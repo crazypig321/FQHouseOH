@@ -1,18 +1,21 @@
 ﻿/**
- * 搜索页（NavDestination）：搜索框 + 分类条 + 结果流 + 搜索历史。
- * 端点语义对齐 fqapp search_page.dart 的 _SearchCategory 与
+ * 搜索页（CommonNav/HdsNavDestination）：bottomBuilder 搜索框 + 分类条 +
+ * 单 List 装载历史/结果流。端点语义对齐 fqapp search_page.dart 的 _SearchCategory 与
  * ApiClient.searchTabs（/api/v1/search）。
  * 长列表使用 LazyForEach + FqMediaDataSource 懒加载。
  */
 
 import { preferences } from '@kit.ArkData';
+import { TitleBarContentOptions } from '@kit.UIDesignKit';
 import { FqBackend, fqErrorMessage } from '../core/FqBackend';
 import { FqMediaItem, FqSearchTab } from '../model/FqModels';
 import { FqMediaDataSource } from '../core/FqMediaDataSource';
 import { FqItemCard } from '../component/FqItemCard';
-import { DetailNavParams, ROUTE_DETAIL } from '../model/FqNavModels';
+import { DetailNavParams, FqTitleBarOptions, ROUTE_DETAIL } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import { CommonSearch, FQ_ACCENT, CommonLoading } from '../view/CommonCom';
+import { CommonNav } from '../view/CommonNav';
+import { appState } from '../entryability/AppState';
 
 interface FqSearchCategoryDef {
   readonly title: string;
@@ -34,6 +37,12 @@ const HISTORY_STORE_NAME: string = 'fq_search_history';
 const HISTORY_KEY: string = 'history';
 const HISTORY_MAX: number = 10;
 
+/** 标题栏 bottomBuilder 插槽高：搜索框 40 + 间距 10 + 分类条 33 + 上下 padding 12 */
+const FQ_SEARCH_BOTTOM_BUILDER_HEIGHT: number = 96;
+
+/** 列表内容起始偏移：标题栏 56 + bottomBuilder 96 */
+const FQ_SEARCH_TOP_INSET: number = 152;
+
 @ComponentV2
 export struct SearchPage {
   @Local keyword: string = '';
@@ -50,102 +59,124 @@ export struct SearchPage {
   private seen: Set<string> = new Set<string>();
   private loadToken: number = 0;
   private historyStore: preferences.Preferences | null = null;
+  private scroller: Scroller = new Scroller();
+  /** 标题栏配置缓存：引用稳定避免每次渲染重建 HdsTitleBar 底部插槽（导致输入焦点丢失/分类条滚动复位） */
+  private titleBarOp: TitleBarContentOptions = FqTitleBarOptions('搜索', false, {
+    builder: (): void => {
+      this.SearchBar();
+    },
+    height: FQ_SEARCH_BOTTOM_BUILDER_HEIGHT,
+  });
 
   aboutToAppear(): void {
     this.initHistory();
   }
 
   build() {
-    NavDestination() {
-      Column() {
-        CommonSearch({
-          searchValue: this.keyword,
-          placeholderValue: '搜索书名 / 作者 / ID',
-          isFocusable: true,
-          focusId: 'search_page_input',
-          submit: (content: string, event: SubmitEvent): void => {
-            this.keyword = content;
-            this.submit();
-          },
-          change: (value: string): void => {
-            this.keyword = value;
-          },
-          didDelete: (): void => {
-            this.keyword = '';
-          },
-          click: (): void => {
-          },
-        })
-          .width('100%')
-          .padding({ left: 16, right: 16, top: 8, bottom: 8 })
-        this.CategoryStrip()
+    CommonNav({
+      titleBarOp: this.titleBarOp,
+      scroller: this.scroller,
+      doubleTapToTop: true,
+      isSearchBarScroller: false,
+    }) {
+      List({ space: 0, scroller: this.scroller }) {
         if (this.submittedQuery.length === 0) {
-          this.HistoryView()
+          ListItem() {
+            this.HistoryView()
+          }
         } else if (this.errorMsg.length > 0 && this.itemCount === 0) {
-          Column({ space: 12 }) {
-            Text(this.errorMsg)
-              .fontSize(14)
-              .fontColor($r('sys.color.font_tertiary'))
-              .textAlign(TextAlign.Center)
-              .padding({ left: 32, right: 32 })
-            Button('重试')
-              .backgroundColor('#FF7A3D')
-              .onClick(() => this.submit())
+          ListItem() {
+            Column({ space: 12 }) {
+              Text(this.errorMsg)
+                .fontSize(14)
+                .fontColor($r('sys.color.font_tertiary'))
+                .textAlign(TextAlign.Center)
+                .padding({ left: 32, right: 32 })
+              Button('重试')
+                .backgroundColor('#FF7A3D')
+                .onClick(() => this.submit())
+            }
+            .width('100%')
+            .padding({ top: 48 })
+            .alignItems(HorizontalAlign.Center)
           }
-          .layoutWeight(1)
-          .width('100%')
-          .justifyContent(FlexAlign.Center)
         } else if (this.itemCount === 0 && !this.loadingState) {
-          Column() {
-            Text('没有找到相关内容')
-              .fontSize(14)
-              .fontColor($r('sys.color.font_secondary'))
+          ListItem() {
+            Column() {
+              Text('没有找到相关内容')
+                .fontSize(14)
+                .fontColor($r('sys.color.font_secondary'))
+            }
+            .width('100%')
+            .padding({ top: 48 })
+            .alignItems(HorizontalAlign.Center)
           }
-          .layoutWeight(1)
-          .width('100%')
-          .justifyContent(FlexAlign.Center)
         } else {
-          List({ space: 0 }) {
-            LazyForEach(this.dataSource, (item: FqMediaItem) => {
-              ListItem() {
-                FqItemCard({
-                  item: item,
-                  onItemClick: (clicked: FqMediaItem): void => {
-                    this.openDetail(clicked);
-                  },
-                })
+          LazyForEach(this.dataSource, (item: FqMediaItem) => {
+            ListItem() {
+              FqItemCard({
+                item: item,
+                onItemClick: (clicked: FqMediaItem): void => {
+                  this.openDetail(clicked);
+                },
+              })
+            }
+          }, (item: FqMediaItem): string => `${item.kind}:${item.id}`)
+          if (this.loadingMore) {
+            ListItem() {
+              Row({ space: 8 }) {
+                CommonLoading({ sizeValue: 20, loadColor: FQ_ACCENT })
+                Text('加载中…')
+                  .fontSize(13)
+                  .fontColor($r('sys.color.font_secondary'))
               }
-            }, (item: FqMediaItem): string => `${item.kind}:${item.id}`)
-            if (this.loadingMore) {
-              ListItem() {
-                Row({ space: 8 }) {
-                  CommonLoading({ sizeValue: 20, loadColor: FQ_ACCENT })
-                  Text('加载中…')
-                    .fontSize(13)
-                    .fontColor($r('sys.color.font_secondary'))
-                }
-                .width('100%')
-                .justifyContent(FlexAlign.Center)
-                .padding(12)
-              }
+              .width('100%')
+              .justifyContent(FlexAlign.Center)
+              .padding(12)
             }
           }
-          .layoutWeight(1)
-          .width('100%')
-          .divider({
-            strokeWidth: 0.5,
-            color: $r('sys.color.comp_divider'),
-            startMargin: 16,
-            endMargin: 16,
-          })
-          .onReachEnd(() => this.loadMore())
         }
       }
       .width('100%')
       .height('100%')
-      .backgroundColor($r('sys.color.background_secondary'))
+      .scrollBar(BarState.Off)
+      .divider({
+        strokeWidth: 0.5,
+        color: $r('sys.color.comp_divider'),
+        startMargin: 16,
+        endMargin: 16,
+      })
+      .contentStartOffset(appState.topRect + FQ_SEARCH_TOP_INSET)
+      .contentEndOffset(appState.bottomRect + 60)
+      .onReachEnd(() => this.loadMore())
     }
-    .title('搜索')
+  }
+
+  /** 标题栏 bottomBuilder：搜索输入（可聚焦）+ 分类条。 */
+  @Builder
+  private SearchBar() {
+    Column({ space: 10 }) {
+      CommonSearch({
+        searchValue: this.keyword,
+        placeholderValue: '搜索书名 / 作者 / ID',
+        isFocusable: true,
+        focusId: 'search_page_input',
+        submit: (content: string, event: SubmitEvent): void => {
+          this.keyword = content;
+          this.submit();
+        },
+        change: (value: string): void => {
+          this.keyword = value;
+        },
+        didDelete: (): void => {
+          this.keyword = '';
+        },
+        click: (): void => {
+        },
+      })
+      this.CategoryStrip()
+    }
+    .padding({ left: 16, right: 16, top: 2, bottom: 10 })
   }
 
   @Builder
@@ -171,44 +202,39 @@ export struct SearchPage {
   @Builder
   private HistoryView() {
     if (this.historyChips.length > 0) {
-      Scroll() {
-        Column({ space: 12 }) {
-          Row() {
-            Text('搜索历史')
-              .fontSize(14)
-              .fontWeight(FontWeight.Medium)
-              .fontColor($r('sys.color.font_tertiary'))
-            Blank()
-            Text('清空')
-              .fontSize(13)
-              .fontColor($r('sys.color.font_secondary'))
-              .onClick(() => this.clearHistory())
-          }
-          .width('100%')
-          Flex({ wrap: FlexWrap.Wrap }) {
-            ForEach(this.historyChips, (entry: string) => {
-              Text(entry)
-                .fontSize(13)
-                .fontColor($r('sys.color.font_primary'))
-                .backgroundColor($r('sys.color.comp_background_tertiary'))
-                .borderRadius(14)
-                .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-                .margin({ right: 8, bottom: 8 })
-                .onClick(() => {
-                  this.keyword = entry;
-                  this.submit();
-                })
-            }, (entry: string): string => entry)
-          }
-          .width('100%')
+      Column({ space: 12 }) {
+        Row() {
+          Text('搜索历史')
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('sys.color.font_tertiary'))
+          Blank()
+          Text('清空')
+            .fontSize(13)
+            .fontColor($r('sys.color.font_secondary'))
+            .onClick(() => this.clearHistory())
         }
-        .padding(16)
-        .alignItems(HorizontalAlign.Start)
+        .width('100%')
+        Flex({ wrap: FlexWrap.Wrap }) {
+          ForEach(this.historyChips, (entry: string) => {
+            Text(entry)
+              .fontSize(13)
+              .fontColor($r('sys.color.font_primary'))
+              .backgroundColor($r('sys.color.comp_background_tertiary'))
+              .borderRadius(14)
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .margin({ right: 8, bottom: 8 })
+              .onClick(() => {
+                this.keyword = entry;
+                this.submit();
+              })
+          }, (entry: string): string => entry)
+        }
+        .width('100%')
       }
-      .scrollBar(BarState.Off)
-      .layoutWeight(1)
+      .padding(16)
       .width('100%')
-      .align(Alignment.TopStart)
+      .alignItems(HorizontalAlign.Start)
     }
   }
 

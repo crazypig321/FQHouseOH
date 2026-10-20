@@ -142,10 +142,13 @@ export struct FqSpotlight {
       .width('100%')
       .height(228)
       .margin({ top: 12 })
-      .loop(false)
+      .padding({ left: 20, right: 20 })
+      .loop(true)
       .indicator(false)
-      .onChange((index: number) => {
-        this.activeIndex = index;
+      .onSelected((index: number) => {
+        this.getUIContext().animateTo({ duration: 250, curve: Curve.Smooth }, (): void => {
+          this.activeIndex = index;
+        });
       })
 
       Row({ space: 8 }) {
@@ -166,18 +169,6 @@ export struct FqSpotlight {
         Text(this.pageLabel())
           .fontSize(11)
           .fontColor($r('sys.color.font_secondary'))
-        if (this.activeIndex < this.items.length - 1) {
-          SymbolGlyph($r('sys.symbol.arrow_right'))
-            .fontSize(16)
-            .fontColor([$r('sys.color.font_secondary')])
-            .width(38)
-            .height(38)
-            .borderRadius(19)
-            .backgroundColor($r('sys.color.comp_background_tertiary'))
-            .onClick(() => {
-              this.swiperController.changeIndex(this.activeIndex + 1, true);
-            })
-        }
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)

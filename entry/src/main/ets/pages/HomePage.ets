@@ -77,7 +77,7 @@ export struct HomePage {
         builder: (): void => {
           this.SearchBar();
         },
-        height: 108
+        height: 100
       }, (): void => {
         this.startRefresh();
       }),
