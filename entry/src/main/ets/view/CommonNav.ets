@@ -14,6 +14,7 @@ import { BlurStrategy,
   HideMode } from '@kit.UIDesignKit';
 import { appState } from '../entryability/AppState';
 import { LengthMetrics } from '@kit.ArkUI';
+import { themeUtils } from '../utils/ThemeUtils';
 
 export function titleBarOf(mainTitle: ResourceStr, subTitle?: ResourceStr,
   menus?: Array<HdsNavigationMenuItemOptions>, bottomBuilder?: BottomBuilderParams): TitleBarContentOptions {
@@ -93,7 +94,18 @@ export struct CommonNav {
       content: this.titleBarOp,
       style: {
         originalStyle: {
-          backgroundStyle: { blurRadius: 30 },
+          backgroundStyle: { backgroundColor: '#00ffffff', maskExtraHeight: 0, blurRadius: 30 },
+          contentStyle: {
+            // 深浅模式切换时由 themeUtils 触发重渲染（HDS 不会自动刷新系统色）
+            titleStyle: { mainTitleColor: themeUtils.textColor, subTitleColor: themeUtils.terTextColor },
+            backIconStyle: { iconColor: themeUtils.textColor },
+            menuStyle: {
+              iconColor: themeUtils.textColor
+            },
+            subIconStyle: {
+              iconColor: themeUtils.textColor
+            }
+          },
         },
         scrollEffectOpts: {
           enableScrollEffect: true,
@@ -102,6 +114,10 @@ export struct CommonNav {
           blurEffectiveEndOffset: LengthMetrics.vp(80), // 动态样式线性过渡的终点位置
         },
         blurStrategy: BlurStrategy.ADAPTIVE,
+        systemMaterialEffect: {
+          materialType: appState.materialType,
+          materialLevel: appState.materialLevel
+        },
       },
       avoidLayoutSafeArea: this.avoidLayoutSafeArea,
     })

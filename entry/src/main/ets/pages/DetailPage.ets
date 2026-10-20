@@ -5,7 +5,8 @@
 
 import { FqBackend, fqErrorMessage } from '../core/FqBackend';
 import { FqBookDetail, fqEmptyBookDetail, fqKindToTab } from '../model/FqModels';
-import { DetailNavParams } from '../model/FqNavModels';
+import { DetailNavParams, FqTitleBarOptions } from '../model/FqNavModels';
+import { CommonNav } from '../view/CommonNav';
 
 @ComponentV2
 export struct DetailPage {
@@ -16,6 +17,7 @@ export struct DetailPage {
   private itemId: string = '';
   private itemKind: string = 'book';
   private itemCover: string = '';
+  private scroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
     this.itemId = DetailNavParams.id;
@@ -28,7 +30,11 @@ export struct DetailPage {
   }
 
   build() {
-    NavDestination() {
+    CommonNav({
+      titleBarOp: FqTitleBarOptions(this.headerTitle, false),
+      scroller: this.scroller,
+      doubleTapToTop: true,
+    }) {
       if (this.loadingState) {
         Column({ space: 12 }) {
           LoadingProgress()
@@ -57,7 +63,7 @@ export struct DetailPage {
         .height('100%')
         .justifyContent(FlexAlign.Center)
       } else {
-        Scroll() {
+        Scroll(this.scroller) {
           Column({ space: 14 }) {
             Row({ space: 14 }) {
               if (this.coverUrl().length > 0) {
@@ -147,7 +153,6 @@ export struct DetailPage {
         .align(Alignment.TopStart)
       }
     }
-    .title(this.headerTitle)
   }
 
   private coverUrl(): string {

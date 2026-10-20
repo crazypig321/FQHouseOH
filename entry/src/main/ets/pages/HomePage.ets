@@ -50,7 +50,7 @@ const FQ_CAPTIONS: string[] = [
 ];
 
 /** 列表内容起始偏移：标题栏 56 + 搜索行 52（Search 40 + 上下 padding 12） */
-const FQ_HOME_TOP_INSET: number = 108;
+const FQ_HOME_TOP_INSET: number = 174;
 
 @ComponentV2
 export struct HomePage {
@@ -81,6 +81,8 @@ export struct HomePage {
       isHideBackButton: true,
       scroller: this.scroller,
       isSearchBarScroller: true,
+      doubleTapToTop: true,
+      scrollToTopYOffset: - appState.topRect - FQ_HOME_TOP_INSET
     }) {
       Refresh({ refreshing: this.refreshing!! }) {
         List({ space: 0, scroller: this.scroller }) {

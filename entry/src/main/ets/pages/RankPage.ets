@@ -13,8 +13,9 @@ import {
   FqRankTab,
   fqEmptyRankCatalog,
 } from '../model/FqModels';
-import { DetailNavParams, ROUTE_DETAIL } from '../model/FqNavModels';
+import { DetailNavParams, FqTitleBarOptions, ROUTE_DETAIL } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
+import { CommonNav } from '../view/CommonNav';
 
 /** 排名行懒加载数据源。 */
 class FqRankEntryDataSource implements IDataSource {
@@ -74,6 +75,7 @@ export struct RankPage {
   @Local loadMoreError: string = '';
   @Local hasMore: boolean = false;
   private dataSource: FqRankEntryDataSource = new FqRankEntryDataSource();
+  private scroller: Scroller = new Scroller();
   private loadToken: number = 0;
 
   aboutToAppear(): void {
@@ -81,7 +83,11 @@ export struct RankPage {
   }
 
   build() {
-    NavDestination() {
+    CommonNav({
+      titleBarOp: FqTitleBarOptions('排行榜', false),
+      scroller: this.scroller,
+      doubleTapToTop: true,
+    }) {
       Column() {
         if (this.loading && this.entryCount === 0) {
           Column({ space: 12 }) {
@@ -112,7 +118,7 @@ export struct RankPage {
           if (!this.currentRank().isDrama && this.catalog.categories.length > 0) {
             this.CategoryStrip()
           }
-          List({ space: 0 }) {
+          List({ space: 0, scroller: this.scroller }) {
             LazyForEach(this.dataSource, (entry: FqRankEntry) => {
               ListItem() {
                 Row({ space: 12 }) {
@@ -195,9 +201,7 @@ export struct RankPage {
       }
       .width('100%')
       .height('100%')
-      .backgroundColor($r('sys.color.background_secondary'))
     }
-    .title('排行榜')
   }
 
   /** 榜单算法药丸条。 */
