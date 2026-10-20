@@ -23,7 +23,15 @@ struct Index {
       .scrollable(false)
       .barPosition(BarPosition.End)
       .barHeight(56)
-      .barFloatingStyle({ barBottomMargin: 28 })
+      .barFloatingStyle({
+        barBottomMargin: 28,
+        systemMaterialEffect: {
+          materialType: appState.materialType,
+          materialLevel: appState.materialLevel
+        },
+        // 智感握姿：随设置开关 handedness 适配
+        adaptToHandedness: appState.smartReachEnabled,
+      })
       .onSelected((index: number) => {
         appState.currTabsIndex = index;
       })

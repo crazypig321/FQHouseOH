@@ -52,7 +52,7 @@ export struct FqMediaCard {
               .backgroundColor('#B81C1B1A')
           }
           .width('100%')
-          .height('100%')
+          //.height('100%')
           .justifyContent(FlexAlign.End)
           .alignItems(HorizontalAlign.End)
           .padding(5)

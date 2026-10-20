@@ -12,7 +12,7 @@ import { FqSpotlight } from '../component/FqSpotlight';
 import { CommonSearch } from '../view/CommonCom';
 import { DetailNavParams, ROUTE_DETAIL, ROUTE_SEARCH, FqTitleBarOptions } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
-import { HideMode, HdsNavDestination } from '@kit.UIDesignKit';
+import { CommonNav } from '../view/CommonNav';
 import { appState } from '../entryability/AppState';
 
 class FqChannelDef {
@@ -72,10 +72,18 @@ export struct HomePage {
   }
 
   build() {
-    HdsNavDestination() {
+    CommonNav({
+      titleBarOp: FqTitleBarOptions($r('app.string.app_name'), true, {
+        builder: (): void => {
+          this.SearchBar();
+        },
+      }),
+      isHideBackButton: true,
+      scroller: this.scroller,
+      isSearchBarScroller: true,
+    }) {
       Refresh({ refreshing: this.refreshing!! }) {
         List({ space: 0, scroller: this.scroller }) {
-          this.ChannelStrip()
           if (this.loading && this.itemCount === 0) {
             this.FeedLoading()
           } else if (this.errorMsg.length > 0 && this.itemCount === 0) {
@@ -188,25 +196,12 @@ export struct HomePage {
       .height('100%')
       .onRefreshing(() => this.loadFirst())
     }
-    .titleBar(FqTitleBarOptions($r('app.string.app_name'), true, {
-      builder: (): void => {
-        this.SearchBar();
-      },
-    }))
-    .dynamicHideTitleBar({
-      hideBottomBuilder: true,
-      mode: HideMode.SCROLL_UP_TO,
-    })
-    .bindToScrollable([this.scroller])
-    .hideBackButton(true)
-    .width('100%')
-    .height('100%')
   }
 
   /** 标题栏 bottomBuilder：搜索框（点击进搜索页，不可聚焦）。 */
   @Builder
   private SearchBar() {
-    Column() {
+    Column({ space: 10 }) {
       CommonSearch({
         searchValue: '',
         placeholderValue: '搜索你想看的故事',
@@ -215,6 +210,7 @@ export struct HomePage {
           NavPathUtils.push(ROUTE_SEARCH);
         },
       })
+      this.ChannelStrip()
     }
     .padding({ left: 16, right: 16, top: 2, bottom: 10 })
   }
@@ -222,8 +218,7 @@ export struct HomePage {
   /** fqapp 药丸频道条（随内容滚动）。 */
   @Builder
   private ChannelStrip() {
-    ListItem() {
-      Column() {
+      Column({ space: 5 }) {
         Scroll() {
           Row({ space: 6 }) {
             ForEach(FQ_CHANNELS, (channel: FqChannelDef, index: number) => {
@@ -257,7 +252,6 @@ export struct HomePage {
       .width('100%')
       .height(54)
       .justifyContent(FlexAlign.Center)
-    }
   }
 
   /** 首屏加载占位。 */

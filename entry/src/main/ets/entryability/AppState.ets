@@ -2,6 +2,7 @@
  * 全局应用状态：NavPathStack 与当前 Tab 索引统一持于此单例
  * （对齐 musicfreeOH AppState 模式，页面通过 appState.pageInfos 路由）。
  */
+import { hdsMaterial } from "@kit.UIDesignKit";
 
 @ObservedV2
 class AppState {
@@ -12,6 +13,13 @@ class AppState {
   @Trace topRect: number = 0;
   /** 底部手势区避让高度（vp） */
   @Trace bottomRect: number = 0;
+
+  // 沉浸光感参数
+  @Trace materialLevel: hdsMaterial.MaterialLevel = hdsMaterial.MaterialLevel.ADAPTIVE;
+  @Trace materialType: hdsMaterial.MaterialType = hdsMaterial.MaterialType.IMMERSIVE;
+
+  // 智感握姿开关（持久化设置，启动时由 Bootstrap 恢复，设置页切换时更新）
+  @Trace smartReachEnabled: boolean = false;
 }
 
 export const appState: AppState = new AppState();

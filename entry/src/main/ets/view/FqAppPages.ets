@@ -10,7 +10,7 @@ import { HomePage } from '../pages/HomePage';
 import { SearchPage } from '../pages/SearchPage';
 import { DetailPage } from '../pages/DetailPage';
 import { RankPage } from '../pages/RankPage';
-import { HdsNavDestination } from '@kit.UIDesignKit';
+import { CommonNav } from './CommonNav';
 
 const TAB_ACCENT: string = '#FF7A3D';
 
@@ -54,7 +54,10 @@ export function PageMapBuilder(name: string) {
 @ComponentV2
 struct ShelfPlaceholderPage {
   build() {
-    HdsNavDestination() {
+    CommonNav({
+      titleBarOp: FqTitleBarOptions('书架', false),
+      isHideBackButton: true,
+    }) {
       Column({ space: 10 }) {
         Text('收藏与浏览记录将在后续版本提供')
           .fontSize(13)
@@ -63,19 +66,17 @@ struct ShelfPlaceholderPage {
       .width('100%')
       .height('100%')
       .justifyContent(FlexAlign.Center)
-      .backgroundColor($r('sys.color.background_secondary'))
     }
-    .titleBar(FqTitleBarOptions('书架', false))
-    .hideBackButton(true)
-    .width('100%')
-    .height('100%')
   }
 }
 
 @ComponentV2
 struct ProfilePlaceholderPage {
   build() {
-    HdsNavDestination() {
+    CommonNav({
+      titleBarOp: FqTitleBarOptions('我的', false),
+      isHideBackButton: true,
+    }) {
       Column({ space: 10 }) {
         Text('设置与账号将在后续版本提供')
           .fontSize(13)
@@ -84,11 +85,6 @@ struct ProfilePlaceholderPage {
       .width('100%')
       .height('100%')
       .justifyContent(FlexAlign.Center)
-      .backgroundColor($r('sys.color.background_secondary'))
     }
-    .titleBar(FqTitleBarOptions('我的', false))
-    .hideBackButton(true)
-    .width('100%')
-    .height('100%')
   }
 }

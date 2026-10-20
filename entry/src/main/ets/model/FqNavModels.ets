@@ -3,8 +3,7 @@
  * （对齐 musicfreeOH NavModels 模式：push 纯路由名，参数由来源页赋静态字段）。
  */
 
-import { BlurStrategy, BottomBuilderParams, HdsNavigationTitleBarOptions, ScrollEffectType, TitleBarContentOptions } from '@kit.UIDesignKit';
-import { LengthMetrics } from '@kit.ArkUI';
+import { BottomBuilderParams, TitleBarContentOptions } from '@kit.UIDesignKit';
 import { NavPathUtils } from '../utils/NavPathUtils';
 
 export const ROUTE_SEARCH: string = 'search';
@@ -20,12 +19,11 @@ export class DetailNavParams {
 }
 
 /**
- * HDS 标题栏配置（对齐 musicfreeOH CommonNav）：
- * 标题栏背景延伸至状态栏（avoidLayoutSafeArea），内容区从标题栏下方起排，
- * 中间内容自然避让状态栏；滚动时标题栏渐变模糊。
+ * HDS 标题栏内容配置（样式统一由 view/CommonNav 的 CommonNav 提供）：
+ * 标题 + 可选搜索/排行菜单 + 可选 bottomBuilder。
  */
 export function FqTitleBarOptions(mainTitle: ResourceStr, showSearch: boolean,
-  bottomBuilder?: BottomBuilderParams): HdsNavigationTitleBarOptions {
+  bottomBuilder?: BottomBuilderParams): TitleBarContentOptions {
   const content: TitleBarContentOptions = {
     title: {
       mainTitle: mainTitle,
@@ -55,17 +53,5 @@ export function FqTitleBarOptions(mainTitle: ResourceStr, showSearch: boolean,
   if (bottomBuilder !== undefined) {
     content.bottomBuilder = bottomBuilder;
   }
-  return {
-    content: content,
-    style: {
-      scrollEffectOpts: {
-        enableScrollEffect: true,
-        scrollEffectType: ScrollEffectType.IMMERSIVE_GRADIENT_BLUR,
-        blurEffectiveStartOffset: LengthMetrics.vp(0),
-        blurEffectiveEndOffset: LengthMetrics.vp(80),
-      },
-      blurStrategy: BlurStrategy.ADAPTIVE,
-    },
-    avoidLayoutSafeArea: true,
-  };
+  return content;
 }
