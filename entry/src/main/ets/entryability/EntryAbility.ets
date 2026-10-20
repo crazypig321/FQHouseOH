@@ -18,6 +18,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { FqBackend } from '../core/FqBackend';
+import { appState } from './AppState';
 
 const DOMAIN = 0x0000;
 
@@ -50,7 +51,24 @@ export default class EntryAbility extends UIAbility {
       hilog.info(DOMAIN, 'testTag', 'Succeeded in loading the content.');
       // 沉浸式：页面铺满全屏（状态栏与底部手势区由组件自行避让）
       const mainWindow: window.Window = windowStage.getMainWindowSync();
-      mainWindow.setWindowLayoutFullScreen(true).catch((error: BusinessError) => {
+      mainWindow.setWindowLayoutFullScreen(true).then(() => {
+        // 全屏后跟踪系统避让区尺寸，供各页面 contentStartOffset/EndOffset 计算
+        const uiContext = mainWindow.getUIContext();
+        const syncAvoidArea = (): void => {
+          appState.topRect = uiContext.px2vp(
+            mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM).topRect.height);
+          appState.bottomRect = uiContext.px2vp(
+            mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR).bottomRect.height);
+        };
+        syncAvoidArea();
+        mainWindow.on('avoidAreaChange', (data: window.AvoidAreaOptions) => {
+          if (data.type === window.AvoidAreaType.TYPE_SYSTEM) {
+            appState.topRect = uiContext.px2vp(data.area.topRect.height);
+          } else if (data.type === window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR) {
+            appState.bottomRect = uiContext.px2vp(data.area.bottomRect.height);
+          }
+        });
+      }).catch((error: BusinessError) => {
         hilog.error(DOMAIN, 'testTag', 'setWindowLayoutFullScreen failed: %{public}s', JSON.stringify(error));
       });
     });

@@ -10,7 +10,8 @@ import { FqMediaDataSource } from '../core/FqMediaDataSource';
 import { FqItemCard } from '../component/FqItemCard';
 import { DetailNavParams, ROUTE_DETAIL, FqTitleBarOptions } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
-import { HdsNavDestination } from '@kit.UIDesignKit';
+import { HideMode, HdsNavDestination } from '@kit.UIDesignKit';
+import { appState } from '../entryability/AppState';
 
 interface FqChannelDef {
   readonly label: string;
@@ -25,6 +26,9 @@ const FQ_CHANNELS: FqChannelDef[] = [
   { label: '视频', tabType: 16 },
 ];
 
+/** 列表内容起始偏移：标题栏 56 + 频道条 44 + 间隙 8 */
+const FQ_HOME_TOP_INSET: number = 108;
+
 @ComponentV2
 export struct HomePage {
   @Local channelIndex: number = 0;
@@ -34,6 +38,7 @@ export struct HomePage {
   @Local refreshing: boolean = false;
   @Local errorMsg: string = '';
   private dataSource: FqMediaDataSource = new FqMediaDataSource();
+  private scroller: Scroller = new Scroller();
   private nextOffset: number = -1;
   private sessionId: string = '';
   private loadToken: number = 0;
@@ -44,103 +49,112 @@ export struct HomePage {
 
   build() {
     HdsNavDestination() {
-      Column() {
-        this.ChannelStrip()
-        if (this.loading && this.itemCount === 0) {
-          Column({ space: 12 }) {
-            LoadingProgress()
-              .width(36)
-              .height(36)
-              .color('#FF7A3D')
-            Text('正在加载…')
-              .fontSize(14)
-              .fontColor('#66000000')
-          }
-          .layoutWeight(1)
-          .width('100%')
-          .justifyContent(FlexAlign.Center)
-        } else if (this.errorMsg.length > 0 && this.itemCount === 0) {
-          Column({ space: 12 }) {
-            Text(this.errorMsg)
-              .fontSize(14)
-              .fontColor('#99000000')
-              .textAlign(TextAlign.Center)
-              .padding({ left: 32, right: 32 })
-            Button('重试')
-              .backgroundColor('#FF7A3D')
-              .onClick(() => this.load(true))
-          }
-          .layoutWeight(1)
-          .width('100%')
-          .justifyContent(FlexAlign.Center)
-        } else if (this.itemCount === 0) {
-          Column() {
-            Text('暂无内容')
-              .fontSize(14)
-              .fontColor('#66000000')
-          }
-          .layoutWeight(1)
-          .width('100%')
-          .justifyContent(FlexAlign.Center)
-        } else {
-          Refresh({ refreshing: this.refreshing!! }) {
-            List({ space: 0 }) {
-              LazyForEach(this.dataSource, (item: FqMediaItem) => {
-                ListItem() {
-                  FqItemCard({
-                    item: item,
-                    onItemClick: (clicked: FqMediaItem): void => {
-                      this.openDetail(clicked);
-                    },
-                  })
-                }
-              }, (item: FqMediaItem): string => `${item.kind}:${item.id}`)
-              if (this.loadingMore) {
-                ListItem() {
-                  Row({ space: 8 }) {
-                    LoadingProgress()
-                      .width(20)
-                      .height(20)
-                      .color('#FF7A3D')
-                    Text('加载中…')
-                      .fontSize(13)
-                      .fontColor('#66000000')
-                  }
-                  .width('100%')
-                  .justifyContent(FlexAlign.Center)
-                  .padding(12)
-                }
-              } else if (this.nextOffset > 0) {
-                ListItem() {
-                  Text('上拉加载更多')
+      if (this.loading && this.itemCount === 0) {
+        Column({ space: 12 }) {
+          LoadingProgress()
+            .width(36)
+            .height(36)
+            .color('#FF7A3D')
+          Text('正在加载…')
+            .fontSize(14)
+            .fontColor($r('sys.color.font_secondary'))
+        }
+        .width('100%')
+        .height('100%')
+        .justifyContent(FlexAlign.Center)
+        .padding({ top: appState.topRect + FQ_HOME_TOP_INSET })
+      } else if (this.errorMsg.length > 0 && this.itemCount === 0) {
+        Column({ space: 12 }) {
+          Text(this.errorMsg)
+            .fontSize(14)
+            .fontColor($r('sys.color.font_tertiary'))
+            .textAlign(TextAlign.Center)
+            .padding({ left: 32, right: 32 })
+          Button('重试')
+            .backgroundColor('#FF7A3D')
+            .onClick(() => this.load(true))
+        }
+        .width('100%')
+        .height('100%')
+        .justifyContent(FlexAlign.Center)
+        .padding({ top: appState.topRect + FQ_HOME_TOP_INSET })
+      } else if (this.itemCount === 0) {
+        Column() {
+          Text('暂无内容')
+            .fontSize(14)
+            .fontColor($r('sys.color.font_secondary'))
+        }
+        .width('100%')
+        .height('100%')
+        .justifyContent(FlexAlign.Center)
+        .padding({ top: appState.topRect + FQ_HOME_TOP_INSET })
+      } else {
+        Refresh({ refreshing: this.refreshing!! }) {
+          List({ space: 0, scroller: this.scroller }) {
+            LazyForEach(this.dataSource, (item: FqMediaItem) => {
+              ListItem() {
+                FqItemCard({
+                  item: item,
+                  onItemClick: (clicked: FqMediaItem): void => {
+                    this.openDetail(clicked);
+                  },
+                })
+              }
+            }, (item: FqMediaItem): string => `${item.kind}:${item.id}`)
+            if (this.loadingMore) {
+              ListItem() {
+                Row({ space: 8 }) {
+                  LoadingProgress()
+                    .width(20)
+                    .height(20)
+                    .color('#FF7A3D')
+                  Text('加载中…')
                     .fontSize(13)
-                    .fontColor('#66000000')
-                    .width('100%')
-                    .textAlign(TextAlign.Center)
-                    .padding(12)
+                    .fontColor($r('sys.color.font_secondary'))
                 }
+                .width('100%')
+                .justifyContent(FlexAlign.Center)
+                .padding(12)
+              }
+            } else if (this.nextOffset > 0) {
+              ListItem() {
+                Text('上拉加载更多')
+                  .fontSize(13)
+                  .fontColor($r('sys.color.font_secondary'))
+                  .width('100%')
+                  .textAlign(TextAlign.Center)
+                  .padding(12)
               }
             }
-            .width('100%')
-            .height('100%')
-            .divider({
-              strokeWidth: 0.5,
-              color: '#0F000000',
-              startMargin: 16,
-              endMargin: 16,
-            })
-            .onReachEnd(() => this.load(false))
           }
-          .layoutWeight(1)
           .width('100%')
-          .onRefreshing(() => this.load(true))
+          .height('100%')
+          .scrollBar(BarState.Off)
+          .contentStartOffset(appState.topRect + FQ_HOME_TOP_INSET)
+          .contentEndOffset(appState.bottomRect + 60)
+          .divider({
+            strokeWidth: 0.5,
+            color: $r('sys.color.comp_divider'),
+            startMargin: 16,
+            endMargin: 16,
+          })
+          .onReachEnd(() => this.load(false))
         }
+        .width('100%')
+        .height('100%')
+        .onRefreshing(() => this.load(true))
       }
-      .width('100%')
-      .height('100%')
-      .backgroundColor('#FFFFFFFF')
     }
-    .titleBar(FqTitleBarOptions($r('app.string.app_name'), true))
+    .titleBar(FqTitleBarOptions($r('app.string.app_name'), true, {
+      builder: (): void => {
+        this.ChannelStrip();
+      },
+    }))
+    .dynamicHideTitleBar({
+      hideBottomBuilder: true,
+      mode: HideMode.SCROLL_UP_TO,
+    })
+    .bindToScrollable([this.scroller])
     .hideBackButton(true)
     .width('100%')
     .height('100%')
@@ -164,14 +178,15 @@ export struct HomePage {
     .scrollable(ScrollDirection.Horizontal)
     .scrollBar(BarState.Off)
     .width('100%')
+    .height(44)
   }
 
   private channelWeight(index: number): FontWeight {
     return this.channelIndex === index ? FontWeight.Bold : FontWeight.Normal;
   }
 
-  private channelColor(index: number): string {
-    return this.channelIndex === index ? '#FF7A3D' : '#66000000';
+  private channelColor(index: number): ResourceColor {
+    return this.channelIndex === index ? '#FF7A3D' : $r('sys.color.font_secondary');
   }
 
   private selectChannel(index: number): void {

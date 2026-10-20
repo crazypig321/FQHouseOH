@@ -3,7 +3,7 @@
  * （对齐 musicfreeOH NavModels 模式：push 纯路由名，参数由来源页赋静态字段）。
  */
 
-import { BlurStrategy, HdsNavigationTitleBarOptions, ScrollEffectType, TitleBarContentOptions } from '@kit.UIDesignKit';
+import { BlurStrategy, BottomBuilderParams, HdsNavigationTitleBarOptions, ScrollEffectType, TitleBarContentOptions } from '@kit.UIDesignKit';
 import { LengthMetrics } from '@kit.ArkUI';
 import { NavPathUtils } from '../utils/NavPathUtils';
 
@@ -23,7 +23,8 @@ export class DetailNavParams {
  * 标题栏背景延伸至状态栏（avoidLayoutSafeArea），内容区从标题栏下方起排，
  * 中间内容自然避让状态栏；滚动时标题栏渐变模糊。
  */
-export function FqTitleBarOptions(mainTitle: ResourceStr, showSearch: boolean): HdsNavigationTitleBarOptions {
+export function FqTitleBarOptions(mainTitle: ResourceStr, showSearch: boolean,
+  bottomBuilder?: BottomBuilderParams): HdsNavigationTitleBarOptions {
   const content: TitleBarContentOptions = {
     title: {
       mainTitle: mainTitle,
@@ -41,6 +42,9 @@ export function FqTitleBarOptions(mainTitle: ResourceStr, showSearch: boolean): 
         },
       }],
     };
+  }
+  if (bottomBuilder !== undefined) {
+    content.bottomBuilder = bottomBuilder;
   }
   return {
     content: content,

@@ -37,7 +37,7 @@ export struct DetailPage {
             .color('#FF7A3D')
           Text('正在加载…')
             .fontSize(14)
-            .fontColor('#66000000')
+            .fontColor($r('sys.color.font_secondary'))
         }
         .width('100%')
         .height('100%')
@@ -46,7 +46,7 @@ export struct DetailPage {
         Column({ space: 12 }) {
           Text(this.errorMsg)
             .fontSize(14)
-            .fontColor('#99000000')
+            .fontColor($r('sys.color.font_tertiary'))
             .textAlign(TextAlign.Center)
             .padding({ left: 32, right: 32 })
           Button('重试')
@@ -66,26 +66,26 @@ export struct DetailPage {
                   .height(134)
                   .borderRadius(10)
                   .objectFit(ImageFit.Cover)
-                  .backgroundColor('#F1F1F3')
+                  .backgroundColor($r('sys.color.comp_background_secondary'))
                   .autoResize(true)
               } else {
                 Column()
                   .width(100)
                   .height(134)
                   .borderRadius(10)
-                  .backgroundColor('#F1F1F3')
+                  .backgroundColor($r('sys.color.comp_background_secondary'))
               }
               Column({ space: 6 }) {
                 Text(this.detail.title)
                   .fontSize(19)
                   .fontWeight(FontWeight.Bold)
-                  .fontColor('#E6000000')
+                  .fontColor($r('sys.color.font_primary'))
                   .maxLines(2)
                   .textOverflow({ overflow: TextOverflow.Ellipsis })
                 if (this.detail.author.length > 0) {
                   Text(this.detail.author)
                     .fontSize(13)
-                    .fontColor('#99000000')
+                    .fontColor($r('sys.color.font_tertiary'))
                     .maxLines(1)
                     .textOverflow({ overflow: TextOverflow.Ellipsis })
                 }
@@ -98,7 +98,7 @@ export struct DetailPage {
                 if (this.metaLine().length > 0) {
                   Text(this.metaLine())
                     .fontSize(12)
-                    .fontColor('#99000000')
+                    .fontColor($r('sys.color.font_tertiary'))
                     .maxLines(2)
                     .textOverflow({ overflow: TextOverflow.Ellipsis })
                 }
@@ -114,10 +114,10 @@ export struct DetailPage {
                 Text('简介')
                   .fontSize(15)
                   .fontWeight(FontWeight.Medium)
-                  .fontColor('#E6000000')
+                  .fontColor($r('sys.color.font_primary'))
                 Text(this.detail.abstractText)
                   .fontSize(13)
-                  .fontColor('#99000000')
+                  .fontColor($r('sys.color.font_tertiary'))
                   .lineHeight(21)
               }
               .width('100%')
@@ -127,13 +127,13 @@ export struct DetailPage {
             if (this.detail.serialCount > 0) {
               Text(this.catalogLine())
                 .fontSize(13)
-                .fontColor('#66000000')
+                .fontColor($r('sys.color.font_secondary'))
                 .width('100%')
             }
 
             Text('阅读与播放将在后续版本提供')
               .fontSize(12)
-              .fontColor('#4D000000')
+              .fontColor($r('sys.color.font_tertiary'))
               .width('100%')
               .padding({ top: 8 })
           }

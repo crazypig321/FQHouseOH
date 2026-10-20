@@ -55,12 +55,12 @@ struct ShelfPlaceholderPage {
       Column({ space: 10 }) {
         Text('收藏与浏览记录将在后续版本提供')
           .fontSize(13)
-          .fontColor('#66000000')
+          .fontColor($r('sys.color.font_secondary'))
       }
       .width('100%')
       .height('100%')
       .justifyContent(FlexAlign.Center)
-      .backgroundColor('#FFFFFF')
+      .backgroundColor($r('sys.color.background_secondary'))
     }
     .titleBar(FqTitleBarOptions('书架', false))
     .hideBackButton(true)
@@ -76,12 +76,12 @@ struct ProfilePlaceholderPage {
       Column({ space: 10 }) {
         Text('设置与账号将在后续版本提供')
           .fontSize(13)
-          .fontColor('#66000000')
+          .fontColor($r('sys.color.font_secondary'))
       }
       .width('100%')
       .height('100%')
       .justifyContent(FlexAlign.Center)
-      .backgroundColor('#FFFFFF')
+      .backgroundColor($r('sys.color.background_secondary'))
     }
     .titleBar(FqTitleBarOptions('我的', false))
     .hideBackButton(true)

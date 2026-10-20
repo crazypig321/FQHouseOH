@@ -61,7 +61,7 @@ export struct SearchPage {
           TextInput({ placeholder: '搜索书名 / 作者 / ID' })
             .layoutWeight(1)
             .height(40)
-            .backgroundColor('#F5F5F7')
+            .backgroundColor($r('sys.color.comp_background_tertiary'))
             .borderRadius(20)
             .padding({ left: 16, right: 16 })
             .fontSize(14)
@@ -85,7 +85,7 @@ export struct SearchPage {
           Column({ space: 12 }) {
             Text(this.errorMsg)
               .fontSize(14)
-              .fontColor('#99000000')
+              .fontColor($r('sys.color.font_tertiary'))
               .textAlign(TextAlign.Center)
               .padding({ left: 32, right: 32 })
             Button('重试')
@@ -99,7 +99,7 @@ export struct SearchPage {
           Column() {
             Text('没有找到相关内容')
               .fontSize(14)
-              .fontColor('#66000000')
+              .fontColor($r('sys.color.font_secondary'))
           }
           .layoutWeight(1)
           .width('100%')
@@ -125,7 +125,7 @@ export struct SearchPage {
                     .color('#FF7A3D')
                   Text('加载中…')
                     .fontSize(13)
-                    .fontColor('#66000000')
+                    .fontColor($r('sys.color.font_secondary'))
                 }
                 .width('100%')
                 .justifyContent(FlexAlign.Center)
@@ -137,7 +137,7 @@ export struct SearchPage {
           .width('100%')
           .divider({
             strokeWidth: 0.5,
-            color: '#0F000000',
+            color: $r('sys.color.comp_divider'),
             startMargin: 16,
             endMargin: 16,
           })
@@ -146,7 +146,7 @@ export struct SearchPage {
       }
       .width('100%')
       .height('100%')
-      .backgroundColor('#FFFFFFFF')
+      .backgroundColor($r('sys.color.background_secondary'))
     }
     .title('搜索')
   }
@@ -180,11 +180,11 @@ export struct SearchPage {
             Text('搜索历史')
               .fontSize(14)
               .fontWeight(FontWeight.Medium)
-              .fontColor('#99000000')
+              .fontColor($r('sys.color.font_tertiary'))
             Blank()
             Text('清空')
               .fontSize(13)
-              .fontColor('#66000000')
+              .fontColor($r('sys.color.font_secondary'))
               .onClick(() => this.clearHistory())
           }
           .width('100%')
@@ -192,8 +192,8 @@ export struct SearchPage {
             ForEach(this.historyChips, (entry: string) => {
               Text(entry)
                 .fontSize(13)
-                .fontColor('#E6000000')
-                .backgroundColor('#F5F5F7')
+                .fontColor($r('sys.color.font_primary'))
+                .backgroundColor($r('sys.color.comp_background_tertiary'))
                 .borderRadius(14)
                 .padding({ left: 12, right: 12, top: 6, bottom: 6 })
                 .margin({ right: 8, bottom: 8 })
@@ -219,8 +219,8 @@ export struct SearchPage {
     return this.categoryIndex === index ? FontWeight.Bold : FontWeight.Normal;
   }
 
-  private categoryColor(index: number): string {
-    return this.categoryIndex === index ? '#FF7A3D' : '#66000000';
+  private categoryColor(index: number): ResourceColor {
+    return this.categoryIndex === index ? '#FF7A3D' : $r('sys.color.font_secondary');
   }
 
   private selectCategory(index: number): void {

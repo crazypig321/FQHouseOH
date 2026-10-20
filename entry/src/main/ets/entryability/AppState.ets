@@ -8,6 +8,10 @@ class AppState {
   /** 全局导航栈（Navigation 根节点使用） */
   @Trace pageInfos: NavPathStack = new NavPathStack();
   @Trace currTabsIndex: number = 0;
+  /** 状态栏避让高度（vp，全屏沉浸模式下由 EntryAbility 跟踪） */
+  @Trace topRect: number = 0;
+  /** 底部手势区避让高度（vp） */
+  @Trace bottomRect: number = 0;
 }
 
 export const appState: AppState = new AppState();
