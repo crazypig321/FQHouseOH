@@ -78,6 +78,23 @@ export class FqHomeFeed {
     return false;
   }
 
+  /** 从磁盘缓存恢复条目：无翻页游标，标记 exhausted，等待下次刷新重置。 */
+  public restore(items: FqMediaItem[]): void {
+    this.merged = [];
+    this.seen.clear();
+    this.exhausted = true;
+    this.pendingErrorMessage = '';
+    for (const item of items) {
+      const key: string = `${item.kind}:${item.id}`;
+      this.seen.add(key);
+      this.merged.push(item);
+    }
+    for (const source of this.sources) {
+      source.loaded = false;
+      source.hasMore = false;
+    }
+  }
+
   /** 首屏：各源并发首页；全败抛首个错误，部分失败降级继续。 */
   public async loadFirst(): Promise<void> {
     this.merged = [];

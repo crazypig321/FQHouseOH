@@ -6,6 +6,7 @@
 
 import { FqBackend, fqErrorMessage } from '../core/FqBackend';
 import { FqHomeFeed, FqHomeRowDataSource, FqHomeSource } from '../core/FqHomeFeed';
+import { FqHomeCache } from '../core/FqHomeCache';
 import { FqMediaItem } from '../model/FqModels';
 import { FqMediaCard } from '../component/FqMediaCard';
 import { FqSpotlight } from '../component/FqSpotlight';
@@ -71,8 +72,12 @@ export struct HomePage {
   private rowSource: FqHomeRowDataSource = new FqHomeRowDataSource(3, 3);
   private scroller: Scroller = new Scroller();
   private loadToken: number = 0;
+  /** 各频道流实例缓存（含翻页游标）；切回频道直接复用，不重新加载。 */
+  private channelFeeds: (FqHomeFeed | null)[] = [null, null, null, null, null, null];
 
   aboutToAppear(): void {
+    FqHomeCache.init(getContext(this));
+    this.hydrateFromDisk();
     this.loadFirst();
   }
 
@@ -401,7 +406,21 @@ export struct HomePage {
     if (this.channelIndex === index) {
       return;
     }
+    this.loadToken += 1;
     this.channelIndex = index;
+    FqHomeCache.saveChannelIndex(index);
+    this.loading = false;
+    this.loadingMore = false;
+    this.refreshing = false;
+    const cached: FqHomeFeed | null = this.channelFeeds[index];
+    if (cached !== null && cached.totalCount() > 0) {
+      this.feed = cached;
+      this.errorMsg = '';
+      this.applyFeed();
+      this.scroller.scrollEdge(Edge.Top);
+      this.searchBarHidden = false;
+      return;
+    }
     this.feed = new FqHomeFeed([]);
     this.spotlightItems = [];
     this.rowSource.setItems([]);
@@ -437,6 +456,28 @@ export struct HomePage {
     this.hasMore = this.feed.hasMore;
   }
 
+  /** 冷启动磁盘缓存回填：各频道复用上次列表；当前频道先展示再由 loadFirst 静默刷新。 */
+  private hydrateFromDisk(): void {
+    const saved: number = FqHomeCache.savedChannelIndex();
+    if (saved >= 0 && saved < FQ_CHANNELS.length) {
+      this.channelIndex = saved;
+    }
+    for (let index: number = 0; index < FQ_CHANNELS.length; index += 1) {
+      const items: FqMediaItem[] = FqHomeCache.channelItems(index);
+      if (items.length === 0) {
+        continue;
+      }
+      const feed: FqHomeFeed = new FqHomeFeed(FQ_CHANNELS[index].buildSources());
+      feed.restore(items);
+      this.channelFeeds[index] = feed;
+    }
+    const current: FqHomeFeed | null = this.channelFeeds[this.channelIndex];
+    if (current !== null) {
+      this.feed = current;
+      this.applyFeed();
+    }
+  }
+
   /** 首屏 0 条且仍有游标时自动补拉一页。 */
   private maybeAutoLoadMore(token: number): void {
     if (this.feed.totalCount() === 0 && this.feed.hasMore) {
@@ -451,10 +492,11 @@ export struct HomePage {
 
   private async loadFirst(): Promise<void> {
     const token: number = ++this.loadToken;
+    const channel: number = this.channelIndex;
     this.loading = true;
     this.loadingMore = false;
     this.errorMsg = '';
-    this.feed = new FqHomeFeed(FQ_CHANNELS[this.channelIndex].buildSources());
+    this.feed = new FqHomeFeed(FQ_CHANNELS[channel].buildSources());
     try {
       await FqBackend.get().start(getContext(this));
       await this.feed.loadFirst();
@@ -462,6 +504,8 @@ export struct HomePage {
         return;
       }
       this.errorMsg = '';
+      this.channelFeeds[channel] = this.feed;
+      FqHomeCache.saveChannelItems(channel, this.feed.items());
       this.applyFeed();
       this.maybeAutoLoadMore(token);
     } catch (error) {
@@ -483,12 +527,14 @@ export struct HomePage {
       return;
     }
     const token: number = ++this.loadToken;
+    const channel: number = this.channelIndex;
     this.loadingMore = true;
     try {
       await this.feed.loadMore();
       if (token !== this.loadToken) {
         return;
       }
+      FqHomeCache.saveChannelItems(channel, this.feed.items());
       this.applyFeed();
       this.maybeAutoLoadMore(token);
     } finally {
