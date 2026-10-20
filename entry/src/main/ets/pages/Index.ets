@@ -1,0 +1,44 @@
+/**
+ * 应用主入口（对齐 musicfreeOH Index 大框架）：
+ * HdsNavigation + HdsTabs 悬浮底栏（barOverlap + barFloatingStyle），
+ * 二级页经 .navDestination 集中页表路由。
+ */
+
+import { HdsNavigation, HdsNavigationTitleMode, HdsTabs, HdsTabsController } from '@kit.UIDesignKit';
+import { appState } from '../entryability/AppState';
+import { MainTabPagesBuilder, PageMapBuilder } from '../view/FqAppPages';
+
+@Entry
+@ComponentV2
+struct Index {
+  private tabsController: HdsTabsController = new HdsTabsController();
+
+  build() {
+    HdsNavigation(appState.pageInfos) {
+      HdsTabs({ controller: this.tabsController }) {
+        MainTabPagesBuilder()
+      }
+      .barOverlap(true)
+      .vertical(false)
+      .scrollable(false)
+      .barPosition(BarPosition.End)
+      .barHeight(56)
+      .barFloatingStyle({ barBottomMargin: 28 })
+      .onSelected((index: number) => {
+        appState.currTabsIndex = index;
+      })
+    }
+    .titleMode(HdsNavigationTitleMode.FREE)
+    .mode(NavigationMode.Stack)
+    .hideBackButton(true)
+    .hideTitleBar(true)
+    .navDestination(this.pageMap)
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  pageMap(name: string) {
+    PageMapBuilder(name)
+  }
+}

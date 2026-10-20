@@ -1,0 +1,6 @@
+{
+  "name": "libfqapi_napi.so",
+  "types": "./index.d.ts",
+  "version": "1.0.0",
+  "description": "fqapi_napi native module type declarations"
+}

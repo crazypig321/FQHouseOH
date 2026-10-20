@@ -1,0 +1,32 @@
+{
+  "provenance": "Synthetic fixture from official lo3/f.java and GetPlanRequest/VideoData field definitions; not a live response.",
+  "series_id": "7612345678901234567",
+  "request": {
+    "method": "GET",
+    "path": "/reading/bookapi/plan/v",
+    "query": {
+      "scene": "10",
+      "from": "series_short_play_info",
+      "book_id": "7612345678901234567",
+      "filter_ids": "7612345678901234567"
+    }
+  },
+  "response": {
+    "code": 0,
+    "data": [
+      {
+        "video_data": [
+          {"series_id": "7612345678901234567", "title": "第一季", "content_type": 1},
+          {"series_id": "7612345678901234568", "title": "第二季", "content_type": 1, "episode_cnt": 36},
+          {"series_id": "7612345678901234568", "title": "重复项", "content_type": 1},
+          {"series_id": "7612345678901234569", "title": "第三季", "content_type": 1002},
+          {"series_id": "7612345678901234570", "title": "漫剧续篇", "content_type": 1004},
+          {"video_id": "7612345678901234571", "title": "没有剧集ID的片段", "content_type": 1},
+          {"series_id": 7612345678901234000.0, "title": "精度已丢失的ID", "content_type": 1},
+          {"series_id": "7612345678901234572", "title": "推荐视频", "content_type": 1001}
+        ]
+      },
+      {"video_data": [{"series_id": "7612345678901234573", "title": "其他推荐位", "content_type": 1}]}
+    ]
+  }
+}

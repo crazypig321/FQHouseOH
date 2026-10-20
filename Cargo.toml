@@ -1,0 +1,18 @@
+# FQHouseOH workspace.
+#
+# `rust/` is vendored from fqapp (E:\next\crazypig\fqapp\rust) and must stay
+# diff-minimal against its source of truth; all FQHouseOH-specific code lives
+# in `crates/`. The only accepted patch inside `rust/` is the core_log cfg in
+# rust/src/api/mod.rs (OHOS file logging).
+#
+# Build entry point for the OpenHarmony arm64 artifact:
+#   scripts/build_rust_ohos.ps1
+[workspace]
+resolver = "2"
+members = ["rust", "crates/fqapi_napi"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

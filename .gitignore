@@ -1,0 +1,27 @@
+/node_modules
+/oh_modules
+/local.properties
+/.idea
+**/build
+/.hvigor
+.cxx
+/.clangd
+/.clang-format
+/.clang-tidy
+**/.test
+/.appanalyzer
+/.cache
+/.codeartsdoer
+/.deveco
+
+# Rust
+/target
+rust/target
+**/*.so
+**/*.so.debug
+
+# DevEco
+/entry/libs
+entry/src/main/cpp/types/**/oh_modules
+*.hap
+*.hsp

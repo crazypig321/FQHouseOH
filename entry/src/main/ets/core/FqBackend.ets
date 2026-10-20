@@ -1,0 +1,236 @@
+/**
+ * 后端服务：Rust 核心生命周期 + API 客户端。
+ *
+ * 移植 fqapp BackendService/RustBackendTransport/ApiClient 的启动链路与
+ * 请求语义（部署 → setDevicePoolKey → init → 缓存 baseUrl/capability；
+ * GET 合并、并发闸、全局 `fq-N` requestId、20s 超时）。
+ * 差异：napi uv 线程池较薄，并发上限 3（Flutter 侧为 16）。
+ */
+
+import { common } from '@kit.AbilityKit';
+import { util } from '@kit.ArkTS';
+import fq, { FqBridgeResponse } from 'libfqapi_napi.so';
+import { FqDeployer } from './FqDeployer';
+import { FqKeyStore } from './FqKeyStore';
+import { fqParseBookDetail, fqParseHomepage, fqParseSearchTabs } from './FqParser';
+import { fqParseObject } from './FqJson';
+import { FqBookDetail, FqHomePage, FqSearchTab } from '../model/FqModels';
+
+const PORT: number = 8080;
+const REQUEST_TIMEOUT_MS: number = 20000;
+const MAX_CONCURRENCY: number = 3;
+
+export class FqRequestError extends Error {
+  readonly statusCode: number;
+
+  constructor(message: string, statusCode: number) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+
+export class FqBackend {
+  private static readonly instance: FqBackend = new FqBackend();
+
+  private startPromise: Promise<void> | null = null;
+  private baseUrlValue: string = '';
+  private capabilityValue: string = '';
+  private requestIdCounter: number = 0;
+  private active: number = 0;
+  private waiters: Array<() => void> = [];
+  private inflightGet: Map<string, Promise<Record<string, Object>>> = new Map();
+
+  private constructor() {
+  }
+
+  public static get(): FqBackend {
+    return FqBackend.instance;
+  }
+
+  public get baseUrl(): string {
+    return this.baseUrlValue;
+  }
+
+  public get capability(): string {
+    return this.capabilityValue;
+  }
+
+  /**
+   * 启动后端。幂等：并发/重复调用共享同一次启动；失败后清除缓存，允许重试。
+   */
+  public start(context: common.Context): Promise<void> {
+    if (this.startPromise === null) {
+      const attempt: Promise<void> = this.startInternal(context);
+      attempt.catch((): void => {
+        if (this.startPromise === attempt) {
+          this.startPromise = null;
+        }
+      });
+      this.startPromise = attempt;
+    }
+    return this.startPromise;
+  }
+
+  private async startInternal(context: common.Context): Promise<void> {
+    const deployer: FqDeployer = new FqDeployer();
+    await deployer.deploy(context);
+    const backendDir: string = `${context.filesDir}/backend`;
+    const poolKey: Uint8Array | null = await FqKeyStore.get().devicePoolKey();
+    if (poolKey !== null) {
+      fq.setDevicePoolKey(poolKey);
+    }
+    const result: string = await fq.init(
+      `${backendDir}/config/config.json`,
+      `${backendDir}/config/device_pool.json`,
+      `${backendDir}/config/filter.json`,
+      backendDir,
+      PORT,
+      '',
+    );
+    if (result !== 'running') {
+      throw new Error(`Rust core init failed: ${result}`);
+    }
+    this.baseUrlValue = await fq.baseUrl();
+    this.capabilityValue = await fq.sessionCapability();
+  }
+
+  /**
+   * 把后端相对资源（/src/...）锚定到带 capability 的 loopback 前缀。
+   * 绝对 http(s) URL 原样返回（CDN 签名不可重编码）。
+   */
+  public resourceUrl(rawPath: string): string {
+    if (rawPath.startsWith('http://') || rawPath.startsWith('https://')) {
+      return rawPath;
+    }
+    let path: string = rawPath;
+    while (path.startsWith('/')) {
+      path = path.substring(1);
+    }
+    const capPrefix: string = this.capabilityValue.length > 0
+      ? `/_session/${this.capabilityValue}/`
+      : '/';
+    return `${this.baseUrlValue}${capPrefix}${path}`;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 请求层
+  // ---------------------------------------------------------------------------
+
+  private nextRequestId(): string {
+    this.requestIdCounter += 1;
+    return `fq-${this.requestIdCounter}`;
+  }
+
+  private async acquire<T>(task: () => Promise<T>): Promise<T> {
+    while (this.active >= MAX_CONCURRENCY) {
+      await new Promise<void>((resolve: () => void) => {
+        this.waiters.push(resolve);
+      });
+    }
+    this.active += 1;
+    try {
+      return await task();
+    } finally {
+      this.active -= 1;
+      const next: (() => void) | undefined = this.waiters.shift();
+      if (next !== undefined) {
+        next();
+      }
+    }
+  }
+
+  /**
+   * GET 并解析 JSON。相同 path+query 的并发请求合并为一次。
+   */
+  public getJson(path: string, query: string): Promise<Record<string, Object>> {
+    const cacheKey: string = `${path}?${query}`;
+    const existing: Promise<Record<string, Object>> | undefined = this.inflightGet.get(cacheKey);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const task: Promise<Record<string, Object>> = this.acquire(
+      (): Promise<Record<string, Object>> => this.fetchJson(path, query),
+    );
+    this.inflightGet.set(cacheKey, task);
+    task.then(
+      (): void => {
+        this.inflightGet.delete(cacheKey);
+      },
+      (): void => {
+        this.inflightGet.delete(cacheKey);
+      },
+    );
+    return task;
+  }
+
+  private async fetchJson(path: string, query: string): Promise<Record<string, Object>> {
+    const requestId: string = this.nextRequestId();
+    const resp: FqBridgeResponse = await fq.request(requestId, 'GET', path, query, new Uint8Array(0), REQUEST_TIMEOUT_MS);
+    const status: number = resp.status;
+    if (status === 499) {
+      throw new FqRequestError('请求已取消', 499);
+    }
+    if (status === 504) {
+      throw new FqRequestError('请求超时', 504);
+    }
+    if (status !== 200) {
+      throw new FqRequestError(`后端错误(${status})`, status);
+    }
+    const text: string = this.decodeText(resp.body);
+    const payload: Record<string, Object> | null = fqParseObject(text);
+    if (payload === null) {
+      throw new FqRequestError('响应不是有效 JSON', status);
+    }
+    return payload;
+  }
+
+  private decodeText(data: ArrayBuffer): string {
+    const decoder: util.TextDecoder = util.TextDecoder.create('utf-8');
+    return decoder.decodeWithStream(new Uint8Array(data));
+  }
+
+  // ---------------------------------------------------------------------------
+  // 业务 API
+  // ---------------------------------------------------------------------------
+
+  /** 首页推荐一页（/api/v1/recommend/homepage）。 */
+  public async homepagePage(tabType: number, offset: number, sessionId: string): Promise<FqHomePage> {
+    let query: string = `tab_type=${tabType}&offset=${offset}`;
+    if (sessionId.length > 0) {
+      query = `${query}&session_id=${encodeURIComponent(sessionId)}`;
+    }
+    const payload: Record<string, Object> = await this.getJson('/api/v1/recommend/homepage', query);
+    return fqParseHomepage(payload, tabType);
+  }
+
+  /** 搜索（/api/v1/search，按 tab_type 取分栏）。 */
+  public async searchTabs(query: string, tabType: number, offset: number): Promise<FqSearchTab[]> {
+    const encoded: string = `query=${encodeURIComponent(query)}&tab_type=${tabType}`
+      + `&offset=${offset < 0 ? 0 : offset}&count=10`;
+    const payload: Record<string, Object> = await this.getJson('/api/v1/search', encoded);
+    return fqParseSearchTabs(payload, tabType);
+  }
+
+  /** 书籍详情（/api/detail）。 */
+  public async bookDetail(bookId: string, tab: string): Promise<FqBookDetail> {
+    const query: string = `source=${encodeURIComponent('番茄')}&book_id=${encodeURIComponent(bookId)}`
+      + `&tab=${encodeURIComponent(tab)}`;
+    const payload: Record<string, Object> = await this.getJson('/api/detail', query);
+    return fqParseBookDetail(payload);
+  }
+}
+
+/** 统一错误文案：FqRequestError 优先，其余退化为字符串。 */
+export function fqErrorMessage(error: Object): string {
+  if (error instanceof FqRequestError) {
+    const message: string = error.message;
+    if (message.length > 0) {
+      return message;
+    }
+  }
+  const text: string = `${error}`;
+  if (text.length > 0 && text !== '[object Object]') {
+    return text;
+  }
+  return '请求失败，请稍后重试';
+}

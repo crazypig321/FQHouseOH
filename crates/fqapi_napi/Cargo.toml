@@ -1,0 +1,15 @@
+[package]
+name = "fqapi_napi"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Node-API adapter exposing the fqapi_core Rust core to HarmonyOS ArkTS"
+
+[lib]
+name = "fqapi_napi"
+crate-type = ["cdylib"]
+
+[dependencies]
+fqapi_core = { path = "../../rust" }
+once_cell = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "fs", "io-util"] }
