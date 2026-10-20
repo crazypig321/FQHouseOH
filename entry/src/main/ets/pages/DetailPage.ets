@@ -7,6 +7,7 @@ import { FqBackend, fqErrorMessage } from '../core/FqBackend';
 import { FqBookDetail, fqEmptyBookDetail, fqKindToTab } from '../model/FqModels';
 import { DetailNavParams, FqTitleBarOptions } from '../model/FqNavModels';
 import { CommonNav } from '../view/CommonNav';
+import { CommonLoading, FQ_ACCENT } from '../view/CommonCom';
 
 @ComponentV2
 export struct DetailPage {
@@ -37,10 +38,7 @@ export struct DetailPage {
     }) {
       if (this.loadingState) {
         Column({ space: 12 }) {
-          LoadingProgress()
-            .width(36)
-            .height(36)
-            .color('#FF7A3D')
+          CommonLoading({ sizeValue: 36, loadColor: FQ_ACCENT })
           Text('正在加载…')
             .fontSize(14)
             .fontColor($r('sys.color.font_secondary'))

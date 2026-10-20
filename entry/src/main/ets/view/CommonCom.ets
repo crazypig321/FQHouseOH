@@ -88,3 +88,49 @@ export struct CommonSearch {
       .defaultFocus(this.isFocusable)
   }
 }
+
+
+/**
+ * 公共加载组件
+ */
+@ComponentV2
+export struct CommonLoading {
+  @Param sizeValue: Length = 28
+  @Param loadColor: ResourceColor = $r('sys.color.icon')
+
+  build() {
+    LoadingProgress()
+      .width(this.sizeValue)
+      .height(this.sizeValue)
+      .color(this.loadColor)
+  }
+}
+
+/** 手动刷新时的全屏加载覆盖层。 */
+@ComponentV2
+export struct RefreshOverlay {
+
+  build() {
+    Stack() {
+      Column({ space: 10 }) {
+        CommonLoading({ sizeValue: 36, loadColor: FQ_ACCENT })
+        Text('正在刷新')
+          .fontSize(13)
+          .fontColor($r('sys.color.font_secondary'))
+      }
+      .padding({
+        left: 30,
+        right: 30,
+        top: 22,
+        bottom: 26
+      })
+      .borderRadius(24)
+      .backgroundColor($r('sys.color.comp_background_primary'))
+      .shadow({ radius: 24, color: '#1A000000' })
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#33000000')
+    .alignContent(Alignment.Center)
+  }
+}

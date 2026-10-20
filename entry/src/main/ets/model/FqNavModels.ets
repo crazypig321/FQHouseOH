@@ -3,7 +3,7 @@
  * （对齐 musicfreeOH NavModels 模式：push 纯路由名，参数由来源页赋静态字段）。
  */
 
-import { BottomBuilderParams, TitleBarContentOptions } from '@kit.UIDesignKit';
+import { BottomBuilderParams, HdsNavigationMenuItemOptions, TitleBarContentOptions } from '@kit.UIDesignKit';
 import { NavPathUtils } from '../utils/NavPathUtils';
 
 export const ROUTE_SEARCH: string = 'search';
@@ -20,35 +20,47 @@ export class DetailNavParams {
 
 /**
  * HDS 标题栏内容配置（样式统一由 view/CommonNav 的 CommonNav 提供）：
- * 标题 + 可选搜索/排行菜单 + 可选 bottomBuilder。
+ * 标题 + 可选刷新/搜索/排行菜单 + 可选 bottomBuilder。
  */
 export function FqTitleBarOptions(mainTitle: ResourceStr, showSearch: boolean,
-  bottomBuilder?: BottomBuilderParams): TitleBarContentOptions {
+  bottomBuilder?: BottomBuilderParams, onRefresh?: () => void): TitleBarContentOptions {
   const content: TitleBarContentOptions = {
     title: {
       mainTitle: mainTitle,
     },
   };
+  const menus: HdsNavigationMenuItemOptions[] = [];
+  if (onRefresh !== undefined) {
+    menus.push({
+      content: {
+        icon: $r('sys.symbol.arrow_clockwise'),
+        label: 'refresh',
+        action: onRefresh,
+      },
+    });
+  }
   if (showSearch) {
-    content.menu = {
-      value: [{
-        content: {
-          icon: $r('sys.symbol.magnifyingglass'),
-          label: 'search',
-          action: (): void => {
-            NavPathUtils.push(ROUTE_SEARCH);
-          },
+    menus.push({
+      content: {
+        icon: $r('sys.symbol.magnifyingglass'),
+        label: 'search',
+        action: (): void => {
+          NavPathUtils.push(ROUTE_SEARCH);
         },
-      }, {
-        content: {
-          icon: $r('sys.symbol.medal'),
-          label: 'rank',
-          action: (): void => {
-            NavPathUtils.push(ROUTE_RANK);
-          },
+      },
+    });
+    menus.push({
+      content: {
+        icon: $r('sys.symbol.medal'),
+        label: 'rank',
+        action: (): void => {
+          NavPathUtils.push(ROUTE_RANK);
         },
-      }],
-    };
+      },
+    });
+  }
+  if (menus.length > 0) {
+    content.menu = { value: menus };
   }
   if (bottomBuilder !== undefined) {
     content.bottomBuilder = bottomBuilder;

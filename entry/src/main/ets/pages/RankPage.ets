@@ -16,6 +16,7 @@ import {
 import { DetailNavParams, FqTitleBarOptions, ROUTE_DETAIL } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import { CommonNav } from '../view/CommonNav';
+import { CommonLoading, FQ_ACCENT } from '../view/CommonCom';
 
 /** 排名行懒加载数据源。 */
 class FqRankEntryDataSource implements IDataSource {
@@ -91,10 +92,7 @@ export struct RankPage {
       Column() {
         if (this.loading && this.entryCount === 0) {
           Column({ space: 12 }) {
-            LoadingProgress()
-              .width(28)
-              .height(28)
-              .color('#FF7A3D')
+            CommonLoading({ sizeValue: 28, loadColor: FQ_ACCENT })
           }
           .layoutWeight(1)
           .width('100%')
@@ -185,10 +183,7 @@ export struct RankPage {
               }
             } else if (this.loadingMore) {
               ListItem() {
-                LoadingProgress()
-                  .width(18)
-                  .height(18)
-                  .color('#FF7A3D')
+                CommonLoading({ sizeValue: 18, loadColor: FQ_ACCENT })
                   .margin(12)
               }
             }

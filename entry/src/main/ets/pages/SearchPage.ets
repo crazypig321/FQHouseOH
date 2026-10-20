@@ -12,7 +12,7 @@ import { FqMediaDataSource } from '../core/FqMediaDataSource';
 import { FqItemCard } from '../component/FqItemCard';
 import { DetailNavParams, ROUTE_DETAIL } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
-import { CommonSearch } from '../view/CommonCom';
+import { CommonSearch, FQ_ACCENT, CommonLoading } from '../view/CommonCom';
 
 interface FqSearchCategoryDef {
   readonly title: string;
@@ -119,10 +119,7 @@ export struct SearchPage {
             if (this.loadingMore) {
               ListItem() {
                 Row({ space: 8 }) {
-                  LoadingProgress()
-                    .width(20)
-                    .height(20)
-                    .color('#FF7A3D')
+                  CommonLoading({ sizeValue: 20, loadColor: FQ_ACCENT })
                   Text('加载中…')
                     .fontSize(13)
                     .fontColor($r('sys.color.font_secondary'))

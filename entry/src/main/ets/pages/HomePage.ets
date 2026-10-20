@@ -9,7 +9,7 @@ import { FqHomeFeed, FqHomeRowDataSource, FqHomeSource } from '../core/FqHomeFee
 import { FqMediaItem } from '../model/FqModels';
 import { FqMediaCard } from '../component/FqMediaCard';
 import { FqSpotlight } from '../component/FqSpotlight';
-import { CommonSearch } from '../view/CommonCom';
+import { CommonSearch, FQ_ACCENT, CommonLoading, RefreshOverlay } from '../view/CommonCom';
 import { DetailNavParams, ROUTE_DETAIL, ROUTE_SEARCH, FqTitleBarOptions } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import { CommonNav } from '../view/CommonNav';
@@ -77,6 +77,9 @@ export struct HomePage {
         builder: (): void => {
           this.SearchBar();
         },
+        height: 108
+      }, (): void => {
+        this.startRefresh();
       }),
       isHideBackButton: true,
       scroller: this.scroller,
@@ -84,7 +87,7 @@ export struct HomePage {
       doubleTapToTop: true,
       scrollToTopYOffset: - appState.topRect - FQ_HOME_TOP_INSET
     }) {
-      Refresh({ refreshing: this.refreshing!! }) {
+      Stack() {
         List({ space: 0, scroller: this.scroller }) {
           if (this.loading && this.itemCount === 0) {
             this.FeedLoading()
@@ -153,10 +156,7 @@ export struct HomePage {
             if (this.loadingMore) {
               ListItem() {
                 Row({ space: 8 }) {
-                  LoadingProgress()
-                    .width(18)
-                    .height(18)
-                    .color('#FF7A3D')
+                  CommonLoading({ sizeValue: 18, loadColor: FQ_ACCENT })
                   Text('加载中…')
                     .fontSize(13)
                     .fontColor($r('sys.color.font_secondary'))
@@ -193,11 +193,22 @@ export struct HomePage {
         .contentStartOffset(appState.topRect + FQ_HOME_TOP_INSET)
         .contentEndOffset(appState.bottomRect + 60)
         .onReachEnd(() => this.loadMore())
+        if (this.refreshing) {
+          RefreshOverlay()
+        }
       }
       .width('100%')
       .height('100%')
-      .onRefreshing(() => this.loadFirst())
     }
+  }
+
+  /** 右上角刷新入口：展示全屏覆盖 loading 并重载当前频道。 */
+  private startRefresh(): void {
+    if (this.loading || this.refreshing) {
+      return;
+    }
+    this.refreshing = true;
+    this.loadFirst();
   }
 
   /** 标题栏 bottomBuilder：搜索框（点击进搜索页，不可聚焦）。 */
@@ -214,16 +225,16 @@ export struct HomePage {
       })
       this.ChannelStrip()
     }
-    .padding({ left: 16, right: 16, top: 2, bottom: 10 })
+    .padding({ left: 16, right: 16 })
   }
 
-  /** fqapp 药丸频道条（随内容滚动）。 */
+  /** fqapp 药丸频道条（随内容滚动，横向 List）。 */
   @Builder
   private ChannelStrip() {
       Column({ space: 5 }) {
-        Scroll() {
-          Row({ space: 6 }) {
-            ForEach(FQ_CHANNELS, (channel: FqChannelDef, index: number) => {
+        List({ space: 6 }) {
+          ForEach(FQ_CHANNELS, (channel: FqChannelDef, index: number) => {
+            ListItem() {
               Row({ space: 5 }) {
                 SymbolGlyph(this.channelIcon(index))
                   .fontSize(14)
@@ -239,17 +250,14 @@ export struct HomePage {
               .backgroundColor(this.channelIndex === index ? '#FF7A3D' : $r('sys.color.comp_background_tertiary'))
               .alignItems(VerticalAlign.Center)
               .onClick(() => this.selectChannel(index))
-            }, (channel: FqChannelDef): string => channel.label)
-          }
-          .padding({ left: 16, right: 16 })
+            }
+          }, (channel: FqChannelDef): string => channel.label)
         }
-        .scrollable(ScrollDirection.Horizontal)
+        .listDirection(Axis.Horizontal)
         .scrollBar(BarState.Off)
+        .edgeEffect(EdgeEffect.None)
         .width('100%')
         .align(Alignment.Center)
-        Divider()
-          .strokeWidth(0.5)
-          .color($r('sys.color.comp_divider'))
       }
       .width('100%')
       .height(54)
@@ -261,20 +269,14 @@ export struct HomePage {
   private FeedLoading() {
     ListItem() {
       Column({ space: 12 }) {
-        LoadingProgress()
-          .width(24)
-          .height(24)
-          .color('#FF7A3D')
+        CommonLoading({ sizeValue: 24, loadColor: FQ_ACCENT })
         Text('正在寻找好故事')
           .fontSize(13)
           .fontColor($r('sys.color.font_secondary'))
       }
       .width('100%')
-      .height(270)
       .borderRadius(24)
-      .backgroundColor($r('sys.color.comp_background_secondary'))
       .justifyContent(FlexAlign.Center)
-      .margin({ left: 20, right: 20, top: 12 })
     }
   }
 
