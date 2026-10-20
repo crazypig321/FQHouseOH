@@ -20,25 +20,18 @@ export class DetailNavParams {
 
 /**
  * HDS 标题栏内容配置（样式统一由 view/CommonNav 的 CommonNav 提供）：
- * 标题 + 可选刷新/搜索/排行菜单 + 可选 bottomBuilder。
+ * 标题 + 可选刷新（onRefresh）/搜索（showSearch，可随搜索条隐藏状态动态透出）/
+ * 排行（showRank，常驻）菜单 + 可选 bottomBuilder。
  */
 export function FqTitleBarOptions(mainTitle: ResourceStr, showSearch: boolean,
-  bottomBuilder?: BottomBuilderParams, onRefresh?: () => void): TitleBarContentOptions {
+  bottomBuilder?: BottomBuilderParams, onRefresh?: () => void,
+  showRank?: boolean): TitleBarContentOptions {
   const content: TitleBarContentOptions = {
     title: {
       mainTitle: mainTitle,
     },
   };
   const menus: HdsNavigationMenuItemOptions[] = [];
-  if (onRefresh !== undefined) {
-    menus.push({
-      content: {
-        icon: $r('sys.symbol.arrow_clockwise'),
-        label: 'refresh',
-        action: onRefresh,
-      },
-    });
-  }
   if (showSearch) {
     menus.push({
       content: {
@@ -49,6 +42,17 @@ export function FqTitleBarOptions(mainTitle: ResourceStr, showSearch: boolean,
         },
       },
     });
+  }
+  if (onRefresh !== undefined) {
+    menus.push({
+      content: {
+        icon: $r('sys.symbol.arrow_clockwise'),
+        label: 'refresh',
+        action: onRefresh,
+      },
+    });
+  }
+  if (showRank === true) {
     menus.push({
       content: {
         icon: $r('sys.symbol.medal'),

@@ -38,10 +38,10 @@ const HISTORY_KEY: string = 'history';
 const HISTORY_MAX: number = 10;
 
 /** 标题栏 bottomBuilder 插槽高：搜索框 40 + 间距 10 + 分类条 33 + 上下 padding 12 */
-const FQ_SEARCH_BOTTOM_BUILDER_HEIGHT: number = 96;
+const FQ_SEARCH_BOTTOM_BUILDER_HEIGHT: number = 76;
 
 /** 列表内容起始偏移：标题栏 56 + bottomBuilder 96 */
-const FQ_SEARCH_TOP_INSET: number = 152;
+const FQ_SEARCH_TOP_INSET: number = 160;
 
 @ComponentV2
 export struct SearchPage {
@@ -98,6 +98,15 @@ export struct SearchPage {
             }
             .width('100%')
             .padding({ top: 48 })
+            .alignItems(HorizontalAlign.Center)
+          }
+        } else if (this.itemCount === 0 && this.loadingState) {
+          ListItem() {
+            Column() {
+              CommonLoading({ sizeValue: 36, loadColor: FQ_ACCENT })
+            }
+            .width('100%')
+            .padding({ top: 64 })
             .alignItems(HorizontalAlign.Center)
           }
         } else if (this.itemCount === 0 && !this.loadingState) {

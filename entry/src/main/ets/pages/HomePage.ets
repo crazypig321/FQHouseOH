@@ -50,7 +50,10 @@ const FQ_CAPTIONS: string[] = [
 ];
 
 /** 列表内容起始偏移：标题栏 56 + 搜索行 52（Search 40 + 上下 padding 12） */
-const FQ_HOME_TOP_INSET: number = 174;
+const FQ_HOME_TOP_INSET: number = 170;
+
+/** bottomBuilder（108vp）完全收起所需滚动距离（hideRatio 默认 2，滚动 216vp 收完） */
+const FQ_SEARCH_HIDE_OFFSET: number = 216;
 
 @ComponentV2
 export struct HomePage {
@@ -62,6 +65,8 @@ export struct HomePage {
   @Local errorMsg: string = '';
   @Local hasMore: boolean = false;
   @Local spotlightItems: FqMediaItem[] = [];
+  /** bottomBuilder（搜索条+频道条）已上滑收起：此时标题栏菜单透出搜索入口 */
+  @Local searchBarHidden: boolean = false;
   private feed: FqHomeFeed = new FqHomeFeed([]);
   private rowSource: FqHomeRowDataSource = new FqHomeRowDataSource(3, 3);
   private scroller: Scroller = new Scroller();
@@ -73,14 +78,14 @@ export struct HomePage {
 
   build() {
     CommonNav({
-      titleBarOp: FqTitleBarOptions($r('app.string.app_name'), true, {
+      titleBarOp: FqTitleBarOptions($r('app.string.app_name'), this.searchBarHidden, {
         builder: (): void => {
           this.SearchBar();
         },
-        height: 100
+        height: 88
       }, (): void => {
         this.startRefresh();
-      }),
+      }, true),
       isHideBackButton: true,
       scroller: this.scroller,
       isSearchBarScroller: true,
@@ -192,6 +197,9 @@ export struct HomePage {
         .scrollBar(BarState.Off)
         .contentStartOffset(appState.topRect + FQ_HOME_TOP_INSET)
         .contentEndOffset(appState.bottomRect + 60)
+        .onDidScroll((scrollOffset: number, scrollState: ScrollState): void => {
+          this.updateSearchBarHidden();
+        })
         .onReachEnd(() => this.loadMore())
         if (this.refreshing) {
           RefreshOverlay()
@@ -277,7 +285,7 @@ export struct HomePage {
       .width('100%')
       .borderRadius(24)
       .justifyContent(FlexAlign.Center)
-    }
+    }.margin({ top: 10 })
   }
 
   /** 首屏失败占位。 */
@@ -401,7 +409,16 @@ export struct HomePage {
     this.errorMsg = '';
     this.hasMore = false;
     this.scroller.scrollEdge(Edge.Top);
+    this.searchBarHidden = false;
     this.loadFirst();
+  }
+
+  /** 滚动时同步搜索条隐藏状态：完全收起后在标题栏菜单透出搜索入口。 */
+  private updateSearchBarHidden(): void {
+    const hidden: boolean = this.scroller.currentOffset().yOffset > FQ_SEARCH_HIDE_OFFSET;
+    if (hidden !== this.searchBarHidden) {
+      this.searchBarHidden = hidden;
+    }
   }
 
   private openDetail(item: FqMediaItem): void {
