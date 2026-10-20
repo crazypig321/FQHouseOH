@@ -167,7 +167,7 @@ export function fqEmptyMediaItem(): FqMediaItem {
   return new FqMediaItem('', '', '', '', '', '', 'book', 0, '', '', '', 0);
 }
 
-/** kind -> 详情/目录接口使用的 tab 名。 */
+/** kind -> 详情/目录接口使用的 tab 名（同时用作界面上的 kind 标签文案）。 */
 export function fqKindToTab(kind: string): string {
   if (kind === 'video') {
     return '短剧';
@@ -182,4 +182,145 @@ export function fqKindToTab(kind: string): string {
     return '听书';
   }
   return '小说';
+}
+
+/** kind -> 界面标签文案。与 fqKindToTab 同映射。 */
+export function fqKindLabel(kind: string): string {
+  return fqKindToTab(kind);
+}
+
+/** 排行榜单（算法维度）：rank_algo 即请求参数 algo_type。 */
+export class FqRankTab {
+  readonly name: string;
+  readonly algo: number;
+
+  constructor(name: string, algo: number) {
+    this.name = name;
+    this.algo = algo;
+  }
+
+  get isDrama(): boolean {
+    return this.name.indexOf('短剧') >= 0 || this.name.indexOf('漫剧') >= 0;
+  }
+}
+
+/** 排行榜分类：info_id 即请求参数 rank_sub_info_id。 */
+export class FqRankCategory {
+  readonly name: string;
+  readonly id: number;
+
+  constructor(name: string, id: number) {
+    this.name = name;
+    this.id = id;
+  }
+}
+
+/** 排行榜条目。kind: 'book' | 'video' | 'manju'。 */
+export class FqRankEntry {
+  readonly position: number;
+  readonly id: string;
+  readonly title: string;
+  readonly cover: string;
+  readonly author: string;
+  readonly abstractText: string;
+  readonly category: string;
+  /** 0 完结 / 1 连载中 / 4 停更 / -1 未知。 */
+  readonly creationStatus: number;
+  readonly wordNumber: number;
+  readonly readCount: number;
+  readonly kind: string;
+  readonly seriesId: string;
+
+  constructor(
+    position: number,
+    id: string,
+    title: string,
+    cover: string,
+    author: string,
+    abstractText: string,
+    category: string,
+    creationStatus: number,
+    wordNumber: number,
+    readCount: number,
+    kind: string,
+    seriesId: string,
+  ) {
+    this.position = position;
+    this.id = id;
+    this.title = title;
+    this.cover = cover;
+    this.author = author;
+    this.abstractText = abstractText;
+    this.category = category;
+    this.creationStatus = creationStatus;
+    this.wordNumber = wordNumber;
+    this.readCount = readCount;
+    this.kind = kind;
+    this.seriesId = seriesId;
+  }
+
+  get statusLabel(): string {
+    if (this.creationStatus === 0) {
+      return '完结';
+    }
+    if (this.creationStatus === 1) {
+      return '连载中';
+    }
+    if (this.creationStatus === 4) {
+      return '停更';
+    }
+    return '';
+  }
+
+  get metaLabel(): string {
+    const parts: string[] = [];
+    if (this.author.length > 0) {
+      parts.push(this.author);
+    }
+    if (this.category.length > 0) {
+      parts.push(this.category);
+    }
+    const status = this.statusLabel;
+    if (status.length > 0) {
+      parts.push(status);
+    }
+    return parts.join(' · ');
+  }
+}
+
+/** 榜单一页：条目 + 是否还有下一页。 */
+export class FqRankBoard {
+  readonly entries: FqRankEntry[];
+  readonly hasMore: boolean;
+
+  constructor(entries: FqRankEntry[], hasMore: boolean) {
+    this.entries = entries;
+    this.hasMore = hasMore;
+  }
+
+  get isEmpty(): boolean {
+    return this.entries.length === 0;
+  }
+}
+
+/** 排行榜目录：一个 rankId 下的算法 tab 与分类。 */
+export class FqRankCatalog {
+  readonly rankId: string;
+  readonly tabs: FqRankTab[];
+  readonly categories: FqRankCategory[];
+
+  constructor(rankId: string, tabs: FqRankTab[], categories: FqRankCategory[]) {
+    this.rankId = rankId;
+    this.tabs = tabs;
+    this.categories = categories;
+  }
+
+  get isEmpty(): boolean {
+    return this.rankId.length === 0 || this.tabs.length === 0;
+  }
+}
+
+/** 空目录占位（页面默认值用）。 */
+export function fqEmptyRankCatalog(): FqRankCatalog {
+  return new FqRankCatalog('', [], []);
 }

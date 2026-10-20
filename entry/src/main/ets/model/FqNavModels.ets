@@ -9,6 +9,7 @@ import { NavPathUtils } from '../utils/NavPathUtils';
 
 export const ROUTE_SEARCH: string = 'search';
 export const ROUTE_DETAIL: string = 'detail';
+export const ROUTE_RANK: string = 'rank';
 
 /** 详情页跳转参数（push 前由来源页赋值，详情页 aboutToAppear 读取）。 */
 export class DetailNavParams {
@@ -38,6 +39,14 @@ export function FqTitleBarOptions(mainTitle: ResourceStr, showSearch: boolean,
           label: 'search',
           action: (): void => {
             NavPathUtils.push(ROUTE_SEARCH);
+          },
+        },
+      }, {
+        content: {
+          icon: $r('sys.symbol.medal'),
+          label: 'rank',
+          action: (): void => {
+            NavPathUtils.push(ROUTE_RANK);
           },
         },
       }],

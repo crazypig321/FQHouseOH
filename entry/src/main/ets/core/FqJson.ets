@@ -134,3 +134,8 @@ export function fqEmptyRecord(): Record<string, Object> {
   const empty: Record<string, Object> = {};
   return empty;
 }
+
+/** 顶层键名列表（仅用于 DFS 遍历未知结构）。 */
+export function fqKeys(rec: Record<string, Object>): string[] {
+  return Object.keys(rec);
+}

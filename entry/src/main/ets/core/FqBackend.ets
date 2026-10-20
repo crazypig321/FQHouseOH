@@ -12,9 +12,15 @@ import { util } from '@kit.ArkTS';
 import fq, { FqBridgeResponse } from 'libfqapi_napi.so';
 import { FqDeployer } from './FqDeployer';
 import { FqKeyStore } from './FqKeyStore';
-import { fqParseBookDetail, fqParseHomepage, fqParseSearchTabs } from './FqParser';
+import { fqParseBookDetail, fqParseHomepage, fqParseRankBoard, fqParseRankCatalog, fqParseSearchTabs } from './FqParser';
 import { fqParseObject } from './FqJson';
-import { FqBookDetail, FqHomePage, FqSearchTab } from '../model/FqModels';
+import {
+  FqBookDetail,
+  FqHomePage,
+  FqRankBoard,
+  FqRankCatalog,
+  FqSearchTab,
+} from '../model/FqModels';
 
 const PORT: number = 8080;
 const REQUEST_TIMEOUT_MS: number = 20000;
@@ -217,6 +223,32 @@ export class FqBackend {
       + `&tab=${encodeURIComponent(tab)}`;
     const payload: Record<string, Object> = await this.getJson('/api/detail', query);
     return fqParseBookDetail(payload);
+  }
+
+  /**
+   * 排行榜目录（藏于 novel homepage tab_type=2 载荷）。
+   */
+  public async rankCatalog(): Promise<FqRankCatalog> {
+    const payload: Record<string, Object> = await this.getJson('/api/v1/recommend/homepage', 'tab_type=2&offset=0');
+    return fqParseRankCatalog(payload);
+  }
+
+  /**
+   * 榜单一页（/api/v1/rank/{rankId}）。
+   * @param algo rank_algo（algo_type）。
+   * @param categoryId rank_sub_info_id。
+   * @param offset 已加载条数（服务端续拉游标）。
+   * @param startAt 第一名的名次（首页 1）。
+   */
+  public async rankBoard(rankId: string, algo: number, categoryId: number, offset: number,
+    startAt: number): Promise<FqRankBoard> {
+    let query: string = `algo_type=${algo}&rank_sub_info_id=${categoryId}`;
+    if (offset > 0) {
+      query = `${query}&offset=${offset}`;
+    }
+    const payload: Record<string, Object> =
+      await this.getJson(`/api/v1/rank/${encodeURIComponent(rankId)}`, query);
+    return fqParseRankBoard(payload, startAt);
   }
 }
 

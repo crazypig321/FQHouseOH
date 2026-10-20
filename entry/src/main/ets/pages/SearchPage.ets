@@ -12,6 +12,7 @@ import { FqMediaDataSource } from '../core/FqMediaDataSource';
 import { FqItemCard } from '../component/FqItemCard';
 import { DetailNavParams, ROUTE_DETAIL } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
+import { CommonSearch } from '../view/CommonCom';
 
 interface FqSearchCategoryDef {
   readonly title: string;
@@ -57,27 +58,26 @@ export struct SearchPage {
   build() {
     NavDestination() {
       Column() {
-        Row({ space: 8 }) {
-          TextInput({ placeholder: '搜索书名 / 作者 / ID' })
-            .layoutWeight(1)
-            .height(40)
-            .backgroundColor($r('sys.color.comp_background_tertiary'))
-            .borderRadius(20)
-            .padding({ left: 16, right: 16 })
-            .fontSize(14)
-            .enterKeyType(EnterKeyType.Search)
-            .onChange((value: string) => {
-              this.keyword = value;
-            })
-            .onSubmit(() => this.submit())
-          Text('搜索')
-            .fontSize(15)
-            .fontColor('#FF7A3D')
-            .padding({ left: 4, right: 4 })
-            .onClick(() => this.submit())
-        }
-        .width('100%')
-        .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+        CommonSearch({
+          searchValue: this.keyword,
+          placeholderValue: '搜索书名 / 作者 / ID',
+          isFocusable: true,
+          focusId: 'search_page_input',
+          submit: (content: string, event: SubmitEvent): void => {
+            this.keyword = content;
+            this.submit();
+          },
+          change: (value: string): void => {
+            this.keyword = value;
+          },
+          didDelete: (): void => {
+            this.keyword = '';
+          },
+          click: (): void => {
+          },
+        })
+          .width('100%')
+          .padding({ left: 16, right: 16, top: 8, bottom: 8 })
         this.CategoryStrip()
         if (this.submittedQuery.length === 0) {
           this.HistoryView()

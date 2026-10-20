@@ -12,13 +12,25 @@ import {
   fqAsRecord,
   fqEmptyRecord,
   fqFirstString,
+  fqKeys,
   fqNum,
   fqParseObject,
   fqShallowMergeInto,
   fqStr,
   fqTruthyAny,
 } from './FqJson';
-import { FqBookDetail, FqHomePage, FqMediaItem, FqSearchTab } from '../model/FqModels';
+import {
+  FqBookDetail,
+  FqHomePage,
+  FqMediaItem,
+  FqRankBoard,
+  FqRankCatalog,
+  FqRankCategory,
+  FqRankEntry,
+  FqRankTab,
+  FqSearchTab,
+  fqEmptyRankCatalog,
+} from '../model/FqModels';
 
 const VIDEO_RE: RegExp = /短剧|短片|剧集|video|drama/i;
 const MANGA_RE: RegExp = /漫画|轻漫|条漫|comic|manga/i;
@@ -724,4 +736,251 @@ export function fqParseBookDetailText(text: string): FqBookDetail {
     return new FqBookDetail('', '', '', '', '', '', -1, 0, 0, '', '');
   }
   return fqParseBookDetail(payload);
+}
+
+// ---------------------------------------------------------------------------
+// 排行榜目录：novel homepage(tab_type=2) 载荷深搜 rank_with_category_data
+// ---------------------------------------------------------------------------
+
+function fqFindRankNode(value: Object | undefined, depth: number): Record<string, Object> | null {
+  if (depth > 12 || value === null || value === undefined) {
+    return null;
+  }
+  const arr: Object[] | null = fqAsArray(value);
+  if (arr !== null) {
+    for (const child of arr) {
+      const found: Record<string, Object> | null = fqFindRankNode(child, depth + 1);
+      if (found !== null) {
+        return found;
+      }
+    }
+    return null;
+  }
+  const rec: Record<string, Object> | null = fqAsRecord(value);
+  if (rec === null) {
+    return null;
+  }
+  if (fqAsRecord(rec['rank_with_category_data']) !== null) {
+    return rec;
+  }
+  for (const key of fqKeys(rec)) {
+    const found: Record<string, Object> | null = fqFindRankNode(rec[key], depth + 1);
+    if (found !== null) {
+      return found;
+    }
+  }
+  return null;
+}
+
+export function fqParseRankCatalog(payload: Record<string, Object>): FqRankCatalog {
+  const node: Record<string, Object> | null = fqFindRankNode(payload, 0);
+  if (node === null) {
+    return fqEmptyRankCatalog();
+  }
+  const rankData: Record<string, Object> = fqAsRecord(node['rank_with_category_data']) ?? fqEmptyRecord();
+
+  const tabs: FqRankTab[] = [];
+  const rawTabs: Object[] | null = fqAsArray(rankData['rank_algo_list']);
+  if (rawTabs !== null) {
+    for (const rawTabValue of rawTabs) {
+      const rawTab: Record<string, Object> | null = fqAsRecord(rawTabValue);
+      if (rawTab === null) {
+        continue;
+      }
+      const name: string = fqStr(rawTab, 'rank_name');
+      const algo: number = fqAsInt(rawTab['rank_algo'], -1);
+      if (name.length === 0 || algo < 0) {
+        continue;
+      }
+      tabs.push(new FqRankTab(name, algo));
+    }
+  }
+
+  const categories: FqRankCategory[] = [];
+  const rawCategories: Object[] | null = fqAsArray(rankData['sub_info_list']);
+  if (rawCategories !== null) {
+    for (const rawCategoryValue of rawCategories) {
+      const rawCategory: Record<string, Object> | null = fqAsRecord(rawCategoryValue);
+      if (rawCategory === null) {
+        continue;
+      }
+      const name: string = fqStr(rawCategory, 'info_name');
+      const id: number = fqAsInt(rawCategory['info_id'], -1);
+      if (name.length === 0 || id < 0) {
+        continue;
+      }
+      categories.push(new FqRankCategory(name, id));
+    }
+  }
+
+  const rankId: string = fqFirstString(node, ['cell_id_str', 'cell_id']);
+  return new FqRankCatalog(rankId, tabs, categories);
+}
+
+// ---------------------------------------------------------------------------
+// 排行榜单页：data.cell_view.cell_data（book_data / video 双路径）
+// ---------------------------------------------------------------------------
+
+function fqRankCategoryText(raw: string): string {
+  const comma: number = raw.indexOf(',');
+  const commaCn: number = raw.indexOf('，');
+  let cut: number = -1;
+  if (comma >= 0 && commaCn >= 0) {
+    cut = Math.min(comma, commaCn);
+  } else if (comma >= 0) {
+    cut = comma;
+  } else if (commaCn >= 0) {
+    cut = commaCn;
+  }
+  if (cut > 0) {
+    return raw.substring(0, cut).trim();
+  }
+  return raw.trim();
+}
+
+function fqRankEntryFromBook(bd: Record<string, Object>): FqRankEntry | null {
+  const id: string = fqFirstString(bd, ['book_id', 'item_id', 'id']);
+  const title: string = fqFirstString(bd, ['book_name', 'title', 'name']);
+  if (id.length === 0 && title.length === 0) {
+    return null;
+  }
+  return new FqRankEntry(
+    0,
+    id,
+    title,
+    fqFirstString(bd, ['thumb_url', 'cover', 'cover_url', 'poster']),
+    fqFirstString(bd, ['author', 'author_name']),
+    fqFirstString(bd, ['abstract', 'intro']),
+    fqRankCategoryText(fqFirstString(bd, ['category'])),
+    fqAsInt(bd['creation_status'], -1),
+    fqAsInt(bd['word_number'], 0),
+    fqAsInt(bd['read_count'], 0),
+    'book',
+    '',
+  );
+}
+
+function fqLooksLikeVideoCell(cell: Record<string, Object>): boolean {
+  if (fqAsArray(cell['video_data']) !== null || fqAsRecord(cell['video_data']) !== null) {
+    return true;
+  }
+  return fqFirstString(cell, ['series_id_str', 'pseries_id', 'video_id']).length > 0;
+}
+
+function fqRankVideoEntry(cell: Record<string, Object>): FqRankEntry | null {
+  const item: FqMediaItem = fqItemFromRaw(cell, '');
+  if (item.kind !== 'video' && item.kind !== 'manju') {
+    return null;
+  }
+  if (item.seriesId.length === 0) {
+    return null;
+  }
+  return new FqRankEntry(
+    0,
+    item.id,
+    item.title,
+    item.cover,
+    item.author,
+    item.intro,
+    item.badge,
+    -1,
+    0,
+    item.followerCount,
+    item.kind,
+    item.seriesId,
+  );
+}
+
+function fqCollectRankCell(
+  cell: Record<string, Object>,
+  entries: FqRankEntry[],
+  seen: Set<string>,
+  startAt: number,
+): void {
+  let entry: FqRankEntry | null = null;
+
+  const bdArray: Object[] | null = fqAsArray(cell['book_data']);
+  if (entry === null && bdArray !== null && bdArray.length > 0) {
+    const first: Record<string, Object> | null = fqAsRecord(bdArray[0]);
+    if (first !== null) {
+      entry = fqRankEntryFromBook(first);
+    }
+  }
+  if (entry === null && bdArray === null) {
+    const bdRec: Record<string, Object> | null = fqAsRecord(cell['book_data']);
+    if (bdRec !== null) {
+      entry = fqRankEntryFromBook(bdRec);
+    }
+  }
+  if (entry === null && fqStr(cell, 'book_name').length > 0) {
+    entry = fqRankEntryFromBook(cell);
+  }
+  if (entry === null && fqLooksLikeVideoCell(cell)) {
+    entry = fqRankVideoEntry(cell);
+  }
+  if (entry === null) {
+    return;
+  }
+
+  const key: string = entry.id.length > 0 ? entry.id : `t:${entry.title}`;
+  if (seen.has(key)) {
+    return;
+  }
+  seen.add(key);
+  entries.push(new FqRankEntry(
+    startAt + entries.length,
+    entry.id,
+    entry.title,
+    entry.cover,
+    entry.author,
+    entry.abstractText,
+    entry.category,
+    entry.creationStatus,
+    entry.wordNumber,
+    entry.readCount,
+    entry.kind,
+    entry.seriesId,
+  ));
+}
+
+/**
+ * 解析 /api/v1/rank/{rankId} 载荷为榜单一页。
+ * @param startAt 第一名的名次（首页 1，翻页 = 已有条数 + 1）。
+ */
+export function fqParseRankBoard(payload: Record<string, Object>, startAt: number): FqRankBoard {
+  const codeRaw: Object | undefined = payload['code'];
+  if (codeRaw !== undefined && codeRaw !== null) {
+    const code: number = fqAsInt(codeRaw, -1);
+    if (code !== 0 && code !== 200) {
+      return new FqRankBoard([], false);
+    }
+  }
+
+  const data: Record<string, Object> | null = fqAsRecord(payload['data']);
+  const cellView: Record<string, Object> | null = data !== null ? fqAsRecord(data['cell_view']) : null;
+  const cells: Object[] | null = cellView !== null ? fqAsArray(cellView['cell_data']) : null;
+
+  const entries: FqRankEntry[] = [];
+  const seen: Set<string> = new Set<string>();
+  if (cells !== null) {
+    for (const cellValue of cells) {
+      const cell: Record<string, Object> | null = fqAsRecord(cellValue);
+      if (cell === null) {
+        continue;
+      }
+      const nested: Object[] | null = fqAsArray(cell['cell_data']);
+      if (nested !== null) {
+        for (const nestedValue of nested) {
+          const nestedCell: Record<string, Object> | null = fqAsRecord(nestedValue);
+          if (nestedCell !== null) {
+            fqCollectRankCell(nestedCell, entries, seen, startAt);
+          }
+        }
+      }
+      fqCollectRankCell(cell, entries, seen, startAt);
+    }
+  }
+
+  const hasMore: boolean = data !== null && data['has_more'] === true;
+  return new FqRankBoard(entries, hasMore);
 }
