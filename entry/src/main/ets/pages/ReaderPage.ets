@@ -24,7 +24,7 @@ import { ReaderNavParams } from '../model/FqNavModels';
 import { CommonNav, titleBarOf } from '../view/CommonNav';
 import { CommonLoading, FQ_ACCENT } from '../view/CommonCom';
 import { CommonSheet, FqSheetOptions } from '../view/CommonSheet';
-import { FqOnlineParser } from '../core/FqOnlineParser';
+import { FQ_FONT_OPTIONS, FqFontOption, FqOnlineParser } from '../core/FqOnlineParser';
 import { appState } from '../entryability/AppState';
 
 /** 阅读主题：themeColor 仅支持 6 位色值（无透明度）。 */
@@ -42,6 +42,13 @@ const FQ_READER_THEMES: FqReaderTheme[] = [
 ];
 
 const FQ_READER_FLIP_LABELS: string[] = ['仿真', '横滑'];
+
+/** 眉页「第N章」前缀匹配（N 支持数字与中文数字，量词：章节回卷集话篇）。 */
+const FQ_HEADER_PREFIX_RE: RegExp = new RegExp('^第[0-9零一二三四五六七八九十百千万]+[章节回卷集话篇]');
+
+/** 眉页前缀剥离（含其后空白），用于提取纯章节名。 */
+const FQ_HEADER_PREFIX_STRIP_RE: RegExp =
+  new RegExp('^第[0-9零一二三四五六七八九十百千万]+[章节回卷集话篇]\\s*');
 
 /** 目录懒加载数据源：持过滤后章节，变更时通知 LazyForEach 刷新。 */
 class FqChapterSource implements IDataSource {
@@ -92,6 +99,7 @@ export struct ReaderPage {
   @Local lineHeight: number = 1.9;
   @Local themeIndex: number = 0;
   @Local flipIndex: number = 0;
+  @Local fontIndex: number = 0;
   private bookId: string = '';
   private kind: string = 'book';
   private bookTitle: string = '';
@@ -103,6 +111,8 @@ export struct ReaderPage {
     this.controllerResolve = resolve;
   });
   private loadToken: number = 0;
+  /** 配置重排后的强制重绘定时器句柄（-1 表示无待执行重绘）。 */
+  private redrawTimer: number = -1;
   private filesDir: string = '';
   private initialized: boolean = false;
   private drawerScroller: Scroller = new Scroller();
@@ -128,6 +138,7 @@ export struct ReaderPage {
     this.lineHeight = settings.lineHeight;
     this.themeIndex = settings.themeIndex;
     this.flipIndex = settings.flipIndex;
+    this.fontIndex = settings.fontIndex;
     hilog.info(0x0001, 'ReaderTheme',
       `aboutToAppear stored themeIndex=${settings.themeIndex} appIsDark=${appState.isDark}`);
     this.filesDir = getContext(this).filesDir;
@@ -138,6 +149,10 @@ export struct ReaderPage {
   aboutToDisappear(): void {
     this.applySystemBar(true);
     this.loadToken += 1;
+    if (this.redrawTimer >= 0) {
+      clearTimeout(this.redrawTimer);
+      this.redrawTimer = -1;
+    }
     try {
       this.controller.releaseBook();
     } catch (error) {
@@ -184,6 +199,32 @@ export struct ReaderPage {
         .width('100%')
         .height('100%')
 
+        // 眉页：章节序号 + 章节名常驻顶部（跟随阅读主题，不拦截翻页点击）
+        if (!this.menuVisible) {
+          Row({ space: 5 }) {
+            Text(this.headerChapterLabel())
+              .fontColor(this.theme().fontColor)
+              .fontSize(12)
+              .opacity(0.5)
+              .maxLines(1)
+              .hitTestBehavior(HitTestMode.None)
+            if (this.headerChapterName().length > 0) {
+              Text(this.headerChapterName())
+                .fontColor(this.theme().fontColor)
+                .fontSize(12)
+                .opacity(0.5)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .constraintSize({ maxWidth: '70%' })
+                .hitTestBehavior(HitTestMode.None)
+            }
+          }
+          .alignItems(VerticalAlign.Center)
+          .constraintSize({ maxWidth: '80%' })
+          .position({ top: appState.topRect + 10, left: 20 })
+          .hitTestBehavior(HitTestMode.None)
+        }
+
         Row() {
           Column()
             .layoutWeight(1)
@@ -226,7 +267,7 @@ export struct ReaderPage {
         .height('100%')
         .bindSheet(this.settingsSheetVisible, this.SettingsSheet(), FqSheetOptions((): void => {
           this.settingsSheetVisible = false;
-        }, SheetSize.MEDIUM))
+        }, 380))
 
         if (this.loadingState) {
           Column({ space: 12 }) {
@@ -357,6 +398,10 @@ export struct ReaderPage {
     CommonSheet({
       sheetTitle: '目录',
       showSearch: true,
+      showLocate: true,
+      locateClick: (): void => {
+        this.locateCurrentChapter();
+      },
       searchActive: this.sheetSearchActive,
       searchValue: this.sheetKeyword,
       searchPlaceholder: '搜索章节',
@@ -400,9 +445,8 @@ export struct ReaderPage {
           }
         }, (chapter: FqChapter): string => chapter.itemId)
       }
-      .contentStartOffset(56)
+      .padding({top: 66, bottom: appState.bottomRect})
       .cachedCount(12)
-      .contentEndOffset(appState.bottomRect)
       .width('100%')
       .height('100%')
       .scrollBar(BarState.Off)
@@ -415,10 +459,16 @@ export struct ReaderPage {
     }
   }
 
-  /** 设置面板：公共 sheet（标题栏）承载排版设置，跟随底部工具栏出现。 */
+  /** 设置面板：公共 sheet（标题栏 + 右侧关闭）承载排版设置，跟随底部工具栏出现。 */
   @Builder
   private SettingsSheet() {
-    CommonSheet() {
+    CommonSheet({
+      sheetTitle: '设置',
+      showClose: true,
+      closeClick: (): void => {
+        this.settingsSheetVisible = false;
+      },
+    }) {
       Column({ space: 16 }) {
         Row({ space: 12 }) {
           Text('字号')
@@ -512,6 +562,26 @@ export struct ReaderPage {
         .alignItems(VerticalAlign.Center)
 
         Row({ space: 12 }) {
+          Text('字体')
+            .fontSize(14)
+            .fontColor(this.theme().fontColor)
+            .width(36)
+          ForEach(FQ_FONT_OPTIONS, (option: FqFontOption, index: number) => {
+            Text(option.label)
+              .fontSize(12)
+              .fontColor(this.fontIndex === index ? '#FFFFFF' : this.theme().fontColor)
+              .backgroundColor(this.fontIndex === index ? FQ_ACCENT : 'transparent')
+              .borderRadius(13)
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .onClick(() => {
+                this.changeFont(index);
+              })
+          }, (option: FqFontOption): string => option.label)
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+
+        Row({ space: 12 }) {
           Text('翻页')
             .fontSize(14)
             .fontColor(this.theme().fontColor)
@@ -533,8 +603,8 @@ export struct ReaderPage {
         .alignItems(VerticalAlign.Center)
       }
       .width('100%')
-      .padding(20)
       .alignItems(HorizontalAlign.Start)
+      .padding({top: 76, bottom: appState.bottomRect, right: 20, left: 20})
     }
   }
 
@@ -604,6 +674,35 @@ export struct ReaderPage {
       return '';
     }
     return chapter.title;
+  }
+
+  /** 眉页序号：标题自带「第N章」前缀取之，否则按章节下标生成。 */
+  private headerChapterLabel(): string {
+    const title: string = this.currentChapterTitle().trim();
+    const rest: string = title.replace(FQ_HEADER_PREFIX_RE, '');
+    if (title.length > 0 && rest.length < title.length) {
+      return title.substring(0, title.length - rest.length);
+    }
+    return `第${this.chapterIndex + 1}章`;
+  }
+
+  /** 眉页章节名：剥掉「第N章」前缀的标题；无前缀返回完整标题，空标题返回空串。 */
+  private headerChapterName(): string {
+    const title: string = this.currentChapterTitle().trim();
+    return title.replace(FQ_HEADER_PREFIX_STRIP_RE, '').trim();
+  }
+
+  /** 目录定位：滚动到当前章节（搜索过滤时按过滤后位置定位）。 */
+  private locateCurrentChapter(): void {
+    const current: FqChapter | undefined = this.chapters[this.chapterIndex];
+    let target: number = this.chapterIndex;
+    if (current !== undefined) {
+      const pos: number = this.filteredChapters().indexOf(current);
+      if (pos >= 0) {
+        target = pos;
+      }
+    }
+    this.drawerScroller.scrollToIndex(target, true);
   }
 
   private hasPrev(): boolean {
@@ -717,12 +816,62 @@ export struct ReaderPage {
     this.applySettingChange();
   }
 
+  /** 切换字体档位：先备好新字体沙箱副本，setPageConfig 的 fontPath 才指向新文件。 */
+  private async changeFont(index: number): Promise<void> {
+    if (index === this.fontIndex || index < 0 || index >= FQ_FONT_OPTIONS.length) {
+      return;
+    }
+    this.fontIndex = index;
+    if (this.bookParser !== null) {
+      await this.bookParser.prepareFont(this.filesDir, this.fontIndex);
+    }
+    this.applySettingChange();
+  }
+
   private applySettingChange(): void {
-    FqReaderStore.saveSettings(this.fontSize, this.lineHeight, this.themeIndex, this.flipIndex);
+    FqReaderStore.saveSettings(this.fontSize, this.lineHeight, this.themeIndex, this.flipIndex,
+      this.fontIndex);
     try {
       this.controller.setPageConfig(this.buildSetting());
     } catch (error) {
       // 排版引擎可能尚未就绪
+    }
+    // setPageConfig 只重排不重绘当前页，设置变更需强制重绘才能即刻生效
+    this.scheduleConfigRedraw();
+  }
+
+  /** 配置重排完成后强制重绘当前页：重排只刷新页缓存，可见重绘靠 startPlay 原位触发。 */
+  private scheduleConfigRedraw(): void {
+    if (this.redrawTimer >= 0) {
+      clearTimeout(this.redrawTimer);
+    }
+    const token: number = this.loadToken;
+    this.redrawTimer = setTimeout((): void => {
+      this.redrawTimer = -1;
+      if (token !== this.loadToken) {
+        return;
+      }
+      hilog.info(0x0001, 'ReaderPage', 'configRedraw: startPlay to redraw current page');
+      this.redrawStartPlay();
+    }, 800);
+  }
+
+  /** 原位重绘当前章：回到最近展示位置，位置失效时回退章首。 */
+  private async redrawStartPlay(): Promise<void> {
+    const domPos: string = this.lastShownStart;
+    try {
+      await this.controller.startPlay(this.chapterIndex, domPos);
+    } catch (error) {
+      const err: BusinessError = error as BusinessError;
+      hilog.error(0x0001, 'ReaderPage', `configRedraw startPlay failed: ${err.message}`);
+      if (domPos.length > 0) {
+        try {
+          await this.controller.startPlay(this.chapterIndex, '');
+        } catch (fallbackError) {
+          const fallbackErr: BusinessError = fallbackError as BusinessError;
+          hilog.error(0x0001, 'ReaderPage', `configRedraw fallback failed: ${fallbackErr.message}`);
+        }
+      }
     }
   }
 
@@ -838,9 +987,9 @@ export struct ReaderPage {
       if (token !== this.loadToken) {
         return;
       }
-      // 字体：自定义 handler 没有 Kit 内置字体，先备好沙箱字体副本，
+      // 字体：自定义 handler 没有 Kit 内置字体，先备好当前档位的沙箱字体副本，
       // 引擎请求「系统字体.ttf」时由解析器 getResourceContent 返回字节
-      await this.bookParser.prepareFont(this.filesDir);
+      await this.bookParser.prepareFont(this.filesDir, this.fontIndex);
       // 一书只注册一次解析器；换章/跳转仅靠 startPlay(spineIndex, domPos) 定位
       if (!this.hasRegisteredBook) {
         this.controller.setPageConfig(this.buildSetting());
@@ -891,7 +1040,6 @@ export struct ReaderPage {
         return;
       }
       this.lastShownStart = data.startDomPos;
-      this.loadingState = false;
       // 引擎跨章翻页后 resourceIndex 即当前章节（书脊索引与章节下标一致）
       if (data.resourceIndex >= 0 && data.resourceIndex < this.totalChapters) {
         this.chapterIndex = data.resourceIndex;
@@ -904,7 +1052,19 @@ export struct ReaderPage {
         this.pendingConfigReapply = false;
         hilog.info(0x0001, 'ReaderPage', 'first pageShow: reapply real config');
         this.controller.setPageConfig(this.buildSetting());
+        // Kit 默认（浅色）首载完成的瞬间重排为真实主题，但重排只刷页缓存、不重绘
+        // 当前显示页：浅色旧渲染会停留到下次翻页。延后 startPlay 原位强制重绘，
+        // 重绘派发的 pageShow 抬起遮罩；兜底定时器防重绘异常时遮罩卡死。
+        this.scheduleConfigRedraw();
+        const token: number = this.loadToken;
+        setTimeout((): void => {
+          if (token === this.loadToken && this.loadingState) {
+            this.loadingState = false;
+          }
+        }, 1800);
+        return;
       }
+      this.loadingState = false;
     });
     // 资源请求兜底：handler.getResourceContent 返回空时，引擎经此回调获取字体等资源
     this.controller.on('resourceRequest', (fileName: string): ArrayBuffer => {

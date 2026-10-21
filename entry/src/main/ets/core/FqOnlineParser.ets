@@ -7,11 +7,16 @@ import { FqChapter } from '../model/FqModels';
 /** 章节内容按需加载器：入参为书脊索引（与章节下标一致）。 */
 export type FqChapterFetcher = (spineIndex: number) => Promise<string>;
 
-/** 系统字体候选：书宋（阅读衬线）优先，其次系统默认黑体。 */
-const FQ_FONT_CANDIDATES: string[] = [
-  '/system/fonts/ShuS-SC.ttf',
-  '/system/fonts/HarmonyOS_Sans_SC.ttf',
-  '/system/fonts/HYQiHeiL3.ttf',
+/** 字体档位：label 供设置面板展示，candidates 为设备系统字体候选（取首个可用）。 */
+export interface FqFontOption {
+  readonly label: string;
+  readonly candidates: string[];
+}
+
+/** 阅读字体档位（下标持久化于阅读设置 fontIndex）。 */
+export const FQ_FONT_OPTIONS: FqFontOption[] = [
+  { label: '书宋', candidates: ['/system/fonts/ShuS-SC.ttf'] },
+  { label: '黑体', candidates: ['/system/fonts/HarmonyOS_Sans_SC.ttf', '/system/fonts/HYQiHeiL3.ttf'] },
 ];
 
 /**
@@ -39,6 +44,8 @@ export class FqOnlineParser extends bookParser.BookParserHandler {
   private fontSandboxPath: string = '';
   /** 字体字节内存缓存（getResourceContent 为同步接口，避免重复读 10MB 文件）。 */
   private fontBuf: ArrayBuffer | null = null;
+  /** 当前已备好沙箱副本的字体档位（-1 表示尚未准备）。 */
+  private preparedFontIndex: number = -1;
   /** 默认 handler 委托：供应 Kit 内置分页 CSS / 内置字体等资源。 */
   private defaultHandler: bookParser.BookParserHandler | null = null;
 
@@ -49,26 +56,30 @@ export class FqOnlineParser extends bookParser.BookParserHandler {
     this.fetcher = fetcher;
   }
 
-  /** 将可读的系统字体复制进应用沙箱（幂等，已有副本直接复用），并准备默认 handler 委托。 */
-  public async prepareFont(filesDir: string): Promise<void> {
+  /** 按档位把可读的系统字体复制进沙箱（每档独立副本，幂等），并准备默认 handler 委托。 */
+  public async prepareFont(filesDir: string, fontIndex: number): Promise<void> {
     await this.ensureDefaultHandler(filesDir);
-    if (this.fontSandboxPath.length > 0) {
+    if (this.preparedFontIndex === fontIndex && this.fontSandboxPath.length > 0) {
       return;
     }
-    const target: string = `${filesDir}/fq_reader_sysfont.ttf`;
+    const option: FqFontOption | undefined = FQ_FONT_OPTIONS[fontIndex];
+    if (option === undefined) {
+      return;
+    }
+    const target: string = `${filesDir}/fq_reader_font_${fontIndex}.ttf`;
     if (FqOnlineParser.fileExists(target)) {
-      this.fontSandboxPath = target;
+      this.applyFont(target, fontIndex);
       hilog.info(0x0001, 'FqOnlineParser', `prepareFont reuse ${target}`);
       return;
     }
-    for (const src of FQ_FONT_CANDIDATES) {
+    for (const src of option.candidates) {
       if (!FqOnlineParser.fileExists(src)) {
         hilog.warn(0x0001, 'FqOnlineParser', `prepareFont candidate missing ${src}`);
         continue;
       }
       try {
         await fileIo.copyFile(src, target);
-        this.fontSandboxPath = target;
+        this.applyFont(target, fontIndex);
         hilog.info(0x0001, 'FqOnlineParser', `prepareFont copied ${src} -> ${target}`);
         return;
       } catch (error) {
@@ -76,7 +87,14 @@ export class FqOnlineParser extends bookParser.BookParserHandler {
         hilog.warn(0x0001, 'FqOnlineParser', `prepareFont copy ${src} failed: ${err.code} ${err.message}`);
       }
     }
-    hilog.error(0x0001, 'FqOnlineParser', 'prepareFont no readable system font found');
+    hilog.error(0x0001, 'FqOnlineParser', `prepareFont no readable system font for ${option.label}`);
+  }
+
+  /** 记录当前生效字体档位；切档后作废字节缓存，readFontBuffer 按新副本重读。 */
+  private applyFont(target: string, fontIndex: number): void {
+    this.fontSandboxPath = target;
+    this.preparedFontIndex = fontIndex;
+    this.fontBuf = null;
   }
 
   /**

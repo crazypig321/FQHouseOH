@@ -32,6 +32,8 @@ export class FqReaderSettings {
   themeIndex: number = -1;
   /** 0 仿真翻页 / 1 横滑翻页。 */
   flipIndex: number = 0;
+  /** 字体档位（FQ_FONT_OPTIONS 下标）：0 书宋 / 1 黑体。 */
+  fontIndex: number = 0;
 }
 
 function fqClampFontSize(value: number): number {
@@ -95,6 +97,10 @@ export class FqReaderStore {
       if (typeof flipIndex === 'number') {
         FqReaderStore.settings.flipIndex = Math.min(1, Math.max(0, Math.trunc(flipIndex)));
       }
+      const fontIndex: Object | undefined = rec['fontIndex'];
+      if (typeof fontIndex === 'number') {
+        FqReaderStore.settings.fontIndex = Math.max(0, Math.trunc(fontIndex));
+      }
     } catch (error) {
       // 损坏配置按默认处理
     }
@@ -105,11 +111,12 @@ export class FqReaderStore {
   }
 
   public static saveSettings(fontSize: number, lineHeight: number,
-    themeIndex: number, flipIndex: number): void {
+    themeIndex: number, flipIndex: number, fontIndex: number): void {
     FqReaderStore.settings.fontSize = fqClampFontSize(fontSize);
     FqReaderStore.settings.lineHeight = fqClampLineHeight(lineHeight);
     FqReaderStore.settings.themeIndex = Math.min(2, Math.max(-1, Math.trunc(themeIndex)));
     FqReaderStore.settings.flipIndex = Math.min(1, Math.max(0, Math.trunc(flipIndex)));
+    FqReaderStore.settings.fontIndex = Math.max(0, Math.trunc(fontIndex));
     const pref: preferences.Preferences | null = FqReaderStore.pref;
     if (pref === null) {
       return;
@@ -120,6 +127,7 @@ export class FqReaderStore {
     rec['lineHeight'] = FqReaderStore.settings.lineHeight;
     rec['themeIndex'] = FqReaderStore.settings.themeIndex;
     rec['flipIndex'] = FqReaderStore.settings.flipIndex;
+    rec['fontIndex'] = FqReaderStore.settings.fontIndex;
     try {
       pref.putSync(FQ_READER_KEY_SETTINGS, JSON.stringify(rec));
       pref.flush().catch((_error: BusinessError): void => {

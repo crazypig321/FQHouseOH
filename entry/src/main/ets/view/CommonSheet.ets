@@ -6,14 +6,17 @@
  *   CommonSearch 搜索框，样式对齐主页搜索行）。
  */
 
-import { HdsNavigationMenuItemOptions, TitleBarContentOptions } from '@kit.UIDesignKit';
+import { HdsNavDestination,
+  HdsNavDestinationTitleMode,
+  HdsNavigationMenuItemOptions, TitleBarContentOptions } from '@kit.UIDesignKit';
+import { themeUtils } from '../utils/ThemeUtils';
 import { CommonSearch } from './CommonCom';
 import { CommonNav } from './CommonNav';
 
-/** 通用 bindSheet 参数：拖拽条 + 关闭回调 + 可选高度（默认大高度半模态）。 */
+/** 通用 bindSheet 参数：拖拽条 + 关闭回调 + 可选高度（默认 300）。 */
 export function FqSheetOptions(onClose: () => void, height?: SheetSize | Length): SheetOptions {
   const options: SheetOptions = {
-    height: 300,
+    height: height === undefined ? 300 : height,
     dragBar: true,
     showClose: false,
     preferType: SheetType.CENTER,
@@ -39,28 +42,54 @@ export struct CommonSheet {
   @Param searchPlaceholder: ResourceStr = '搜索';
   /** CommonSearch 焦点定位 id（使用方传入且保持稳定）。 */
   @Param focusId: string = 'common_sheet_search';
+  /** 标题栏右侧是否显示定位按钮（目录滚动到当前章节）。 */
+  @Param showLocate: boolean = false;
+  /** 标题栏右侧是否显示关闭按钮。 */
+  @Param showClose: boolean = false;
   @Event searchToggle: () => void = (): void => {};
   @Event searchChange: (value: string) => void = (_value: string): void => {};
   @Event searchSubmit: (value: string) => void = (_value: string): void => {};
+  @Event locateClick: () => void = (): void => {};
+  @Event closeClick: () => void = (): void => {};
   @BuilderParam content: () => void;
 
   build() {
-    CommonNav({
-      titleBarOp: this.titleBarContent(),
-      isHideBackButton: true,
-      avoidLayoutSafeArea: false,
-      showBrandGradient: false,
-    }) {
+    HdsNavDestination() {
       this.content()
     }
+    .titleBar({
+      content: this.titleBarContent(),
+      style: {
+        originalStyle: {
+          contentStyle: {
+            // 深浅模式切换时由 themeUtils 触发重渲染（HDS 不会自动刷新系统色）
+            titleStyle: { mainTitleColor: themeUtils.textColor, subTitleColor: themeUtils.terTextColor },
+            backIconStyle: { iconColor: themeUtils.textColor },
+            menuStyle: {
+              iconColor: themeUtils.textColor
+            },
+            subIconStyle: {
+              iconColor: themeUtils.textColor
+            }
+          },
+        },
+        scrollEffectOpts: {
+          enableScrollEffect: false,
+        },
+      },
+      avoidLayoutSafeArea: false,
+    })
+    .hideBackButton(true)
+    .titleMode(HdsNavDestinationTitleMode.MODAL)
   }
 
   private titleBarContent(): TitleBarContentOptions {
     const content: TitleBarContentOptions = {
       title: { mainTitle: this.sheetTitle },
     };
+    const menus: HdsNavigationMenuItemOptions[] = [];
     if (this.showSearch) {
-      const menus: HdsNavigationMenuItemOptions[] = [{
+      menus.push({
         content: {
           icon: $r('sys.symbol.magnifyingglass'),
           label: 'search',
@@ -68,16 +97,40 @@ export struct CommonSheet {
             this.searchToggle();
           },
         },
-      }];
-      content.menu = { value: menus };
-      if (this.searchActive) {
-        content.bottomBuilder = {
-          builder: (): void => {
-            this.SearchBar();
+      });
+    }
+    if (this.showLocate) {
+      menus.push({
+        content: {
+          icon: $r('sys.symbol.scope'),
+          label: 'locate',
+          action: (): void => {
+            this.locateClick();
           },
-          height: 52,
-        };
-      }
+        },
+      });
+    }
+    if (this.showClose) {
+      menus.push({
+        content: {
+          icon: $r('sys.symbol.xmark'),
+          label: 'close',
+          action: (): void => {
+            this.closeClick();
+          },
+        },
+      });
+    }
+    if (menus.length > 0) {
+      content.menu = { value: menus };
+    }
+    if (this.showSearch && this.searchActive) {
+      content.bottomBuilder = {
+        builder: (): void => {
+          this.SearchBar();
+        },
+        height: 52,
+      };
     }
     return content;
   }
