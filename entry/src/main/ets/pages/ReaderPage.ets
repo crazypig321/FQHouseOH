@@ -1,8 +1,9 @@
 /**
  * 小说阅读页（CommonNav 框架，基于 Reader Kit）：
- * 章节正文（v1 图文接口优先，回退旧版 /api/content）写入沙箱 txt 后交
- * ReadPageComponent 排版渲染；Reader Kit 仅支持本地文件，故每章一文件。
- * 交互：屏幕三分区 —— 左/右点击与横滑翻页（越界自动切换章节），
+ * 整本书注册一个 FqOnlineParser（目录/书脊与网络目录一一对应），
+ * 章节正文由排版引擎经 getSpineItemContent 按需网络拉取；
+ * 换章/目录跳转用 startPlay(spineIndex, domPos)，跨章翻页由引擎自行推进。
+ * 交互：屏幕三分区 —— 左/右点击与横滑翻页，
  * 中间呼出菜单：CommonNav 标题栏（hideTitleBar 随菜单显隐）+ ReadBar
  * 悬浮工具条（目录/上一章/下一章/设置，readBarHeight 随菜单 0/56）；
  * 目录/设置为 bindSheet 半模态公共 sheet（CommonSheet）；阅读时隐藏系统状态栏。
@@ -12,7 +13,7 @@
 import { common } from '@kit.AbilityKit';
 import { display, window } from '@kit.ArkUI';
 import { fileIo } from '@kit.CoreFileKit';
-import { bookParser, ReadPageComponent, readerCore } from '@kit.ReaderKit';
+import { ReadPageComponent, readerCore } from '@kit.ReaderKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { TitleBarContentOptions } from '@kit.UIDesignKit';
@@ -23,6 +24,7 @@ import { ReaderNavParams } from '../model/FqNavModels';
 import { CommonNav, titleBarOf } from '../view/CommonNav';
 import { CommonLoading, FQ_ACCENT } from '../view/CommonCom';
 import { CommonSheet, FqSheetOptions } from '../view/CommonSheet';
+import { FqOnlineParser } from '../core/FqOnlineParser';
 import { appState } from '../entryability/AppState';
 
 /** 阅读主题：themeColor 仅支持 6 位色值（无透明度）。 */
@@ -40,9 +42,6 @@ const FQ_READER_THEMES: FqReaderTheme[] = [
 ];
 
 const FQ_READER_FLIP_LABELS: string[] = ['仿真', '横滑'];
-
-/** 翻页越界判定超时（ms）：flipPage 后 pageShow 未推进即视为章节边界。 */
-const FQ_FLIP_BOUNDARY_TIMEOUT: number = 500;
 
 /** 目录懒加载数据源：持过滤后章节，变更时通知 LazyForEach 刷新。 */
 class FqChapterSource implements IDataSource {
@@ -111,9 +110,12 @@ export struct ReaderPage {
   private chapterSource: FqChapterSource = new FqChapterSource();
   /** 最近一次 pageShow 的 startDomPos，用于判断 flipPage 是否推进了页面。 */
   private lastShownStart: string = '';
-  /** 待定翻页方向：-1 无，0 上一页，1 下一页。 */
-  private pendingFlip: number = -1;
-  private flipTimerId: number = -1;
+  /** 整本书籍解析器：registerBookParser 仅一次，换章靠 startPlay(spineIndex) 定位。 */
+  private bookParser: FqOnlineParser | null = null;
+  /** 是否已向当前控制器 registerBookParser 过书籍。 */
+  private hasRegisteredBook: boolean = false;
+  /** register 会把配置重置为 Kit 默认，首个 pageShow 渲染完成后需重应用真实配置。 */
+  private pendingConfigReapply: boolean = false;
 
   aboutToAppear(): void {
     this.bookId = ReaderNavParams.id;
@@ -136,7 +138,6 @@ export struct ReaderPage {
   aboutToDisappear(): void {
     this.applySystemBar(true);
     this.loadToken += 1;
-    this.clearPendingFlip();
     try {
       this.controller.releaseBook();
     } catch (error) {
@@ -148,7 +149,7 @@ export struct ReaderPage {
         fileIo.rmdirSync(dir);
       }
     } catch (error) {
-      // 清理失败不阻断
+      // 清理历史遗留的章节文件
     }
   }
 
@@ -543,10 +544,10 @@ export struct ReaderPage {
   }
 
   // ---------------------------------------------------------------------------
-  // 翻页与章节边界
+  // 翻页
   // ---------------------------------------------------------------------------
 
-  /** 点击/横滑翻页；pageShow 未推进（章节首/末页）时切换章节。 */
+  /** 点击/横滑翻页；跨章由排版引擎在书脊间自行推进（内容经解析器按需拉取）。 */
   private requestFlip(isNext: boolean): void {
     if (this.menuVisible || this.settingsSheetVisible) {
       this.menuVisible = false;
@@ -556,42 +557,10 @@ export struct ReaderPage {
     if (this.loadingState || this.errorMsg.length > 0 || this.chapters.length === 0) {
       return;
     }
-    this.armBoundaryTimer(isNext);
     try {
       this.controller.flipPage(isNext);
     } catch (error) {
-      this.clearPendingFlip();
-    }
-  }
-
-  private armBoundaryTimer(isNext: boolean): void {
-    this.pendingFlip = isNext ? 1 : 0;
-    if (this.flipTimerId >= 0) {
-      clearTimeout(this.flipTimerId);
-    }
-    this.flipTimerId = setTimeout(() => {
-      this.flipTimerId = -1;
-      if (this.pendingFlip >= 0) {
-        const next: boolean = this.pendingFlip === 1;
-        this.pendingFlip = -1;
-        this.crossBoundary(next);
-      }
-    }, FQ_FLIP_BOUNDARY_TIMEOUT);
-  }
-
-  private clearPendingFlip(): void {
-    this.pendingFlip = -1;
-    if (this.flipTimerId >= 0) {
-      clearTimeout(this.flipTimerId);
-      this.flipTimerId = -1;
-    }
-  }
-
-  private crossBoundary(isNext: boolean): void {
-    if (isNext && this.hasNext()) {
-      this.openChapter(this.chapterIndex + 1, '');
-    } else if (!isNext && this.hasPrev()) {
-      this.openChapter(this.chapterIndex - 1, '');
+      // 排版引擎可能尚未就绪
     }
   }
 
@@ -776,7 +745,8 @@ export struct ReaderPage {
     const viewportScale: number = 1.5;
     const setting: readerCore.ReaderSetting = {
       fontName: '系统字体',
-      fontPath: '',
+      // 沙箱字体副本路径：引擎直接采用；若仍以资源请求索取则由解析器供给字节
+      fontPath: this.bookParser === null ? '' : this.bookParser.getFontSandboxPath(),
       fontSize: this.fontSize * viewportScale,
       fontWeight: 400,
       fontColor: this.fqKitColor(theme.fontColor),
@@ -816,6 +786,9 @@ export struct ReaderPage {
       this.chapters = chapters;
       this.totalChapters = chapters.length;
       this.chapterSource.setItems(chapters);
+      // 整本书一个解析器：目录/书脊与网络目录一一对应，正文由引擎按需拉取
+      this.bookParser = new FqOnlineParser(this.bookTitle, chapters,
+        (spineIndex: number): Promise<string> => this.fetchChapterText(spineIndex));
       const progress: FqReaderProgress = FqReaderStore.getProgress(this.bookId);
       let index: number = this.startChapterIndex;
       let domPos: string = '';
@@ -835,11 +808,12 @@ export struct ReaderPage {
 
   private async openChapter(index: number, domPos: string): Promise<void> {
     const chapter: FqChapter | undefined = this.chapters[index];
-    if (chapter === undefined) {
+    if (chapter === undefined || this.bookParser === null) {
       return;
     }
     const token: number = ++this.loadToken;
-    this.clearPendingFlip();
+    hilog.info(0x0001, 'ReaderPage',
+      `openChapter index=${index} domPos=${domPos} registered=${this.hasRegisteredBook}`);
     this.menuVisible = false;
     this.onSheetClose();
     this.settingsSheetVisible = false;
@@ -849,7 +823,9 @@ export struct ReaderPage {
     this.lastShownStart = '';
     try {
       await this.controllerReady;
-      const text: string = await FqBackend.get().chapterText(chapter.itemId, chapter.title);
+      // 预取本章正文：前置暴露空章节/网络错误，同时预热解析器缓存，
+      // 引擎随后 getSpineItemContent(index) 直接命中
+      const text: string = await this.fetchChapterText(index);
       if (token !== this.loadToken) {
         return;
       }
@@ -862,16 +838,28 @@ export struct ReaderPage {
       if (token !== this.loadToken) {
         return;
       }
-      const path: string = this.writeChapterFile(chapter.itemId, text);
-      const handler: bookParser.BookParserHandler = await bookParser.getDefaultHandler(path);
-      if (token !== this.loadToken) {
-        return;
+      // 字体：自定义 handler 没有 Kit 内置字体，先备好沙箱字体副本，
+      // 引擎请求「系统字体.ttf」时由解析器 getResourceContent 返回字节
+      await this.bookParser.prepareFont(this.filesDir);
+      // 一书只注册一次解析器；换章/跳转仅靠 startPlay(spineIndex, domPos) 定位
+      if (!this.hasRegisteredBook) {
+        this.controller.setPageConfig(this.buildSetting());
+        this.controller.registerBookParser(this.bookParser);
+        this.hasRegisteredBook = true;
+        this.pendingConfigReapply = true;
       }
-      this.controller.setPageConfig(this.buildSetting());
-      this.controller.registerBookParser(handler);
-      await this.controller.startPlay(0, domPos);
-      // startPlay 会将配置重置为组件默认（浅色），渲染完成后必须重新应用
-      this.controller.setPageConfig(this.buildSetting());
+      try {
+        await this.controller.startPlay(index, domPos);
+      } catch (playError) {
+        // 旧进度 domPos 可能与当前解析结构不匹配，回退章首重试
+        if (domPos.length > 0) {
+          await this.controller.startPlay(index, '');
+        } else {
+          throw new Error(`startPlay failed: ${playError}`);
+        }
+      }
+      // 注册/首播期间 Kit 会以默认配置开始首载；此刻再 setPageConfig 会打断进行中的
+      // 首载（load failed 4 → 快照被释放 → 卡加载），真实配置改到首个 pageShow 后应用
       FqReaderStore.saveProgress(this.bookId, index, domPos);
     } catch (error) {
       if (token === this.loadToken) {
@@ -879,6 +867,14 @@ export struct ReaderPage {
         this.loadingState = false;
       }
     }
+  }
+
+  private async fetchChapterText(index: number): Promise<string> {
+    const chapter: FqChapter | undefined = this.chapters[index];
+    if (chapter === undefined) {
+      return '';
+    }
+    return FqBackend.get().chapterText(chapter.itemId, chapter.title);
   }
 
   private async ensureController(): Promise<void> {
@@ -889,40 +885,34 @@ export struct ReaderPage {
       this.getUIContext().getHostContext() as common.UIAbilityContext;
     await this.controller.init(context);
     this.controller.on('pageShow', (data: readerCore.PageDataInfo): void => {
+      hilog.info(0x0001, 'ReaderPage',
+        `pageShow state=${data.state} resourceIndex=${data.resourceIndex} startDomPos=${data.startDomPos}`);
       if (data.state !== readerCore.PageState.PAGE_ON_SHOW) {
         return;
       }
-      if (this.pendingFlip >= 0) {
-        const crossed: boolean = data.startDomPos !== this.lastShownStart;
-        const isNext: boolean = this.pendingFlip === 1;
-        this.clearPendingFlip();
-        if (!crossed) {
-          this.crossBoundary(isNext);
-          return;
-        }
-      }
       this.lastShownStart = data.startDomPos;
       this.loadingState = false;
+      // 引擎跨章翻页后 resourceIndex 即当前章节（书脊索引与章节下标一致）
+      if (data.resourceIndex >= 0 && data.resourceIndex < this.totalChapters) {
+        this.chapterIndex = data.resourceIndex;
+      }
       const domPos: string = data.startDomPos;
       if (domPos.length > 0) {
         FqReaderStore.saveProgress(this.bookId, this.chapterIndex, domPos);
       }
+      if (this.pendingConfigReapply) {
+        this.pendingConfigReapply = false;
+        hilog.info(0x0001, 'ReaderPage', 'first pageShow: reapply real config');
+        this.controller.setPageConfig(this.buildSetting());
+      }
+    });
+    // 资源请求兜底：handler.getResourceContent 返回空时，引擎经此回调获取字体等资源
+    this.controller.on('resourceRequest', (fileName: string): ArrayBuffer => {
+      if (this.bookParser !== null) {
+        return this.bookParser.serveFontBytes(fileName);
+      }
+      return new ArrayBuffer(0);
     });
     this.initialized = true;
-  }
-
-  private writeChapterFile(itemId: string, text: string): string {
-    const dir: string = `${this.filesDir}/reader`;
-    if (!fileIo.accessSync(dir)) {
-      fileIo.mkdirSync(dir);
-    }
-    const safeBookId: string = this.bookId.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const safeItemId: string = itemId.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const path: string = `${dir}/${safeBookId}_${safeItemId}.txt`;
-    const file: fileIo.File = fileIo.openSync(
-      path, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
-    fileIo.writeSync(file.fd, text);
-    fileIo.closeSync(file);
-    return path;
   }
 }
