@@ -134,14 +134,33 @@ export struct SearchPage {
           if (this.loadingMore) {
             ListItem() {
               Row({ space: 8 }) {
-                CommonLoading({ sizeValue: 20, loadColor: FQ_ACCENT })
+                CommonLoading({ sizeValue: 18, loadColor: FQ_ACCENT })
                 Text('加载中…')
                   .fontSize(13)
                   .fontColor($r('sys.color.font_secondary'))
               }
               .width('100%')
+              .height(48)
               .justifyContent(FlexAlign.Center)
-              .padding(12)
+            }
+          } else if (!this.hasMore) {
+            ListItem() {
+              Row({ space: 10 }) {
+                Divider()
+                  .strokeWidth(0.5)
+                  .color($r('sys.color.comp_divider'))
+                  .layoutWeight(1)
+                Text('好故事，未完待续')
+                  .fontSize(11)
+                  .fontColor($r('sys.color.font_tertiary'))
+                Divider()
+                  .strokeWidth(0.5)
+                  .color($r('sys.color.comp_divider'))
+                  .layoutWeight(1)
+              }
+              .width('100%')
+              .padding({ left: 20, right: 20, top: 14, bottom: 14 })
+              .alignItems(VerticalAlign.Center)
             }
           }
         }
@@ -301,6 +320,7 @@ export struct SearchPage {
     const category: FqSearchCategoryDef = FQ_SEARCH_CATEGORIES[this.categoryIndex];
     const offset: number = this.nextOffset;
     this.loadingState = true;
+    this.loadingMore = offset > 0;
     this.errorMsg = '';
     try {
       await FqBackend.get().start(getContext(this));
