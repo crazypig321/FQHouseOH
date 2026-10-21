@@ -190,7 +190,7 @@ export struct CommonNav {
   /** 底部悬浮操作栏：小说带听书/下载，其余类型仅主按钮（开始观看/收听/阅读）。 */
   @Builder
   private ReadBar() {
-    Row({ space: 14 }) {
+    Row() {
       if (this.readBarKind === 'book') {
         Row() {
           ForEach([$r('sys.symbol.headphones'), $r('sys.symbol.download')], (v: Resource, i: number) => {
@@ -215,25 +215,32 @@ export struct CommonNav {
             }
           })
         }
+
+        Divider()
+          .vertical(true)
+          .strokeWidth(0.5)
+          .height(22)
+          .color($r('sys.color.comp_divider'))
+          .margin({ left: 14, right: 14 })
       }
 
       Row({ space: 8 }) {
         SymbolGlyph(this.readBarIcon())
           .fontSize(19)
-          .fontColor([Color.White])
+          .fontColor([$r('sys.color.icon')])
         Text(this.readBarLabel())
           .fontSize(15.5)
           .fontWeight(FontWeight.Bold)
-          .fontColor(Color.White)
+          .fontColor($r('sys.color.font'))
       }
       .layoutWeight(1)
       .height(48)
       .borderRadius(24)
       .justifyContent(FlexAlign.Center)
-      .linearGradient({
+      /*.linearGradient(this.readBarKind === 'book' ? {
         angle: 90,
         colors: [[FQ_ACCENT, 0], ['#E4432E', 1]],
-      })
+      } : undefined)*/
       .onClick(() => this.readerBarClick(this.readBarActionLabel()))
     }
     .width('100%')

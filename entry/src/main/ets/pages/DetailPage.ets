@@ -130,7 +130,7 @@ export struct DetailPage {
               this.ChapterPreview()
             }
           }
-          .padding({ left: 20, right: 20, top: 6, bottom: 16 })
+          .padding({ left: 20, right: 20 })
           .scrollBar(BarState.Off)
           .contentStartOffset(appState.topRect + FQ_DETAIL_TOP_INSET)
           .contentEndOffset(appState.bottomRect + FQ_DETAIL_BOTTOM_INSET)
