@@ -168,12 +168,12 @@ export struct SearchPage {
       .width('100%')
       .height('100%')
       .scrollBar(BarState.Off)
-      .divider({
+    /*  .divider({
         strokeWidth: 0.5,
         color: $r('sys.color.comp_divider'),
         startMargin: 103,
         endMargin: 16,
-      })
+      })*/
       .contentStartOffset(appState.topRect + FQ_SEARCH_TOP_INSET)
       .contentEndOffset(appState.bottomRect + 60)
       .onReachEnd(() => this.loadMore())

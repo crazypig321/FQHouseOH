@@ -12,7 +12,8 @@ import { promptAction } from '@kit.ArkUI';
 import { FqBackend, fqErrorMessage } from '../core/FqBackend';
 import { FqBookDetail, FqChapter, fqEmptyBookDetail, fqKindToTab, fqKindLabel } from '../model/FqModels';
 import { FqShelfStore, FqShelfItem } from '../core/FqShelfStore';
-import { DetailNavParams, FqTitleBarOptions } from '../model/FqNavModels';
+import { DetailNavParams, FqTitleBarOptions, ReaderNavParams, ROUTE_READER } from '../model/FqNavModels';
+import { NavPathUtils } from '../utils/NavPathUtils';
 import { CommonNav } from '../view/CommonNav';
 import { CommonLoading, FQ_ACCENT } from '../view/CommonCom';
 import { appState } from '../entryability/AppState';
@@ -67,7 +68,7 @@ export struct DetailPage {
       scrollToTopYOffset: -(appState.topRect + FQ_DETAIL_TOP_INSET),
       isShowBar: true,
       readBarKind: this.itemKind,
-      readerBarClick: (key: string): void => { this.comingSoon(key) }
+      readerBarClick: (key: string): void => { this.onReadBarAction(key) }
     }) {
       Stack({ alignContent: Alignment.Bottom }) {
         if (this.loadingState) {
@@ -475,7 +476,7 @@ export struct DetailPage {
             .width('100%')
             .alignItems(HorizontalAlign.Start)
             .layoutWeight(1)
-          }.width('100%').padding(14)
+          }.width('100%').padding(14).onClick(() => this.openReader(index))
         }
       }, (chapter: FqChapter): string => chapter.itemId)
       if (this.previewChapters().length === 0) {
@@ -617,6 +618,23 @@ export struct DetailPage {
 
   private comingSoon(feature: string): void {
     promptAction.showToast({ message: `${feature}功能即将上线`, duration: 1500 });
+  }
+
+  /** 底部操作栏：小说"阅读"进阅读器，其余动作占位。 */
+  private onReadBarAction(key: string): void {
+    if (key === '阅读' && this.itemKind === 'book') {
+      this.openReader(-1);
+      return;
+    }
+    this.comingSoon(key);
+  }
+
+  private openReader(chapterIndex: number): void {
+    ReaderNavParams.id = this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId;
+    ReaderNavParams.kind = this.itemKind;
+    ReaderNavParams.title = this.detail.title;
+    ReaderNavParams.chapterIndex = chapterIndex;
+    NavPathUtils.push(ROUTE_READER);
   }
 
   private async load(): Promise<void> {

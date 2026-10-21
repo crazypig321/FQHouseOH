@@ -9,6 +9,7 @@ import { NavPathUtils } from '../utils/NavPathUtils';
 export const ROUTE_SEARCH: string = 'search';
 export const ROUTE_DETAIL: string = 'detail';
 export const ROUTE_RANK: string = 'rank';
+export const ROUTE_READER: string = 'reader';
 
 /** 详情页跳转参数（push 前由来源页赋值，详情页 aboutToAppear 读取）。 */
 export class DetailNavParams {
@@ -16,6 +17,15 @@ export class DetailNavParams {
   static kind: string = 'book';
   static title: string = '';
   static cover: string = '';
+}
+
+/** 阅读页跳转参数。 */
+export class ReaderNavParams {
+  static id: string = '';
+  static kind: string = 'book';
+  static title: string = '';
+  /** 定位章节下标；-1 表示跟随上次阅读进度。 */
+  static chapterIndex: number = -1;
 }
 
 /**

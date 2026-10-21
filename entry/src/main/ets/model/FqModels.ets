@@ -6,18 +6,29 @@
 
 /** 内容卡片。kind: 'book' | 'video' | 'manju' | 'manga' | 'audio'。 */
 export class FqMediaItem {
+  /** 内容唯一标识。 */
   readonly id: string;
+  /** 标题。 */
   readonly title: string;
+  /** 封面图 URL。 */
   readonly cover: string;
+  /** 作者。 */
   readonly author: string;
+  /** 徽标文案（如"独家"、"VIP"等）。 */
   readonly badge: string;
+  /** 集数/章节信息文案。 */
   readonly ep: string;
+  /** 内容类型：'book' | 'video' | 'manju' | 'manga' | 'audio'。 */
   readonly kind: string;
   /** 0-10 评分，0 表示未知。 */
   readonly score: number;
+  /** 简介。 */
   readonly intro: string;
+  /** 系列 ID。 */
   readonly seriesId: string;
+  /** 章节/集 ID。 */
   readonly episodeId: string;
+  /** 关注人数。 */
   readonly followerCount: number;
 
   constructor(

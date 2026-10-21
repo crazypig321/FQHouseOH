@@ -12,7 +12,7 @@ import { util } from '@kit.ArkTS';
 import fq, { FqBridgeResponse } from 'libfqapi_napi.so';
 import { FqDeployer } from './FqDeployer';
 import { FqKeyStore } from './FqKeyStore';
-import { fqParseBookDetail, fqParseChapterSummaries, fqParseDirectory, fqParseHomepage, fqParseRankBoard, fqParseRankCatalog, fqParseSearchTabs, fqParseSeriesFeed } from './FqParser';
+import { fqParseBookDetail, fqParseChapterSummaries, fqParseDirectory, fqParseHomepage, fqParseRankBoard, fqParseRankCatalog, fqParseSearchTabs, fqParseSeriesFeed, fqLegacyChapterText, fqNormalizeChapterText, fqParseNovelChapter } from './FqParser';
 import { fqParseObject } from './FqJson';
 import {
   FqBookDetail,
@@ -300,6 +300,29 @@ export class FqBackend {
     } catch (error) {
       return new Map();
     }
+  }
+
+  /**
+   * 章节正文（fqapp chapterContent/contentText 语义）：
+   * v1 图文接口（/api/v1/chapters/{id}/novel，后端 DH 解密）优先，
+   * 失败/未解密回退旧版 /api/content 文本桥（深度取 content/text 等字段）。
+   */
+  public async chapterText(itemId: string, chapterTitle: string): Promise<string> {
+    try {
+      const novelPayload: Record<string, Object> = await this.getJson(
+        `/api/v1/chapters/${encodeURIComponent(itemId)}/novel`, '');
+      const novelText: string =
+        fqNormalizeChapterText(fqParseNovelChapter(novelPayload), chapterTitle);
+      if (novelText.trim().length > 0) {
+        return novelText;
+      }
+    } catch (error) {
+      // 回退旧版文本桥
+    }
+    const query: string = `source=${encodeURIComponent('番茄')}&item_id=${encodeURIComponent(itemId)}`
+      + `&tab=${encodeURIComponent('小说')}`;
+    const payload: Record<string, Object> = await this.getJson('/api/content', query);
+    return fqNormalizeChapterText(fqLegacyChapterText(payload), chapterTitle);
   }
 }
 

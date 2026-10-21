@@ -1207,3 +1207,111 @@ export function fqParseRankBoard(payload: Record<string, Object>, startAt: numbe
   const hasMore: boolean = data !== null && data['has_more'] === true;
   return new FqRankBoard(entries, hasMore);
 }
+
+// ---------------------------------------------------------------------------
+// 章节正文：提取与清洗（对齐 fqapp _extractChapterText / normalizeChapterText）
+// ---------------------------------------------------------------------------
+
+/** 旧版 /api/content 深度取正文：content/text/article_content/body 任一命中即用。 */
+export function fqLegacyChapterText(payload: Record<string, Object>): string {
+  return fqVisitChapterText(payload, 0);
+}
+
+function fqVisitChapterText(value: Object | undefined, depth: number): string {
+  if (depth > 7 || value === undefined) {
+    return '';
+  }
+  const rec: Record<string, Object> | null = fqAsRecord(value);
+  if (rec !== null) {
+    const preferred: string[] = ['content', 'text', 'article_content', 'body'];
+    for (const key of preferred) {
+      const candidate: Object | undefined = rec[key];
+      if (typeof candidate === 'string' && candidate.trim().length > 0) {
+        return candidate;
+      }
+    }
+    for (const key of fqKeys(rec)) {
+      const found: string = fqVisitChapterText(rec[key], depth + 1);
+      if (found.length > 0) {
+        return found;
+      }
+    }
+    return '';
+  }
+  const arr: Object[] | null = fqAsArray(value);
+  if (arr !== null) {
+    for (const child of arr) {
+      const found: string = fqVisitChapterText(child, depth + 1);
+      if (found.length > 0) {
+        return found;
+      }
+    }
+  }
+  return '';
+}
+
+/**
+ * v1 图文章节（/api/v1/chapters/{id}/novel，后端 DH 解密）：
+ * 仅接受显式解密成功（content_decrypted）的 content 字符串。
+ */
+export function fqParseNovelChapter(payload: Record<string, Object>): string {
+  const data: Record<string, Object> | null = fqAsRecord(payload['data']);
+  if (data === null) {
+    return '';
+  }
+  const flag: Object | undefined = data['content_decrypted'];
+  if (typeof flag !== 'boolean' || !flag) {
+    return '';
+  }
+  const content: Object | undefined = data['content'];
+  if (typeof content !== 'string') {
+    return '';
+  }
+  return content;
+}
+
+const FQ_HIDDEN_BLOCK_RE: RegExp = /<(script|style|head|template|noscript|title)[\s\S]*?<\/\1\s*>/gi;
+const FQ_MARKER_RE: RegExp = /\{!--[\s\S]*?--\}|<!--[\s\S]*?-->/g;
+const FQ_TRUNCATED_MARKER_RE: RegExp = /\{!--\s*PGC_[A-Z_]+:[^\n]*$/gm;
+const FQ_BREAK_RE: RegExp =
+  /<\/(p|div|h[1-6]|li|tr|dt|dd|blockquote|pre|section|article|ul|ol|dl|table|figure|figcaption|header|footer|aside|main|address)>|<(br|hr)\b[^>]*>/gi;
+const FQ_TAG_RE: RegExp = /<\/?[a-zA-Z][^>]*>/g;
+const FQ_LINE_BREAK_RE: RegExp = /\r\n?|[\u0085\u2028\u2029]/g;
+const FQ_EDGE_MARKER_RE: RegExp = /^[\u200B\uFEFF]+|[\u200B\uFEFF]+$/g;
+const FQ_TITLE_SPACE_RE: RegExp = /\s+/g;
+
+/**
+ * 章节正文清洗（fqapp normalizeChapterText 的正则版）：
+ * 隐藏块 → 内容标记（音频头/注释）→ 块级标签转行 → 剥内联标签 →
+ * 实体解码 → 行归一化；首行与章节标题同文时去重。
+ */
+export function fqNormalizeChapterText(raw: string, chapterTitle: string): string {
+  let text: string = raw;
+  text = text.replace(FQ_HIDDEN_BLOCK_RE, '');
+  text = text.replace(FQ_MARKER_RE, '');
+  text = text.replace(FQ_TRUNCATED_MARKER_RE, '');
+  text = text.replace(FQ_BREAK_RE, '\n');
+  text = text.replace(FQ_TAG_RE, '');
+  text = text.replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, '\'').replace(/&apos;/g, '\'')
+    .replace(/&ldquo;/g, '\u201C').replace(/&rdquo;/g, '\u201D')
+    .replace(/&mdash;/g, '\u2014').replace(/&hellip;/g, '\u2026')
+    .replace(/&amp;/g, '&');
+  text = text.replace(/\u00A0/g, ' ');
+  text = text.replace(FQ_LINE_BREAK_RE, '\n');
+
+  const lines: string[] = text.split('\n');
+  const paragraphs: string[] = [];
+  for (const line of lines) {
+    const trimmed: string = line.trim().replace(FQ_EDGE_MARKER_RE, '').trim();
+    if (trimmed.length > 0) {
+      paragraphs.push(trimmed);
+    }
+  }
+  const title: string = chapterTitle.trim();
+  if (title.length > 0 && paragraphs.length > 0
+    && paragraphs[0].replace(FQ_TITLE_SPACE_RE, '') === title.replace(FQ_TITLE_SPACE_RE, '')) {
+    paragraphs.shift();
+  }
+  return paragraphs.join('\n');
+}
