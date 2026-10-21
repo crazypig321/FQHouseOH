@@ -1,11 +1,14 @@
 ﻿/**
  * 首页：fqapp 原版 6 频道多源推荐流
  * （推荐 = 首页流多 tab 交错 + 漫画搜索分页；单频道 = 单源）。
+ * 各 homepage 源推荐游标停走后转入 search 兜底续页
+ * （小说/短剧/听书 = 旧版 /api/search 页码；漫剧 = v1 搜索游标，
+ * 对齐 fqapp home_provider.dart `_loadInitial`/`_loadNext`）。
  * 布局：标题栏 bottomBuilder 搜索框 + 药丸频道条 + 今日焦点轮播 + 分区头 + 3 列封面网格。
  */
 
 import { FqBackend, fqErrorMessage } from '../core/FqBackend';
-import { FqHomeFeed, FqHomeRowDataSource, FqHomeSource } from '../core/FqHomeFeed';
+import { FqHomeFeed, FqHomeRowDataSource, FqHomeSource, FQ_SOURCE_SEARCH, FQ_SOURCE_SEARCH_PAGED } from '../core/FqHomeFeed';
 import { FqHomeCache } from '../core/FqHomeCache';
 import { FqMediaItem } from '../model/FqModels';
 import { FqMediaCard } from '../component/FqMediaCard';
@@ -29,17 +32,25 @@ class FqChannelDef {
 
 const FQ_CHANNELS: FqChannelDef[] = [
   new FqChannelDef('推荐', (): FqHomeSource[] => [
-    FqHomeSource.homepage(2, 'book'),
-    FqHomeSource.homepage(8, 'video'),
-    FqHomeSource.homepage(24, 'manju'),
+    FqHomeSource.homepageFallback(2, 'book', FQ_SOURCE_SEARCH_PAGED, '小说', 0),
+    FqHomeSource.homepageFallback(8, 'video', FQ_SOURCE_SEARCH_PAGED, '短剧', 0),
+    FqHomeSource.homepageFallback(24, 'manju', FQ_SOURCE_SEARCH, '漫剧', 11),
     FqHomeSource.search('漫画', 8, 'manga'),
-    FqHomeSource.homepage(5, 'audio'),
+    FqHomeSource.homepageFallback(5, 'audio', FQ_SOURCE_SEARCH_PAGED, '听书', 0),
   ]),
-  new FqChannelDef('小说', (): FqHomeSource[] => [FqHomeSource.homepage(2, 'book')]),
-  new FqChannelDef('短剧', (): FqHomeSource[] => [FqHomeSource.homepage(8, 'video')]),
-  new FqChannelDef('漫剧', (): FqHomeSource[] => [FqHomeSource.homepage(24, 'manju')]),
+  new FqChannelDef('小说', (): FqHomeSource[] => [
+    FqHomeSource.homepageFallback(2, 'book', FQ_SOURCE_SEARCH_PAGED, '小说', 0),
+  ]),
+  new FqChannelDef('短剧', (): FqHomeSource[] => [
+    FqHomeSource.homepageFallback(8, 'video', FQ_SOURCE_SEARCH_PAGED, '短剧', 0),
+  ]),
+  new FqChannelDef('漫剧', (): FqHomeSource[] => [
+    FqHomeSource.homepageFallback(24, 'manju', FQ_SOURCE_SEARCH, '漫剧', 11),
+  ]),
   new FqChannelDef('漫画', (): FqHomeSource[] => [FqHomeSource.search('漫画', 8, 'manga')]),
-  new FqChannelDef('听书', (): FqHomeSource[] => [FqHomeSource.homepage(5, 'audio')]),
+  new FqChannelDef('听书', (): FqHomeSource[] => [
+    FqHomeSource.homepageFallback(5, 'audio', FQ_SOURCE_SEARCH_PAGED, '听书', 0),
+  ]),
 ];
 
 const FQ_CAPTIONS: string[] = [
@@ -152,19 +163,21 @@ export struct HomePage {
               .padding({ left: 20, right: 20, top: 18, bottom: 12 })
               .alignItems(VerticalAlign.Center)
             }
-            LazyForEach(this.rowSource, (row: FqMediaItem[]) => {
-              ListItem() {
-                Row({ space: 14 }) {
-                  this.GridSlot(row, 0)
-                  this.GridSlot(row, 1)
-                  this.GridSlot(row, 2)
-                }
-                .width('100%')
-                .padding({ left: 20, right: 20 })
-                .margin({ bottom: 14 })
-                .alignItems(VerticalAlign.Top)
-              }
-            }, (row: FqMediaItem[], index: number): string => this.rowKey(row, index))
+
+            ListItem(){
+              List({ space: 14 }){
+                LazyForEach(this.rowSource, (row: FqMediaItem[], i: number) => {
+                  ListItem() {
+                    this.GridSlot(row, i)
+                  }.transition(TransitionEffect.scale({ x: 0.8, y: 0.8 }).animation({ duration:300, curve: Curve.Smooth }))
+                }, (row: FqMediaItem[], index: number): string => this.rowKey(row, index))
+              }.width('100%').height('100%')
+              .scrollBar(BarState.Off)
+              .edgeEffect(EdgeEffect.None)
+              .lanes(3, 20)
+              .padding({ left:20, right: 20 })
+            }
+
             if (this.loadingMore) {
               ListItem() {
                 Row({ space: 8 }) {
@@ -417,6 +430,11 @@ export struct HomePage {
       this.applyFeed();
       this.scroller.scrollEdge(Edge.Top);
       this.searchBarHidden = false;
+      if (cached.isRestored()) {
+        // 磁盘缓存回填的频道：先展示旧数据，后台刷新换取翻页能力
+        // （fqapp load(manualRefresh:false) 的 stale-while-revalidate 语义）。
+        this.loadFirst();
+      }
       return;
     }
     this.feed = new FqHomeFeed([]);

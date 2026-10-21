@@ -218,6 +218,14 @@ export class FqBackend {
     return fqParseSearchTabs(payload, tabType);
   }
 
+  /** 旧版搜索（/api/search，页码分页：offset=(page-1)*9）。 */
+  public async searchTabsPaged(query: string, page: number): Promise<FqSearchTab[]> {
+    const encoded: string = `source=${encodeURIComponent('番茄')}&query=${encodeURIComponent(query)}`
+      + `&page=${page < 1 ? 1 : page}`;
+    const payload: Record<string, Object> = await this.getJson('/api/search', encoded);
+    return fqParseSearchTabs(payload, 0);
+  }
+
   /** 书籍详情（/api/detail）。 */
   public async bookDetail(bookId: string, tab: string): Promise<FqBookDetail> {
     const query: string = `source=${encodeURIComponent('番茄')}&book_id=${encodeURIComponent(bookId)}`

@@ -1,11 +1,15 @@
 /**
  * 主页多源频道流控制器。
  *
- * 对齐 fqapp lib/features/home/home_provider.dart 的 6 频道语义，
- * 简化为「每源独立游标 + 轮询交错合并」：
+ * 对齐 fqapp lib/features/home/home_provider.dart 的 6 频道语义：
  * - homepage 源：/api/v1/recommend/homepage（tab_type 频道，next_offset/session_id 游标）。
- * - search 源：/api/v1/search 分栏（漫画频道分页，next_offset 游标）。
- * - forceKind 对齐 fqapp `_forceKind`：非 manju 目标剔除 manju 项，其余强制 kind。
+ *   游标停走（fqapp recommendExhausted）或请求失败时转入 search 兜底续页
+ *   （fqapp `_loadInitial`/`_loadNext` 的 `_searchByType` 语义）。
+ * - v1 search 源：/api/v1/search 分栏（漫画/漫剧，next_offset 游标）。
+ * - 旧版 paged search 兜底：/api/search 页码分页（小说/短剧/听书），
+ *   hasMore = 本页有匹配条目（fqapp `_searchProgress` 非 漫画/漫剧 分支）。
+ * - forceKind 对齐 fqapp `_forceKind`：homepage 阶段剔除异类并强制 kind；
+ *   search 阶段按 fqapp `_searchItems` 过滤 kind。
  */
 
 import { FqBackend, FqRequestError, fqErrorMessage } from './FqBackend';
@@ -13,35 +17,75 @@ import { FqHomePage, FqMediaItem, FqSearchTab } from '../model/FqModels';
 
 export const FQ_SOURCE_HOMEPAGE: number = 0;
 export const FQ_SOURCE_SEARCH: number = 1;
+export const FQ_SOURCE_SEARCH_PAGED: number = 2;
 
-/** 单个推荐源及其游标状态。 */
+/** 单个推荐源及其游标状态（含 search 兜底阶段配置）。 */
 export class FqHomeSource {
-  readonly mode: number;
-  readonly tabType: number;
-  readonly query: string;
+  /** 初始阶段（reset 回退目标）。 */
+  readonly primaryMode: number;
+  readonly primaryTabType: number;
+  readonly primaryQuery: string;
+  /** 目标内容类型：homepage 阶段强制映射，search 阶段按此过滤。 */
   readonly forcedKind: string;
+  /** 兜底阶段模式；-1 表示无兜底。 */
+  readonly fallbackMode: number;
+  readonly fallbackQuery: string;
+  readonly fallbackTabType: number;
+  /** 当前阶段。 */
+  mode: number;
+  tabType: number;
+  query: string;
   offset: number;
+  /** paged 兜底阶段：下一次请求页码。 */
+  page: number;
   sessionId: string;
   hasMore: boolean;
   loaded: boolean;
 
-  constructor(mode: number, tabType: number, query: string, forcedKind: string) {
+  constructor(mode: number, tabType: number, query: string, forcedKind: string,
+    fallbackMode: number, fallbackQuery: string, fallbackTabType: number) {
+    this.primaryMode = mode;
+    this.primaryTabType = tabType;
+    this.primaryQuery = query;
+    this.forcedKind = forcedKind;
+    this.fallbackMode = fallbackMode;
+    this.fallbackQuery = fallbackQuery;
+    this.fallbackTabType = fallbackTabType;
     this.mode = mode;
     this.tabType = tabType;
     this.query = query;
-    this.forcedKind = forcedKind;
     this.offset = 0;
+    this.page = 1;
     this.sessionId = '';
     this.hasMore = true;
     this.loaded = false;
   }
 
   public static homepage(tabType: number, forcedKind: string): FqHomeSource {
-    return new FqHomeSource(FQ_SOURCE_HOMEPAGE, tabType, '', forcedKind);
+    return new FqHomeSource(FQ_SOURCE_HOMEPAGE, tabType, '', forcedKind, -1, '', 0);
+  }
+
+  /** homepage 推荐 + search 兜底：推荐游标停走后由 search 续页。 */
+  public static homepageFallback(tabType: number, forcedKind: string,
+    fallbackMode: number, fallbackQuery: string, fallbackTabType: number): FqHomeSource {
+    return new FqHomeSource(FQ_SOURCE_HOMEPAGE, tabType, '', forcedKind,
+      fallbackMode, fallbackQuery, fallbackTabType);
   }
 
   public static search(query: string, tabType: number, forcedKind: string): FqHomeSource {
-    return new FqHomeSource(FQ_SOURCE_SEARCH, tabType, query, forcedKind);
+    return new FqHomeSource(FQ_SOURCE_SEARCH, tabType, query, forcedKind, -1, '', 0);
+  }
+
+  /** 回到初始阶段（loadFirst/restore 前调用）。 */
+  public reset(): void {
+    this.mode = this.primaryMode;
+    this.tabType = this.primaryTabType;
+    this.query = this.primaryQuery;
+    this.offset = 0;
+    this.page = 1;
+    this.sessionId = '';
+    this.hasMore = true;
+    this.loaded = false;
   }
 }
 
@@ -52,6 +96,8 @@ export class FqHomeFeed {
   private seen: Set<string> = new Set<string>();
   private exhausted: boolean = false;
   private pendingErrorMessage: string = '';
+  /** 磁盘缓存回填标记：本会话未联网加载过，切入选中时需后台刷新。 */
+  private restoredFlag: boolean = false;
 
   constructor(sources: FqHomeSource[]) {
     this.sources = sources;
@@ -64,6 +110,11 @@ export class FqHomeFeed {
 
   public totalCount(): number {
     return this.merged.length;
+  }
+
+  /** 是否为磁盘缓存回填（无翻页能力，需刷新后才可加载更多）。 */
+  public isRestored(): boolean {
+    return this.restoredFlag;
   }
 
   public get hasMore(): boolean {
@@ -84,13 +135,14 @@ export class FqHomeFeed {
     this.seen.clear();
     this.exhausted = true;
     this.pendingErrorMessage = '';
+    this.restoredFlag = true;
     for (const item of items) {
       const key: string = `${item.kind}:${item.id}`;
       this.seen.add(key);
       this.merged.push(item);
     }
     for (const source of this.sources) {
-      source.loaded = false;
+      source.reset();
       source.hasMore = false;
     }
   }
@@ -101,14 +153,12 @@ export class FqHomeFeed {
     this.seen.clear();
     this.exhausted = false;
     this.pendingErrorMessage = '';
+    this.restoredFlag = false;
 
     const groups: FqMediaItem[][] = [];
     const tasks: Promise<boolean>[] = [];
     for (const source of this.sources) {
-      source.offset = 0;
-      source.sessionId = '';
-      source.hasMore = true;
-      source.loaded = false;
+      source.reset();
       tasks.push(this.loadSourceSafe(source, groups));
     }
     const results: boolean[] = await Promise.all(tasks);
@@ -148,7 +198,9 @@ export class FqHomeFeed {
     }
     await Promise.all(tasks);
     const added: number = this.mergeGroups(groups);
-    if (added === 0) {
+    // fqapp `_applyFetched`：整页重复且各源均无游标时才收尾；
+    // 兜底阶段已武装/游标仍在推进时继续等待下次触底。
+    if (added === 0 && !this.hasMore) {
       this.exhausted = true;
     }
   }
@@ -172,28 +224,33 @@ export class FqHomeFeed {
   }
 
   private async loadSource(source: FqHomeSource): Promise<FqMediaItem[]> {
-    const backend: FqBackend = FqBackend.get();
-    if (source.mode === FQ_SOURCE_SEARCH) {
-      const tabs: FqSearchTab[] = await backend.searchTabs(source.query, source.tabType, source.offset);
-      let matched: FqSearchTab | null = null;
-      for (const tab of tabs) {
-        if (tab.title === source.query) {
-          matched = tab;
-          break;
+    if (source.mode === FQ_SOURCE_HOMEPAGE) {
+      let items: FqMediaItem[] = [];
+      let failed: boolean = false;
+      try {
+        items = await this.loadHomepageStage(source);
+      } catch (error) {
+        if (source.fallbackMode < 0) {
+          throw new FqRequestError(fqErrorMessage(error), 0);
         }
+        // 推荐接口故障不应让整个频道停摆（fqapp：fall through to search）。
+        failed = true;
+        this.enterFallback(source);
       }
-      if (matched === null) {
-        source.hasMore = false;
-        return [];
+      if (!failed && (items.length > 0 || source.mode === FQ_SOURCE_HOMEPAGE)) {
+        return items;
       }
-      const items: FqMediaItem[] = this.applyForcedKind(matched.items, source.forcedKind);
-      if (matched.hasMore !== false && matched.nextOffset > source.offset) {
-        source.offset = matched.nextOffset;
-      } else {
-        source.hasMore = false;
-      }
-      return items;
+      // 空页且无游标：立即请求 search 兜底首页（fqapp `_loadInitial` 同语义）。
     }
+    if (source.mode === FQ_SOURCE_SEARCH_PAGED) {
+      return await this.loadPagedStage(source);
+    }
+    return await this.loadCursorStage(source);
+  }
+
+  /** homepage 推荐阶段：游标停走时转入 search 兜底（fqapp recommendExhausted = !canAdvance）。 */
+  private async loadHomepageStage(source: FqHomeSource): Promise<FqMediaItem[]> {
+    const backend: FqBackend = FqBackend.get();
     const page: FqHomePage = await backend.homepagePage(source.tabType, source.offset, source.sessionId);
     const items: FqMediaItem[] = this.applyForcedKind(page.items, source.forcedKind);
     if (page.nextOffset > 0) {
@@ -202,9 +259,86 @@ export class FqHomeFeed {
         source.sessionId = page.sessionId;
       }
     } else {
+      this.enterFallback(source);
+    }
+    return items;
+  }
+
+  /** 旧版 /api/search 页码阶段：hasMore = 本页有匹配条目（fqapp `_searchProgress` 非 漫画/漫剧 分支）。 */
+  private async loadPagedStage(source: FqHomeSource): Promise<FqMediaItem[]> {
+    const backend: FqBackend = FqBackend.get();
+    const tabs: FqSearchTab[] = await backend.searchTabsPaged(source.query, source.page);
+    const items: FqMediaItem[] = this.searchStageItems(tabs, source.query, source.forcedKind);
+    source.hasMore = items.length > 0;
+    source.page += 1;
+    return items;
+  }
+
+  /** v1 /api/v1/search 游标阶段（漫画/漫剧）。 */
+  private async loadCursorStage(source: FqHomeSource): Promise<FqMediaItem[]> {
+    const backend: FqBackend = FqBackend.get();
+    const tabs: FqSearchTab[] = await backend.searchTabs(source.query, source.tabType, source.offset);
+    let matched: FqSearchTab | null = null;
+    for (const tab of tabs) {
+      if (tab.title === source.query) {
+        matched = tab;
+        break;
+      }
+    }
+    if (matched === null) {
+      source.hasMore = false;
+      return [];
+    }
+    const items: FqMediaItem[] = this.filterByKind(matched.items, source.forcedKind);
+    if (matched.hasMore !== false && matched.nextOffset > source.offset) {
+      source.offset = matched.nextOffset;
+    } else {
       source.hasMore = false;
     }
     return items;
+  }
+
+  /** 转入 search 兜底阶段；无兜底则收尾。 */
+  private enterFallback(source: FqHomeSource): void {
+    if (source.fallbackMode < 0) {
+      source.hasMore = false;
+      return;
+    }
+    source.mode = source.fallbackMode;
+    source.query = source.fallbackQuery;
+    source.tabType = source.fallbackTabType;
+    source.offset = 0;
+    source.page = 1;
+  }
+
+  /** fqapp `_searchItems`：标题互含匹配（无匹配取全部分栏），按 kind 过滤。 */
+  private searchStageItems(tabs: FqSearchTab[], label: string, kind: string): FqMediaItem[] {
+    const matching: FqSearchTab[] = [];
+    for (const tab of tabs) {
+      if (tab.title.length > 0 && (tab.title.includes(label) || label.includes(tab.title))) {
+        matching.push(tab);
+      }
+    }
+    const selected: FqSearchTab[] = matching.length > 0 ? matching : tabs;
+    const out: FqMediaItem[] = [];
+    for (const tab of selected) {
+      for (const item of tab.items) {
+        if (item.kind === kind) {
+          out.push(item);
+        }
+      }
+    }
+    return out;
+  }
+
+  private filterByKind(items: FqMediaItem[], kind: string): FqMediaItem[] {
+    const out: FqMediaItem[] = [];
+    for (const item of items) {
+      if (item.kind === kind) {
+        out.push(item);
+      }
+    }
+    return out;
   }
 
   /** fqapp `_forceKind`：目标非 manju 时剔除 manju 项，其余强制 kind。 */
