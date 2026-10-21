@@ -51,6 +51,8 @@ export struct CommonNav {
   @Param isSearchBarScroller: boolean = true
   /** 是否显示底部栏 */
   @Param isShowBar: boolean = false
+  /** 底部栏内容类型：book 显示听书/下载，其余仅主按钮；主按钮文案/图标按类型区分 */
+  @Param readBarKind: string = 'book'
   /** 双击标题栏区域时列表回滚到顶部 */
   @Param doubleTapToTop: boolean = false
   @Param scrollToTopYOffset: number = 0
@@ -185,39 +187,41 @@ export struct CommonNav {
     })
   }
 
-  /** 底部悬浮操作栏：听书 / 下载 + 开始阅读主按钮。 */
+  /** 底部悬浮操作栏：小说带听书/下载，其余类型仅主按钮（开始观看/收听/阅读）。 */
   @Builder
   private ReadBar() {
     Row({ space: 14 }) {
-      Row() {
-        ForEach([$r('sys.symbol.headphones'), $r('sys.symbol.download')], (v: Resource, i: number) => {
-          Column({ space: 3 }) {
-            SymbolGlyph(v)
-              .fontSize(19)
-              .fontColor([$r('sys.color.icon_primary')])
-            Text(i === 0 ? '听书' : '下载')
-              .fontSize(10.5)
-              .fontColor($r('sys.color.font_primary'))
-          }
-          .alignItems(HorizontalAlign.Center)
-          .onClick(() => this.readerBarClick(i === 0 ? '听书' : '下载'))
+      if (this.readBarKind === 'book') {
+        Row() {
+          ForEach([$r('sys.symbol.headphones'), $r('sys.symbol.download')], (v: Resource, i: number) => {
+            Column({ space: 3 }) {
+              SymbolGlyph(v)
+                .fontSize(19)
+                .fontColor([$r('sys.color.icon_primary')])
+              Text(i === 0 ? '听书' : '下载')
+                .fontSize(10.5)
+                .fontColor($r('sys.color.font_primary'))
+            }
+            .alignItems(HorizontalAlign.Center)
+            .onClick(() => this.readerBarClick(i === 0 ? '听书' : '下载'))
 
-          if (i === 0) {
-            Divider()
-              .vertical(true)
-              .strokeWidth(0.5)
-              .height(22)
-              .color($r('sys.color.comp_divider'))
-              .margin({ left: 14, right: 14 })
-          }
-        })
+            if (i === 0) {
+              Divider()
+                .vertical(true)
+                .strokeWidth(0.5)
+                .height(22)
+                .color($r('sys.color.comp_divider'))
+                .margin({ left: 14, right: 14 })
+            }
+          })
+        }
       }
 
       Row({ space: 8 }) {
-        SymbolGlyph($r('sys.symbol.book'))
+        SymbolGlyph(this.readBarIcon())
           .fontSize(19)
           .fontColor([Color.White])
-        Text('开始阅读')
+        Text(this.readBarLabel())
           .fontSize(15.5)
           .fontWeight(FontWeight.Bold)
           .fontColor(Color.White)
@@ -230,13 +234,49 @@ export struct CommonNav {
         angle: 90,
         colors: [[FQ_ACCENT, 0], ['#E4432E', 1]],
       })
-      .onClick(() => this.readerBarClick('阅读'))
+      .onClick(() => this.readerBarClick(this.readBarActionLabel()))
     }
     .width('100%')
-    .padding({ left: 10, right: -15 })
+    .padding({ left: this.readBarKind != 'book' ? 0 : 10 })
     .borderRadius(24)
     .alignItems(VerticalAlign.Center)
     .justifyContent(FlexAlign.SpaceBetween)
+  }
+
+  /** 主按钮文案：观看 / 收听 / 阅读（对齐 fqapp _readLabel）。 */
+  private readBarLabel(): string {
+    if (this.readBarKind === 'video' || this.readBarKind === 'manju') {
+      return '开始观看';
+    }
+    if (this.readBarKind === 'audio') {
+      return '开始收听';
+    }
+    return '开始阅读';
+  }
+
+  /** 主按钮点击回调标识（页面据此区分动作）。 */
+  private readBarActionLabel(): string {
+    if (this.readBarKind === 'video' || this.readBarKind === 'manju') {
+      return '观看';
+    }
+    if (this.readBarKind === 'audio') {
+      return '收听';
+    }
+    return '阅读';
+  }
+
+  /** 主按钮图标：按内容类型区分（对齐 fqapp homeKindIcon）。 */
+  private readBarIcon(): Resource {
+    if (this.readBarKind === 'video' || this.readBarKind === 'manju') {
+      return $r('sys.symbol.film');
+    }
+    if (this.readBarKind === 'audio') {
+      return $r('sys.symbol.headphones');
+    }
+    if (this.readBarKind === 'manga') {
+      return $r('sys.symbol.book_pages');
+    }
+    return $r('sys.symbol.book');
   }
 }
 

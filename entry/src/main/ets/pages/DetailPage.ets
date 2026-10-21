@@ -66,7 +66,8 @@ export struct DetailPage {
       doubleTapToTop: true,
       scrollToTopYOffset: -(appState.topRect + FQ_DETAIL_TOP_INSET),
       isShowBar: true,
-      readerBarClick: (key) => { this.comingSoon(key) }
+      readBarKind: this.itemKind,
+      readerBarClick: (key: string): void => { this.comingSoon(key) }
     }) {
       Stack({ alignContent: Alignment.Bottom }) {
         if (this.loadingState) {
@@ -452,6 +453,7 @@ export struct DetailPage {
                   .fontColor($r('sys.color.font_primary'))
                   .lineHeight(22)
                   .maxLines(1)
+                  .layoutWeight(1)
                   .textOverflow({ overflow: TextOverflow.Ellipsis })
                 SymbolGlyph($r('sys.symbol.chevron_right'))
                   .fontSize(15)
