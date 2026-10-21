@@ -11,10 +11,14 @@ import { BlurStrategy,
   ScrollEffectType,
   TitleBarContentOptions,
   BottomBuilderParams,
-  HideMode } from '@kit.UIDesignKit';
+  HideMode,
+  HdsTabs,
+  HdsTabsController,
+  HdsNavDestinationTitleMode} from '@kit.UIDesignKit';
 import { appState } from '../entryability/AppState';
 import { LengthMetrics } from '@kit.ArkUI';
 import { themeUtils } from '../utils/ThemeUtils';
+import { FQ_ACCENT } from './CommonCom';
 
 export function titleBarOf(mainTitle: ResourceStr, subTitle?: ResourceStr,
   menus?: Array<HdsNavigationMenuItemOptions>, bottomBuilder?: BottomBuilderParams): TitleBarContentOptions {
@@ -36,6 +40,7 @@ export function titleBarOf(mainTitle: ResourceStr, subTitle?: ResourceStr,
 
 @ComponentV2
 export struct CommonNav {
+  private tabsController: HdsTabsController = new HdsTabsController();
   @Param titleBarOp?: TitleBarContentOptions = undefined
   @Param isHideBackButton: boolean = false
   /** 标题栏背景延伸至状态栏，内容区从标题栏下方起排 */
@@ -44,11 +49,18 @@ export struct CommonNav {
   @Param scroller: Scroller | undefined = undefined
   /** 上滑时随标题栏隐藏 bottomBuilder（搜索行） */
   @Param isSearchBarScroller: boolean = true
+  /** 是否显示底部栏 */
+  @Param isShowBar: boolean = false
   /** 双击标题栏区域时列表回滚到顶部 */
   @Param doubleTapToTop: boolean = false
   @Param scrollToTopYOffset: number = 0
+  @Param scrollMaskExtraHeight?: number = 0
+
   /** 返回 true 拦截系统返回 */
   @Event backPressed: () => boolean = (): boolean => false
+
+  /** readerBar点击回调 */
+  @Event readerBarClick: (key: string) => void
 
   @BuilderParam content: () => void;
 
@@ -88,13 +100,37 @@ export struct CommonNav {
 
   build() {
     HdsNavDestination() {
-      this.content()
+      // PC 侧边栏布局下不渲染页面级迷你条（Index 全局悬浮 PlayBar 常驻覆盖所有页面）
+      if (this.isShowBar){
+        HdsTabs({ controller: this.tabsController }) {
+          TabContent(){
+            this.content()
+          }.tabBar(this.ReadBar())//.align(Alignment.Top)
+        }
+        .barOverlap(true)
+        .vertical(false)
+        .scrollable(false)
+        .barPosition(BarPosition.End)
+        .barHeight(56)
+        .barFloatingStyle({
+          barWidth: { smallWidth: 330, mediumWidth: 480, largeWidth: 560 },
+          barBottomMargin: 28,
+          systemMaterialEffect: {
+            materialType: appState.materialType,
+            materialLevel: appState.materialLevel
+          },
+          adaptToHandedness: true,
+          // gradientMask: { maskColor: appConfig.maskColor },
+        })
+      }else{
+        this.content()
+      }
     }
     .titleBar({
       content: this.titleBarOp,
       style: {
         originalStyle: {
-          backgroundStyle: { backgroundColor: '#00ffffff', maskExtraHeight: 0, blurRadius: 30 },
+          backgroundStyle: { maskExtraHeight: 0, blurRadius: 30 },
           contentStyle: {
             // 深浅模式切换时由 themeUtils 触发重渲染（HDS 不会自动刷新系统色）
             titleStyle: { mainTitleColor: themeUtils.textColor, subTitleColor: themeUtils.terTextColor },
@@ -113,6 +149,7 @@ export struct CommonNav {
           blurEffectiveStartOffset: LengthMetrics.vp(0), // 动态样式线性过渡的起始位置
           blurEffectiveEndOffset: LengthMetrics.vp(80), // 动态样式线性过渡的终点位置
         },
+        scrollEffectStyle: { backgroundStyle: { maskExtraHeight: this.scrollMaskExtraHeight, blurRadius: 30 } },
         blurStrategy: BlurStrategy.ADAPTIVE,
         systemMaterialEffect: {
           materialType: appState.materialType,
@@ -121,6 +158,7 @@ export struct CommonNav {
       },
       avoidLayoutSafeArea: this.avoidLayoutSafeArea,
     })
+    .titleMode(HdsNavDestinationTitleMode.MINI)
     .bindToScrollable(this.scroller ? [this.scroller] : [])
     .hideBackButton(this.isHideBackButton)
     .onTouch((event: TouchEvent): void => {
@@ -141,6 +179,64 @@ export struct CommonNav {
       hideBottomBuilder: this.isSearchBarScroller,
       mode: HideMode.SCROLL_UP_TO
     })
+    .linearGradient({
+      angle: 180,
+      colors: [['#1AFF7A3D', 0], ['#00FF7A3D', 1]],
+    })
+  }
+
+  /** 底部悬浮操作栏：听书 / 下载 + 开始阅读主按钮。 */
+  @Builder
+  private ReadBar() {
+    Row({ space: 14 }) {
+      Row() {
+        ForEach([$r('sys.symbol.headphones'), $r('sys.symbol.download')], (v: Resource, i: number) => {
+          Column({ space: 3 }) {
+            SymbolGlyph(v)
+              .fontSize(19)
+              .fontColor([$r('sys.color.icon_primary')])
+            Text(i === 0 ? '听书' : '下载')
+              .fontSize(10.5)
+              .fontColor($r('sys.color.font_primary'))
+          }
+          .alignItems(HorizontalAlign.Center)
+          .onClick(() => this.readerBarClick(i === 0 ? '听书' : '下载'))
+
+          if (i === 0) {
+            Divider()
+              .vertical(true)
+              .strokeWidth(0.5)
+              .height(22)
+              .color($r('sys.color.comp_divider'))
+              .margin({ left: 14, right: 14 })
+          }
+        })
+      }
+
+      Row({ space: 8 }) {
+        SymbolGlyph($r('sys.symbol.book'))
+          .fontSize(19)
+          .fontColor([Color.White])
+        Text('开始阅读')
+          .fontSize(15.5)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(Color.White)
+      }
+      .layoutWeight(1)
+      .height(48)
+      .borderRadius(24)
+      .justifyContent(FlexAlign.Center)
+      .linearGradient({
+        angle: 90,
+        colors: [[FQ_ACCENT, 0], ['#E4432E', 1]],
+      })
+      .onClick(() => this.readerBarClick('阅读'))
+    }
+    .width('100%')
+    .padding({ left: 10, right: -15 })
+    .borderRadius(24)
+    .alignItems(VerticalAlign.Center)
+    .justifyContent(FlexAlign.SpaceBetween)
   }
 }
 

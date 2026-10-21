@@ -95,7 +95,8 @@ export struct HomePage {
       scroller: this.scroller,
       isSearchBarScroller: true,
       doubleTapToTop: true,
-      scrollToTopYOffset: - appState.topRect - FQ_HOME_TOP_INSET
+      scrollToTopYOffset: - appState.topRect - FQ_HOME_TOP_INSET,
+      scrollMaskExtraHeight: undefined
     }) {
       Stack() {
         List({ space: 0, scroller: this.scroller }) {

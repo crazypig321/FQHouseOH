@@ -64,6 +64,9 @@ export struct DetailPage {
       }, this.inShelf),
       scroller: this.scroller,
       doubleTapToTop: true,
+      scrollToTopYOffset: -(appState.topRect + FQ_DETAIL_TOP_INSET),
+      isShowBar: true,
+      readerBarClick: (key) => { this.comingSoon(key) }
     }) {
       Stack({ alignContent: Alignment.Bottom }) {
         if (this.loadingState) {
@@ -91,34 +94,48 @@ export struct DetailPage {
           .height('100%')
           .justifyContent(FlexAlign.Center)
         } else {
-          Scroll(this.scroller) {
-            Column({ space: 16 }) {
+          List({ scroller: this.scroller, space: 16 }) {
+            ListItem(){
               this.Hero()
-              if (this.detail.author.length > 0) {
+            }
+
+            if (this.detail.author.length > 0) {
+              ListItem(){
                 this.AuthorCard()
               }
-              if (this.readLabel().length > 0 || this.scoreValue() > 0) {
+            }
+            if (this.readLabel().length > 0 || this.scoreValue() > 0) {
+              ListItem(){
                 this.StatsCard()
               }
+            }
+
+            ListItem(){
               this.DescriptionBlock()
-              if (this.detail.tags.length > 0) {
+            }
+
+            if (this.detail.tags.length > 0) {
+              ListItem(){
                 this.TagChips()
               }
+            }
+            ListItem(){
               this.IdRow()
+            }
+            ListItem(){
               this.DirectoryRow()
+            }
+            ListItem(){
               this.ChapterPreview()
             }
-            .width('100%')
-            .alignItems(HorizontalAlign.Start)
-            .padding({ left: 20, right: 20, top: 6, bottom: 16 })
           }
+          .padding({ left: 20, right: 20, top: 6, bottom: 16 })
           .scrollBar(BarState.Off)
           .contentStartOffset(appState.topRect + FQ_DETAIL_TOP_INSET)
           .contentEndOffset(appState.bottomRect + FQ_DETAIL_BOTTOM_INSET)
           .width('100%')
           .height('100%')
           .align(Alignment.TopStart)
-          this.ReadBar()
         }
       }
       .width('100%')
@@ -179,10 +196,6 @@ export struct DetailPage {
     .width('100%')
     .padding({ top: 10, bottom: 12 })
     .alignItems(VerticalAlign.Top)
-    .linearGradient({
-      angle: 180,
-      colors: [['#1AFF7A3D', 0], ['#00FF7A3D', 1]],
-    })
   }
 
   /** 作者卡：头像 + 笔名 + 头衔徽标 + 引导文案。 */
@@ -476,68 +489,6 @@ export struct DetailPage {
     .borderRadius(16)
     .backgroundColor($r('sys.color.comp_background_primary'))
     .clip(true)
-  }
-
-  /** 底部悬浮操作栏：听书 / 下载 + 开始阅读主按钮。 */
-  @Builder
-  private ReadBar() {
-    Column() {
-      Row() {
-        Column({ space: 3 }) {
-          SymbolGlyph($r('sys.symbol.headphones'))
-            .fontSize(19)
-            .fontColor([$r('sys.color.icon_primary')])
-          Text('听书')
-            .fontSize(10.5)
-            .fontColor($r('sys.color.font_primary'))
-        }
-        .alignItems(HorizontalAlign.Center)
-        .onClick(() => this.comingSoon('听书'))
-        Divider()
-          .vertical(true)
-          .strokeWidth(0.5)
-          .height(22)
-          .color($r('sys.color.comp_divider'))
-          .margin({ left: 14, right: 14 })
-        Column({ space: 3 }) {
-          SymbolGlyph($r('sys.symbol.download'))
-            .fontSize(19)
-            .fontColor([$r('sys.color.icon_primary')])
-          Text('下载')
-            .fontSize(10.5)
-            .fontColor($r('sys.color.font_primary'))
-        }
-        .alignItems(HorizontalAlign.Center)
-        .onClick(() => this.comingSoon('下载'))
-        Row({ space: 8 }) {
-          SymbolGlyph($r('sys.symbol.book'))
-            .fontSize(19)
-            .fontColor([Color.White])
-          Text('开始阅读')
-            .fontSize(15.5)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(Color.White)
-        }
-        .layoutWeight(1)
-        .height(48)
-        .margin({ left: 14 })
-        .borderRadius(24)
-        .justifyContent(FlexAlign.Center)
-        .linearGradient({
-          angle: 90,
-          colors: [[FQ_ACCENT, 0], ['#E4432E', 1]],
-        })
-        .onClick(() => this.comingSoon('阅读'))
-      }
-      .width('100%')
-      .padding({ left: 14, right: 14, top: 12, bottom: 12 })
-      .borderRadius(24)
-      .backgroundColor($r('sys.color.comp_background_primary'))
-      .alignItems(VerticalAlign.Center)
-      .shadow({ radius: 16, color: '#28000000', offsetY: -4 })
-    }
-    .width('100%')
-    .padding({ left: 12, right: 12, bottom: appState.bottomRect + 10 })
   }
 
   private coverUrl(): string {
