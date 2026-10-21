@@ -1283,7 +1283,8 @@ const FQ_TITLE_SPACE_RE: RegExp = /\s+/g;
 /**
  * 章节正文清洗（fqapp normalizeChapterText 的正则版）：
  * 隐藏块 → 内容标记（音频头/注释）→ 块级标签转行 → 剥内联标签 →
- * 实体解码 → 行归一化；首行与章节标题同文时去重。
+ * 实体解码 → 行归一化；首行固定为章节标题（排版引擎把 txt 首行
+ * 渲染为加大加粗的章题，标题须占住该行，正文段落才不会被套标题样式）。
  */
 export function fqNormalizeChapterText(raw: string, chapterTitle: string): string {
   let text: string = raw;
@@ -1309,9 +1310,11 @@ export function fqNormalizeChapterText(raw: string, chapterTitle: string): strin
     }
   }
   const title: string = chapterTitle.trim();
-  if (title.length > 0 && paragraphs.length > 0
-    && paragraphs[0].replace(FQ_TITLE_SPACE_RE, '') === title.replace(FQ_TITLE_SPACE_RE, '')) {
-    paragraphs.shift();
+  if (title.length > 0) {
+    if (paragraphs.length === 0
+      || paragraphs[0].replace(FQ_TITLE_SPACE_RE, '') !== title.replace(FQ_TITLE_SPACE_RE, '')) {
+      paragraphs.unshift(title);
+    }
   }
   return paragraphs.join('\n');
 }

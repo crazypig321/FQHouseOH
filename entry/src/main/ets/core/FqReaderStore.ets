@@ -7,11 +7,12 @@
 import preferences from '@ohos.data.preferences';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { fqAsRecord } from './FqJson';
+import { fqAsRecord, fqKeys } from './FqJson';
 
 const FQ_READER_STORE_NAME: string = 'fq_reader';
 const FQ_READER_KEY_SETTINGS: string = 'settings';
 const FQ_READER_KEY_PROGRESS: string = 'progress_';
+const FQ_READER_KEY_PAGES: string = 'pages_';
 
 /** 单书阅读进度。 */
 export class FqReaderProgress {
@@ -183,6 +184,63 @@ export class FqReaderStore {
     rec['domPos'] = domPos;
     try {
       pref.putSync(`${FQ_READER_KEY_PROGRESS}${bookId}`, JSON.stringify(rec));
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
+  }
+
+  /** 读取单书各章已排版页数（chapterIndex → 页数）。 */
+  public static getChapterPages(bookId: string): Map<number, number> {
+    const result: Map<number, number> = new Map();
+    const pref: preferences.Preferences | null = FqReaderStore.pref;
+    if (pref === null || bookId.length === 0) {
+      return result;
+    }
+    let text: string = '';
+    try {
+      const raw: preferences.ValueType = pref.getSync(`${FQ_READER_KEY_PAGES}${bookId}`, '');
+      if (typeof raw === 'string') {
+        text = raw;
+      }
+    } catch (error) {
+      return result;
+    }
+    if (text.length === 0) {
+      return result;
+    }
+    try {
+      const parsed: Object | null = JSON.parse(text);
+      const rec: Record<string, Object> | null = parsed === null ? null : fqAsRecord(parsed);
+      if (rec === null) {
+        return result;
+      }
+      for (const key of fqKeys(rec)) {
+        const value: Object | undefined = rec[key];
+        const index: number = Number.parseInt(key, 10);
+        if (typeof value === 'number' && value > 0 && !Number.isNaN(index) && index >= 0) {
+          result.set(index, Math.trunc(value));
+        }
+      }
+    } catch (error) {
+      // 损坏数据按空处理
+    }
+    return result;
+  }
+
+  public static saveChapterPages(bookId: string, pages: Map<number, number>): void {
+    const pref: preferences.Preferences | null = FqReaderStore.pref;
+    if (pref === null || bookId.length === 0) {
+      return;
+    }
+    const rec: Record<string, Object> = {};
+    pages.forEach((value: number, key: number): void => {
+      rec[`${key}`] = value;
+    });
+    try {
+      pref.putSync(`${FQ_READER_KEY_PAGES}${bookId}`, JSON.stringify(rec));
       pref.flush().catch((_error: BusinessError): void => {
         // 落盘失败不阻断
       });

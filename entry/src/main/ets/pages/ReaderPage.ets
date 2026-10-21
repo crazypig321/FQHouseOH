@@ -3,10 +3,12 @@
  * 整本书注册一个 FqOnlineParser（目录/书脊与网络目录一一对应），
  * 章节正文由排版引擎经 getSpineItemContent 按需网络拉取；
  * 换章/目录跳转用 startPlay(spineIndex, domPos)，跨章翻页由引擎自行推进。
- * 交互：屏幕三分区 —— 左/右点击与横滑翻页，
- * 中间呼出菜单：CommonNav 标题栏（hideTitleBar 随菜单显隐）+ ReadBar
+ * 交互：三列翻页触区（左=上一页，中=呼出菜单，右=下一页；横向滑动同样翻页）：
+ * CommonNav 标题栏（hideTitleBar 随菜单显隐）+ ReadBar
  * 悬浮工具条（目录/上一章/下一章/设置，readBarHeight 随菜单 0/56）；
  * 目录/设置为 bindSheet 半模态公共 sheet（CommonSheet）；阅读时隐藏系统状态栏。
+ * 眉页（章节名）与眉脚（时钟/电量/整书页码）自绘覆盖层
+ * （PageDataInfo 页眉/页脚为预留字段暂不支持；整书页码为冻结估算，跨章校正）。
  * 进度（章节 + domPos）与设置（字号/行距/主题/翻页）持久化。
  */
 
@@ -14,7 +16,7 @@ import { common } from '@kit.AbilityKit';
 import { display, window } from '@kit.ArkUI';
 import { fileIo } from '@kit.CoreFileKit';
 import { ReadPageComponent, readerCore } from '@kit.ReaderKit';
-import { BusinessError } from '@kit.BasicServicesKit';
+import { BusinessError, batteryInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { TitleBarContentOptions } from '@kit.UIDesignKit';
 import { FqBackend, fqErrorMessage } from '../core/FqBackend';
@@ -118,7 +120,7 @@ export struct ReaderPage {
   private drawerScroller: Scroller = new Scroller();
   /** 目录懒加载数据源（过滤后章节，搜索时刷新）。 */
   private chapterSource: FqChapterSource = new FqChapterSource();
-  /** 最近一次 pageShow 的 startDomPos，用于判断 flipPage 是否推进了页面。 */
+  /** 最近一次显示页的起始 domPos（进度保存/恢复用）。 */
   private lastShownStart: string = '';
   /** 整本书籍解析器：registerBookParser 仅一次，换章靠 startPlay(spineIndex) 定位。 */
   private bookParser: FqOnlineParser | null = null;
@@ -126,6 +128,18 @@ export struct ReaderPage {
   private hasRegisteredBook: boolean = false;
   /** register 会把配置重置为 Kit 默认，首个 pageShow 渲染完成后需重应用真实配置。 */
   private pendingConfigReapply: boolean = false;
+  /** 眉脚时钟文本（HH:mm）。 */
+  @Local footerClock: string = '';
+  /** 眉脚电量百分比（-1 未知）。 */
+  @Local batteryLevel: number = -1;
+  /** 时钟/电量刷新定时器（-1 表示未启动）。 */
+  private clockTimer: number = -1;
+  /** 各章已排版页数（chapterIndex → 页数），整书页码估算与持久化用。 */
+  private chapterPages: Map<number, number> = new Map();
+  /** 各章页数冻结估算（chapterIndex → 页数）：会话内不随翻页重算，整书页码仅跨章校正。 */
+  private chapterEstimate: Map<number, number> = new Map();
+  /** 最近一次显示页在章内的页偏移（0 起）。 */
+  @Local shownPageOffset: number = 0;
 
   aboutToAppear(): void {
     this.bookId = ReaderNavParams.id;
@@ -142,6 +156,11 @@ export struct ReaderPage {
     hilog.info(0x0001, 'ReaderTheme',
       `aboutToAppear stored themeIndex=${settings.themeIndex} appIsDark=${appState.isDark}`);
     this.filesDir = getContext(this).filesDir;
+    this.chapterPages = FqReaderStore.getChapterPages(this.bookId);
+    this.refreshFooterStatus();
+    this.clockTimer = setInterval((): void => {
+      this.refreshFooterStatus();
+    }, 30000);
     this.applySystemBar(false);
     this.load();
   }
@@ -152,6 +171,10 @@ export struct ReaderPage {
     if (this.redrawTimer >= 0) {
       clearTimeout(this.redrawTimer);
       this.redrawTimer = -1;
+    }
+    if (this.clockTimer >= 0) {
+      clearInterval(this.clockTimer);
+      this.clockTimer = -1;
     }
     try {
       this.controller.releaseBook();
@@ -199,32 +222,7 @@ export struct ReaderPage {
         .width('100%')
         .height('100%')
 
-        // 眉页：章节序号 + 章节名常驻顶部（跟随阅读主题，不拦截翻页点击）
-        if (!this.menuVisible) {
-          Row({ space: 5 }) {
-            Text(this.headerChapterLabel())
-              .fontColor(this.theme().fontColor)
-              .fontSize(12)
-              .opacity(0.5)
-              .maxLines(1)
-              .hitTestBehavior(HitTestMode.None)
-            if (this.headerChapterName().length > 0) {
-              Text(this.headerChapterName())
-                .fontColor(this.theme().fontColor)
-                .fontSize(12)
-                .opacity(0.5)
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .constraintSize({ maxWidth: '70%' })
-                .hitTestBehavior(HitTestMode.None)
-            }
-          }
-          .alignItems(VerticalAlign.Center)
-          .constraintSize({ maxWidth: '80%' })
-          .position({ top: appState.topRect + 10, left: 20 })
-          .hitTestBehavior(HitTestMode.None)
-        }
-
+        // 翻页触区：左=上一页，中=呼出菜单，右=下一页；横向滑动同样翻页
         Row() {
           Column()
             .layoutWeight(1)
@@ -268,6 +266,59 @@ export struct ReaderPage {
         .bindSheet(this.settingsSheetVisible, this.SettingsSheet(), FqSheetOptions((): void => {
           this.settingsSheetVisible = false;
         }, 380))
+
+        // 眉页：章节序号 + 章节名常驻顶部（跟随阅读主题，不拦截翻页点击）；
+        // 定位用 maxTopRect（状态栏可见期间最大避让高度，覆盖摄像头孔条）
+        if (!this.menuVisible) {
+          Row({ space: 5 }) {
+            Text(this.headerChapterLabel())
+              .fontColor(this.theme().fontColor)
+              .fontSize(12)
+              .opacity(0.5)
+              .maxLines(1)
+              .hitTestBehavior(HitTestMode.None)
+            if (this.headerChapterName().length > 0) {
+              Text(this.headerChapterName())
+                .fontColor(this.theme().fontColor)
+                .fontSize(12)
+                .opacity(0.5)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .constraintSize({ maxWidth: '70%' })
+                .hitTestBehavior(HitTestMode.None)
+            }
+          }
+          .alignItems(VerticalAlign.Center)
+          .constraintSize({ maxWidth: '80%' })
+          .position({ top: Math.max(appState.maxTopRect, 32) + 8, left: 34 })
+          .hitTestBehavior(HitTestMode.None)
+        }
+
+        // 眉脚：左时钟+电量图标，右整书页码（已看/估算总数）
+        if (!this.menuVisible) {
+          Row() {
+            Text(this.footerClock)
+              .fontColor(this.theme().fontColor)
+              .fontSize(12)
+              .opacity(0.5)
+              .maxLines(1)
+            SymbolGlyph(this.batteryIcon())
+              .fontSize(14)
+              .fontColor([this.theme().fontColor])
+              .opacity(0.5)
+            Blank()
+            Text(this.footerPages())
+              .fontColor(this.theme().fontColor)
+              .fontSize(12)
+              .opacity(0.5)
+              .maxLines(1)
+          }
+          .alignItems(VerticalAlign.Center)
+          .width('100%')
+          .padding({ left: 34, right: 34 })
+          .position({ bottom: appState.bottomRect + 10, left: 0 })
+          .hitTestBehavior(HitTestMode.None)
+        }
 
         if (this.loadingState) {
           Column({ space: 12 }) {
@@ -613,10 +664,6 @@ export struct ReaderPage {
     return this.theme().night ? '#2A2D30' : '#E8E2D4';
   }
 
-  // ---------------------------------------------------------------------------
-  // 翻页
-  // ---------------------------------------------------------------------------
-
   /** 点击/横滑翻页；跨章由排版引擎在书脊间自行推进（内容经解析器按需拉取）。 */
   private requestFlip(isNext: boolean): void {
     if (this.menuVisible || this.settingsSheetVisible) {
@@ -690,6 +737,115 @@ export struct ReaderPage {
   private headerChapterName(): string {
     const title: string = this.currentChapterTitle().trim();
     return title.replace(FQ_HEADER_PREFIX_STRIP_RE, '').trim();
+  }
+
+  /** 眉脚电量图标：按系统电量映射到档位图标资源。 */
+  private batteryIcon(): Resource {
+    const level: number = this.batteryLevel;
+    if (level >= 100) {
+      return $r('sys.symbol.battery_100percent');
+    }
+    if (level >= 95) {
+      return $r('sys.symbol.battery_95percent');
+    }
+    if (level >= 90) {
+      return $r('sys.symbol.battery_90percent');
+    }
+    if (level >= 80) {
+      return $r('sys.symbol.battery_80percent');
+    }
+    if (level >= 75) {
+      return $r('sys.symbol.battery_75percent');
+    }
+    if (level >= 70) {
+      return $r('sys.symbol.battery_70percent');
+    }
+    if (level >= 60) {
+      return $r('sys.symbol.battery_60percent');
+    }
+    if (level >= 50) {
+      return $r('sys.symbol.battery_50percent');
+    }
+    if (level >= 40) {
+      return $r('sys.symbol.battery_40percent');
+    }
+    if (level >= 30) {
+      return $r('sys.symbol.battery_30percent');
+    }
+    if (level >= 20) {
+      return $r('sys.symbol.battery_20percent');
+    }
+    if (level >= 15) {
+      return $r('sys.symbol.battery_15percent');
+    }
+    if (level >= 10) {
+      return $r('sys.symbol.battery_10percent');
+    }
+    return $r('sys.symbol.battery_5percent');
+  }
+
+  /** 刷新眉脚时钟与电量（启动时与 30s 定时器调用）。 */
+  private refreshFooterStatus(): void {
+    const now: Date = new Date();
+    const hours: number = now.getHours();
+    const minutes: number = now.getMinutes();
+    const hh: string = hours < 10 ? `0${hours}` : `${hours}`;
+    const mm: string = minutes < 10 ? `0${minutes}` : `${minutes}`;
+    this.footerClock = `${hh}:${mm}`;
+    this.batteryLevel = batteryInfo.batterySOC;
+  }
+
+  /** 构建整书页数冻结估算：已知章取实测，其余按已知均值（无数据默认 3 页）。
+   * 会话内不再随翻页重算，整书页码不逐页跳动；跨章/跳章时以实测逐章校正。 */
+  private buildChapterEstimates(): void {
+    let knownTotal: number = 0;
+    this.chapterPages.forEach((pages: number): void => {
+      knownTotal += pages;
+    });
+    const avg: number = this.chapterPages.size > 0
+      ? Math.max(1, Math.round(knownTotal / this.chapterPages.size)) : 3;
+    this.chapterEstimate = new Map();
+    for (let index: number = 0; index < this.totalChapters; index++) {
+      const known: number | undefined = this.chapterPages.get(index);
+      this.chapterEstimate.set(index, known !== undefined ? known : avg);
+    }
+  }
+
+  /** 以实测页数校正某章冻结估算（跨章/跳章时调用，保证整书页码衔接不回跳）。 */
+  private refreshChapterEstimate(index: number): void {
+    if (index < 0 || index >= this.totalChapters) {
+      return;
+    }
+    const known: number | undefined = this.chapterPages.get(index);
+    if (known !== undefined) {
+      this.chapterEstimate.set(index, known);
+    }
+  }
+
+  /** 章节页数（冻结估算值）：会话内稳定，整书页码不随翻页逐页变化。 */
+  private estimateChapterPages(index: number): number {
+    const estimate: number | undefined = this.chapterEstimate.get(index);
+    if (estimate !== undefined) {
+      return estimate;
+    }
+    const known: number | undefined = this.chapterPages.get(index);
+    return known !== undefined ? known : 3;
+  }
+
+  /** 眉脚整书页码：已看页数/整书估算页数。 */
+  private footerPages(): string {
+    if (this.totalChapters <= 0) {
+      return '';
+    }
+    let readPages: number = this.shownPageOffset + 1;
+    for (let i: number = 0; i < this.chapterIndex; i++) {
+      readPages += this.estimateChapterPages(i);
+    }
+    let totalPages: number = 0;
+    for (let i: number = 0; i < this.totalChapters; i++) {
+      totalPages += this.estimateChapterPages(i);
+    }
+    return `${readPages}/${totalPages}`;
   }
 
   /** 目录定位：滚动到当前章节（搜索过滤时按过滤后位置定位）。 */
@@ -891,7 +1047,7 @@ export struct ReaderPage {
       `buildSetting viewPort=${screenWidth}x${screenHeight} density=${density}`);
     // Reader Kit 内置上下页边距（约 92/59vp）无配置项：等比放大视口与字号，
     // 组件把视口整页缩放进自身区域，视觉字号不变而页边距等比缩小、每页容纳更多内容
-    const viewportScale: number = 1.7;
+    const viewportScale: number = 1.5;
     const setting: readerCore.ReaderSetting = {
       fontName: '系统字体',
       // 沙箱字体副本路径：引擎直接采用；若仍以资源请求索取则由解析器供给字节
@@ -934,6 +1090,8 @@ export struct ReaderPage {
       }
       this.chapters = chapters;
       this.totalChapters = chapters.length;
+      // 整书页码冻结估算：目录就绪后构建一次，会话内不随翻页重算
+      this.buildChapterEstimates();
       this.chapterSource.setItems(chapters);
       // 整本书一个解析器：目录/书脊与网络目录一一对应，正文由引擎按需拉取
       this.bookParser = new FqOnlineParser(this.bookTitle, chapters,
@@ -966,6 +1124,8 @@ export struct ReaderPage {
     this.menuVisible = false;
     this.onSheetClose();
     this.settingsSheetVisible = false;
+    // 跳章：先以实测校正离场章节的冻结估算，整书页码衔接不回跳
+    this.refreshChapterEstimate(this.chapterIndex);
     this.chapterIndex = index;
     this.loadingState = true;
     this.errorMsg = '';
@@ -1035,14 +1195,25 @@ export struct ReaderPage {
     await this.controller.init(context);
     this.controller.on('pageShow', (data: readerCore.PageDataInfo): void => {
       hilog.info(0x0001, 'ReaderPage',
-        `pageShow state=${data.state} resourceIndex=${data.resourceIndex} startDomPos=${data.startDomPos}`);
+        `pageShow state=${data.state} resourceIndex=${data.resourceIndex} pageOffset=${data.pageOffset} startDomPos=${data.startDomPos}`);
       if (data.state !== readerCore.PageState.PAGE_ON_SHOW) {
         return;
       }
       this.lastShownStart = data.startDomPos;
       // 引擎跨章翻页后 resourceIndex 即当前章节（书脊索引与章节下标一致）
       if (data.resourceIndex >= 0 && data.resourceIndex < this.totalChapters) {
+        if (data.resourceIndex !== this.chapterIndex) {
+          // 跨章：以实测校正离场章节的冻结估算，整书页码仅此刻变化
+          this.refreshChapterEstimate(this.chapterIndex);
+        }
         this.chapterIndex = data.resourceIndex;
+      }
+      // 眉脚页码：记录当前页章内偏移与本章已见页数（供整书页数估算）
+      this.shownPageOffset = data.pageOffset >= 0 ? data.pageOffset : 0;
+      const knownPages: number | undefined = this.chapterPages.get(this.chapterIndex);
+      if (knownPages === undefined || this.shownPageOffset + 1 > knownPages) {
+        this.chapterPages.set(this.chapterIndex, this.shownPageOffset + 1);
+        FqReaderStore.saveChapterPages(this.bookId, this.chapterPages);
       }
       const domPos: string = data.startDomPos;
       if (domPos.length > 0) {

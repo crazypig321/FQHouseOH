@@ -107,15 +107,23 @@ export default class EntryAbility extends UIAbility {
         // 全屏后跟踪系统避让区尺寸，供各页面 contentStartOffset/EndOffset 计算
         const uiContext = mainWindow.getUIContext();
         const syncAvoidArea = (): void => {
-          appState.topRect = uiContext.px2vp(
+          const topRectVp: number = uiContext.px2vp(
             mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM).topRect.height);
+          appState.topRect = topRectVp;
+          // 记录状态栏可见期间的最大避让高度：阅读页隐藏状态栏后仍需避让摄像头孔条
+          appState.maxTopRect = Math.max(appState.maxTopRect, topRectVp);
           appState.bottomRect = uiContext.px2vp(
             mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR).bottomRect.height);
+          hilog.info(DOMAIN, 'testTag',
+            'avoidArea top=%{public}s maxTop=%{public}s bottom=%{public}s',
+            `${appState.topRect}`, `${appState.maxTopRect}`, `${appState.bottomRect}`);
         };
         syncAvoidArea();
         mainWindow.on('avoidAreaChange', (data: window.AvoidAreaOptions) => {
           if (data.type === window.AvoidAreaType.TYPE_SYSTEM) {
-            appState.topRect = uiContext.px2vp(data.area.topRect.height);
+            const topRectVp: number = uiContext.px2vp(data.area.topRect.height);
+            appState.topRect = topRectVp;
+            appState.maxTopRect = Math.max(appState.maxTopRect, topRectVp);
           } else if (data.type === window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR) {
             appState.bottomRect = uiContext.px2vp(data.area.bottomRect.height);
           }

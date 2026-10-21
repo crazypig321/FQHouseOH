@@ -11,6 +11,8 @@ class AppState {
   @Trace currTabsIndex: number = 0;
   /** 状态栏避让高度（vp，全屏沉浸模式下由 EntryAbility 跟踪） */
   @Trace topRect: number = 0;
+  /** 状态栏可见期间的最大避让高度（vp）：阅读页隐藏状态栏后仍覆盖摄像头孔条，眉页定位用 */
+  @Trace maxTopRect: number = 0;
   /** 底部手势区避让高度（vp） */
   @Trace bottomRect: number = 0;
   /** 屏幕物理宽度（px，启动时由 EntryAbility 同步） */

@@ -9,6 +9,7 @@
 
 import { common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import fq, { FqBridgeResponse } from 'libfqapi_napi.so';
 import { FqDeployer } from './FqDeployer';
 import { FqKeyStore } from './FqKeyStore';
@@ -26,6 +27,12 @@ import {
 const PORT: number = 8080;
 const REQUEST_TIMEOUT_MS: number = 20000;
 const MAX_CONCURRENCY: number = 3;
+
+/** 诊断日志用文本头部：截断 100 字符并把换行替换为可见符。 */
+function fqLogHead(text: string): string {
+  const head: string = text.length > 100 ? text.substring(0, 100) : text;
+  return head.split('\n').join('⏎');
+}
 
 export class FqRequestError extends Error {
   readonly statusCode: number;
@@ -311,8 +318,10 @@ export class FqBackend {
     try {
       const novelPayload: Record<string, Object> = await this.getJson(
         `/api/v1/chapters/${encodeURIComponent(itemId)}/novel`, '');
-      const novelText: string =
-        fqNormalizeChapterText(fqParseNovelChapter(novelPayload), chapterTitle);
+      const rawNovel: string = fqParseNovelChapter(novelPayload);
+      const novelText: string = fqNormalizeChapterText(rawNovel, chapterTitle);
+      hilog.info(0x0001, 'FqBackend', `chapterText raw=${fqLogHead(rawNovel)}`);
+      hilog.info(0x0001, 'FqBackend', `chapterText norm=${fqLogHead(novelText)}`);
       if (novelText.trim().length > 0) {
         return novelText;
       }
@@ -322,7 +331,9 @@ export class FqBackend {
     const query: string = `source=${encodeURIComponent('番茄')}&item_id=${encodeURIComponent(itemId)}`
       + `&tab=${encodeURIComponent('小说')}`;
     const payload: Record<string, Object> = await this.getJson('/api/content', query);
-    return fqNormalizeChapterText(fqLegacyChapterText(payload), chapterTitle);
+    const legacyText: string = fqNormalizeChapterText(fqLegacyChapterText(payload), chapterTitle);
+    hilog.info(0x0001, 'FqBackend', `chapterText legacy=${fqLogHead(legacyText)}`);
+    return legacyText;
   }
 }
 
