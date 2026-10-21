@@ -49,16 +49,22 @@ export class FqMediaItem {
   }
 }
 
-/** 首页推荐一页：条目 + 翻页游标。nextOffset < 0 表示无更多。 */
+/**
+ * 首页推荐一页：条目 + 翻页游标。nextOffset < 0 表示无更多。
+ * cellId 为官方第二段（series-feed/cell/change）所需的首个 cell_id_str；
+ * 数字型 cell_id 在 JSON 里是 double，会被精度截断成上游认不出的值。
+ */
 export class FqHomePage {
   readonly items: FqMediaItem[];
   readonly nextOffset: number;
   readonly sessionId: string;
+  readonly cellId: string;
 
-  constructor(items: FqMediaItem[], nextOffset: number, sessionId: string) {
+  constructor(items: FqMediaItem[], nextOffset: number, sessionId: string, cellId: string) {
     this.items = items;
     this.nextOffset = nextOffset;
     this.sessionId = sessionId;
+    this.cellId = cellId;
   }
 }
 

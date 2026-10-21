@@ -428,9 +428,55 @@ export function fqParseMediaItems(payload: Record<string, Object>, forcedKind: s
 // 首页：data.tab_item 选卡 + 游标提取
 // ---------------------------------------------------------------------------
 
+/** 上游 tab_item 形状非确定（数组或以序号为键的映射），统一收窄为数组。 */
+function fqHomepageTabItems(data: Record<string, Object>): Object[] | null {
+  const raw: Object | undefined = data['tab_item'];
+  const arr: Object[] | null = fqAsArray(raw);
+  if (arr !== null) {
+    return arr;
+  }
+  const map: Record<string, Object> | null = fqAsRecord(raw);
+  if (map === null) {
+    return null;
+  }
+  const out: Object[] = [];
+  for (const key of fqKeys(map)) {
+    out.push(map[key]);
+  }
+  return out;
+}
+
+/** 深度优先取第一个非空字符串字段（对齐 Dart `_firstStringField`）。 */
+function fqFirstStringField(node: Object | undefined, field: string): string {
+  const rec: Record<string, Object> | null = fqAsRecord(node);
+  if (rec !== null) {
+    const direct: Object | undefined = rec[field];
+    if (typeof direct === 'string' && direct.length > 0) {
+      return direct;
+    }
+    for (const key of fqKeys(rec)) {
+      const found: string = fqFirstStringField(rec[key], field);
+      if (found.length > 0) {
+        return found;
+      }
+    }
+    return '';
+  }
+  const arr: Object[] | null = fqAsArray(node);
+  if (arr !== null) {
+    for (const element of arr) {
+      const found: string = fqFirstStringField(element, field);
+      if (found.length > 0) {
+        return found;
+      }
+    }
+  }
+  return '';
+}
+
 export function fqParseHomepage(payload: Record<string, Object>, tabType: number): FqHomePage {
   const data: Record<string, Object> | null = fqAsRecord(payload['data']);
-  const tabItems: Object[] | null = data !== null ? fqAsArray(data['tab_item']) : null;
+  const tabItems: Object[] | null = data !== null ? fqHomepageTabItems(data) : null;
 
   let nextOffset: number = -1;
   let sessionId: string = '';
@@ -461,9 +507,26 @@ export function fqParseHomepage(payload: Record<string, Object>, tabType: number
   const selected: Record<string, Object> = matched !== null
     ? matched
     : (tabItems !== null ? fqEmptyRecord() : payload);
+  const cellId: string = matched !== null ? fqFirstStringField(matched, 'cell_id_str') : '';
   const forcedKind: string = tabType === 24 ? 'manju' : '';
   const items: FqMediaItem[] = fqParseMediaItems(selected, forcedKind);
-  return new FqHomePage(items, nextOffset, sessionId);
+  return new FqHomePage(items, nextOffset, sessionId, cellId);
+}
+
+/**
+ * 官方第二段（/api/v1/recommend/series-feed，即 bookmall/cell/change）载荷：
+ * 条目 + data.next_offset/session_id 游标。短剧（t8）视频流与听书（t5）
+ * 有声书流的实际分页都由本接口承载（fqapp `_seriesFlowPage`）。
+ */
+export function fqParseSeriesFeed(payload: Record<string, Object>): FqHomePage {
+  const data: Record<string, Object> | null = fqAsRecord(payload['data']);
+  if (data === null) {
+    return new FqHomePage([], -1, '', '');
+  }
+  const nextOffset: number = fqAsInt(data['next_offset'], 0);
+  const sessionId: string = fqStr(data, 'session_id');
+  const items: FqMediaItem[] = fqParseMediaItems(data, '');
+  return new FqHomePage(items, nextOffset, sessionId, '');
 }
 
 // ---------------------------------------------------------------------------

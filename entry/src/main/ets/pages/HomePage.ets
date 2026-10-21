@@ -81,7 +81,7 @@ export struct HomePage {
   /** bottomBuilder（搜索条+频道条）已上滑收起：此时标题栏菜单透出搜索入口 */
   @Local searchBarHidden: boolean = false;
   private feed: FqHomeFeed = new FqHomeFeed([]);
-  private rowSource: FqHomeRowDataSource = new FqHomeRowDataSource(3, 3);
+  private rowSource: FqHomeRowDataSource = new FqHomeRowDataSource(3);
   private scroller: Scroller = new Scroller();
   private loadToken: number = 0;
   /** 各频道流实例缓存（含翻页游标）；切回频道直接复用，不重新加载。 */
@@ -164,18 +164,20 @@ export struct HomePage {
               .alignItems(VerticalAlign.Center)
             }
 
-            ListItem(){
-              List({ space: 14 }){
-                LazyForEach(this.rowSource, (row: FqMediaItem[], i: number) => {
+            ListItem() {
+              List({ space: 14 }) {
+                LazyForEach(this.rowSource, (row: FqMediaItem, i: number) => {
                   ListItem() {
                     this.GridSlot(row, i)
-                  }.transition(TransitionEffect.scale({ x: 0.8, y: 0.8 }).animation({ duration:300, curve: Curve.Smooth }))
-                }, (row: FqMediaItem[], index: number): string => this.rowKey(row, index))
-              }.width('100%').height('100%')
+                  }.transition(TransitionEffect.scale({ x: 0.8, y: 0.8 }).animation({ duration: 300, curve: Curve.Smooth }))
+                }, (row: FqMediaItem, index: number): string => this.rowKey(row, index))
+              }
+              .width('100%')
+              .lanes(3, 20)
               .scrollBar(BarState.Off)
               .edgeEffect(EdgeEffect.None)
-              .lanes(3, 20)
-              .padding({ left:20, right: 20 })
+              .padding({ left: 20, right: 20 })
+              .cachedCount(3)
             }
 
             if (this.loadingMore) {
@@ -364,12 +366,12 @@ export struct HomePage {
     }
   }
 
-  /** 网格槽位：不足 3 个时用空占位保持等宽。 */
+  /** 网格行：整行渲染 3 列，不足 3 个时用空占位保持等宽。 */
   @Builder
-  private GridSlot(row: FqMediaItem[], slot: number) {
-    if (slot < row.length) {
+  private GridSlot(row: FqMediaItem, i: number) {
+    if (i < this.rowSource.totalCount()) {
       FqMediaCard({
-        item: row[slot],
+        item: row,
         onItemClick: (clicked: FqMediaItem): void => {
           this.openDetail(clicked);
         },
@@ -408,9 +410,8 @@ export struct HomePage {
     return FQ_CAPTIONS[this.channelIndex];
   }
 
-  private rowKey(row: FqMediaItem[], index: number): string {
-    const first: string = row.length > 0 ? `${row[0].kind}:${row[0].id}` : '';
-    return `${index}:${row.length}:${first}`;
+  private rowKey(row: FqMediaItem, index: number): string {
+    return `${index}:${row.kind}:${row.id}`;
   }
 
   private selectChannel(index: number): void {

@@ -3,6 +3,8 @@
  *
  * 对齐 fqapp lib/features/home/home_provider.dart 的 6 频道语义：
  * - homepage 源：/api/v1/recommend/homepage（tab_type 频道，next_offset/session_id 游标）。
+ *   听书（t5）/短剧（t8）的 tab 游标是装饰性的，内容分页走官方第二段
+ *   /api/v1/recommend/series-feed（cell/change，fqapp `homepagePage` 两段语义）。
  *   游标停走（fqapp recommendExhausted）或请求失败时转入 search 兜底续页
  *   （fqapp `_loadInitial`/`_loadNext` 的 `_searchByType` 语义）。
  * - v1 search 源：/api/v1/search 分栏（漫画/漫剧，next_offset 游标）。
@@ -18,6 +20,13 @@ import { FqHomePage, FqMediaItem, FqSearchTab } from '../model/FqModels';
 export const FQ_SOURCE_HOMEPAGE: number = 0;
 export const FQ_SOURCE_SEARCH: number = 1;
 export const FQ_SOURCE_SEARCH_PAGED: number = 2;
+
+/**
+ * 走官方第二段（series-feed/cell/change）分页的 homepage 频道。
+ * 听书（5）/短剧（8）的 tab 游标是装饰性的（offset 翻页一律 101116），
+ * 真实分页由 cell 内容接口承载。
+ */
+const FQ_SERIES_FLOW_TABS: number[] = [5, 8];
 
 /** 单个推荐源及其游标状态（含 search 兜底阶段配置）。 */
 export class FqHomeSource {
@@ -39,6 +48,8 @@ export class FqHomeSource {
   /** paged 兜底阶段：下一次请求页码。 */
   page: number;
   sessionId: string;
+  /** 官方第二段 cell（cell_id_str）；跨刷新缓存（fqapp `_seriesCellIds` 语义）。 */
+  cellId: string;
   hasMore: boolean;
   loaded: boolean;
 
@@ -57,6 +68,7 @@ export class FqHomeSource {
     this.offset = 0;
     this.page = 1;
     this.sessionId = '';
+    this.cellId = '';
     this.hasMore = true;
     this.loaded = false;
   }
@@ -248,11 +260,53 @@ export class FqHomeFeed {
     return await this.loadCursorStage(source);
   }
 
-  /** homepage 推荐阶段：游标停走时转入 search 兜底（fqapp recommendExhausted = !canAdvance）。 */
+  /**
+   * homepage 推荐阶段（fqapp `homepagePage` 两段语义）：
+   * - series-flow 频道（t5/t8）：第一段只负责开 cell（cell_id_str + session），
+   *   内容翻页走官方第二段 series-feed（cell/change）；已知 cell 的翻页直接打第二段。
+   * - 其余频道：tab 游标推进，游标停走转入 search 兜底（fqapp recommendExhausted）。
+   */
   private async loadHomepageStage(source: FqHomeSource): Promise<FqMediaItem[]> {
     const backend: FqBackend = FqBackend.get();
+    const seriesFlow: boolean = FQ_SERIES_FLOW_TABS.indexOf(source.tabType) >= 0;
+    // 已知 cell 的翻页：第二段游标与第一段不是一回事，直接打第二段。
+    if (seriesFlow && source.offset > 0 && source.cellId.length > 0) {
+      const flow: FqHomePage = await backend.seriesFeedPage(
+        source.tabType, source.cellId, source.offset, source.sessionId);
+      if (flow.items.length > 0) {
+        this.advanceSeriesCursor(source, flow);
+        return this.applyForcedKind(flow.items, source.forcedKind);
+      }
+      // 第二段空页：退回第一段结果。
+    }
     const page: FqHomePage = await backend.homepagePage(source.tabType, source.offset, source.sessionId);
     const items: FqMediaItem[] = this.applyForcedKind(page.items, source.forcedKind);
+    if (!seriesFlow) {
+      if (page.nextOffset > 0) {
+        source.offset = page.nextOffset;
+        if (page.sessionId.length > 0) {
+          source.sessionId = page.sessionId;
+        }
+      } else {
+        this.enterFallback(source);
+      }
+      return items;
+    }
+    // series-flow：第一段成功且尚未用当前参数试过第二段时，提取 cell 走第二段
+    //（fqapp：`flow ?? tab.page`，第二段结果整体替换第一段）。
+    if (!(source.offset > 0 && source.cellId.length > 0)) {
+      const cellId: string = page.cellId.length > 0 ? page.cellId : source.cellId;
+      if (cellId.length > 0) {
+        source.cellId = cellId;
+        const sessionId: string = source.sessionId.length > 0 ? source.sessionId : page.sessionId;
+        const flow: FqHomePage =
+          await backend.seriesFeedPage(source.tabType, cellId, source.offset, sessionId);
+        if (flow.items.length > 0) {
+          this.advanceSeriesCursor(source, flow);
+          return this.applyForcedKind(flow.items, source.forcedKind);
+        }
+      }
+    }
     if (page.nextOffset > 0) {
       source.offset = page.nextOffset;
       if (page.sessionId.length > 0) {
@@ -262,6 +316,18 @@ export class FqHomeFeed {
       this.enterFallback(source);
     }
     return items;
+  }
+
+  /** 第二段游标推进；游标停走（≤当前 offset）视为推荐流走完，转入 search 兜底。 */
+  private advanceSeriesCursor(source: FqHomeSource, flow: FqHomePage): void {
+    if (flow.nextOffset > 0 && flow.nextOffset > source.offset) {
+      source.offset = flow.nextOffset;
+      if (flow.sessionId.length > 0) {
+        source.sessionId = flow.sessionId;
+      }
+    } else {
+      this.enterFallback(source);
+    }
   }
 
   /** 旧版 /api/search 页码阶段：hasMore = 本页有匹配条目（fqapp `_searchProgress` 非 漫画/漫剧 分支）。 */
@@ -415,23 +481,18 @@ export class FqHomeFeed {
 export class FqHomeRowDataSource implements IDataSource {
   private items: FqMediaItem[] = [];
   private readonly startSkip: number;
-  private readonly columns: number;
   private listeners: DataChangeListener[] = [];
 
-  constructor(startSkip: number, columns: number) {
+  constructor(startSkip: number) {
     this.startSkip = startSkip;
-    this.columns = columns;
   }
 
   totalCount(): number {
-    const usable: number = Math.max(0, this.items.length - this.startSkip);
-    return Math.ceil(usable / this.columns);
+    return Math.max(0, this.items.length - this.startSkip);
   }
 
-  getData(index: number): FqMediaItem[] {
-    const from: number = this.startSkip + index * this.columns;
-    const to: number = Math.min(this.items.length, from + this.columns);
-    return this.items.slice(from, to);
+  getData(index: number): FqMediaItem {
+    return this.items[this.startSkip + index];
   }
 
   registerDataChangeListener(listener: DataChangeListener): void {

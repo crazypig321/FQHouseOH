@@ -12,7 +12,7 @@ import { util } from '@kit.ArkTS';
 import fq, { FqBridgeResponse } from 'libfqapi_napi.so';
 import { FqDeployer } from './FqDeployer';
 import { FqKeyStore } from './FqKeyStore';
-import { fqParseBookDetail, fqParseChapterSummaries, fqParseDirectory, fqParseHomepage, fqParseRankBoard, fqParseRankCatalog, fqParseSearchTabs } from './FqParser';
+import { fqParseBookDetail, fqParseChapterSummaries, fqParseDirectory, fqParseHomepage, fqParseRankBoard, fqParseRankCatalog, fqParseSearchTabs, fqParseSeriesFeed } from './FqParser';
 import { fqParseObject } from './FqJson';
 import {
   FqBookDetail,
@@ -208,6 +208,25 @@ export class FqBackend {
     }
     const payload: Record<string, Object> = await this.getJson('/api/v1/recommend/homepage', query);
     return fqParseHomepage(payload, tabType);
+  }
+
+  /**
+   * 官方第二段一页（/api/v1/recommend/series-feed，即 bookmall/cell/change）。
+   * 短剧（t8）视频流与听书（t5）有声书流的实际分页接口：
+   * offset 取上一页 data.next_offset；unlimited_selector_change_type
+   * 首屏 2（ChangeFilter）、翻页 1（GetMore）。
+   */
+  public async seriesFeedPage(tabType: number, cellId: string, offset: number,
+    sessionId: string): Promise<FqHomePage> {
+    const safeOffset: number = offset < 0 ? 0 : offset;
+    let query: string = `cell_id=${encodeURIComponent(cellId)}&tab_type=${tabType}`
+      + `&client_template=2&client_req_type=2&offset=${safeOffset}`
+      + `&unlimited_selector_change_type=${safeOffset > 0 ? 1 : 2}`;
+    if (sessionId.length > 0) {
+      query = `${query}&session_id=${encodeURIComponent(sessionId)}`;
+    }
+    const payload: Record<string, Object> = await this.getJson('/api/v1/recommend/series-feed', query);
+    return fqParseSeriesFeed(payload);
   }
 
   /** 搜索（/api/v1/search，按 tab_type 取分栏）。 */
