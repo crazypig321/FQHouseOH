@@ -129,8 +129,10 @@ export struct CommonNav {
             materialType: appState.materialType,
             materialLevel: appState.materialLevel
           },
+          gradientMask: {
+            maskHeight: this.readBarHeight === 0 ? 0 : 56,
+          },
           adaptToHandedness: true,
-          // gradientMask: { maskColor: appConfig.maskColor },
         })
       }else{
         this.content()
