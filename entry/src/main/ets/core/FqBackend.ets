@@ -12,10 +12,11 @@ import { util } from '@kit.ArkTS';
 import fq, { FqBridgeResponse } from 'libfqapi_napi.so';
 import { FqDeployer } from './FqDeployer';
 import { FqKeyStore } from './FqKeyStore';
-import { fqParseBookDetail, fqParseHomepage, fqParseRankBoard, fqParseRankCatalog, fqParseSearchTabs } from './FqParser';
+import { fqParseBookDetail, fqParseChapterSummaries, fqParseDirectory, fqParseHomepage, fqParseRankBoard, fqParseRankCatalog, fqParseSearchTabs } from './FqParser';
 import { fqParseObject } from './FqJson';
 import {
   FqBookDetail,
+  FqChapter,
   FqHomePage,
   FqRankBoard,
   FqRankCatalog,
@@ -249,6 +250,29 @@ export class FqBackend {
     const payload: Record<string, Object> =
       await this.getJson(`/api/v1/rank/${encodeURIComponent(rankId)}`, query);
     return fqParseRankBoard(payload, startAt);
+  }
+
+  /** 目录章节（/api/directory，多卷平铺）。 */
+  public async directoryChapters(bookId: string, tab: string): Promise<FqChapter[]> {
+    const query: string = `source=${encodeURIComponent('番茄')}&book_id=${encodeURIComponent(bookId)}`
+      + `&tab=${encodeURIComponent(tab)}`;
+    const payload: Record<string, Object> = await this.getJson('/api/directory', query);
+    return fqParseDirectory(payload);
+  }
+
+  /** 章节试读（/api/v1/books/{id}/chapters/summary）；装饰性数据，失败返回空 Map。 */
+  public async chapterSummaries(bookId: string, itemIds: string[]): Promise<Map<string, string>> {
+    if (itemIds.length === 0) {
+      return new Map();
+    }
+    try {
+      const ids: string = itemIds.map((value: string): string => encodeURIComponent(value)).join(',');
+      const payload: Record<string, Object> = await this.getJson(
+        `/api/v1/books/${encodeURIComponent(bookId)}/chapters/summary`, `item_ids=${ids}`);
+      return fqParseChapterSummaries(payload);
+    } catch (error) {
+      return new Map();
+    }
   }
 }
 

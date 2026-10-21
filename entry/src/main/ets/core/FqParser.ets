@@ -21,6 +21,7 @@ import {
 } from './FqJson';
 import {
   FqBookDetail,
+  FqChapter,
   FqHomePage,
   FqMediaItem,
   FqRankBoard,
@@ -30,6 +31,7 @@ import {
   FqRankTab,
   FqSearchTab,
   fqEmptyRankCatalog,
+  fqFormatCounter,
 } from '../model/FqModels';
 
 const VIDEO_RE: RegExp = /短剧|短片|剧集|video|drama/i;
@@ -682,7 +684,8 @@ function fqResolveDetailData(payload: Record<string, Object>): Record<string, Ob
 function fqAuthorOf(data: Record<string, Object>): string {
   const authorInfo: Record<string, Object> | null = fqAsRecord(data['author_info']);
   if (authorInfo !== null) {
-    const name: string = fqStr(authorInfo, 'author_name') || fqStr(authorInfo, 'name');
+    const name: string = fqStr(authorInfo, 'author_name') || fqStr(authorInfo, 'name')
+      || fqStr(authorInfo, 'user_name');
     if (name.length > 0) {
       return name;
     }
@@ -690,19 +693,59 @@ function fqAuthorOf(data: Record<string, Object>): string {
   return fqStr(data, 'author');
 }
 
+/** 作者头衔徽标：user_title_infos[].title_text 优先，回退 author_role。 */
+function fqAuthorTitleOf(data: Record<string, Object>): string {
+  const authorInfo: Record<string, Object> | null = fqAsRecord(data['author_info']);
+  if (authorInfo === null) {
+    return '';
+  }
+  const titles: Object[] | null = fqAsArray(authorInfo['user_title_infos']);
+  if (titles !== null) {
+    for (const entry of titles) {
+      const rec: Record<string, Object> | null = fqAsRecord(entry);
+      if (rec === null) {
+        continue;
+      }
+      const text: string = fqStr(rec, 'title_text');
+      if (text.length > 0) {
+        return text;
+      }
+    }
+  }
+  return fqStr(authorInfo, 'author_role');
+}
+
+/** 在读人数展示文案：formatCounter(read_count) 优先，回退 sub_info。 */
+function fqReadLabelOf(data: Record<string, Object>, subInfo: string): string {
+  const formatted: string = fqFormatCounter(fqStr(data, 'read_count'));
+  if (formatted.length > 0) {
+    return formatted;
+  }
+  return subInfo;
+}
+
 export function fqParseBookDetail(payload: Record<string, Object>): FqBookDetail {
   const data: Record<string, Object> | null = fqResolveDetailData(payload);
   if (data === null) {
-    return new FqBookDetail('', '', '', '', '', '', -1, 0, 0, '', '');
+    return new FqBookDetail('', '', '', '', '', '', -1, 0, 0, '', '', [], false, '', '', '');
   }
   let category: string = fqStr(data, 'category');
   const tags: string[] = [];
   const rawTags: Object | undefined = data['tags'];
-  const rawTagArr: Object[] | null = fqAsArray(rawTags);
-  if (rawTagArr !== null) {
-    for (const tagValue of rawTagArr) {
-      if (typeof tagValue === 'string' && tagValue.trim().length > 0) {
-        tags.push(tagValue.trim());
+  if (typeof rawTags === 'string' && rawTags.trim().length > 0) {
+    const parts: string[] = rawTags.split(/[,,]/);
+    for (const part of parts) {
+      if (part.trim().length > 0) {
+        tags.push(part.trim());
+      }
+    }
+  } else {
+    const rawTagArr: Object[] | null = fqAsArray(rawTags);
+    if (rawTagArr !== null) {
+      for (const tagValue of rawTagArr) {
+        if (typeof tagValue === 'string' && tagValue.trim().length > 0) {
+          tags.push(tagValue.trim());
+        }
       }
     }
   }
@@ -714,6 +757,12 @@ export function fqParseBookDetail(payload: Record<string, Object>): FqBookDetail
     cover = fqStr(data, 'thumb_url');
   }
   const serialCount: number = fqAsInt(data['serial_count'], fqAsInt(data['content_chapter_number'], 0));
+  const subInfo: string = fqStr(data, 'sub_info');
+  const authorInfo: Record<string, Object> | null = fqAsRecord(data['author_info']);
+  let authorAvatar: string = '';
+  if (authorInfo !== null) {
+    authorAvatar = fqStr(authorInfo, 'user_avatar') || fqStr(authorInfo, 'avatar');
+  }
   return new FqBookDetail(
     fqStr(data, 'book_id'),
     fqStr(data, 'book_name'),
@@ -724,8 +773,13 @@ export function fqParseBookDetail(payload: Record<string, Object>): FqBookDetail
     fqAsInt(data['creation_status'], -1),
     fqAsInt(data['word_number'], 0),
     serialCount,
-    fqStr(data, 'sub_info'),
+    subInfo,
     fqStr(data, 'score'),
+    tags,
+    fqStr(data, 'authorize_type') === '1',
+    fqAuthorTitleOf(data),
+    authorAvatar,
+    fqReadLabelOf(data, subInfo),
   );
 }
 
@@ -733,9 +787,115 @@ export function fqParseBookDetail(payload: Record<string, Object>): FqBookDetail
 export function fqParseBookDetailText(text: string): FqBookDetail {
   const payload: Record<string, Object> | null = fqParseObject(text);
   if (payload === null) {
-    return new FqBookDetail('', '', '', '', '', '', -1, 0, 0, '', '');
+    return new FqBookDetail('', '', '', '', '', '', -1, 0, 0, '', '', [], false, '', '', '');
   }
   return fqParseBookDetail(payload);
+}
+
+// ---------------------------------------------------------------------------
+// 目录章节 + 章节试读（media_item.dart parseDirectory / chapter_summary.dart）
+// ---------------------------------------------------------------------------
+
+function fqDirectoryInner(payload: Record<string, Object>): Object | undefined {
+  let data: Object | undefined = payload['data'] !== undefined ? payload['data'] : payload;
+  const inner: Record<string, Object> | null = fqAsRecord(data);
+  if (inner !== null && (fqAsRecord(inner['data']) !== null || fqAsArray(inner['data']) !== null)) {
+    data = inner['data'];
+  }
+  return data;
+}
+
+function fqEntryIdOf(rec: Record<string, Object>): string {
+  const id: string = fqStr(rec, 'itemId') || fqStr(rec, 'item_id')
+    || fqStr(rec, 'chapter_id') || fqStr(rec, 'video_id')
+    || fqStr(rec, 'vid') || fqStr(rec, 'episode_id') || fqStr(rec, 'id');
+  if (id.length > 0 && id !== '0') {
+    return id;
+  }
+  return '';
+}
+
+function fqChapterListOf(volume: Object): Object[] | null {
+  if (fqAsArray(volume) !== null) {
+    return fqAsArray(volume);
+  }
+  const rec: Record<string, Object> | null = fqAsRecord(volume);
+  if (rec === null) {
+    return null;
+  }
+  const list: Object[] | null = fqAsArray(rec['chapterList']) ?? fqAsArray(rec['chapter_list']);
+  return list;
+}
+
+/** 目录载荷 -> 章节平铺列表（chapterListWithVolume 多卷拼接）。 */
+export function fqParseDirectory(payload: Record<string, Object>): FqChapter[] {
+  const inner: Object | undefined = fqDirectoryInner(payload);
+  const innerRec: Record<string, Object> | null = fqAsRecord(inner);
+  if (innerRec === null) {
+    return [];
+  }
+  const chapters: FqChapter[] = [];
+  const volumes: Object[] | null = fqAsArray(innerRec['chapterListWithVolume']);
+  if (volumes !== null) {
+    for (const volume of volumes) {
+      const entries: Object[] | null = fqChapterListOf(volume);
+      if (entries === null) {
+        continue;
+      }
+      for (const entry of entries) {
+        const rec: Record<string, Object> | null = fqAsRecord(entry);
+        if (rec === null) {
+          continue;
+        }
+        const itemId: string = fqEntryIdOf(rec);
+        if (itemId.length === 0) {
+          continue;
+        }
+        chapters.push(new FqChapter(itemId, fqStr(rec, 'title') || fqStr(rec, 'chapter_title')));
+      }
+    }
+  }
+  return chapters;
+}
+
+const FQ_PREVIEW_MARKER_RE: RegExp = new RegExp('\\{!--[\\s\\S]*?--\\}|<!--[\\s\\S]*?-->|\\{!--[\\s\\S]*$|<!--[\\s\\S]*$', 'g');
+const FQ_PREVIEW_TAG_RE: RegExp = new RegExp('</?[a-zA-Z][^>]*>', 'g');
+const FQ_PREVIEW_SPACE_RE: RegExp = new RegExp('\\s+', 'g');
+
+/** 试读正文清洗：剥掉音频标记/HTML 注释/标签与实体，压缩空白。 */
+function fqCleanPreview(raw: string): string {
+  let text: string = raw.replace(FQ_PREVIEW_MARKER_RE, ' ');
+  text = text.replace(FQ_PREVIEW_TAG_RE, ' ');
+  text = text.replace('&nbsp;', ' ').replace('&lt;', '<').replace('&gt;', '>')
+    .replace('&quot;', '"').replace('&#39;', '\'').replace('&apos;', '\'')
+    .replace('&amp;', '&');
+  return text.replace(FQ_PREVIEW_SPACE_RE, ' ').trim();
+}
+
+/** 试读载荷 -> itemId -> 正文开头（data.summary_item_data）。 */
+export function fqParseChapterSummaries(payload: Record<string, Object>): Map<string, string> {
+  const out: Map<string, string> = new Map();
+  const data: Record<string, Object> | null = fqAsRecord(payload['data']);
+  if (data === null) {
+    return out;
+  }
+  const entries: Object[] | null = fqAsArray(data['summary_item_data']);
+  if (entries === null) {
+    return out;
+  }
+  for (const entry of entries) {
+    const rec: Record<string, Object> | null = fqAsRecord(entry);
+    if (rec === null) {
+      continue;
+    }
+    const itemId: string = fqStr(rec, 'item_id') || fqStr(rec, 'itemId');
+    const summary: string = fqCleanPreview(fqStr(rec, 'summary'));
+    if (itemId.length === 0 || summary.length === 0) {
+      continue;
+    }
+    out.set(itemId, summary);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------

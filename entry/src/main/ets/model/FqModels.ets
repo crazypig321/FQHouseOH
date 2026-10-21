@@ -91,6 +91,16 @@ export class FqBookDetail {
   readonly serialCount: number;
   readonly subInfo: string;
   readonly scoreText: string;
+  /** 分类标签（tags 拆分）。 */
+  readonly tags: string[];
+  /** authorize_type == '1' 即原创。 */
+  readonly original: boolean;
+  /** 作者头衔徽标（author_info.user_title_infos.title_text，如 作家Lv.5）。 */
+  readonly authorTitle: string;
+  /** 作者头像（完整 URL 或后端相对路径）。 */
+  readonly authorAvatar: string;
+  /** 在读人数展示文案：优先 formatCounter(read_count)，否则 sub_info。 */
+  readonly readLabel: string;
 
   constructor(
     bookId: string,
@@ -104,6 +114,11 @@ export class FqBookDetail {
     serialCount: number,
     subInfo: string,
     scoreText: string,
+    tags: string[],
+    original: boolean,
+    authorTitle: string,
+    authorAvatar: string,
+    readLabel: string,
   ) {
     this.bookId = bookId;
     this.title = title;
@@ -116,6 +131,11 @@ export class FqBookDetail {
     this.serialCount = serialCount;
     this.subInfo = subInfo;
     this.scoreText = scoreText;
+    this.tags = tags;
+    this.original = original;
+    this.authorTitle = authorTitle;
+    this.authorAvatar = authorAvatar;
+    this.readLabel = readLabel;
   }
 
   get statusLabel(): string {
@@ -138,7 +158,37 @@ export class FqBookDetail {
 
 /** 空详情占位（组件默认值用）。 */
 export function fqEmptyBookDetail(): FqBookDetail {
-  return new FqBookDetail('', '', '', '', '', '', -1, 0, 0, '', '');
+  return new FqBookDetail('', '', '', '', '', '', -1, 0, 0, '', '', [], false, '', '', '');
+}
+
+/** 目录章节（/api/directory，M1 仅取标题与 itemId）。 */
+export class FqChapter {
+  readonly itemId: string;
+  readonly title: string;
+
+  constructor(itemId: string, title: string) {
+    this.itemId = itemId;
+    this.title = title;
+  }
+}
+
+/** 对齐 fqapp formatCounter：纯数字 79528 -> 7.9万，非数字原样返回。 */
+export function fqFormatCounter(raw: string): string {
+  const text: string = raw.trim();
+  if (text.length === 0) {
+    return '';
+  }
+  const parsed: number = Number.parseInt(text, 10);
+  if (Number.isNaN(parsed)) {
+    return text;
+  }
+  if (parsed < 10000) {
+    return `${parsed}`;
+  }
+  if (parsed >= 100000000) {
+    return `${trimFqZero((parsed / 100000000).toFixed(1))}亿`;
+  }
+  return `${trimFqZero((parsed / 10000).toFixed(1))}万`;
 }
 
 /** 对齐 fqapp formatWordCount：1328318 -> 132.8万字。 */

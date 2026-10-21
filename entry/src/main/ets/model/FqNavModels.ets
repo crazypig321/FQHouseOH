@@ -20,18 +20,27 @@ export class DetailNavParams {
 
 /**
  * HDS 标题栏内容配置（样式统一由 view/CommonNav 的 CommonNav 提供）：
- * 标题 + 可选刷新（onRefresh）/搜索（showSearch，可随搜索条隐藏状态动态透出）/
- * 排行（showRank，常驻）菜单 + 可选 bottomBuilder。
+ * 标题 + 可选书架（onShelf，shelfActive 控制实心图标）/刷新（onRefresh）/
+ * 搜索（showSearch）/排行（showRank）菜单 + 可选 bottomBuilder。
  */
 export function FqTitleBarOptions(mainTitle: ResourceStr, showSearch: boolean,
   bottomBuilder?: BottomBuilderParams, onRefresh?: () => void,
-  showRank?: boolean): TitleBarContentOptions {
+  showRank?: boolean, onShelf?: () => void, shelfActive?: boolean): TitleBarContentOptions {
   const content: TitleBarContentOptions = {
     title: {
       mainTitle: mainTitle,
     },
   };
   const menus: HdsNavigationMenuItemOptions[] = [];
+  if (onShelf !== undefined) {
+    menus.push({
+      content: {
+        icon: shelfActive === true ? $r('sys.symbol.bookmark_fill') : $r('sys.symbol.bookmark'),
+        label: 'shelf',
+        action: onShelf,
+      },
+    });
+  }
   if (showSearch) {
     menus.push({
       content: {
