@@ -36,7 +36,7 @@ struct Index {
         appState.currTabsIndex = index;
       })
     }
-    .titleMode(HdsNavigationTitleMode.FREE)
+    .titleMode(HdsNavigationTitleMode.MINI)
     .mode(NavigationMode.Stack)
     .hideBackButton(true)
     .hideTitleBar(true)

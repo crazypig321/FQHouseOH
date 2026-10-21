@@ -57,6 +57,14 @@ export struct CommonNav {
   @Param doubleTapToTop: boolean = false
   @Param scrollToTopYOffset: number = 0
   @Param scrollMaskExtraHeight?: number = 0
+  /** 隐藏标题栏（带动画）；阅读页阅读态传 true */
+  @Param hideTitleBar: boolean = false
+  /** 页面背景色；undefined 用 sys.color.background_secondary */
+  @Param pageBackgroundColor: ResourceColor | undefined = undefined
+  /** 是否保留品牌橙渐变背景 */
+  @Param showBrandGradient: boolean = true
+  /** 底部悬浮条高度（阅读页随菜单显隐 0/56 切换） */
+  @Param readBarHeight: number = 56
 
   /** 返回 true 拦截系统返回 */
   @Event backPressed: () => boolean = (): boolean => false
@@ -113,7 +121,7 @@ export struct CommonNav {
         .vertical(false)
         .scrollable(false)
         .barPosition(BarPosition.End)
-        .barHeight(56)
+        .barHeight(this.readBarHeight)
         .barFloatingStyle({
           barWidth: { smallWidth: 330, mediumWidth: 480, largeWidth: 560 },
           barBottomMargin: 28,
@@ -161,6 +169,7 @@ export struct CommonNav {
       avoidLayoutSafeArea: this.avoidLayoutSafeArea,
     })
     .titleMode(HdsNavDestinationTitleMode.MINI)
+    .hideTitleBar(this.hideTitleBar, true)
     .bindToScrollable(this.scroller ? [this.scroller] : [])
     .hideBackButton(this.isHideBackButton)
     .onTouch((event: TouchEvent): void => {
@@ -171,7 +180,7 @@ export struct CommonNav {
         this.pageWidthVp = newArea.width;
       }
     })
-    .backgroundColor($r('sys.color.background_secondary'))
+    .backgroundColor(this.pageBackgroundColor ?? $r('sys.color.background_secondary'))
     .width('100%')
     .height('100%')
     .onBackPressed(() => {
@@ -181,17 +190,39 @@ export struct CommonNav {
       hideBottomBuilder: this.isSearchBarScroller,
       mode: HideMode.SCROLL_UP_TO
     })
-    .linearGradient({
-      angle: 180,
-      colors: [['#1AFF7A3D', 0], ['#00FF7A3D', 1]],
-    })
+    .linearGradient(this.brandGradient())
   }
 
-  /** 底部悬浮操作栏：小说带听书/下载，其余类型仅主按钮（开始观看/收听/阅读）。 */
+  /** 品牌橙渐变背景；showBrandGradient 为 false（阅读页）时返回 undefined。 */
+  private brandGradient(): LinearGradient | undefined {
+    if (!this.showBrandGradient) {
+      return undefined;
+    }
+    const options: LinearGradientOptions = {
+      angle: 180,
+      colors: [['#1AFF7A3D', 0], ['#00FF7A3D', 1]],
+    };
+    return options;
+  }
+
+  /** 底部悬浮操作栏：小说带听书/下载，其余类型仅主按钮（开始观看/收听/阅读）；reader 为阅读工具条。 */
   @Builder
   private ReadBar() {
-    Row() {
-      if (this.readBarKind === 'book') {
+    if (this.readBarKind === 'reader') {
+      Row() {
+        this.ReaderTool($r('sys.symbol.list_bullet'), '目录')
+        this.ReaderBarDivider()
+        this.ReaderTool($r('sys.symbol.chevron_left'), '上一章')
+        this.ReaderBarDivider()
+        this.ReaderTool($r('sys.symbol.chevron_right'), '下一章')
+        this.ReaderBarDivider()
+        this.ReaderTool($r('sys.symbol.textformat'), '设置')
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+    } else {
+      Row() {
+        if (this.readBarKind === 'book') {
         Row() {
           ForEach([$r('sys.symbol.headphones'), $r('sys.symbol.download')], (v: Resource, i: number) => {
             Column({ space: 3 }) {
@@ -244,10 +275,39 @@ export struct CommonNav {
       .onClick(() => this.readerBarClick(this.readBarActionLabel()))
     }
     .width('100%')
-    .padding({ left: this.readBarKind != 'book' ? 0 : 10 })
-    .borderRadius(24)
-    .alignItems(VerticalAlign.Center)
-    .justifyContent(FlexAlign.SpaceBetween)
+      .padding({ left: this.readBarKind != 'book' ? 0 : 10 })
+      .borderRadius(24)
+      .alignItems(VerticalAlign.Center)
+      .justifyContent(FlexAlign.SpaceBetween)
+    }
+  }
+
+  /** 阅读页悬浮条工具键（对齐听书/下载小键样式），点击按文案分发 readerBarClick。 */
+  @Builder
+  private ReaderTool(icon: Resource, label: string) {
+    Column({ space: 3 }) {
+      SymbolGlyph(icon)
+        .fontSize(19)
+        .fontColor([$r('sys.color.icon_primary')])
+      Text(label)
+        .fontSize(10.5)
+        .fontColor($r('sys.color.font_primary'))
+    }
+    .alignItems(HorizontalAlign.Center)
+    .layoutWeight(1)
+    .onClick(() => {
+      this.readerBarClick(label);
+    })
+  }
+
+  /** 阅读页悬浮条键间分隔线。 */
+  @Builder
+  private ReaderBarDivider() {
+    Divider()
+      .vertical(true)
+      .strokeWidth(0.5)
+      .height(22)
+      .color($r('sys.color.comp_divider'))
   }
 
   /** 主按钮文案：观看 / 收听 / 阅读（对齐 fqapp _readLabel）。 */

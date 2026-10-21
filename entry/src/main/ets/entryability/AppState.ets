@@ -13,6 +13,10 @@ class AppState {
   @Trace topRect: number = 0;
   /** 底部手势区避让高度（vp） */
   @Trace bottomRect: number = 0;
+  /** 屏幕物理宽度（px，启动时由 EntryAbility 同步） */
+  @Trace screenWidth: number = 0;
+  /** 屏幕物理高度（px，启动时由 EntryAbility 同步） */
+  @Trace screenHeight: number = 0;
 
   // 沉浸光感参数
   @Trace materialLevel: hdsMaterial.MaterialLevel = hdsMaterial.MaterialLevel.ADAPTIVE;
@@ -20,6 +24,9 @@ class AppState {
 
   // 智感握姿开关（持久化设置，启动时由 Bootstrap 恢复，设置页切换时更新）
   @Trace smartReachEnabled: boolean = false;
+
+  /** 系统当前是否深色模式（EntryAbility 启动与 onConfigurationUpdate 同步） */
+  @Trace isDark: boolean = false;
 }
 
 export const appState: AppState = new AppState();

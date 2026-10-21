@@ -14,11 +14,14 @@
  */
 
 import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
+import type { Configuration } from '@ohos.app.ability.Configuration';
+import resourceManager from '@ohos.resourceManager';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { window } from '@kit.ArkUI';
+import { display, mediaquery, window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { FqBackend } from '../core/FqBackend';
 import { appState } from './AppState';
+import { themeUtils } from '../utils/ThemeUtils';
 
 const DOMAIN = 0x0000;
 
@@ -39,9 +42,52 @@ export default class EntryAbility extends UIAbility {
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onDestroy');
   }
 
+  /** 同步系统深浅色到全局状态（启动与配置变化时调用）。 */
+  private applyColorMode(colorMode: ConfigurationConstant.ColorMode): void {
+    appState.isDark = colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
+    themeUtils.colorModeChange(colorMode);
+  }
+
+  private syncColorMode(): void {
+    try {
+      const config: resourceManager.Configuration = this.context.resourceManager.getConfigurationSync();
+      hilog.info(DOMAIN, 'testTag', 'config colorMode: %{public}s', `${config.colorMode}`);
+      const isDark: boolean = config.colorMode === resourceManager.ColorMode.DARK;
+      appState.isDark = isDark;
+      themeUtils.colorModeChange(isDark ? ConfigurationConstant.ColorMode.COLOR_MODE_DARK
+        : ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT);
+    } catch (error) {
+      // 读取失败保持默认浅色
+    }
+  }
+
+  onConfigurationUpdate(newConfig: Configuration): void {
+    this.applyColorMode(newConfig.colorMode !== undefined
+      ? newConfig.colorMode : ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
+  }
+
+  /** media query 监听实际生效的深浅色（跟随系统时 getConfigurationSync 可能返回 NOT_SET）。 */
+  private watchColorMode(): void {
+    try {
+      const listener: mediaquery.MediaQueryListener =
+        mediaquery.matchMediaSync('(dark-mode: true)');
+      appState.isDark = listener.matches;
+      hilog.info(DOMAIN, 'testTag', 'dark-mode matches: %{public}s', `${listener.matches}`);
+      listener.on('change', (result: mediaquery.MediaQueryResult) => {
+        const isDark: boolean = result.matches === true;
+        hilog.info(DOMAIN, 'testTag', 'dark-mode change: %{public}s', `${isDark}`);
+        this.applyColorMode(isDark ? ConfigurationConstant.ColorMode.COLOR_MODE_DARK
+          : ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT);
+      });
+    } catch (error) {
+      hilog.error(DOMAIN, 'testTag', 'watchColorMode failed: %{public}s', JSON.stringify(error));
+    }
+  }
+
   onWindowStageCreate(windowStage: window.WindowStage): void {
     // Main window is created, set main page for this ability
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onWindowStageCreate');
+    this.syncColorMode();
 
     windowStage.loadContent('pages/Index', (err) => {
       if (err.code) {
@@ -51,6 +97,12 @@ export default class EntryAbility extends UIAbility {
       hilog.info(DOMAIN, 'testTag', 'Succeeded in loading the content.');
       // 沉浸式：页面铺满全屏（状态栏与底部手势区由组件自行避让）
       const mainWindow: window.Window = windowStage.getMainWindowSync();
+      this.watchColorMode();
+      // 屏幕物理尺寸入全局状态（供阅读器排版视口等使用）
+      const displayData: display.Display = display.getDefaultDisplaySync();
+      appState.screenWidth = displayData.width;
+      appState.screenHeight = displayData.height;
+      hilog.info(DOMAIN, 'testTag', 'screen size: %{public}dx%{public}d', `${appState.screenWidth}`, `${appState.screenHeight}`);
       mainWindow.setWindowLayoutFullScreen(true).then(() => {
         // 全屏后跟踪系统避让区尺寸，供各页面 contentStartOffset/EndOffset 计算
         const uiContext = mainWindow.getUIContext();

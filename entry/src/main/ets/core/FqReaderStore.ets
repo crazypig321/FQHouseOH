@@ -28,8 +28,8 @@ export class FqReaderProgress {
 export class FqReaderSettings {
   fontSize: number = 19;
   lineHeight: number = 1.9;
-  /** 0 纸白 / 1 米黄 / 2 夜间。 */
-  themeIndex: number = 0;
+  /** -1 跟随系统深浅色 / 0 纸白 / 1 米黄 / 2 夜间。 */
+  themeIndex: number = -1;
   /** 0 仿真翻页 / 1 横滑翻页。 */
   flipIndex: number = 0;
 }
@@ -84,7 +84,12 @@ export class FqReaderStore {
       }
       const themeIndex: Object | undefined = rec['themeIndex'];
       if (typeof themeIndex === 'number') {
-        FqReaderStore.settings.themeIndex = Math.min(2, Math.max(0, Math.trunc(themeIndex)));
+        FqReaderStore.settings.themeIndex = Math.min(2, Math.max(-1, Math.trunc(themeIndex)));
+      }
+      // 旧版本数据（无版本号）迁移：主题重置为跟随系统（旧版无跟随档，存值语义已变化）
+      const version: Object | undefined = rec['v'];
+      if (typeof version !== 'number' || Math.trunc(version) < 2) {
+        FqReaderStore.settings.themeIndex = -1;
       }
       const flipIndex: Object | undefined = rec['flipIndex'];
       if (typeof flipIndex === 'number') {
@@ -103,13 +108,14 @@ export class FqReaderStore {
     themeIndex: number, flipIndex: number): void {
     FqReaderStore.settings.fontSize = fqClampFontSize(fontSize);
     FqReaderStore.settings.lineHeight = fqClampLineHeight(lineHeight);
-    FqReaderStore.settings.themeIndex = Math.min(2, Math.max(0, Math.trunc(themeIndex)));
+    FqReaderStore.settings.themeIndex = Math.min(2, Math.max(-1, Math.trunc(themeIndex)));
     FqReaderStore.settings.flipIndex = Math.min(1, Math.max(0, Math.trunc(flipIndex)));
     const pref: preferences.Preferences | null = FqReaderStore.pref;
     if (pref === null) {
       return;
     }
     const rec: Record<string, Object> = {};
+    rec['v'] = 2;
     rec['fontSize'] = FqReaderStore.settings.fontSize;
     rec['lineHeight'] = FqReaderStore.settings.lineHeight;
     rec['themeIndex'] = FqReaderStore.settings.themeIndex;

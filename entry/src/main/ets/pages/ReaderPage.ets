@@ -1,22 +1,29 @@
 /**
- * 小说阅读页（NavDestination，基于 Reader Kit）：
+ * 小说阅读页（CommonNav 框架，基于 Reader Kit）：
  * 章节正文（v1 图文接口优先，回退旧版 /api/content）写入沙箱 txt 后交
- * ReadPageComponent 排版渲染；Reader Kit 仅支持本地文件，故每章一文件，
- * 切章重排。进度（章节 + domPos）与设置（字号/行距/主题/翻页）持久化。
- * 交互：左右 1/3 透传给组件原生点按翻页，中间 1/3 弹出菜单。
+ * ReadPageComponent 排版渲染；Reader Kit 仅支持本地文件，故每章一文件。
+ * 交互：屏幕三分区 —— 左/右点击与横滑翻页（越界自动切换章节），
+ * 中间呼出菜单：CommonNav 标题栏（hideTitleBar 随菜单显隐）+ ReadBar
+ * 悬浮工具条（目录/上一章/下一章/设置，readBarHeight 随菜单 0/56）；
+ * 目录/设置为 bindSheet 半模态公共 sheet（CommonSheet）；阅读时隐藏系统状态栏。
+ * 进度（章节 + domPos）与设置（字号/行距/主题/翻页）持久化。
  */
 
 import { common } from '@kit.AbilityKit';
-import { display } from '@kit.ArkUI';
+import { display, window } from '@kit.ArkUI';
 import { fileIo } from '@kit.CoreFileKit';
 import { bookParser, ReadPageComponent, readerCore } from '@kit.ReaderKit';
 import { BusinessError } from '@kit.BasicServicesKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+import { TitleBarContentOptions } from '@kit.UIDesignKit';
 import { FqBackend, fqErrorMessage } from '../core/FqBackend';
 import { FqChapter, fqKindToTab } from '../model/FqModels';
 import { FqReaderProgress, FqReaderStore } from '../core/FqReaderStore';
 import { ReaderNavParams } from '../model/FqNavModels';
-import { NavPathUtils } from '../utils/NavPathUtils';
+import { CommonNav, titleBarOf } from '../view/CommonNav';
 import { CommonLoading, FQ_ACCENT } from '../view/CommonCom';
+import { CommonSheet, FqSheetOptions } from '../view/CommonSheet';
+import { appState } from '../entryability/AppState';
 
 /** 阅读主题：themeColor 仅支持 6 位色值（无透明度）。 */
 interface FqReaderTheme {
@@ -34,13 +41,52 @@ const FQ_READER_THEMES: FqReaderTheme[] = [
 
 const FQ_READER_FLIP_LABELS: string[] = ['仿真', '横滑'];
 
+/** 翻页越界判定超时（ms）：flipPage 后 pageShow 未推进即视为章节边界。 */
+const FQ_FLIP_BOUNDARY_TIMEOUT: number = 500;
+
+/** 目录懒加载数据源：持过滤后章节，变更时通知 LazyForEach 刷新。 */
+class FqChapterSource implements IDataSource {
+  private items: FqChapter[] = [];
+  private listeners: DataChangeListener[] = [];
+
+  setItems(items: FqChapter[]): void {
+    this.items = items;
+    for (const listener of this.listeners) {
+      listener.onDataReloaded();
+    }
+  }
+
+  totalCount(): number {
+    return this.items.length;
+  }
+
+  getData(index: number): Object {
+    return this.items[index];
+  }
+
+  registerDataChangeListener(listener: DataChangeListener): void {
+    if (this.listeners.indexOf(listener) < 0) {
+      this.listeners.push(listener);
+    }
+  }
+
+  unregisterDataChangeListener(listener: DataChangeListener): void {
+    const index: number = this.listeners.indexOf(listener);
+    if (index >= 0) {
+      this.listeners.splice(index, 1);
+    }
+  }
+}
+
 @ComponentV2
 export struct ReaderPage {
   @Local loadingState: boolean = true;
   @Local errorMsg: string = '';
   @Local menuVisible: boolean = false;
-  @Local drawerVisible: boolean = false;
-  @Local settingsVisible: boolean = false;
+  @Local sheetVisible: boolean = false;
+  @Local sheetSearchActive: boolean = false;
+  @Local sheetKeyword: string = '';
+  @Local settingsSheetVisible: boolean = false;
   @Local chapterIndex: number = 0;
   @Local totalChapters: number = 0;
   @Local fontSize: number = 19;
@@ -61,6 +107,13 @@ export struct ReaderPage {
   private filesDir: string = '';
   private initialized: boolean = false;
   private drawerScroller: Scroller = new Scroller();
+  /** 目录懒加载数据源（过滤后章节，搜索时刷新）。 */
+  private chapterSource: FqChapterSource = new FqChapterSource();
+  /** 最近一次 pageShow 的 startDomPos，用于判断 flipPage 是否推进了页面。 */
+  private lastShownStart: string = '';
+  /** 待定翻页方向：-1 无，0 上一页，1 下一页。 */
+  private pendingFlip: number = -1;
+  private flipTimerId: number = -1;
 
   aboutToAppear(): void {
     this.bookId = ReaderNavParams.id;
@@ -73,12 +126,17 @@ export struct ReaderPage {
     this.lineHeight = settings.lineHeight;
     this.themeIndex = settings.themeIndex;
     this.flipIndex = settings.flipIndex;
+    hilog.info(0x0001, 'ReaderTheme',
+      `aboutToAppear stored themeIndex=${settings.themeIndex} appIsDark=${appState.isDark}`);
     this.filesDir = getContext(this).filesDir;
+    this.applySystemBar(false);
     this.load();
   }
 
   aboutToDisappear(): void {
+    this.applySystemBar(true);
     this.loadToken += 1;
+    this.clearPendingFlip();
     try {
       this.controller.releaseBook();
     } catch (error) {
@@ -95,7 +153,19 @@ export struct ReaderPage {
   }
 
   build() {
-    NavDestination() {
+    CommonNav({
+      //titleBarOp: this.buildTitleBar(),
+      hideTitleBar: !this.menuVisible,
+      pageBackgroundColor: this.theme().background,
+      showBrandGradient: false,
+      isShowBar: true,
+      readBarKind: 'reader',
+      readBarHeight: this.menuVisible ? 56 : 0,
+      readerBarClick: (key: string): void => {
+        this.onReadBarAction(key);
+      },
+      backPressed: (): boolean => this.handleBackPressed(),
+    }) {
       Stack() {
         ReadPageComponent({
           controller: this.controller,
@@ -110,22 +180,52 @@ export struct ReaderPage {
             this.resolveController();
           },
         })
+        .width('100%')
+        .height('100%')
+
         Row() {
           Column()
             .layoutWeight(1)
             .height('100%')
-            .hitTestBehavior(HitTestMode.None)
+            .onClick(() => this.requestFlip(false))
+            .gesture(PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 30 })
+              .onActionEnd((event: GestureEvent) => {
+                if (event.offsetX < -30) {
+                  this.requestFlip(true);
+                } else if (event.offsetX > 30) {
+                  this.requestFlip(false);
+                }
+              }))
           Column()
             .layoutWeight(1)
             .height('100%')
             .onClick(() => this.toggleMenu())
+            .gesture(PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 30 })
+              .onActionEnd((event: GestureEvent) => {
+                if (event.offsetX < -30) {
+                  this.requestFlip(true);
+                } else if (event.offsetX > 30) {
+                  this.requestFlip(false);
+                }
+              }))
           Column()
             .layoutWeight(1)
             .height('100%')
-            .hitTestBehavior(HitTestMode.None)
+            .onClick(() => this.requestFlip(true))
+            .gesture(PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 30 })
+              .onActionEnd((event: GestureEvent) => {
+                if (event.offsetX < -30) {
+                  this.requestFlip(true);
+                } else if (event.offsetX > 30) {
+                  this.requestFlip(false);
+                }
+              }))
         }
         .width('100%')
         .height('100%')
+        .bindSheet(this.settingsSheetVisible, this.SettingsSheet(), FqSheetOptions((): void => {
+          this.settingsSheetVisible = false;
+        }, SheetSize.MEDIUM))
 
         if (this.loadingState) {
           Column({ space: 12 }) {
@@ -156,217 +256,84 @@ export struct ReaderPage {
         }
 
         if (this.menuVisible) {
-          Column() {
-            this.TopBar()
-            Blank()
-            if (this.settingsVisible) {
-              this.SettingsPanel()
-            }
-            this.BottomBar()
-          }
-          .width('100%')
-          .height('100%')
-        }
-
-        if (this.drawerVisible) {
-          this.ChapterDrawer()
+          Column()
+            .width('100%')
+            .height('100%')
+            .onClick(() => {
+              this.menuVisible = false;
+              this.sheetVisible = false;
+              this.settingsSheetVisible = false;
+            })
         }
       }
       .width('100%')
       .height('100%')
       .backgroundColor(this.theme().background)
+      .bindSheet(this.sheetVisible, this.CatalogSheet(), FqSheetOptions((): void => {
+        this.onSheetClose();
+      }))
     }
-    .hideTitleBar(true)
-    .backgroundColor(this.theme().background)
-    .onBackPressed((): boolean => {
-      if (this.drawerVisible || this.settingsVisible || this.menuVisible) {
-        this.drawerVisible = false;
-        this.settingsVisible = false;
-        this.menuVisible = false;
-        return true;
-      }
-      return false;
-    })
   }
 
   // ---------------------------------------------------------------------------
-  // 菜单 / 抽屉 / 设置
+  // 标题栏 / ReadBar 分发 / 返回
   // ---------------------------------------------------------------------------
 
-  @Builder
-  private TopBar() {
-    Row({ space: 12 }) {
-      SymbolGlyph($r('sys.symbol.chevron_left'))
-        .fontSize(24)
-        .fontColor([this.theme().fontColor])
-        .onClick(() => NavPathUtils.pop())
-      Column({ space: 2 }) {
-        if (this.bookTitle.length > 0) {
-          Text(this.bookTitle)
-            .fontSize(15)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(this.theme().fontColor)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-        }
-        Text(this.currentChapterTitle())
-          .fontSize(12)
-          .fontColor(this.theme().fontColor)
-          .opacity(0.7)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-      }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
-      Text(`${this.chapterIndex + 1}/${this.totalChapters}`)
-        .fontSize(12)
-        .fontColor(this.theme().fontColor)
-        .opacity(0.7)
-    }
-    .width('100%')
-    .padding({ left: 16, right: 20, top: 10, bottom: 10 })
-    .backgroundColor(this.theme().background)
+  /** CommonNav 标题栏：章节标题（MINI 模式仅主标题）。 */
+  private buildTitleBar(): TitleBarContentOptions {
+    const chapterTitle: string = this.currentChapterTitle();
+    const options: TitleBarContentOptions = {
+      title: {
+        mainTitle: chapterTitle.length > 0 ? chapterTitle : this.bookTitle,
+      },
+    };
+    return options;
   }
 
-  @Builder
-  private BottomBar() {
-    Row({ space: 6 }) {
-      this.MenuAction($r('sys.symbol.list_bullet'), '目录', (): void => {
-        this.openDrawer();
-      })
-      this.MenuAction($r('sys.symbol.textformat'), '设置', (): void => {
-        this.settingsVisible = !this.settingsVisible;
-      })
-      Divider()
-        .vertical(true)
-        .strokeWidth(0.5)
-        .height(22)
-        .color(this.theme().fontColor)
-        .opacity(0.2)
-        .margin({ left: 8, right: 8 })
-      Text('上一章')
-        .fontSize(14)
-        .fontColor(this.theme().fontColor)
-        .opacity(this.hasPrev() ? 1 : 0.35)
-        .padding({ left: 10, right: 10, top: 8, bottom: 8 })
-        .onClick(() => this.openPrev())
-      Text('下一章')
-        .fontSize(14)
-        .fontColor(this.theme().fontColor)
-        .opacity(this.hasNext() ? 1 : 0.35)
-        .padding({ left: 10, right: 10, top: 8, bottom: 8 })
-        .onClick(() => this.openNext())
+  /** ReadBar 悬浮工具条分发：目录 / 设置 / 上一章 / 下一章。 */
+  private onReadBarAction(key: string): void {
+    if (key === '目录') {
+      this.openSheet();
+    } else if (key === '设置') {
+      this.settingsSheetVisible = true;
+    } else if (key === '上一章') {
+      this.openPrev();
+    } else if (key === '下一章') {
+      this.openNext();
     }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 10, bottom: 10 })
-    .backgroundColor(this.theme().background)
-    .alignItems(VerticalAlign.Center)
   }
 
-  @Builder
-  private MenuAction(icon: Resource, label: string, action: () => void) {
-    Column({ space: 4 }) {
-      SymbolGlyph(icon)
-        .fontSize(20)
-        .fontColor([this.theme().fontColor])
-      Text(label)
-        .fontSize(11)
-        .fontColor(this.theme().fontColor)
+  /** 系统返回：先关目录半模态，再关菜单，最后放行返回上一页。 */
+  private handleBackPressed(): boolean {
+    if (this.sheetVisible) {
+      this.onSheetClose();
+      return true;
     }
-    .alignItems(HorizontalAlign.Center)
-    .padding({ left: 10, right: 10, top: 4, bottom: 4 })
-    .onClick(() => action())
+    if (this.settingsSheetVisible || this.menuVisible) {
+      this.settingsSheetVisible = false;
+      this.menuVisible = false;
+      return true;
+    }
+    return false;
   }
 
-  @Builder
-  private SettingsPanel() {
-    Column({ space: 16 }) {
-      Row({ space: 12 }) {
-        Text('字号')
-          .fontSize(14)
-          .fontColor(this.theme().fontColor)
-          .width(36)
-        this.SettingChip('A-', (): void => {
-          this.changeFontSize(-1);
-        })
-        Text(`${this.fontSize}`)
-          .fontSize(14)
-          .fontColor(this.theme().fontColor)
-          .width(32)
-          .textAlign(TextAlign.Center)
-        this.SettingChip('A+', (): void => {
-          this.changeFontSize(1);
-        })
-        Blank()
-        Text('行距')
-          .fontSize(14)
-          .fontColor(this.theme().fontColor)
-        this.SettingChip('-', (): void => {
-          this.changeLineHeight(-0.1);
-        })
-        Text(`${this.lineHeight.toFixed(1)}`)
-          .fontSize(14)
-          .fontColor(this.theme().fontColor)
-          .width(32)
-          .textAlign(TextAlign.Center)
-        this.SettingChip('+', (): void => {
-          this.changeLineHeight(0.1);
-        })
-      }
-      .width('100%')
-      .alignItems(VerticalAlign.Center)
+  /** 沉浸控制：阅读时隐藏系统状态栏，菜单呼出（标题栏/工具栏出现）时恢复。 */
+  @Monitor('menuVisible')
+  onMenuVisibleChange(): void {
+    this.applySystemBar(this.menuVisible);
+  }
 
-      Row({ space: 12 }) {
-        Text('主题')
-          .fontSize(14)
-          .fontColor(this.theme().fontColor)
-          .width(36)
-        ForEach(FQ_READER_THEMES, (theme: FqReaderTheme, index: number) => {
-          Column({ space: 4 }) {
-            Column()
-              .width(34)
-              .height(34)
-              .borderRadius(17)
-              .backgroundColor(theme.background)
-              .border({
-                width: this.themeIndex === index ? 2 : 1,
-                color: this.themeIndex === index ? FQ_ACCENT : this.theme().fontColor,
-              })
-            Text(theme.label)
-              .fontSize(10)
-              .fontColor(this.theme().fontColor)
-              .opacity(this.themeIndex === index ? 1 : 0.6)
-          }
-          .alignItems(HorizontalAlign.Center)
-          .onClick(() => {
-            this.themeIndex = index;
-            this.applySettingChange();
-          })
-        }, (theme: FqReaderTheme): string => theme.label)
-        Blank()
-        Text('翻页')
-          .fontSize(14)
-          .fontColor(this.theme().fontColor)
-        ForEach(FQ_READER_FLIP_LABELS, (label: string, index: number) => {
-          Text(label)
-            .fontSize(12)
-            .fontColor(this.flipIndex === index ? '#FFFFFF' : this.theme().fontColor)
-            .backgroundColor(this.flipIndex === index ? FQ_ACCENT : 'transparent')
-            .borderRadius(13)
-            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-            .onClick(() => {
-              this.flipIndex = index;
-              this.applySettingChange();
-            })
-        }, (label: string): string => label)
+  private applySystemBar(show: boolean): void {
+    const context: common.UIAbilityContext =
+      this.getUIContext().getHostContext() as common.UIAbilityContext;
+    window.getLastWindow(context).then((win: window.Window) => {
+      if (show) {
+        win.setWindowSystemBarEnable(['status', 'navigation']);
+      } else {
+        win.setWindowSystemBarEnable(['navigation']);
       }
-      .width('100%')
-      .alignItems(VerticalAlign.Center)
-    }
-    .width('100%')
-    .padding({ left: 20, right: 20, top: 14, bottom: 14 })
-    .backgroundColor(this.theme().background)
-    .alignItems(HorizontalAlign.Start)
+    }).catch((): void => {
+    });
   }
 
   @Builder
@@ -383,62 +350,249 @@ export struct ReaderPage {
       .onClick(() => action())
   }
 
+  /** 目录半模态：公共 sheet（标题栏+搜索）承载章节列表。 */
   @Builder
-  private ChapterDrawer() {
-    Row() {
-      Column()
-        .layoutWeight(1)
-        .height('100%')
-        .onClick(() => {
-          this.drawerVisible = false;
-        })
-      Column() {
-        Row({ space: 10 }) {
-          Text('目录')
-            .fontSize(17)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.theme().fontColor)
-            .layoutWeight(1)
-          SymbolGlyph($r('sys.symbol.xmark'))
-            .fontSize(18)
-            .fontColor([this.theme().fontColor])
-            .onClick(() => {
-              this.drawerVisible = false;
-            })
-        }
-        .width('100%')
-        .padding({ left: 20, right: 20, top: 14, bottom: 12 })
-
-        List({ scroller: this.drawerScroller }) {
-          ForEach(this.chapters, (chapter: FqChapter, index: number) => {
-            ListItem() {
-              Text(chapter.title.length > 0 ? chapter.title : `第${index + 1}章`)
+  private CatalogSheet() {
+    CommonSheet({
+      sheetTitle: '目录',
+      showSearch: true,
+      searchActive: this.sheetSearchActive,
+      searchValue: this.sheetKeyword,
+      searchPlaceholder: '搜索章节',
+      focusId: 'reader_sheet_search',
+      searchToggle: (): void => {
+        this.sheetSearchActive = !this.sheetSearchActive;
+        this.sheetKeyword = '';
+        this.refreshCatalogSource();
+      },
+      searchChange: (value: string): void => {
+        this.sheetKeyword = value;
+        this.refreshCatalogSource();
+      },
+      searchSubmit: (value: string): void => {
+        this.sheetKeyword = value;
+        this.refreshCatalogSource();
+      },
+    }) {
+      List({ scroller: this.drawerScroller }) {
+        LazyForEach(this.chapterSource, (chapter: FqChapter) => {
+          ListItem() {
+            Row({ space: 14 }) {
+              Text(`${this.chapterIndexOf(chapter) + 1}`)
+                .fontSize(12)
+                .fontColor(this.theme().fontColor)
+                .opacity(0.5)
+                .textAlign(TextAlign.End)
+              Text(chapter.title.length > 0 ? chapter.title
+                : `第${this.chapterIndexOf(chapter) + 1}章`)
                 .fontSize(14)
-                .fontColor(index === this.chapterIndex ? FQ_ACCENT : this.theme().fontColor)
+                .fontColor(this.chapterIndexOf(chapter) === this.chapterIndex
+                  ? FQ_ACCENT : this.theme().fontColor)
+                .layoutWeight(1)
                 .maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .width('100%')
-                .padding({ left: 20, right: 20, top: 11, bottom: 11 })
-                .onClick(() => this.jumpToChapter(index))
             }
-          }, (chapter: FqChapter): string => chapter.itemId)
+            .width('100%')
+            .padding(14)
+            .alignItems(VerticalAlign.Center)
+            .onClick(() => this.jumpToChapter(this.chapterIndexOf(chapter)))
+          }
+        }, (chapter: FqChapter): string => chapter.itemId)
+      }
+      .contentStartOffset(56)
+      .cachedCount(12)
+      .contentEndOffset(appState.bottomRect)
+      .width('100%')
+      .height('100%')
+      .scrollBar(BarState.Off)
+      .divider({
+        strokeWidth: 0.5,
+        color: this.panelDividerColor(),
+        startMargin: 16,
+        endMargin: 16,
+      })
+    }
+  }
+
+  /** 设置面板：公共 sheet（标题栏）承载排版设置，跟随底部工具栏出现。 */
+  @Builder
+  private SettingsSheet() {
+    CommonSheet() {
+      Column({ space: 16 }) {
+        Row({ space: 12 }) {
+          Text('字号')
+            .fontSize(14)
+            .fontColor(this.theme().fontColor)
+            .width(36)
+          this.SettingChip('A-', (): void => {
+            this.changeFontSize(-1);
+          })
+          Text(`${this.fontSize}`)
+            .fontSize(14)
+            .fontColor(this.theme().fontColor)
+            .width(32)
+            .textAlign(TextAlign.Center)
+          this.SettingChip('A+', (): void => {
+            this.changeFontSize(1);
+          })
+          Blank()
+          Text('行距')
+            .fontSize(14)
+            .fontColor(this.theme().fontColor)
+          this.SettingChip('-', (): void => {
+            this.changeLineHeight(-0.1);
+          })
+          Text(`${this.lineHeight.toFixed(1)}`)
+            .fontSize(14)
+            .fontColor(this.theme().fontColor)
+            .width(32)
+            .textAlign(TextAlign.Center)
+          this.SettingChip('+', (): void => {
+            this.changeLineHeight(0.1);
+          })
         }
         .width('100%')
-        .layoutWeight(1)
-        .scrollBar(BarState.Off)
-        .divider({
-          strokeWidth: 0.5,
-          color: this.theme().fontColor,
-          startMargin: 20,
-          endMargin: 20,
-        })
+        .alignItems(VerticalAlign.Center)
+
+        Row({ space: 12 }) {
+          Text('主题')
+            .fontSize(14)
+            .fontColor(this.theme().fontColor)
+            .width(36)
+          Column({ space: 4 }) {
+            Column() {
+              SymbolGlyph($r('sys.symbol.sun_max'))
+                .fontSize(18)
+                .fontColor([this.theme().fontColor])
+            }
+            .width(34)
+            .height(34)
+            .borderRadius(17)
+            .backgroundColor(this.theme().background)
+            .border({
+              width: this.themeIndex === -1 ? 2 : 1,
+              color: this.themeIndex === -1 ? FQ_ACCENT : this.theme().fontColor,
+            })
+            .justifyContent(FlexAlign.Center)
+            Text('跟随')
+              .fontSize(10)
+              .fontColor(this.theme().fontColor)
+              .opacity(this.themeIndex === -1 ? 1 : 0.6)
+          }
+          .alignItems(HorizontalAlign.Center)
+          .onClick(() => {
+            this.themeIndex = -1;
+            this.applySettingChange();
+          })
+          ForEach(FQ_READER_THEMES, (theme: FqReaderTheme, index: number) => {
+            Column({ space: 4 }) {
+              Column()
+                .width(34)
+                .height(34)
+                .borderRadius(17)
+                .backgroundColor(theme.background)
+                .border({
+                  width: this.themeIndex === index ? 2 : 1,
+                  color: this.themeIndex === index ? FQ_ACCENT : this.theme().fontColor,
+                })
+              Text(theme.label)
+                .fontSize(10)
+                .fontColor(this.theme().fontColor)
+                .opacity(this.themeIndex === index ? 1 : 0.6)
+            }
+            .alignItems(HorizontalAlign.Center)
+            .onClick(() => {
+              this.themeIndex = index;
+              this.applySettingChange();
+            })
+          }, (theme: FqReaderTheme): string => theme.label)
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+
+        Row({ space: 12 }) {
+          Text('翻页')
+            .fontSize(14)
+            .fontColor(this.theme().fontColor)
+            .width(36)
+          ForEach(FQ_READER_FLIP_LABELS, (label: string, index: number) => {
+            Text(label)
+              .fontSize(12)
+              .fontColor(this.flipIndex === index ? '#FFFFFF' : this.theme().fontColor)
+              .backgroundColor(this.flipIndex === index ? FQ_ACCENT : 'transparent')
+              .borderRadius(13)
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .onClick(() => {
+                this.flipIndex = index;
+                this.applySettingChange();
+              })
+          }, (label: string): string => label)
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
       }
-      .width('78%')
-      .height('100%')
-      .backgroundColor(this.theme().background)
+      .width('100%')
+      .padding(20)
+      .alignItems(HorizontalAlign.Start)
     }
-    .width('100%')
-    .height('100%')
+  }
+
+  /** 面板内分隔线颜色（随阅读主题）。 */
+  private panelDividerColor(): string {
+    return this.theme().night ? '#2A2D30' : '#E8E2D4';
+  }
+
+  // ---------------------------------------------------------------------------
+  // 翻页与章节边界
+  // ---------------------------------------------------------------------------
+
+  /** 点击/横滑翻页；pageShow 未推进（章节首/末页）时切换章节。 */
+  private requestFlip(isNext: boolean): void {
+    if (this.menuVisible || this.settingsSheetVisible) {
+      this.menuVisible = false;
+      this.settingsSheetVisible = false;
+      return;
+    }
+    if (this.loadingState || this.errorMsg.length > 0 || this.chapters.length === 0) {
+      return;
+    }
+    this.armBoundaryTimer(isNext);
+    try {
+      this.controller.flipPage(isNext);
+    } catch (error) {
+      this.clearPendingFlip();
+    }
+  }
+
+  private armBoundaryTimer(isNext: boolean): void {
+    this.pendingFlip = isNext ? 1 : 0;
+    if (this.flipTimerId >= 0) {
+      clearTimeout(this.flipTimerId);
+    }
+    this.flipTimerId = setTimeout(() => {
+      this.flipTimerId = -1;
+      if (this.pendingFlip >= 0) {
+        const next: boolean = this.pendingFlip === 1;
+        this.pendingFlip = -1;
+        this.crossBoundary(next);
+      }
+    }, FQ_FLIP_BOUNDARY_TIMEOUT);
+  }
+
+  private clearPendingFlip(): void {
+    this.pendingFlip = -1;
+    if (this.flipTimerId >= 0) {
+      clearTimeout(this.flipTimerId);
+      this.flipTimerId = -1;
+    }
+  }
+
+  private crossBoundary(isNext: boolean): void {
+    if (isNext && this.hasNext()) {
+      this.openChapter(this.chapterIndex + 1, '');
+    } else if (!isNext && this.hasPrev()) {
+      this.openChapter(this.chapterIndex - 1, '');
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -453,8 +607,26 @@ export struct ReaderPage {
     }
   }
 
+  /** 系统深浅色（appState.isDark 的计算映射，供 @Monitor 监听）。 */
+  @Computed
+  get systemDark(): boolean {
+    return appState.isDark;
+  }
+
+  @Monitor('systemDark')
+  onSystemDarkChange(): void {
+    if (this.themeIndex === -1) {
+      this.applySettingChange();
+    }
+  }
+
+  /** 实际生效的主题下标：-1 跟随系统（深色 → 夜间，浅色 → 纸白）。 */
+  private effectiveThemeIndex(): number {
+    return this.themeIndex === -1 ? (this.systemDark ? 2 : 0) : this.themeIndex;
+  }
+
   private theme(): FqReaderTheme {
-    return FQ_READER_THEMES[this.themeIndex] ?? FQ_READER_THEMES[0];
+    return FQ_READER_THEMES[this.effectiveThemeIndex()] ?? FQ_READER_THEMES[0];
   }
 
   private currentChapterTitle(): string {
@@ -474,48 +646,87 @@ export struct ReaderPage {
   }
 
   private toggleMenu(): void {
-    if (this.drawerVisible || this.settingsVisible) {
-      this.drawerVisible = false;
-      this.settingsVisible = false;
+    if (this.sheetVisible) {
+      this.onSheetClose();
+      return;
+    }
+    if (this.settingsSheetVisible) {
+      this.settingsSheetVisible = false;
       return;
     }
     this.menuVisible = !this.menuVisible;
+    if (!this.menuVisible) {
+      this.settingsSheetVisible = false;
+    }
   }
 
-  private openDrawer(): void {
-    this.drawerVisible = true;
+  private openSheet(): void {
+    this.sheetSearchActive = false;
+    this.sheetKeyword = '';
+    this.refreshCatalogSource();
+    this.sheetVisible = true;
     setTimeout(() => {
       this.drawerScroller.scrollToIndex(this.chapterIndex, false);
-    }, 100);
+    }, 300);
+  }
+
+  private onSheetClose(): void {
+    this.sheetVisible = false;
+    this.sheetSearchActive = false;
+    this.sheetKeyword = '';
+  }
+
+  /** 目录搜索过滤：空关键字返回全量目录。 */
+  private filteredChapters(): FqChapter[] {
+    const keyword: string = this.sheetKeyword.trim();
+    if (keyword.length === 0) {
+      return this.chapters;
+    }
+    const result: FqChapter[] = [];
+    for (const chapter of this.chapters) {
+      if (chapter.title.includes(keyword)) {
+        result.push(chapter);
+      }
+    }
+    return result;
+  }
+
+  /** 按当前关键字刷新目录懒加载数据源。 */
+  private refreshCatalogSource(): void {
+    this.chapterSource.setItems(this.filteredChapters());
+  }
+
+  private chapterIndexOf(chapter: FqChapter): number {
+    return this.chapters.indexOf(chapter);
   }
 
   private openPrev(): void {
     if (!this.hasPrev()) {
       return;
     }
-    this.openChapter(this.chapterIndex - 1, '', this.loadToken);
+    this.openChapter(this.chapterIndex - 1, '');
   }
 
   private openNext(): void {
     if (!this.hasNext()) {
       return;
     }
-    this.openChapter(this.chapterIndex + 1, '', this.loadToken);
+    this.openChapter(this.chapterIndex + 1, '');
   }
 
   private jumpToChapter(index: number): void {
-    this.drawerVisible = false;
+    this.onSheetClose();
     if (index < 0 || index >= this.totalChapters || index === this.chapterIndex) {
       return;
     }
-    this.openChapter(index, '', this.loadToken);
+    this.openChapter(index, '');
   }
 
   private retry(): void {
     if (this.chapters.length === 0) {
       this.load();
     } else {
-      this.openChapter(this.chapterIndex, '', this.loadToken);
+      this.openChapter(this.chapterIndex, '');
     }
   }
 
@@ -546,23 +757,37 @@ export struct ReaderPage {
     }
   }
 
+  /** Reader Kit 颜色仅接受 6 位十六进制（不带 #）。 */
+  private fqKitColor(color: string): string {
+    return color.startsWith('#') ? color.substring(1) : color;
+  }
+
   private buildSetting(): readerCore.ReaderSetting {
     const theme: FqReaderTheme = this.theme();
     const displayData: display.Display = display.getDefaultDisplaySync();
+    // 排版视口：屏幕物理尺寸（由 EntryAbility 采集于 appState）
+    const density: number = displayData.scaledDensity > 0 ? displayData.scaledDensity : 1;
+    const screenWidth: number = appState.screenWidth > 0 ? appState.screenWidth : displayData.width;
+    const screenHeight: number = appState.screenHeight > 0 ? appState.screenHeight : displayData.height;
+    hilog.info(0x0001, 'ReaderTheme',
+      `buildSetting viewPort=${screenWidth}x${screenHeight} density=${density}`);
+    // Reader Kit 内置上下页边距（约 92/59vp）无配置项：等比放大视口与字号，
+    // 组件把视口整页缩放进自身区域，视觉字号不变而页边距等比缩小、每页容纳更多内容
+    const viewportScale: number = 1.5;
     const setting: readerCore.ReaderSetting = {
       fontName: '系统字体',
       fontPath: '',
-      fontSize: this.fontSize,
+      fontSize: this.fontSize * viewportScale,
       fontWeight: 400,
-      fontColor: theme.fontColor,
+      fontColor: this.fqKitColor(theme.fontColor),
       lineHeight: this.lineHeight,
       nightMode: theme.night,
-      themeColor: theme.background,
+      themeColor: this.fqKitColor(theme.background),
       themeBgImg: '',
       flipMode: this.flipIndex === 1 ? '1' : '0',
-      scaledDensity: displayData.scaledDensity > 0 ? displayData.scaledDensity : 1,
-      viewPortWidth: displayData.width,
-      viewPortHeight: displayData.height,
+      scaledDensity: density,
+      viewPortWidth: Math.round(screenWidth * viewportScale),
+      viewPortHeight: Math.round(screenHeight * viewportScale),
     };
     return setting;
   }
@@ -590,6 +815,7 @@ export struct ReaderPage {
       }
       this.chapters = chapters;
       this.totalChapters = chapters.length;
+      this.chapterSource.setItems(chapters);
       const progress: FqReaderProgress = FqReaderStore.getProgress(this.bookId);
       let index: number = this.startChapterIndex;
       let domPos: string = '';
@@ -598,7 +824,7 @@ export struct ReaderPage {
           ? progress.chapterIndex : 0;
         domPos = index === progress.chapterIndex ? progress.domPos : '';
       }
-      await this.openChapter(index, domPos, token);
+      await this.openChapter(index, domPos);
     } catch (error) {
       if (token === this.loadToken) {
         this.errorMsg = fqErrorMessage(error);
@@ -607,17 +833,20 @@ export struct ReaderPage {
     }
   }
 
-  private async openChapter(index: number, domPos: string, token: number): Promise<void> {
+  private async openChapter(index: number, domPos: string): Promise<void> {
     const chapter: FqChapter | undefined = this.chapters[index];
     if (chapter === undefined) {
       return;
     }
+    const token: number = ++this.loadToken;
+    this.clearPendingFlip();
     this.menuVisible = false;
-    this.drawerVisible = false;
-    this.settingsVisible = false;
+    this.onSheetClose();
+    this.settingsSheetVisible = false;
     this.chapterIndex = index;
     this.loadingState = true;
     this.errorMsg = '';
+    this.lastShownStart = '';
     try {
       await this.controllerReady;
       const text: string = await FqBackend.get().chapterText(chapter.itemId, chapter.title);
@@ -641,6 +870,8 @@ export struct ReaderPage {
       this.controller.setPageConfig(this.buildSetting());
       this.controller.registerBookParser(handler);
       await this.controller.startPlay(0, domPos);
+      // startPlay 会将配置重置为组件默认（浅色），渲染完成后必须重新应用
+      this.controller.setPageConfig(this.buildSetting());
       FqReaderStore.saveProgress(this.bookId, index, domPos);
     } catch (error) {
       if (token === this.loadToken) {
@@ -661,6 +892,16 @@ export struct ReaderPage {
       if (data.state !== readerCore.PageState.PAGE_ON_SHOW) {
         return;
       }
+      if (this.pendingFlip >= 0) {
+        const crossed: boolean = data.startDomPos !== this.lastShownStart;
+        const isNext: boolean = this.pendingFlip === 1;
+        this.clearPendingFlip();
+        if (!crossed) {
+          this.crossBoundary(isNext);
+          return;
+        }
+      }
+      this.lastShownStart = data.startDomPos;
       this.loadingState = false;
       const domPos: string = data.startDomPos;
       if (domPos.length > 0) {
