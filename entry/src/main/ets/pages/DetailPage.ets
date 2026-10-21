@@ -438,39 +438,42 @@ export struct DetailPage {
     List() {
       ForEach(this.previewChapters(), (chapter: FqChapter, index: number) => {
         ListItem(){
-          Column({ space: 10 }) {
-            Row({ space: 10 }) {
-              Text(this.padIndex(index + 1))
-                .fontSize(12)
-                .fontColor($r('sys.color.font_tertiary'))
-                .width(36)
-                .textAlign(TextAlign.Center)
-              Text(chapter.title)
-                .fontSize(14)
-                .fontColor($r('sys.color.font_primary'))
-                .lineHeight(22)
-                .layoutWeight(1)
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-              SymbolGlyph($r('sys.symbol.chevron_right'))
-                .fontSize(15)
-                .fontColor([$r('sys.color.icon_tertiary')])
+          Row({ space: 14 }){
+            Text(this.padIndex(index + 1))
+              .fontSize(12)
+              .fontWeight(FontWeight.Medium)
+              .fontColor($r('sys.color.font_secondary'))
+              .textAlign(TextAlign.Center)
+
+            Column({ space: 10 }) {
+              Row({ space: 10 }) {
+                Text(chapter.title)
+                  .fontSize(14)
+                  .fontColor($r('sys.color.font_primary'))
+                  .lineHeight(22)
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                SymbolGlyph($r('sys.symbol.chevron_right'))
+                  .fontSize(15)
+                  .fontColor([$r('sys.color.icon_tertiary')])
+              }
+              .width('100%')
+              .alignItems(VerticalAlign.Center)
+              .justifyContent(FlexAlign.SpaceBetween)
+
+              if (this.previewOf(chapter.itemId).length > 0) {
+                Text(this.previewOf(chapter.itemId))
+                  .fontSize(12)
+                  .fontColor($r('sys.color.font_tertiary'))
+                  .lineHeight(20)
+                  .maxLines(3)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+              }
             }
             .width('100%')
-            .alignItems(VerticalAlign.Center)
-            if (this.previewOf(chapter.itemId).length > 0) {
-              Text(this.previewOf(chapter.itemId))
-                .fontSize(12)
-                .fontColor($r('sys.color.font_tertiary'))
-                .lineHeight(20)
-                .maxLines(3)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .padding({ left: 46 })
-            }
-          }
-          .width('100%')
-          .padding(14)
-          .alignItems(HorizontalAlign.Start)
+            .alignItems(HorizontalAlign.Start)
+            .layoutWeight(1)
+          }.width('100%').padding(14)
         }
       }, (chapter: FqChapter): string => chapter.itemId)
       if (this.previewChapters().length === 0) {
@@ -490,7 +493,7 @@ export struct DetailPage {
     .backgroundColor($r('sys.color.comp_background_primary'))
     .divider({
       strokeWidth: 0.5,
-      startMargin: 14,
+      startMargin: 42,
       endMargin: 14,
       color: $r('sys.color.comp_divider')
     })
