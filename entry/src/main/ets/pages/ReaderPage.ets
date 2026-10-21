@@ -891,7 +891,7 @@ export struct ReaderPage {
       `buildSetting viewPort=${screenWidth}x${screenHeight} density=${density}`);
     // Reader Kit 内置上下页边距（约 92/59vp）无配置项：等比放大视口与字号，
     // 组件把视口整页缩放进自身区域，视觉字号不变而页边距等比缩小、每页容纳更多内容
-    const viewportScale: number = 1.5;
+    const viewportScale: number = 1.7;
     const setting: readerCore.ReaderSetting = {
       fontName: '系统字体',
       // 沙箱字体副本路径：引擎直接采用；若仍以资源请求索取则由解析器供给字节

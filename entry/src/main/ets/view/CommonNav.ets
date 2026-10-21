@@ -122,6 +122,7 @@ export struct CommonNav {
         .scrollable(false)
         .barPosition(BarPosition.End)
         .barHeight(this.readBarHeight)
+        //.animation({duration: 250, curve: Curve.Smooth})
         .barFloatingStyle({
           barWidth: { smallWidth: 330, mediumWidth: 480, largeWidth: 560 },
           barBottomMargin: 28,
