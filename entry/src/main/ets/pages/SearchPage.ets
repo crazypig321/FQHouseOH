@@ -38,7 +38,7 @@ const HISTORY_KEY: string = 'history';
 const HISTORY_MAX: number = 10;
 
 /** 标题栏 bottomBuilder 插槽高：搜索框 40 + 间距 10 + 分类条 33 + 上下 padding 12 */
-const FQ_SEARCH_BOTTOM_BUILDER_HEIGHT: number = 76;
+const FQ_SEARCH_BOTTOM_BUILDER_HEIGHT: number = 110;
 
 /** 列表内容起始偏移：标题栏 56 + bottomBuilder 96 */
 const FQ_SEARCH_TOP_INSET: number = 160;
@@ -152,7 +152,7 @@ export struct SearchPage {
       .divider({
         strokeWidth: 0.5,
         color: $r('sys.color.comp_divider'),
-        startMargin: 16,
+        startMargin: 103,
         endMargin: 16,
       })
       .contentStartOffset(appState.topRect + FQ_SEARCH_TOP_INSET)

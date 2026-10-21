@@ -19,6 +19,7 @@ import { NavPathUtils } from '../utils/NavPathUtils';
 import { CommonNav } from '../view/CommonNav';
 import { appState } from '../entryability/AppState';
 import { rowImmersiveModifier } from '../utils/ModifierUtils';
+import { LengthMetrics } from '@kit.ArkUI';
 
 class FqChannelDef {
   readonly label: string;
@@ -89,7 +90,10 @@ export struct HomePage {
 
   aboutToAppear(): void {
     FqHomeCache.init(getContext(this));
-    this.hydrateFromDisk();
+    const saved: number = FqHomeCache.savedChannelIndex();
+    if (saved >= 0 && saved < FQ_CHANNELS.length) {
+      this.channelIndex = saved;
+    }
     this.loadFirst();
   }
 
@@ -169,7 +173,7 @@ export struct HomePage {
                 LazyForEach(this.rowSource, (row: FqMediaItem, i: number) => {
                   ListItem() {
                     this.GridSlot(row, i)
-                  }.transition(TransitionEffect.scale({ x: 0.8, y: 0.8 }).animation({ duration: 300, curve: Curve.Smooth }))
+                  }//.transition(TransitionEffect.scale({ x: 0.8, y: 0.8 }).animation({ duration: 300, curve: Curve.Smooth }))
                 }, (row: FqMediaItem, index: number): string => this.rowKey(row, index))
               }
               .width('100%')
@@ -288,6 +292,7 @@ export struct HomePage {
     .width('100%')
     .height(85)
     .alignListItem(ListItemAlign.Center)
+    .fadingEdge(true, { fadingEdgeLength: LengthMetrics.vp(30) })
   }
 
   /** 首屏加载占位。 */
@@ -431,11 +436,6 @@ export struct HomePage {
       this.applyFeed();
       this.scroller.scrollEdge(Edge.Top);
       this.searchBarHidden = false;
-      if (cached.isRestored()) {
-        // 磁盘缓存回填的频道：先展示旧数据，后台刷新换取翻页能力
-        // （fqapp load(manualRefresh:false) 的 stale-while-revalidate 语义）。
-        this.loadFirst();
-      }
       return;
     }
     this.feed = new FqHomeFeed([]);
@@ -473,28 +473,6 @@ export struct HomePage {
     this.hasMore = this.feed.hasMore;
   }
 
-  /** 冷启动磁盘缓存回填：各频道复用上次列表；当前频道先展示再由 loadFirst 静默刷新。 */
-  private hydrateFromDisk(): void {
-    const saved: number = FqHomeCache.savedChannelIndex();
-    if (saved >= 0 && saved < FQ_CHANNELS.length) {
-      this.channelIndex = saved;
-    }
-    for (let index: number = 0; index < FQ_CHANNELS.length; index += 1) {
-      const items: FqMediaItem[] = FqHomeCache.channelItems(index);
-      if (items.length === 0) {
-        continue;
-      }
-      const feed: FqHomeFeed = new FqHomeFeed(FQ_CHANNELS[index].buildSources());
-      feed.restore(items);
-      this.channelFeeds[index] = feed;
-    }
-    const current: FqHomeFeed | null = this.channelFeeds[this.channelIndex];
-    if (current !== null) {
-      this.feed = current;
-      this.applyFeed();
-    }
-  }
-
   /** 首屏 0 条且仍有游标时自动补拉一页。 */
   private maybeAutoLoadMore(token: number): void {
     if (this.feed.totalCount() === 0 && this.feed.hasMore) {
@@ -522,7 +500,6 @@ export struct HomePage {
       }
       this.errorMsg = '';
       this.channelFeeds[channel] = this.feed;
-      FqHomeCache.saveChannelItems(channel, this.feed.items());
       this.applyFeed();
       this.maybeAutoLoadMore(token);
     } catch (error) {
@@ -551,7 +528,6 @@ export struct HomePage {
       if (token !== this.loadToken) {
         return;
       }
-      FqHomeCache.saveChannelItems(channel, this.feed.items());
       this.applyFeed();
       this.maybeAutoLoadMore(token);
     } finally {
