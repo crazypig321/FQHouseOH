@@ -15,6 +15,7 @@ import { DetailNavParams, ROUTE_DETAIL, ROUTE_SEARCH, FqTitleBarOptions } from '
 import { NavPathUtils } from '../utils/NavPathUtils';
 import { CommonNav } from '../view/CommonNav';
 import { appState } from '../entryability/AppState';
+import { rowImmersiveModifier } from '../utils/ModifierUtils';
 
 class FqChannelDef {
   readonly label: string;
@@ -51,7 +52,7 @@ const FQ_CAPTIONS: string[] = [
 ];
 
 /** 列表内容起始偏移：标题栏 56 + 搜索行 52（Search 40 + 上下 padding 12） */
-const FQ_HOME_TOP_INSET: number = 170;
+const FQ_HOME_TOP_INSET: number = 175;
 
 /** bottomBuilder（108vp）完全收起所需滚动距离（hideRatio 默认 2，滚动 216vp 收完） */
 const FQ_SEARCH_HIDE_OFFSET: number = 216;
@@ -87,7 +88,7 @@ export struct HomePage {
         builder: (): void => {
           this.SearchBar();
         },
-        height: 88
+        height: 100
       }, (): void => {
         this.startRefresh();
       }, true),
@@ -228,7 +229,7 @@ export struct HomePage {
   /** 标题栏 bottomBuilder：搜索框（点击进搜索页，不可聚焦）。 */
   @Builder
   private SearchBar() {
-    Column({ space: 10 }) {
+    Column({ space: 10 }){
       CommonSearch({
         searchValue: '',
         placeholderValue: '搜索你想看的故事',
@@ -236,46 +237,42 @@ export struct HomePage {
         click: (): void => {
           NavPathUtils.push(ROUTE_SEARCH);
         },
-      })
+      }).height(30)
       this.ChannelStrip()
-    }
-    .padding({ left: 16, right: 16 })
+    }.padding({ left: 16, right: 16 })
   }
 
   /** fqapp 药丸频道条（随内容滚动，横向 List）。 */
   @Builder
   private ChannelStrip() {
-      Column({ space: 5 }) {
-        List({ space: 6 }) {
-          ForEach(FQ_CHANNELS, (channel: FqChannelDef, index: number) => {
-            ListItem() {
-              Row({ space: 5 }) {
-                SymbolGlyph(this.channelIcon(index))
-                  .fontSize(14)
-                  .fontColor([this.channelIconColor(index)])
-                Text(channel.label)
-                  .fontSize(13)
-                  .fontWeight(this.channelIndex === index ? 700 : 500)
-                  .fontColor(this.channelIndex === index ? Color.White : $r('sys.color.font_primary'))
-              }
-              .height(38)
-              .padding({ left: 14, right: 14 })
-              .borderRadius(19)
-              .backgroundColor(this.channelIndex === index ? '#FF7A3D' : $r('sys.color.comp_background_tertiary'))
-              .alignItems(VerticalAlign.Center)
-              .onClick(() => this.selectChannel(index))
-            }
-          }, (channel: FqChannelDef): string => channel.label)
+    List({ space: 6 }) {
+      ForEach(FQ_CHANNELS, (channel: FqChannelDef, index: number) => {
+        ListItem() {
+          Row({ space: 5 }) {
+            SymbolGlyph(this.channelIcon(index))
+              .fontSize(14)
+              .fontColor([this.channelIconColor(index)])
+            Text(channel.label)
+              .fontSize(13)
+              .fontWeight(this.channelIndex === index ? 700 : 500)
+              .fontColor(this.channelIndex === index ? Color.White : $r('sys.color.font_primary'))
+          }
+          .height(38)
+          .padding({ left: 14, right: 14 })
+          .borderRadius(19)
+          .backgroundColor(this.channelIndex === index ? '#FF7A3D' : Color.Transparent)
+          .alignItems(VerticalAlign.Center)
+          .onClick(() => this.selectChannel(index))
+          .attributeModifier(this.channelIndex === index ? undefined : rowImmersiveModifier)
         }
-        .listDirection(Axis.Horizontal)
-        .scrollBar(BarState.Off)
-        .edgeEffect(EdgeEffect.None)
-        .width('100%')
-        .align(Alignment.Center)
-      }
-      .width('100%')
-      .height(54)
-      .justifyContent(FlexAlign.Center)
+      }, (channel: FqChannelDef): string => channel.label)
+    }
+    .listDirection(Axis.Horizontal)
+    .scrollBar(BarState.Off)
+    .edgeEffect(EdgeEffect.None)
+    .width('100%')
+    .height(85)
+    .alignListItem(ListItemAlign.Center)
   }
 
   /** 首屏加载占位。 */

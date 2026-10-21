@@ -435,60 +435,65 @@ export struct DetailPage {
   /** 章节试读预览：序号 + 章节名 + 正文开头摘录。 */
   @Builder
   private ChapterPreview() {
-    Column() {
+    List() {
       ForEach(this.previewChapters(), (chapter: FqChapter, index: number) => {
-        Column({ space: 10 }) {
-          Row({ space: 10 }) {
-            Text(this.padIndex(index + 1))
-              .fontSize(12)
-              .fontColor($r('sys.color.font_tertiary'))
-              .width(36)
-              .textAlign(TextAlign.Center)
-            Text(chapter.title)
-              .fontSize(14)
-              .fontColor($r('sys.color.font_primary'))
-              .lineHeight(22)
-              .layoutWeight(1)
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-            SymbolGlyph($r('sys.symbol.chevron_right'))
-              .fontSize(15)
-              .fontColor([$r('sys.color.icon_tertiary')])
+        ListItem(){
+          Column({ space: 10 }) {
+            Row({ space: 10 }) {
+              Text(this.padIndex(index + 1))
+                .fontSize(12)
+                .fontColor($r('sys.color.font_tertiary'))
+                .width(36)
+                .textAlign(TextAlign.Center)
+              Text(chapter.title)
+                .fontSize(14)
+                .fontColor($r('sys.color.font_primary'))
+                .lineHeight(22)
+                .layoutWeight(1)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+              SymbolGlyph($r('sys.symbol.chevron_right'))
+                .fontSize(15)
+                .fontColor([$r('sys.color.icon_tertiary')])
+            }
+            .width('100%')
+            .alignItems(VerticalAlign.Center)
+            if (this.previewOf(chapter.itemId).length > 0) {
+              Text(this.previewOf(chapter.itemId))
+                .fontSize(12)
+                .fontColor($r('sys.color.font_tertiary'))
+                .lineHeight(20)
+                .maxLines(3)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .padding({ left: 46 })
+            }
           }
           .width('100%')
-          .alignItems(VerticalAlign.Center)
-          if (this.previewOf(chapter.itemId).length > 0) {
-            Text(this.previewOf(chapter.itemId))
-              .fontSize(12)
-              .fontColor($r('sys.color.font_tertiary'))
-              .lineHeight(20)
-              .maxLines(3)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .padding({ left: 46 })
-          }
-          if (index < this.previewChapters().length - 1) {
-            Divider()
-              .strokeWidth(0.6)
-              .color($r('sys.color.comp_divider'))
-          }
+          .padding(14)
+          .alignItems(HorizontalAlign.Start)
         }
-        .width('100%')
-        .padding({ left: 14, right: 14, top: 15, bottom: 15 })
-        .alignItems(HorizontalAlign.Start)
       }, (chapter: FqChapter): string => chapter.itemId)
       if (this.previewChapters().length === 0) {
-        Text('暂未获取到章节，可以稍后刷新重试')
-          .fontSize(12)
-          .fontColor($r('sys.color.font_tertiary'))
-          .width('100%')
-          .textAlign(TextAlign.Center)
-          .padding(16)
+        ListItem(){
+          Text('暂未获取到章节，可以稍后刷新重试')
+            .fontSize(12)
+            .fontColor($r('sys.color.font_tertiary'))
+            .width('100%')
+            .textAlign(TextAlign.Center)
+            .padding(16)
+        }
       }
     }
     .width('100%')
+    .clip(true)
     .borderRadius(16)
     .backgroundColor($r('sys.color.comp_background_primary'))
-    .clip(true)
+    .divider({
+      strokeWidth: 0.5,
+      startMargin: 14,
+      endMargin: 14,
+      color: $r('sys.color.comp_divider')
+    })
   }
 
   private coverUrl(): string {
