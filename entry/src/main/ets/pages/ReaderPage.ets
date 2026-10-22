@@ -7,14 +7,15 @@
  * 穿透，滑动直达引擎原生跟手翻页）：
  * CommonNav 标题栏（hideTitleBar 随菜单显隐）+ ReadBar
  * 悬浮工具条（目录/上一章/下一章/设置，readBarHeight 随菜单 0/56）；
- * 目录/设置为 bindSheet 半模态公共 sheet（CommonSheet）；阅读时隐藏系统状态栏。
+ * 目录为 bindSheet 半模态公共 sheet（CommonSheet）；设置为公共弹窗（DialogManager
+ * + CustomContentDialog，无标题无按钮仅内容区，悬于工具条上方居中）；阅读时隐藏系统状态栏。
  * 眉页（章节名）与眉脚（时钟/电量/整书页码）自绘覆盖层
  * （PageDataInfo 页眉/页脚为预留字段暂不支持；整书页码为冻结估算，跨章校正）。
  * 进度（章节 + domPos）与设置（字号/行距/主题/翻页）持久化。
  */
 
 import { common } from '@kit.AbilityKit';
-import { curves, display, window } from '@kit.ArkUI';
+import { CustomContentDialog, curves, display, window } from '@kit.ArkUI';
 import { fileIo } from '@kit.CoreFileKit';
 import { ReadPageComponent, readerCore } from '@kit.ReaderKit';
 import { BusinessError, batteryInfo } from '@kit.BasicServicesKit';
@@ -29,22 +30,8 @@ import { CommonLoading, CommonSearch, FQ_ACCENT } from '../view/CommonCom';
 import { CommonSheet, FqSheetOptions } from '../view/CommonSheet';
 import { FQ_FONT_OPTIONS, FqFontOption, FqOnlineParser } from '../core/FqOnlineParser';
 import { appState } from '../entryability/AppState';
-
-/** 阅读主题：themeColor 仅支持 6 位色值（无透明度）。 */
-interface FqReaderTheme {
-  readonly fontColor: string;
-  readonly background: string;
-  readonly night: boolean;
-  readonly label: string;
-}
-
-const FQ_READER_THEMES: FqReaderTheme[] = [
-  { fontColor: '#1F2329', background: '#F6F4EF', night: false, label: '纸白' },
-  { fontColor: '#3E2F1C', background: '#F0E4C8', night: false, label: '米黄' },
-  { fontColor: '#9AA0A6', background: '#151719', night: true, label: '夜间' },
-];
-
-const FQ_READER_FLIP_LABELS: string[] = ['仿真', '横滑'];
+import { DialogManager } from '../utils/DialogUtils';
+import { FQ_READER_THEMES, FqReaderTheme, ReaderSettingsDialogContent } from '../view/dialog/ReaderSettingsDialogContent';
 
 /** 眉页「第N章」前缀匹配（N 支持数字与中文数字，量词：章节回卷集话篇）。 */
 const FQ_HEADER_PREFIX_RE: RegExp = new RegExp('^第[0-9零一二三四五六七八九十百千万]+[章节回卷集话篇]');
@@ -99,7 +86,6 @@ export struct ReaderPage {
   @Local sheetKeyword: string = '';
   /** 目录排序：true 倒序（不持久化，每次打开目录重置为正序）。 */
   @Local sheetDescending: boolean = false;
-  @Local settingsSheetVisible: boolean = false;
   @Local chapterIndex: number = 0;
   @Local totalChapters: number = 0;
   @Local fontSize: number = 19;
@@ -149,6 +135,23 @@ export struct ReaderPage {
   /** 最近一次显示页在章内的页偏移（0 起）。 */
   @Local shownPageOffset: number = 0;
 
+  /** 「阅读设置」公共弹窗：内容组件在 view/dialog，无标题无按钮仅内容区。 */
+  private settingsDialog: CustomDialogController = new CustomDialogController({
+    builder: CustomContentDialog({
+      contentBuilder: (): void => {
+        this.DialogContentBuilder(DialogManager.dialogChangeKey);
+      },
+      contentAreaPadding: { top: 20, bottom: 20, left: 24, right: 24 },
+    }),
+    // 弹窗布局区已排除底部安全区：自安全区底上移越过悬浮工具条并留出间距
+    alignment: DialogAlignment.Bottom,
+    offset: { dx: 0, dy: -68 },
+    autoCancel: true,
+    onWillDisappear: (): void => {
+      DialogManager.DisappearDialog(DialogManager.dialogChangeKey);
+    },
+  });
+
   aboutToAppear(): void {
     this.bookId = ReaderNavParams.id;
     this.kind = ReaderNavParams.kind;
@@ -170,12 +173,27 @@ export struct ReaderPage {
       this.refreshFooterStatus();
     }, 30000);
     this.applySystemBar(false);
+    // 公共弹窗宿主：注册打开/轻提示/关闭动作（设置弹窗经 DialogManager.OpenDialog 打开）
+    DialogManager.Register((): void => {
+      this.settingsDialog.open();
+    }, (message: string): void => {
+      this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 });
+    }, (): void => {
+      this.settingsDialog.close();
+    });
     this.load();
   }
 
   aboutToDisappear(): void {
     this.applySystemBar(true);
     this.loadToken += 1;
+    // 公共弹窗：关闭可能还开着的弹窗并注销宿主，防浮层残留
+    try {
+      this.settingsDialog.close();
+    } catch (error) {
+      // 弹窗可能未打开
+    }
+    DialogManager.Unregister();
     if (this.redrawTimer >= 0) {
       clearTimeout(this.redrawTimer);
       this.redrawTimer = -1;
@@ -253,9 +271,6 @@ export struct ReaderPage {
         .width('100%')
         .height('100%')
         .hitTestBehavior(HitTestMode.Transparent)
-        .bindSheet(this.settingsSheetVisible, this.SettingsSheet(), FqSheetOptions((): void => {
-          this.settingsSheetVisible = false;
-        }, 380))
 
         // 眉页：章节序号 + 章节名常驻顶部（跟随阅读主题，不拦截翻页点击）；
         // 定位用 maxTopRect（状态栏可见期间最大避让高度，覆盖摄像头孔条）
@@ -347,7 +362,6 @@ export struct ReaderPage {
             .onClick(() => {
               this.menuVisible = false;
               this.sheetVisible = false;
-              this.settingsSheetVisible = false;
             })
         }
       }
@@ -365,7 +379,7 @@ export struct ReaderPage {
     if (key === '目录') {
       this.openSheet();
     } else if (key === '设置') {
-      this.settingsSheetVisible = true;
+      DialogManager.OpenDialog('阅读设置');
     } else if (key === '上一章') {
       this.openPrev();
     } else if (key === '下一章') {
@@ -379,8 +393,7 @@ export struct ReaderPage {
       this.onSheetClose();
       return true;
     }
-    if (this.settingsSheetVisible || this.menuVisible) {
-      this.settingsSheetVisible = false;
+    if (this.menuVisible) {
       this.menuVisible = false;
       return true;
     }
@@ -404,20 +417,6 @@ export struct ReaderPage {
       }
     }).catch((): void => {
     });
-  }
-
-  @Builder
-  private SettingChip(label: string, action: () => void) {
-    Text(label)
-      .fontSize(14)
-      .fontWeight(FontWeight.Medium)
-      .fontColor(this.theme().fontColor)
-      .width(34)
-      .height(34)
-      .borderRadius(17)
-      .textAlign(TextAlign.Center)
-      .backgroundColor(this.theme().night ? '#2A2D30' : '#E8E2D4')
-      .onClick(() => action())
   }
 
   /** 目录半模态：公共 sheet（标题栏+搜索）承载章节列表。 */
@@ -493,157 +492,36 @@ export struct ReaderPage {
     }
   }
 
-  /** 设置面板：公共 sheet（标题栏 + 右侧关闭）承载排版设置，跟随底部工具栏出现。 */
+  /** 公共弹窗内容装配：按 DialogManager 标识分发内容组件（当前仅「阅读设置」）。 */
   @Builder
-  private SettingsSheet() {
-    CommonSheet({
-      sheetTitle: '设置',
-      showClose: true,
-      closeClick: (): void => {
-        this.settingsSheetVisible = false;
-      },
-    }) {
-      Column({ space: 16 }) {
-        Row({ space: 12 }) {
-          Text('字号')
-            .fontSize(14)
-            .fontColor(this.theme().fontColor)
-            .width(36)
-          this.SettingChip('A-', (): void => {
-            this.changeFontSize(-1);
-          })
-          Text(`${this.fontSize}`)
-            .fontSize(14)
-            .fontColor(this.theme().fontColor)
-            .width(32)
-            .textAlign(TextAlign.Center)
-          this.SettingChip('A+', (): void => {
-            this.changeFontSize(1);
-          })
-        }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
-
-        Row({ space: 12 }) {
-          Text('行距')
-            .fontSize(14)
-            .fontColor(this.theme().fontColor)
-            .width(36)
-          this.SettingChip('-', (): void => {
-            this.changeLineHeight(-0.1);
-          })
-          Text(`${this.lineHeight.toFixed(1)}`)
-            .fontSize(14)
-            .fontColor(this.theme().fontColor)
-            .width(32)
-            .textAlign(TextAlign.Center)
-          this.SettingChip('+', (): void => {
-            this.changeLineHeight(0.1);
-          })
-        }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
-
-        Row({ space: 12 }) {
-          Text('主题')
-            .fontSize(14)
-            .fontColor(this.theme().fontColor)
-            .width(36)
-          Column({ space: 4 }) {
-            Column() {
-              SymbolGlyph($r('sys.symbol.sun_max'))
-                .fontSize(18)
-                .fontColor([this.theme().fontColor])
-            }
-            .width(34)
-            .height(34)
-            .borderRadius(17)
-            .backgroundColor(this.theme().background)
-            .border({
-              width: this.themeIndex === -1 ? 2 : 1,
-              color: this.themeIndex === -1 ? FQ_ACCENT : this.theme().fontColor,
-            })
-            .justifyContent(FlexAlign.Center)
-            Text('跟随')
-              .fontSize(10)
-              .fontColor(this.theme().fontColor)
-              .opacity(this.themeIndex === -1 ? 1 : 0.6)
-          }
-          .alignItems(HorizontalAlign.Center)
-          .onClick(() => {
-            this.themeIndex = -1;
-            this.applySettingChange();
-          })
-          ForEach(FQ_READER_THEMES, (theme: FqReaderTheme, index: number) => {
-            Column({ space: 4 }) {
-              Column()
-                .width(34)
-                .height(34)
-                .borderRadius(17)
-                .backgroundColor(theme.background)
-                .border({
-                  width: this.themeIndex === index ? 2 : 1,
-                  color: this.themeIndex === index ? FQ_ACCENT : this.theme().fontColor,
-                })
-              Text(theme.label)
-                .fontSize(10)
-                .fontColor(this.theme().fontColor)
-                .opacity(this.themeIndex === index ? 1 : 0.6)
-            }
-            .alignItems(HorizontalAlign.Center)
-            .onClick(() => {
-              this.themeIndex = index;
-              this.applySettingChange();
-            })
-          }, (theme: FqReaderTheme): string => theme.label)
-        }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
-
-        Row({ space: 12 }) {
-          Text('字体')
-            .fontSize(14)
-            .fontColor(this.theme().fontColor)
-            .width(36)
-          ForEach(FQ_FONT_OPTIONS, (option: FqFontOption, index: number) => {
-            Text(option.label)
-              .fontSize(12)
-              .fontColor(this.fontIndex === index ? '#FFFFFF' : this.theme().fontColor)
-              .backgroundColor(this.fontIndex === index ? FQ_ACCENT : 'transparent')
-              .borderRadius(13)
-              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-              .onClick(() => {
-                this.changeFont(index);
-              })
-          }, (option: FqFontOption): string => option.label)
-        }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
-
-        Row({ space: 12 }) {
-          Text('翻页')
-            .fontSize(14)
-            .fontColor(this.theme().fontColor)
-            .width(36)
-          ForEach(FQ_READER_FLIP_LABELS, (label: string, index: number) => {
-            Text(label)
-              .fontSize(12)
-              .fontColor(this.flipIndex === index ? '#FFFFFF' : this.theme().fontColor)
-              .backgroundColor(this.flipIndex === index ? FQ_ACCENT : 'transparent')
-              .borderRadius(13)
-              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-              .onClick(() => {
-                this.flipIndex = index;
-                this.applySettingChange();
-              })
-          }, (label: string): string => label)
-        }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
-      }
-      .width('100%')
-      .alignItems(HorizontalAlign.Start)
-      .padding({top: 76, bottom: appState.bottomRect, right: 20, left: 20})
+  private DialogContentBuilder(key: string) {
+    if (key === '阅读设置') {
+      ReaderSettingsDialogContent({
+        fontSize: this.fontSize,
+        lineHeight: this.lineHeight,
+        themeIndex: this.themeIndex,
+        flipIndex: this.flipIndex,
+        fontIndex: this.fontIndex,
+        followThemeBg: this.theme().background,
+        followThemeFont: this.theme().fontColor,
+        fontSizeChange: (delta: number): void => {
+          this.changeFontSize(delta);
+        },
+        lineHeightChange: (delta: number): void => {
+          this.changeLineHeight(delta);
+        },
+        themeChange: (index: number): void => {
+          this.themeIndex = index;
+          this.applySettingChange();
+        },
+        fontChange: (index: number): void => {
+          this.changeFont(index);
+        },
+        flipChange: (index: number): void => {
+          this.flipIndex = index;
+          this.applySettingChange();
+        },
+      })
     }
   }
 
@@ -654,9 +532,8 @@ export struct ReaderPage {
 
   /** 点击分区翻页（滑动由引擎原生跟手处理）；跨章由排版引擎在书脊间自行推进。 */
   private requestFlip(isNext: boolean): void {
-    if (this.menuVisible || this.settingsSheetVisible) {
+    if (this.menuVisible) {
       this.menuVisible = false;
-      this.settingsSheetVisible = false;
       return;
     }
     if (this.loadingState || this.errorMsg.length > 0 || this.chapters.length === 0) {
@@ -896,14 +773,7 @@ export struct ReaderPage {
       this.onSheetClose();
       return;
     }
-    if (this.settingsSheetVisible) {
-      this.settingsSheetVisible = false;
-      return;
-    }
     this.menuVisible = !this.menuVisible;
-    if (!this.menuVisible) {
-      this.settingsSheetVisible = false;
-    }
   }
 
   private openSheet(): void {
@@ -1164,7 +1034,6 @@ export struct ReaderPage {
       `openChapter index=${index} domPos=${domPos} registered=${this.hasRegisteredBook}`);
     this.menuVisible = false;
     this.onSheetClose();
-    this.settingsSheetVisible = false;
     // 跳章：先以实测校正离场章节的冻结估算，整书页码衔接不回跳
     this.refreshChapterEstimate(this.chapterIndex);
     this.chapterIndex = index;
