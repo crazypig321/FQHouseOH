@@ -959,8 +959,13 @@ export struct ReaderPage {
     // Reader Kit 内置页边距无配置项：等比放大视口与字号，组件把视口整页缩放进
     // 自身区域，视觉字号不变而边距等比缩小（左右内置约 172.5px 缩至约 20vp）
     const viewportScale: number = 1.5;
+    // 字体族名按档位区分：引擎按「fontName.ttf」缓存字体，名字不变则切档后仍命中
+    // 启动时已加载的旧字体、永不重新取字节（仅变 fontPath 不触发重载）；换名才重新加载。
+    // 沙箱副本未就绪时回退 Kit 内置「系统字体」（默认 handler 可供应其字节）。
+    const fontOption: FqFontOption | undefined = FQ_FONT_OPTIONS[this.fontIndex];
+    const fontReady: boolean = this.bookParser !== null && this.bookParser.isFontReady(this.fontIndex);
     const setting: readerCore.ReaderSetting = {
-      fontName: '系统字体',
+      fontName: fontReady && fontOption !== undefined ? fontOption.name : '系统字体',
       // 沙箱字体副本路径：引擎直接采用；若仍以资源请求索取则由解析器供给字节
       fontPath: this.bookParser === null ? '' : this.bookParser.getFontSandboxPath(),
       fontSize: this.fontSize * viewportScale,

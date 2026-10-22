@@ -7,16 +7,19 @@ import { FqChapter } from '../model/FqModels';
 /** 章节内容按需加载器：入参为书脊索引（与章节下标一致）。 */
 export type FqChapterFetcher = (spineIndex: number) => Promise<string>;
 
-/** 字体档位：label 供设置面板展示，candidates 为设备系统字体候选（取首个可用）。 */
+/** 字体档位：name 为引擎侧字体族名（引擎按「name + .ttf」请求并缓存字体，每档必须
+ *  唯一——切档换名才令引擎视为新字体重新加载，否则一直命中启动时加载的旧字体）；
+ *  label 供设置面板展示；candidates 为设备系统字体候选（取首个可用）。 */
 export interface FqFontOption {
+  readonly name: string;
   readonly label: string;
   readonly candidates: string[];
 }
 
 /** 阅读字体档位（下标持久化于阅读设置 fontIndex）。 */
 export const FQ_FONT_OPTIONS: FqFontOption[] = [
-  { label: '书宋', candidates: ['/system/fonts/ShuS-SC.ttf'] },
-  { label: '黑体', candidates: ['/system/fonts/HarmonyOS_Sans_SC.ttf', '/system/fonts/HYQiHeiL3.ttf'] },
+  { name: '书宋', label: '书宋', candidates: ['/system/fonts/ShuS-SC.ttf'] },
+  { name: '黑体', label: '黑体', candidates: ['/system/fonts/HarmonyOS_Sans_SC.ttf', '/system/fonts/HYQiHeiL3.ttf'] },
 ];
 
 /**
@@ -125,6 +128,11 @@ export class FqOnlineParser extends bookParser.BookParserHandler {
   /** 沙箱字体副本路径（未准备好时为空串）。 */
   public getFontSandboxPath(): string {
     return this.fontSandboxPath;
+  }
+
+  /** 指定档位的沙箱字体副本是否就绪（buildSetting 选 fontName 依据：未就绪回退 Kit 内置「系统字体」）。 */
+  public isFontReady(fontIndex: number): boolean {
+    return this.preparedFontIndex === fontIndex && this.fontSandboxPath.length > 0;
   }
 
   /** controller.on('resourceRequest') 回调入口：与 getResourceContent 同源供给字体。 */
