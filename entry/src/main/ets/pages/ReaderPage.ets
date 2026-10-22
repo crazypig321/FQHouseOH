@@ -954,9 +954,6 @@ export struct ReaderPage {
   private toggleCatalogOrder(): void {
     this.sheetDescending = !this.sheetDescending;
     this.refreshCatalogSource();
-    setTimeout(() => {
-      this.locateCurrentChapter();
-    }, 100);
   }
 
   /** 按当前关键字刷新目录懒加载数据源。 */
