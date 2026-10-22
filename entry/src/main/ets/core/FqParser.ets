@@ -20,6 +20,8 @@ import {
   fqTruthyAny,
 } from './FqJson';
 import {
+  FqBookComment,
+  FqBookCommentPage,
   FqBookDetail,
   FqChapter,
   FqHomePage,
@@ -1206,6 +1208,98 @@ export function fqParseRankBoard(payload: Record<string, Object>, startAt: numbe
 
   const hasMore: boolean = data !== null && data['has_more'] === true;
   return new FqRankBoard(entries, hasMore);
+}
+
+// ---------------------------------------------------------------------------
+// 书评：BookCommentPage.fromPayload（fqapp lib/models/book_comment.dart）
+// ---------------------------------------------------------------------------
+
+/** 解包 {code, data}（及嵌套 data.data）到书评页记录。 */
+function fqResolveCommentData(payload: Record<string, Object>): Record<string, Object> | null {
+  let data: Object | undefined = payload['data'] !== undefined ? payload['data'] : payload;
+  const inner: Record<string, Object> | null = fqAsRecord(data);
+  if (inner !== null && fqAsRecord(inner['data']) !== null) {
+    data = inner['data'];
+  }
+  return fqAsRecord(data);
+}
+
+/** 评论图片 URL 列表：legacy 字符串数组或 {web_url} 映射数组，仅收 http(s)。 */
+function fqCommentImageUrls(value: Object | undefined): string[] {
+  const arr: Object[] | null = fqAsArray(value);
+  if (arr === null) {
+    return [];
+  }
+  const urls: string[] = [];
+  for (const image of arr) {
+    const rec: Record<string, Object> | null = fqAsRecord(image);
+    const raw: string = rec !== null
+      ? fqStr(rec, 'web_url')
+      : (typeof image === 'string' ? image.trim() : '');
+    if (raw.startsWith('https://') || raw.startsWith('http://')) {
+      urls.push(raw);
+    }
+  }
+  return urls;
+}
+
+/** 上游时间戳秒转毫秒（容忍毫秒值），非法返回 0。 */
+function fqCommentTimestampMs(value: Object | undefined): number {
+  const raw: number = fqAsInt(value, 0);
+  if (raw <= 0) {
+    return 0;
+  }
+  const ms: number = raw > 100000000000 ? raw : raw * 1000;
+  return ms > 8640000000000000 ? 0 : ms;
+}
+
+/**
+ * 解析 /api/v1/books/{id}/comments 载荷为书评一页：
+ * data.comment[]（text/score 0-10/digg_count/reply_count/read_duration 秒/
+ * user_info 嵌套）+ 页级 comment_cnt/score_cnt/context/has_more/next_offset。
+ */
+export function fqParseBookComments(payload: Record<string, Object>): FqBookCommentPage {
+  const data: Record<string, Object> | null = fqResolveCommentData(payload);
+  if (data === null) {
+    return new FqBookCommentPage([], 0, 0, '', false, 0);
+  }
+  const comments: FqBookComment[] = [];
+  const rawList: Object[] | null = fqAsArray(data['comment']);
+  if (rawList !== null) {
+    for (const entry of rawList) {
+      const rec: Record<string, Object> | null = fqAsRecord(entry);
+      if (rec === null) {
+        continue;
+      }
+      const text: string = fqStr(rec, 'text');
+      const imageUrls: string[] = fqCommentImageUrls(rec['image_url']);
+      if (text.length === 0 && imageUrls.length === 0) {
+        continue;
+      }
+      const user: Record<string, Object> = fqAsRecord(rec['user_info']) ?? fqEmptyRecord();
+      comments.push(new FqBookComment(
+        fqStr(rec, 'comment_id'),
+        text,
+        imageUrls,
+        fqAsInt(rec['score'], 0),
+        fqAsInt(rec['digg_count'], 0),
+        fqAsInt(rec['reply_count'], 0),
+        fqAsInt(rec['read_duration'], 0),
+        fqCommentTimestampMs(rec['create_timestamp']),
+        fqStr(user, 'user_name'),
+        fqStr(user, 'user_avatar'),
+        user['is_author'] === true,
+      ));
+    }
+  }
+  return new FqBookCommentPage(
+    comments,
+    fqAsInt(data['comment_cnt'], 0),
+    fqAsInt(data['score_cnt'], 0),
+    fqStr(data, 'context'),
+    data['has_more'] === true,
+    fqAsInt(data['next_offset'], 0),
+  );
 }
 
 // ---------------------------------------------------------------------------

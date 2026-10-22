@@ -7,9 +7,11 @@
  * 穿透，滑动直达引擎原生跟手翻页）：
  * CommonNav 标题栏（hideTitleBar 随菜单显隐）+ ReadBar
  * 悬浮工具条（目录/上一章/下一章/设置，readBarHeight 随菜单 0/56）；
+ * 标题栏书评键打开书评半模态（bindSheet 于翻页触区，CommonSheet + LazyForEach 分页懒加载）；
  * 目录为 bindSheet 半模态公共 sheet（CommonSheet）；设置为公共弹窗（DialogManager
  * + CustomContentDialog，无标题无按钮仅内容区，悬于工具条上方居中）；阅读时隐藏系统状态栏。
- * 眉页（章节名）与眉脚（时钟/电量/整书页码）自绘覆盖层
+ * 眉页（章节名）与眉脚（时钟/电量/整书页码）自绘覆盖层，字体随阅读字体档位
+ * （registerFont 注册沙箱字体副本为自定义字体族，引擎请求链与 Kit 排版共用同一副本）
  * （PageDataInfo 页眉/页脚为预留字段暂不支持；整书页码为冻结估算，跨章校正）。
  * 进度（章节 + domPos）与设置（字号/行距/主题/翻页）持久化。
  */
@@ -22,7 +24,7 @@ import { BusinessError, batteryInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { TitleBarContentOptions } from '@kit.UIDesignKit';
 import { FqBackend, fqErrorMessage } from '../core/FqBackend';
-import { FqChapter, fqKindToTab } from '../model/FqModels';
+import { FqBookComment, FqBookCommentPage, FqChapter, fqFormatCountInt, fqKindToTab } from '../model/FqModels';
 import { FqReaderProgress, FqReaderStore } from '../core/FqReaderStore';
 import { ReaderNavParams } from '../model/FqNavModels';
 import { CommonNav, titleBarOf } from '../view/CommonNav';
@@ -76,6 +78,64 @@ class FqChapterSource implements IDataSource {
   }
 }
 
+/** 书评懒加载数据源：持已加载书评，续拉按 comment_id 去重后通知 LazyForEach 刷新。 */
+class FqCommentSource implements IDataSource {
+  private items: FqBookComment[] = [];
+  private listeners: DataChangeListener[] = [];
+
+  setItems(items: FqBookComment[]): void {
+    this.items = items;
+    this.notifyReloaded();
+  }
+
+  /** 续拉追加：非空 comment_id 与已有条目去重，避免分页交界重复渲染。 */
+  appendItems(items: FqBookComment[]): void {
+    for (const item of items) {
+      if (item.id.length > 0 && this.containsId(item.id)) {
+        continue;
+      }
+      this.items.push(item);
+    }
+    this.notifyReloaded();
+  }
+
+  totalCount(): number {
+    return this.items.length;
+  }
+
+  getData(index: number): Object {
+    return this.items[index];
+  }
+
+  registerDataChangeListener(listener: DataChangeListener): void {
+    if (this.listeners.indexOf(listener) < 0) {
+      this.listeners.push(listener);
+    }
+  }
+
+  unregisterDataChangeListener(listener: DataChangeListener): void {
+    const index: number = this.listeners.indexOf(listener);
+    if (index >= 0) {
+      this.listeners.splice(index, 1);
+    }
+  }
+
+  private containsId(id: string): boolean {
+    for (const known of this.items) {
+      if (known.id === id) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private notifyReloaded(): void {
+    for (const listener of this.listeners) {
+      listener.onDataReloaded();
+    }
+  }
+}
+
 @ComponentV2
 export struct ReaderPage {
   @Local loadingState: boolean = true;
@@ -86,6 +146,24 @@ export struct ReaderPage {
   @Local sheetKeyword: string = '';
   /** 目录排序：true 倒序（不持久化，每次打开目录重置为正序）。 */
   @Local sheetDescending: boolean = false;
+  /** 书评半模态（标题栏书评键呼出）。 */
+  @Local commentSheetVisible: boolean = false;
+  /** 书评首拉进行中（整页 Loading 态）。 */
+  @Local commentLoading: boolean = false;
+  /** 书评首拉错误文案（非空走错误 + 重试态）。 */
+  @Local commentError: string = '';
+  /** 已加载书评条数（空态判定）。 */
+  @Local commentCount: number = 0;
+  /** 书评总数（comment_cnt，Sheet 标题计数）。 */
+  @Local commentTotal: number = 0;
+  /** 还有下一页（服务端 has_more）。 */
+  @Local commentHasMore: boolean = false;
+  /** 续拉进行中（列表底部 Loading 态）。 */
+  @Local commentLoadingMore: boolean = false;
+  /** 续拉失败（列表底部点击重试态）。 */
+  @Local commentMoreFailed: boolean = false;
+  /** 眉页/眉脚字体族（随阅读字体档位注册；空串回退系统默认）。 */
+  @Local readerFontFamily: string = '';
   @Local chapterIndex: number = 0;
   @Local totalChapters: number = 0;
   @Local fontSize: number = 19;
@@ -111,6 +189,13 @@ export struct ReaderPage {
   private drawerScroller: Scroller = new Scroller();
   /** 目录懒加载数据源（过滤后章节，搜索时刷新）。 */
   private chapterSource: FqChapterSource = new FqChapterSource();
+  /** 书评懒加载数据源（分页续拉，按 comment_id 去重）。 */
+  private commentSource: FqCommentSource = new FqCommentSource();
+  private commentScroller: Scroller = new Scroller();
+  /** 书评续拉游标（服务端 next_offset）。 */
+  private commentNextOffset: number = 0;
+  /** 标题栏内容（书名 + 书评键），aboutToAppear 装配。 */
+  private titleBarOp: TitleBarContentOptions | undefined = undefined;
   /** 最近一次显示页的起始 domPos（进度保存/恢复用）。 */
   private lastShownStart: string = '';
   /** 整本书籍解析器：registerBookParser 仅一次，换章靠 startPlay(spineIndex) 定位。 */
@@ -119,6 +204,12 @@ export struct ReaderPage {
   private hasRegisteredBook: boolean = false;
   /** register 会把配置重置为 Kit 默认，首个 pageShow 渲染完成后需重应用真实配置。 */
   private pendingConfigReapply: boolean = false;
+  /** 正停在书脊外幻影页（末章之后/首章之前的越界空白页），回到真实页后清零。 */
+  private phantomActive: boolean = false;
+  /** 幻影页回弹失败累计：flipPage 反弹无效时升级 startPlay 原位重排。 */
+  private phantomBounceFails: number = 0;
+  /** 幻影页回弹提示上次弹出时间戳（限频防连弹）。 */
+  private lastEndBounceToastMs: number = 0;
   /** 待应用的窗口尺寸变化（小窗/全屏切换；章载中暂挂防打断，载后补应用）。 */
   private viewportDirty: boolean = false;
   /** 眉脚时钟文本（HH:mm）。 */
@@ -156,6 +247,18 @@ export struct ReaderPage {
     this.bookId = ReaderNavParams.id;
     this.kind = ReaderNavParams.kind;
     this.bookTitle = ReaderNavParams.title;
+    // 标题栏：书名 + 书评键（HDS 菜单，菜单呼出时随标题栏显示）
+    this.titleBarOp = titleBarOf(this.bookTitle, undefined, [
+      {
+        content: {
+          icon: $r('sys.symbol.message'),
+          label: 'comments',
+          action: (): void => {
+            this.openCommentSheet();
+          },
+        },
+      },
+    ]);
     this.startChapterIndex = ReaderNavParams.chapterIndex;
     FqReaderStore.init(getContext(this));
     const settings = FqReaderStore.getSettings();
@@ -221,11 +324,11 @@ export struct ReaderPage {
   build() {
     CommonNav({
       hideTitleBar: !this.menuVisible,
+      titleBarOp: this.titleBarOp,
       pageBackgroundColor: this.theme().background,
       showBrandGradient: false,
       scrollMaskExtraHeight: 0,
       tabMaskHeight: 0,
-      navBlurRadius: 0,
       isShowBar: true,
       readBarKind: 'reader',
       readBarHeight: this.menuVisible ? 56 : 0,
@@ -271,6 +374,10 @@ export struct ReaderPage {
         .width('100%')
         .height('100%')
         .hitTestBehavior(HitTestMode.Transparent)
+        // 书评半模态挂在触区（目录 sheet 在 Stack，不同节点各持一个 bindSheet）
+        .bindSheet(this.commentSheetVisible, this.CommentSheet(), FqSheetOptions((): void => {
+          this.onCommentSheetClose();
+        }, this.commentSheetHeightVp()))
 
         // 眉页：章节序号 + 章节名常驻顶部（跟随阅读主题，不拦截翻页点击）；
         // 定位用 maxTopRect（状态栏可见期间最大避让高度，覆盖摄像头孔条）
@@ -280,6 +387,7 @@ export struct ReaderPage {
               .fontColor(this.theme().fontColor)
               .fontSize(14)
               .opacity(0.5)
+              .fontFamily(this.readerFontFamily)
               .maxLines(1)
               .hitTestBehavior(HitTestMode.None)
             if (this.headerChapterName().length > 0) {
@@ -287,6 +395,7 @@ export struct ReaderPage {
                 .fontColor(this.theme().fontColor)
                 .fontSize(14)
                 .opacity(0.5)
+                .fontFamily(this.readerFontFamily)
                 .maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
                 .hitTestBehavior(HitTestMode.None)
@@ -307,6 +416,7 @@ export struct ReaderPage {
               .fontColor(this.theme().fontColor)
               .fontSize(12)
               .opacity(0.5)
+              .fontFamily(this.readerFontFamily)
               .maxLines(1)
             SymbolGlyph(this.batteryIcon())
               .fontSize(14)
@@ -317,6 +427,7 @@ export struct ReaderPage {
               .fontColor(this.theme().fontColor)
               .fontSize(12)
               .opacity(0.5)
+              .fontFamily(this.readerFontFamily)
               .maxLines(1)
           }
           .alignItems(VerticalAlign.Center)
@@ -387,8 +498,12 @@ export struct ReaderPage {
     }
   }
 
-  /** 系统返回：先关目录半模态，再关菜单，最后放行返回上一页。 */
+  /** 系统返回：先关书评/目录半模态，再关菜单，最后放行返回上一页。 */
   private handleBackPressed(): boolean {
+    if (this.commentSheetVisible) {
+      this.onCommentSheetClose();
+      return true;
+    }
     if (this.sheetVisible) {
       this.onSheetClose();
       return true;
@@ -440,7 +555,7 @@ export struct ReaderPage {
           isDefaultFocus: false,
           placeholderValue: '搜索章节',
           focusId: 'reader_sheet_search',
-          bgColor: '#F5F5F5',
+          bgColor: $r('sys.color.comp_background_float'),
           change: (value: string): void => {
             this.sheetKeyword = value;
             this.refreshCatalogSource();
@@ -492,6 +607,241 @@ export struct ReaderPage {
     }
   }
 
+  /** 书评半模态：公共 sheet 承载懒加载列表（首拉 Loading / 错误重试 / 空态 / 分页列表）。 */
+  @Builder
+  private CommentSheet() {
+    CommonSheet({
+      sheetTitle: this.commentSheetTitle(),
+    }) {
+      Column() {
+        if (this.commentLoading) {
+          Column({ space: 10 }) {
+            CommonLoading({ sizeValue: 36, loadColor: FQ_ACCENT })
+          }
+          .width('100%')
+          .layoutWeight(1)
+          .justifyContent(FlexAlign.Center)
+        } else if (this.commentError.length > 0) {
+          Column({ space: 12 }) {
+            Text(this.commentError)
+              .fontSize(14)
+              .fontColor(this.theme().fontColor)
+              .textAlign(TextAlign.Center)
+              .padding({ left: 32, right: 32 })
+            Button('重试')
+              .backgroundColor(FQ_ACCENT)
+              .onClick(() => {
+                this.loadComments(true);
+              })
+          }
+          .width('100%')
+          .layoutWeight(1)
+          .justifyContent(FlexAlign.Center)
+        } else if (this.commentCount === 0) {
+          Column() {
+            Text('暂无书评')
+              .fontSize(14)
+              .fontColor(this.theme().fontColor)
+              .opacity(0.55)
+          }
+          .width('100%')
+          .layoutWeight(1)
+          .justifyContent(FlexAlign.Center)
+        } else {
+          List({ scroller: this.commentScroller }) {
+            LazyForEach(this.commentSource, (comment: FqBookComment) => {
+              ListItem() {
+                this.CommentTile(comment)
+              }
+            }, (comment: FqBookComment): string =>
+              comment.id.length > 0 ? comment.id : `c${comment.createdAtMs}_${comment.text.length}`)
+            ListItem() {
+              this.CommentMoreFooter()
+            }
+          }
+          .width('100%')
+          .layoutWeight(1)
+          .cachedCount(8)
+          .scrollBar(BarState.Off)
+          .contentEndOffset(appState.bottomRect)
+          .divider({
+            strokeWidth: 0.5,
+            color: this.panelDividerColor(),
+            startMargin: 20,
+            endMargin: 20,
+          })
+          .onReachEnd((): void => {
+            this.loadComments(false);
+          })
+        }
+      }
+      .width('100%')
+      .height('100%')
+      .padding({ top: 56 })
+    }
+  }
+
+  /** 单条书评：头像 + 名字/星级/时间 + 正文 + 图片 + 点赞回复计数（对齐 detail_reviews）。 */
+  @Builder
+  private CommentTile(comment: FqBookComment) {
+    Column({ space: 10 }) {
+      Row({ space: 10 }) {
+        Stack() {
+          Column() {
+            SymbolGlyph($r('sys.symbol.person'))
+              .fontSize(16)
+              .fontColor([this.theme().fontColor])
+              .opacity(0.55)
+          }
+          .width(30)
+          .height(30)
+          .borderRadius(15)
+          .backgroundColor(this.panelDividerColor())
+          .justifyContent(FlexAlign.Center)
+          if (comment.userAvatar.length > 0) {
+            Image(comment.userAvatar)
+              .width(30)
+              .height(30)
+              .borderRadius(15)
+              .objectFit(ImageFit.Cover)
+          }
+        }
+        Column({ space: 4 }) {
+          Row({ space: 6 }) {
+            Text(comment.userName.length > 0 ? comment.userName : '书友')
+              .fontSize(13)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.theme().fontColor)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+            if (comment.isAuthor) {
+              Text('作者')
+                .fontSize(9)
+                .fontColor(Color.White)
+                .backgroundColor(FQ_ACCENT)
+                .borderRadius(4)
+                .padding({ left: 5, right: 5, top: 1, bottom: 1 })
+            }
+          }
+          .width('100%')
+          Row({ space: 8 }) {
+            Rating({
+              rating: comment.stars,
+              indicator: true,
+            })
+            if (comment.relativeTime().length > 0) {
+              Text(comment.relativeTime())
+                .fontSize(11)
+                .fontColor(this.theme().fontColor)
+                .opacity(0.55)
+                .maxLines(1)
+            }
+            if (comment.readDurationLabel.length > 0) {
+              Text(comment.readDurationLabel)
+                .fontSize(11)
+                .fontColor(this.theme().fontColor)
+                .opacity(0.55)
+                .maxLines(1)
+            }
+          }
+          .alignItems(VerticalAlign.Center)
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+      }
+      .alignItems(VerticalAlign.Top)
+      .width('100%')
+
+      Text(comment.text)
+        .fontSize(13.5)
+        .lineHeight(22)
+        .fontColor(this.theme().fontColor)
+        .width('100%')
+
+      if (comment.imageUrls.length > 0) {
+        Row({ space: 6 }) {
+          ForEach(comment.imageUrls.slice(0, 3), (url: string) => {
+            Image(url)
+              .width(76)
+              .height(76)
+              .borderRadius(6)
+              .objectFit(ImageFit.Cover)
+          }, (url: string): string => url)
+        }
+        .alignItems(VerticalAlign.Top)
+      }
+
+      Row({ space: 14 }) {
+        Row({ space: 4 }) {
+          SymbolGlyph($r('sys.symbol.hand_thumbsup'))
+            .fontSize(13)
+            .fontColor([this.theme().fontColor])
+            .opacity(0.55)
+          Text(fqFormatCountInt(comment.diggCount))
+            .fontSize(11)
+            .fontColor(this.theme().fontColor)
+            .opacity(0.55)
+        }
+        .alignItems(VerticalAlign.Center)
+        Row({ space: 4 }) {
+          SymbolGlyph($r('sys.symbol.message'))
+            .fontSize(13)
+            .fontColor([this.theme().fontColor])
+            .opacity(0.55)
+          Text(fqFormatCountInt(comment.replyCount))
+            .fontSize(11)
+            .fontColor(this.theme().fontColor)
+            .opacity(0.55)
+        }
+        .alignItems(VerticalAlign.Center)
+      }
+      .alignItems(VerticalAlign.Center)
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .padding({ top: 14, bottom: 14, left: 20, right: 20 })
+  }
+
+  /** 书评列表底态：续拉 Loading / 失败重试 / 没有更多。 */
+  @Builder
+  private CommentMoreFooter() {
+    if (this.commentLoadingMore) {
+      Row({ space: 8 }) {
+        LoadingProgress()
+          .width(18)
+          .height(18)
+          .color(FQ_ACCENT)
+        Text('正在加载')
+          .fontSize(12)
+          .fontColor(this.theme().fontColor)
+          .opacity(0.55)
+      }
+      .width('100%')
+      .justifyContent(FlexAlign.Center)
+      .padding({ top: 14, bottom: 14 })
+    } else if (this.commentMoreFailed) {
+      Text('加载失败，点击重试')
+        .fontSize(12)
+        .fontColor(this.theme().fontColor)
+        .opacity(0.55)
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .padding({ top: 14, bottom: 14 })
+        .onClick(() => {
+          this.loadComments(false);
+        })
+    } else if (!this.commentHasMore) {
+      Text('没有更多书评了')
+        .fontSize(12)
+        .fontColor(this.theme().fontColor)
+        .opacity(0.55)
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .padding({ top: 14, bottom: 14 })
+    }
+  }
+
   /** 公共弹窗内容装配：按 DialogManager 标识分发内容组件（当前仅「阅读设置」）。 */
   @Builder
   private DialogContentBuilder(key: string) {
@@ -532,6 +882,7 @@ export struct ReaderPage {
 
   /** 点击分区翻页（滑动由引擎原生跟手处理）；跨章由排版引擎在书脊间自行推进。 */
   private requestFlip(isNext: boolean): void {
+    hilog.info(0x0001, 'ReaderPage', `requestFlip ${isNext ? 'next' : 'prev'} menu=${this.menuVisible}`);
     if (this.menuVisible) {
       this.menuVisible = false;
       return;
@@ -542,7 +893,7 @@ export struct ReaderPage {
     try {
       this.controller.flipPage(isNext);
     } catch (error) {
-      // 排版引擎可能尚未就绪
+      hilog.info(0x0001, 'ReaderPage', 'flipPage not ready');
     }
   }
 
@@ -831,6 +1182,103 @@ export struct ReaderPage {
     this.chapterSource.setItems(this.displayChapters());
   }
 
+  /** 打开书评半模态：首开自动拉第一页。 */
+  private openCommentSheet(): void {
+    this.commentSheetVisible = true;
+    if (this.commentSource.totalCount() === 0 && !this.commentLoading) {
+      this.loadComments(true);
+    }
+  }
+
+  private onCommentSheetClose(): void {
+    this.commentSheetVisible = false;
+  }
+
+  /** 书评 Sheet 标题：总数就绪后带计数（书评 · 123）。 */
+  private commentSheetTitle(): string {
+    return this.commentTotal > 0 ? `书评 · ${this.commentTotal}` : '书评';
+  }
+
+  /** 书评 Sheet 高度：屏高 82%（vp），异常回退 600。 */
+  private commentSheetHeightVp(): number {
+    const displayData: display.Display = display.getDefaultDisplaySync();
+    const density: number = displayData.scaledDensity > 0 ? displayData.scaledDensity : 1;
+    const screenHeight: number = appState.screenHeight > 0 ? appState.screenHeight : displayData.height;
+    const height: number = Math.round((screenHeight / density) * 0.82);
+    return height > 0 ? height : 600;
+  }
+
+  /** 拉取书评一页：refresh 重置分页（首开/重试），否则触底续拉。 */
+  private async loadComments(refresh: boolean): Promise<void> {
+    if (this.bookId.length === 0) {
+      return;
+    }
+    if (refresh) {
+      if (this.commentLoading) {
+        return;
+      }
+      this.commentLoading = true;
+      this.commentError = '';
+    } else {
+      if (this.commentLoading || this.commentLoadingMore || !this.commentHasMore) {
+        return;
+      }
+      this.commentLoadingMore = true;
+      this.commentMoreFailed = false;
+    }
+    const offset: number = refresh ? 0 : this.commentNextOffset;
+    try {
+      const page: FqBookCommentPage = await FqBackend.get().bookComments(this.bookId, 20, offset);
+      if (refresh) {
+        this.commentSource.setItems(page.comments);
+        this.commentNextOffset = page.nextOffset > 0 ? page.nextOffset : page.comments.length;
+        this.commentHasMore = page.hasMore && page.comments.length > 0;
+        this.commentLoading = false;
+      } else {
+        this.commentSource.appendItems(page.comments);
+        const advanced: number = page.nextOffset > offset ? page.nextOffset : offset + page.comments.length;
+        this.commentNextOffset = advanced;
+        this.commentHasMore = page.hasMore && page.comments.length > 0 && advanced > offset;
+        this.commentLoadingMore = false;
+      }
+      this.commentTotal = page.totalCount;
+      this.commentCount = this.commentSource.totalCount();
+    } catch (error) {
+      if (refresh) {
+        this.commentError = fqErrorMessage(error);
+        this.commentLoading = false;
+      } else {
+        this.commentLoadingMore = false;
+        this.commentMoreFailed = true;
+      }
+    }
+  }
+
+  /** 眉页/眉脚字体注册：把当前档位沙箱字体副本注册为自定义字体族（幂等，重名更新）。 */
+  private applyHeaderFont(): void {
+    const option: FqFontOption | undefined = FQ_FONT_OPTIONS[this.fontIndex];
+    if (this.bookParser === null || option === undefined) {
+      this.readerFontFamily = '';
+      return;
+    }
+    if (!this.bookParser.isFontReady(this.fontIndex)) {
+      return;
+    }
+    const sandboxPath: string = this.bookParser.getFontSandboxPath();
+    if (sandboxPath.length === 0) {
+      return;
+    }
+    try {
+      this.getUIContext().getFont().registerFont({
+        familyName: option.name,
+        familySrc: `file://${sandboxPath}`,
+      });
+      this.readerFontFamily = option.name;
+    } catch (error) {
+      this.readerFontFamily = '';
+    }
+  }
+
   private chapterIndexOf(chapter: FqChapter): number {
     return this.chapters.indexOf(chapter);
   }
@@ -891,6 +1339,7 @@ export struct ReaderPage {
     this.fontIndex = index;
     if (this.bookParser !== null) {
       await this.bookParser.prepareFont(this.filesDir, this.fontIndex);
+      this.applyHeaderFont();
     }
     this.applySettingChange();
   }
@@ -940,6 +1389,84 @@ export struct ReaderPage {
         }
       }
     }
+  }
+
+  /**
+   * 重应用真实配置（register 后 Kit 重置为默认配置）。
+   * 首个 pageShow 时刻组件可能尚未完成初始化，setPageConfig 抛
+   * 「Read Page Component is not initialized」（1016900002）且处于引擎回调内、
+   * 未捕获即 jscrash：失败短暂延迟重试，仍失败则放弃重排、仅重绘兜底。
+   */
+  private applyPendingConfig(attempt: number): void {
+    try {
+      this.controller.setPageConfig(this.buildSetting());
+    } catch (error) {
+      const err: BusinessError = error as BusinessError;
+      hilog.error(0x0001, 'ReaderPage',
+        `reapply config failed(${attempt}): ${err.code} ${err.message}`);
+      if (attempt < 5) {
+        const token: number = this.loadToken;
+        setTimeout((): void => {
+          if (token === this.loadToken) {
+            this.applyPendingConfig(attempt + 1);
+          }
+        }, 400);
+        return;
+      }
+    }
+    // buildSetting 已采集最新窗口尺寸，暂挂的尺寸变化无需再补应用
+    this.viewportDirty = false;
+    // Kit 默认（浅色）首载完成的瞬间重排为真实主题，但重排只刷页缓存、不重绘
+    // 当前显示页：浅色旧渲染会停留到下次翻页。延后 startPlay 原位强制重绘，
+    // 重绘派发的 pageShow 抬起遮罩；兜底定时器防重绘异常时遮罩卡死。
+    this.scheduleConfigRedraw();
+    const token: number = this.loadToken;
+    setTimeout((): void => {
+      if (token === this.loadToken && this.loadingState) {
+        this.loadingState = false;
+      }
+    }, 1800);
+  }
+
+  /**
+   * 书脊外幻影页回弹：优先引擎反向翻页（动画平滑）；若反弹后仍停在幻影页
+   * （flipPage 静默无效），升级 startPlay 原位重排直回最近真实位置。回到
+   * 真实页的 pageShow 会清零失败计数；回弹提示限频 2.5s 防连弹。
+   */
+  private bounceFromPhantom(atBookEnd: boolean): void {
+    hilog.warn(0x0001, 'ReaderPage',
+      `phantom pageShow, bounce ${atBookEnd ? 'back' : 'forward'} (fails=${this.phantomBounceFails})`);
+    const now: number = Date.now();
+    if (now - this.lastEndBounceToastMs > 2500) {
+      this.lastEndBounceToastMs = now;
+      this.getUIContext().getPromptAction().showToast({
+        message: atBookEnd ? '已到全书末尾' : '已到全书开头',
+        duration: 1500
+      });
+    }
+    if (this.phantomBounceFails >= 1) {
+      // flipPage 反弹未见效（或再次滑入幻影页）：原位 startPlay 直回最近真实位置
+      this.phantomBounceFails += 1;
+      this.controller.startPlay(this.chapterIndex, this.lastShownStart)
+        .catch((error: BusinessError): void => {
+          hilog.error(0x0001, 'ReaderPage', `bounce startPlay failed: ${error.message}`);
+        });
+      return;
+    }
+    this.phantomBounceFails += 1;
+    try {
+      this.controller.flipPage(!atBookEnd);
+    } catch (error) {
+      const err: BusinessError = error as BusinessError;
+      hilog.error(0x0001, 'ReaderPage', `bounce flipPage failed: ${err.message}`);
+    }
+    // 反弹校验：flipPage 静默无效（700ms 内无真实页 pageShow）则升级 startPlay
+    const token: number = this.loadToken;
+    setTimeout((): void => {
+      if (token === this.loadToken && this.phantomActive) {
+        this.bounceFromPhantom(atBookEnd);
+      }
+    }, 700);
   }
 
   /** Reader Kit 颜色仅接受 6 位十六进制（不带 #）。 */
@@ -1065,6 +1592,7 @@ export struct ReaderPage {
       // 字体：自定义 handler 没有 Kit 内置字体，先备好当前档位的沙箱字体副本，
       // 引擎请求「系统字体.ttf」时由解析器 getResourceContent 返回字节
       await this.bookParser.prepareFont(this.filesDir, this.fontIndex);
+      this.applyHeaderFont();
       // 一书只注册一次解析器；换章/跳转仅靠 startPlay(spineIndex, domPos) 定位
       if (!this.hasRegisteredBook) {
         this.controller.setPageConfig(this.buildSetting());
@@ -1109,11 +1637,26 @@ export struct ReaderPage {
       this.getUIContext().getHostContext() as common.UIAbilityContext;
     await this.controller.init(context);
     this.controller.on('pageShow', (data: readerCore.PageDataInfo): void => {
-      hilog.info(0x0001, 'ReaderPage',
-        `pageShow state=${data.state} resourceIndex=${data.resourceIndex} pageOffset=${data.pageOffset} startDomPos=${data.startDomPos}`);
+      hilog.info(0x0001, 'ReaderPage', `pageShow ${JSON.stringify(data)}`);
       if (data.state !== readerCore.PageState.PAGE_ON_SHOW) {
         return;
       }
+      // 书脊外幻影页：引擎把末章之后（首章之前）编成无正文虚拟页照常派发 pageShow
+      // （resourceIndex 越界、domPos 全空），原生滑动/点击均可滑入。不更新任何
+      // 阅读状态（lastShownStart/页码/进度），下一拍异步回弹到真实页。
+      const outOfSpine: boolean = data.resourceIndex >= this.totalChapters || data.resourceIndex < 0;
+      if (outOfSpine && data.startDomPos.length === 0 && data.endDomPos.length === 0) {
+        this.phantomActive = true;
+        const token: number = this.loadToken;
+        setTimeout((): void => {
+          if (token === this.loadToken) {
+            this.bounceFromPhantom(data.resourceIndex >= this.totalChapters);
+          }
+        }, 0);
+        return;
+      }
+      this.phantomActive = false;
+      this.phantomBounceFails = 0;
       this.lastShownStart = data.startDomPos;
       // 引擎跨章翻页后 resourceIndex 即当前章节（书脊索引与章节下标一致）
       if (data.resourceIndex >= 0 && data.resourceIndex < this.totalChapters) {
@@ -1137,19 +1680,7 @@ export struct ReaderPage {
       if (this.pendingConfigReapply) {
         this.pendingConfigReapply = false;
         hilog.info(0x0001, 'ReaderPage', 'first pageShow: reapply real config');
-        this.controller.setPageConfig(this.buildSetting());
-        // buildSetting 已采集最新窗口尺寸，暂挂的尺寸变化无需再补应用
-        this.viewportDirty = false;
-        // Kit 默认（浅色）首载完成的瞬间重排为真实主题，但重排只刷页缓存、不重绘
-        // 当前显示页：浅色旧渲染会停留到下次翻页。延后 startPlay 原位强制重绘，
-        // 重绘派发的 pageShow 抬起遮罩；兜底定时器防重绘异常时遮罩卡死。
-        this.scheduleConfigRedraw();
-        const token: number = this.loadToken;
-        setTimeout((): void => {
-          if (token === this.loadToken && this.loadingState) {
-            this.loadingState = false;
-          }
-        }, 1800);
+        this.applyPendingConfig(0);
         return;
       }
       this.loadingState = false;

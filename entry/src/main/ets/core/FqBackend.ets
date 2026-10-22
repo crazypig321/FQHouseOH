@@ -13,9 +13,10 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import fq, { FqBridgeResponse } from 'libfqapi_napi.so';
 import { FqDeployer } from './FqDeployer';
 import { FqKeyStore } from './FqKeyStore';
-import { fqParseBookDetail, fqParseChapterSummaries, fqParseDirectory, fqParseHomepage, fqParseRankBoard, fqParseRankCatalog, fqParseSearchTabs, fqParseSeriesFeed, fqLegacyChapterText, fqNormalizeChapterText, fqParseNovelChapter } from './FqParser';
+import { fqParseBookComments, fqParseBookDetail, fqParseChapterSummaries, fqParseDirectory, fqParseHomepage, fqParseRankBoard, fqParseRankCatalog, fqParseSearchTabs, fqParseSeriesFeed, fqLegacyChapterText, fqNormalizeChapterText, fqParseNovelChapter } from './FqParser';
 import { fqParseObject } from './FqJson';
 import {
+  FqBookCommentPage,
   FqBookDetail,
   FqChapter,
   FqHomePage,
@@ -258,6 +259,14 @@ export class FqBackend {
       + `&tab=${encodeURIComponent(tab)}`;
     const payload: Record<string, Object> = await this.getJson('/api/detail', query);
     return fqParseBookDetail(payload);
+  }
+
+  /** 书评一页 + 头部计数（/api/v1/books/{id}/comments，count/offset 分页）。 */
+  public async bookComments(bookId: string, count: number, offset: number): Promise<FqBookCommentPage> {
+    const query: string = `count=${count < 1 ? 10 : count}&offset=${offset < 0 ? 0 : offset}`;
+    const payload: Record<string, Object> =
+      await this.getJson(`/api/v1/books/${encodeURIComponent(bookId)}/comments`, query);
+    return fqParseBookComments(payload);
   }
 
   /**

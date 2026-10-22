@@ -391,3 +391,142 @@ export class FqRankCatalog {
 export function fqEmptyRankCatalog(): FqRankCatalog {
   return new FqRankCatalog('', [], []);
 }
+
+// ---------------------------------------------------------------------------
+// 书评（fqapp lib/models/book_comment.dart）
+// ---------------------------------------------------------------------------
+
+/** 单条书评（/api/v1/books/{id}/comments 的 data.comment[] 条目）。 */
+export class FqBookComment {
+  readonly id: string;
+  readonly text: string;
+  readonly imageUrls: string[];
+  /** 上游 0-10 评分，0 表示未评。 */
+  readonly score: number;
+  readonly diggCount: number;
+  readonly replyCount: number;
+  /** 读者已读时长（秒）。 */
+  readonly readSeconds: number;
+  /** 发布时间（毫秒），0 表示未知。 */
+  readonly createdAtMs: number;
+  readonly userName: string;
+  readonly userAvatar: string;
+  readonly isAuthor: boolean;
+
+  constructor(
+    id: string,
+    text: string,
+    imageUrls: string[],
+    score: number,
+    diggCount: number,
+    replyCount: number,
+    readSeconds: number,
+    createdAtMs: number,
+    userName: string,
+    userAvatar: string,
+    isAuthor: boolean,
+  ) {
+    this.id = id;
+    this.text = text;
+    this.imageUrls = imageUrls;
+    this.score = score;
+    this.diggCount = diggCount;
+    this.replyCount = replyCount;
+    this.readSeconds = readSeconds;
+    this.createdAtMs = createdAtMs;
+    this.userName = userName;
+    this.userAvatar = userAvatar;
+    this.isAuthor = isAuthor;
+  }
+
+  /** 上游 0-10 评分换算五星制（含半星）。 */
+  get stars(): number {
+    const clamped: number = this.score < 0 ? 0 : (this.score > 10 ? 10 : this.score);
+    return clamped / 2;
+  }
+
+  /** 相对发布时间（`1天前`），未知时间返回空串。 */
+  relativeTime(nowMs?: number): string {
+    if (this.createdAtMs <= 0) {
+      return '';
+    }
+    const reference: number = nowMs !== undefined ? nowMs : Date.now();
+    const seconds: number = Math.floor((reference - this.createdAtMs) / 1000);
+    if (seconds < 60) {
+      return '刚刚';
+    }
+    if (seconds < 3600) {
+      return `${Math.floor(seconds / 60)}分钟前`;
+    }
+    if (seconds < 86400) {
+      return `${Math.floor(seconds / 3600)}小时前`;
+    }
+    if (seconds < 86400 * 30) {
+      return `${Math.floor(seconds / 86400)}天前`;
+    }
+    if (seconds < 86400 * 365) {
+      return `${Math.floor(seconds / (86400 * 30))}个月前`;
+    }
+    return `${Math.floor(seconds / (86400 * 365))}年前`;
+  }
+
+  /** `阅读14小时后点评` 文案，未读时为空。 */
+  get readDurationLabel(): string {
+    if (this.readSeconds <= 0) {
+      return '';
+    }
+    const hours: number = Math.floor(this.readSeconds / 3600);
+    if (hours >= 1) {
+      return `阅读${hours}小时后点评`;
+    }
+    const minutes: number = Math.floor(this.readSeconds / 60);
+    if (minutes >= 1) {
+      return `阅读${minutes}分钟后点评`;
+    }
+    return `阅读${this.readSeconds}秒后点评`;
+  }
+}
+
+/** 书评一页 + 详情页头部计数。 */
+export class FqBookCommentPage {
+  readonly comments: FqBookComment[];
+  /** comment_cnt：书评总数。 */
+  readonly totalCount: number;
+  /** score_cnt：评分人数。 */
+  readonly scoreCount: number;
+  /** context：上游现成展示串（如 `2.6万人点评`）。 */
+  readonly scoreContext: string;
+  readonly hasMore: boolean;
+  readonly nextOffset: number;
+
+  constructor(
+    comments: FqBookComment[],
+    totalCount: number,
+    scoreCount: number,
+    scoreContext: string,
+    hasMore: boolean,
+    nextOffset: number,
+  ) {
+    this.comments = comments;
+    this.totalCount = totalCount;
+    this.scoreCount = scoreCount;
+    this.scoreContext = scoreContext;
+    this.hasMore = hasMore;
+    this.nextOffset = nextOffset;
+  }
+
+  get isEmpty(): boolean {
+    return this.comments.length === 0;
+  }
+}
+
+/** 数字计数 79528 -> 7.9万（对齐 fqapp formatCount，用于点赞/回复数）。 */
+export function fqFormatCountInt(value: number): string {
+  if (value < 10000) {
+    return `${value}`;
+  }
+  if (value < 100000000) {
+    return `${trimFqZero((value / 10000).toFixed(1))}万`;
+  }
+  return `${trimFqZero((value / 100000000).toFixed(1))}亿`;
+}
