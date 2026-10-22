@@ -13,6 +13,7 @@ import { appState } from '../entryability/AppState';
 import { themeUtils } from '../utils/ThemeUtils';
 import { CommonSearch } from './CommonCom';
 import { CommonNav } from './CommonNav';
+import { uiMaterial } from '@kit.ArkUI';
 
 /** 通用 bindSheet 参数：拖拽条 + 关闭回调 + 可选高度（默认 300）。 */
 export function FqSheetOptions(onClose: () => void, height?: SheetSize | Length): SheetOptions {
@@ -21,10 +22,15 @@ export function FqSheetOptions(onClose: () => void, height?: SheetSize | Length)
     dragBar: true,
     showClose: false,
     preferType: SheetType.CENTER,
+    backgroundColor: Color.Transparent,
+    systemMaterial: new uiMaterial.ImmersiveMaterial({
+      style: uiMaterial.ImmersiveStyle.ULTRA_THICK,
+    }),
     shouldDismiss: (sheetDismiss: SheetDismiss): void => {
       sheetDismiss.dismiss();
       onClose();
     },
+    onWillSpringBackWhenDismiss: ()=>{},
     onWillAppear: () => {
       appState.isForegroundBlur = true
     },
@@ -91,6 +97,9 @@ export struct CommonSheet {
     })
     .hideBackButton(true)
     .titleMode(HdsNavDestinationTitleMode.MODAL)
+    // 内容层透明：sheet 材质（blurStyle/systemMaterial）即唯一可见层，
+    // 否则 HdsNavDestination 默认不透明底色盖住材质层，视觉成「两层」
+    .backgroundColor(Color.Transparent)
   }
 
   private titleBarContent(): TitleBarContentOptions {

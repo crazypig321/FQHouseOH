@@ -204,12 +204,8 @@ export struct ReaderPage {
   private hasRegisteredBook: boolean = false;
   /** register 会把配置重置为 Kit 默认，首个 pageShow 渲染完成后需重应用真实配置。 */
   private pendingConfigReapply: boolean = false;
-  /** 正停在书脊外幻影页（末章之后/首章之前的越界空白页），回到真实页后清零。 */
-  private phantomActive: boolean = false;
-  /** 幻影页回弹失败累计：flipPage 反弹无效时升级 startPlay 原位重排。 */
-  private phantomBounceFails: number = 0;
-  /** 幻影页回弹提示上次弹出时间戳（限频防连弹）。 */
-  private lastEndBounceToastMs: number = 0;
+  /** 书脊末尾「全书完」尾页可见：末章之后的引擎幻影空白页上覆盖自绘终页。 */
+  @Local endPageVisible: boolean = false;
   /** 待应用的窗口尺寸变化（小窗/全屏切换；章载中暂挂防打断，载后补应用）。 */
   private viewportDirty: boolean = false;
   /** 眉脚时钟文本（HH:mm）。 */
@@ -381,7 +377,7 @@ export struct ReaderPage {
 
         // 眉页：章节序号 + 章节名常驻顶部（跟随阅读主题，不拦截翻页点击）；
         // 定位用 maxTopRect（状态栏可见期间最大避让高度，覆盖摄像头孔条）
-        if (!this.menuVisible) {
+        if (!this.menuVisible && !this.endPageVisible) {
           Row({ space: 5 }) {
             Text(this.headerChapterLabel())
               .fontColor(this.theme().fontColor)
@@ -410,7 +406,7 @@ export struct ReaderPage {
         }
 
         // 眉脚：左时钟+电量图标，右整书页码（已看/估算总数）
-        if (!this.menuVisible) {
+        if (!this.menuVisible && !this.endPageVisible) {
           Row({space: 5}) {
             Text(this.footerClock)
               .fontColor(this.theme().fontColor)
@@ -434,6 +430,25 @@ export struct ReaderPage {
           .width('100%')
           .padding({ left: TOP_BOTTOM_PADDING, right: TOP_BOTTOM_PADDING })
           .position({ bottom: appState.bottomRect + 20, left: 0 })
+          .hitTestBehavior(HitTestMode.None)
+          .transition(TransitionEffect.OPACITY.animation({duration: 300}))
+        }
+
+        // 「全书完」尾页：末章之后的引擎幻影空白页上盖一层主题底色终页（参考
+        // 原版章末页样式：居中小字、弱化色），命中穿透给下方翻页触区——前翻
+        // 停留尾页、后翻/点左区回正文；眉页眉脚在此页隐藏
+        if (this.endPageVisible) {
+          Column() {
+            Text('全书完')
+              .fontColor(this.theme().fontColor)
+              .fontSize(13)
+              .opacity(0.5)
+              .fontFamily(this.readerFontFamily)
+          }
+          .width('100%')
+          .height('100%')
+          .justifyContent(FlexAlign.Center)
+          .backgroundColor(this.theme().background)
           .hitTestBehavior(HitTestMode.None)
           .transition(TransitionEffect.OPACITY.animation({duration: 300}))
         }
@@ -1428,47 +1443,6 @@ export struct ReaderPage {
     }, 1800);
   }
 
-  /**
-   * 书脊外幻影页回弹：优先引擎反向翻页（动画平滑）；若反弹后仍停在幻影页
-   * （flipPage 静默无效），升级 startPlay 原位重排直回最近真实位置。回到
-   * 真实页的 pageShow 会清零失败计数；回弹提示限频 2.5s 防连弹。
-   */
-  private bounceFromPhantom(atBookEnd: boolean): void {
-    hilog.warn(0x0001, 'ReaderPage',
-      `phantom pageShow, bounce ${atBookEnd ? 'back' : 'forward'} (fails=${this.phantomBounceFails})`);
-    const now: number = Date.now();
-    if (now - this.lastEndBounceToastMs > 2500) {
-      this.lastEndBounceToastMs = now;
-      this.getUIContext().getPromptAction().showToast({
-        message: atBookEnd ? '已到全书末尾' : '已到全书开头',
-        duration: 1500
-      });
-    }
-    if (this.phantomBounceFails >= 1) {
-      // flipPage 反弹未见效（或再次滑入幻影页）：原位 startPlay 直回最近真实位置
-      this.phantomBounceFails += 1;
-      this.controller.startPlay(this.chapterIndex, this.lastShownStart)
-        .catch((error: BusinessError): void => {
-          hilog.error(0x0001, 'ReaderPage', `bounce startPlay failed: ${error.message}`);
-        });
-      return;
-    }
-    this.phantomBounceFails += 1;
-    try {
-      this.controller.flipPage(!atBookEnd);
-    } catch (error) {
-      const err: BusinessError = error as BusinessError;
-      hilog.error(0x0001, 'ReaderPage', `bounce flipPage failed: ${err.message}`);
-    }
-    // 反弹校验：flipPage 静默无效（700ms 内无真实页 pageShow）则升级 startPlay
-    const token: number = this.loadToken;
-    setTimeout((): void => {
-      if (token === this.loadToken && this.phantomActive) {
-        this.bounceFromPhantom(atBookEnd);
-      }
-    }, 700);
-  }
-
   /** Reader Kit 颜色仅接受 6 位十六进制（不带 #）。 */
   private fqKitColor(color: string): string {
     return color.startsWith('#') ? color.substring(1) : color;
@@ -1643,20 +1617,13 @@ export struct ReaderPage {
       }
       // 书脊外幻影页：引擎把末章之后（首章之前）编成无正文虚拟页照常派发 pageShow
       // （resourceIndex 越界、domPos 全空），原生滑动/点击均可滑入。不更新任何
-      // 阅读状态（lastShownStart/页码/进度），下一拍异步回弹到真实页。
+      // 阅读状态（lastShownStart/页码/进度）；书末幻影页就地展示「全书完」尾页。
       const outOfSpine: boolean = data.resourceIndex >= this.totalChapters || data.resourceIndex < 0;
       if (outOfSpine && data.startDomPos.length === 0 && data.endDomPos.length === 0) {
-        this.phantomActive = true;
-        const token: number = this.loadToken;
-        setTimeout((): void => {
-          if (token === this.loadToken) {
-            this.bounceFromPhantom(data.resourceIndex >= this.totalChapters);
-          }
-        }, 0);
+        this.endPageVisible = data.resourceIndex >= this.totalChapters;
         return;
       }
-      this.phantomActive = false;
-      this.phantomBounceFails = 0;
+      this.endPageVisible = false;
       this.lastShownStart = data.startDomPos;
       // 引擎跨章翻页后 resourceIndex 即当前章节（书脊索引与章节下标一致）
       if (data.resourceIndex >= 0 && data.resourceIndex < this.totalChapters) {
