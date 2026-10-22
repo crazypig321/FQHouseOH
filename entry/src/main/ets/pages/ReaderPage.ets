@@ -25,7 +25,7 @@ import { FqChapter, fqKindToTab } from '../model/FqModels';
 import { FqReaderProgress, FqReaderStore } from '../core/FqReaderStore';
 import { ReaderNavParams } from '../model/FqNavModels';
 import { CommonNav, titleBarOf } from '../view/CommonNav';
-import { CommonLoading, FQ_ACCENT } from '../view/CommonCom';
+import { CommonLoading, CommonSearch, FQ_ACCENT } from '../view/CommonCom';
 import { CommonSheet, FqSheetOptions } from '../view/CommonSheet';
 import { FQ_FONT_OPTIONS, FqFontOption, FqOnlineParser } from '../core/FqOnlineParser';
 import { appState } from '../entryability/AppState';
@@ -52,6 +52,8 @@ const FQ_HEADER_PREFIX_RE: RegExp = new RegExp('^第[0-9零一二三四五六七
 /** 眉页前缀剥离（含其后空白），用于提取纯章节名。 */
 const FQ_HEADER_PREFIX_STRIP_RE: RegExp =
   new RegExp('^第[0-9零一二三四五六七八九十百千万]+[章节回卷集话篇]\\s*');
+
+const TOP_BOTTOM_PADDING: number = 34
 
 /** 目录懒加载数据源：持过滤后章节，变更时通知 LazyForEach 刷新。 */
 class FqChapterSource implements IDataSource {
@@ -129,6 +131,8 @@ export struct ReaderPage {
   private hasRegisteredBook: boolean = false;
   /** register 会把配置重置为 Kit 默认，首个 pageShow 渲染完成后需重应用真实配置。 */
   private pendingConfigReapply: boolean = false;
+  /** 待应用的窗口尺寸变化（小窗/全屏切换；章载中暂挂防打断，载后补应用）。 */
+  private viewportDirty: boolean = false;
   /** 眉脚时钟文本（HH:mm）。 */
   @Local footerClock: string = '';
   /** 眉脚电量百分比（-1 未知）。 */
@@ -180,6 +184,7 @@ export struct ReaderPage {
     }
     try {
       this.controller.releaseBook();
+      this.controller.off('pageShow')
     } catch (error) {
       // 组件可能尚未就绪
     }
@@ -195,7 +200,6 @@ export struct ReaderPage {
 
   build() {
     CommonNav({
-      //titleBarOp: this.buildTitleBar(),
       hideTitleBar: !this.menuVisible,
       pageBackgroundColor: this.theme().background,
       showBrandGradient: false,
@@ -221,8 +225,6 @@ export struct ReaderPage {
             this.resolveController();
           },
         })
-        .width('100%')
-        .height('100%')
 
         // 翻页触区：左=上一页，中=呼出菜单，右=下一页；横向滑动同样翻页
         Row() {
@@ -263,13 +265,13 @@ export struct ReaderPage {
                 .opacity(0.5)
                 .maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .constraintSize({ maxWidth: '70%' })
                 .hitTestBehavior(HitTestMode.None)
             }
           }
+          .width('100%')
           .alignItems(VerticalAlign.Center)
-          .constraintSize({ maxWidth: '80%' })
-          .position({ top: Math.max(appState.maxTopRect, 32) , left: 34 })
+          .padding({ left: TOP_BOTTOM_PADDING, right: TOP_BOTTOM_PADDING })
+          .position({ top: Math.max(appState.maxTopRect, 32) , left: 0 })
           .hitTestBehavior(HitTestMode.None)
         }
 
@@ -294,8 +296,8 @@ export struct ReaderPage {
           }
           .alignItems(VerticalAlign.Center)
           .width('100%')
-          .padding({ left: 34, right: 34 })
-          .position({ bottom: appState.bottomRect + 10, left: 0 })
+          .padding({ left: TOP_BOTTOM_PADDING, right: TOP_BOTTOM_PADDING })
+          .position({ bottom: appState.bottomRect + 20, left: 0 })
           .hitTestBehavior(HitTestMode.None)
         }
 
@@ -412,65 +414,65 @@ export struct ReaderPage {
   private CatalogSheet() {
     CommonSheet({
       sheetTitle: '目录',
-      showSearch: true,
       showLocate: true,
       locateClick: (): void => {
         this.locateCurrentChapter();
       },
-      searchActive: this.sheetSearchActive,
-      searchValue: this.sheetKeyword,
-      searchPlaceholder: '搜索章节',
-      focusId: 'reader_sheet_search',
-      searchToggle: (): void => {
-        this.sheetSearchActive = !this.sheetSearchActive;
-        this.sheetKeyword = '';
-        this.refreshCatalogSource();
-      },
-      searchChange: (value: string): void => {
-        this.sheetKeyword = value;
-        this.refreshCatalogSource();
-      },
-      searchSubmit: (value: string): void => {
-        this.sheetKeyword = value;
-        this.refreshCatalogSource();
-      },
     }) {
-      List({ scroller: this.drawerScroller }) {
-        LazyForEach(this.chapterSource, (chapter: FqChapter) => {
-          ListItem() {
-            Row({ space: 14 }) {
-              Text(`${this.chapterIndexOf(chapter) + 1}`)
-                .fontSize(12)
-                .fontColor(this.theme().fontColor)
-                .opacity(0.5)
-                .textAlign(TextAlign.End)
-              Text(chapter.title.length > 0 ? chapter.title
-                : `第${this.chapterIndexOf(chapter) + 1}章`)
-                .fontSize(14)
-                .fontColor(this.chapterIndexOf(chapter) === this.chapterIndex
-                  ? FQ_ACCENT : this.theme().fontColor)
-                .layoutWeight(1)
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
+      Column({space: 16}){
+        CommonSearch({
+          searchValue: this.sheetKeyword,
+          placeholderValue: '搜索章节',
+          focusId: 'reader_sheet_search',
+          bgColor: '#F5F5F5',
+          change: (value: string): void => {
+            this.sheetKeyword = value;
+            this.refreshCatalogSource();
+          },
+          submit: (value: string, _event: SubmitEvent): void => {
+            this.sheetKeyword = value;
+            this.refreshCatalogSource();
+          },
+          didDelete: (): void => {
+            this.sheetKeyword = '';
+            this.refreshCatalogSource();
+          },
+          click: (): void => {
+          },
+        }).height(36).padding({right: 20, left: 20, bottom: 10 })
+
+        List({ scroller: this.drawerScroller }) {
+          LazyForEach(this.chapterSource, (chapter: FqChapter) => {
+            ListItem() {
+              Row({ space: 14 }) {
+                Text(chapter.title.length > 0 ? chapter.title
+                  : `第${this.chapterIndexOf(chapter) + 1}章`)
+                  .fontSize(14)
+                  .fontColor(this.chapterIndexOf(chapter) === this.chapterIndex
+                    ? FQ_ACCENT : this.theme().fontColor)
+                  .layoutWeight(1)
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+              }
+              .width('100%')
+              .padding({ top: 14, bottom: 14, right: 20, left: 20 })
+              .alignItems(VerticalAlign.Center)
+              .onClick(() => this.jumpToChapter(this.chapterIndexOf(chapter)))
             }
-            .width('100%')
-            .padding(14)
-            .alignItems(VerticalAlign.Center)
-            .onClick(() => this.jumpToChapter(this.chapterIndexOf(chapter)))
-          }
-        }, (chapter: FqChapter): string => chapter.itemId)
-      }
-      .padding({top: 66, bottom: appState.bottomRect})
-      .cachedCount(12)
-      .width('100%')
-      .height('100%')
-      .scrollBar(BarState.Off)
-      .divider({
-        strokeWidth: 0.5,
-        color: this.panelDividerColor(),
-        startMargin: 16,
-        endMargin: 16,
-      })
+          }, (chapter: FqChapter): string => chapter.itemId)
+        }
+        .contentEndOffset(appState.bottomRect)
+        .cachedCount(12)
+        .width('100%')
+        .height('100%')
+        .scrollBar(BarState.Off)
+        .divider({
+          strokeWidth: 0.5,
+          color: this.panelDividerColor(),
+          startMargin: 20,
+          endMargin: 20,
+        })
+      }.padding({top: 56})
     }
   }
 
@@ -501,10 +503,15 @@ export struct ReaderPage {
           this.SettingChip('A+', (): void => {
             this.changeFontSize(1);
           })
-          Blank()
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+
+        Row({ space: 12 }) {
           Text('行距')
             .fontSize(14)
             .fontColor(this.theme().fontColor)
+            .width(36)
           this.SettingChip('-', (): void => {
             this.changeLineHeight(-0.1);
           })
@@ -668,6 +675,40 @@ export struct ReaderPage {
     if (this.themeIndex === -1) {
       this.applySettingChange();
     }
+  }
+
+  /** 窗口宽度（appState.screenWidth 的计算映射，供 @Monitor 监听小窗/全屏切换）。 */
+  @Computed
+  get windowWidth(): number {
+    return appState.screenWidth;
+  }
+
+  /** 窗口高度（appState.screenHeight 的计算映射，供 @Monitor 监听小窗/全屏切换）。 */
+  @Computed
+  get windowHeight(): number {
+    return appState.screenHeight;
+  }
+
+  /** 窗口尺寸变化（EntryAbility 更新 appState 后触发）：重算排版视口并重排。 */
+  @Monitor('windowWidth', 'windowHeight')
+  onWindowSizeChange(): void {
+    this.viewportDirty = true;
+    this.applyViewportUpdate();
+  }
+
+  /** 应用窗口尺寸变化：setPageConfig 重排（只刷页缓存），重绘当前页靠 scheduleConfigRedraw。 */
+  private applyViewportUpdate(): void {
+    if (!this.viewportDirty || !this.initialized || this.loadingState) {
+      return;
+    }
+    this.viewportDirty = false;
+    hilog.info(0x0001, 'ReaderPage', 'windowSizeChange: setPageConfig to update viewport');
+    try {
+      this.controller.setPageConfig(this.buildSetting());
+    } catch (error) {
+      // 排版引擎可能尚未就绪
+    }
+    this.scheduleConfigRedraw();
   }
 
   /** 实际生效的主题下标：-1 跟随系统（深色 → 夜间，浅色 → 纸白）。 */
@@ -1009,8 +1050,8 @@ export struct ReaderPage {
     const screenHeight: number = appState.screenHeight > 0 ? appState.screenHeight : displayData.height;
     hilog.info(0x0001, 'ReaderTheme',
       `buildSetting viewPort=${screenWidth}x${screenHeight} density=${density}`);
-    // Reader Kit 内置上下页边距（约 92/59vp）无配置项：等比放大视口与字号，
-    // 组件把视口整页缩放进自身区域，视觉字号不变而页边距等比缩小、每页容纳更多内容
+    // Reader Kit 内置页边距无配置项：等比放大视口与字号，组件把视口整页缩放进
+    // 自身区域，视觉字号不变而边距等比缩小（左右内置约 172.5px 缩至约 20vp）
     const viewportScale: number = 1.5;
     const setting: readerCore.ReaderSetting = {
       fontName: '系统字体',
@@ -1187,6 +1228,8 @@ export struct ReaderPage {
         this.pendingConfigReapply = false;
         hilog.info(0x0001, 'ReaderPage', 'first pageShow: reapply real config');
         this.controller.setPageConfig(this.buildSetting());
+        // buildSetting 已采集最新窗口尺寸，暂挂的尺寸变化无需再补应用
+        this.viewportDirty = false;
         // Kit 默认（浅色）首载完成的瞬间重排为真实主题，但重排只刷页缓存、不重绘
         // 当前显示页：浅色旧渲染会停留到下次翻页。延后 startPlay 原位强制重绘，
         // 重绘派发的 pageShow 抬起遮罩；兜底定时器防重绘异常时遮罩卡死。
@@ -1200,6 +1243,8 @@ export struct ReaderPage {
         return;
       }
       this.loadingState = false;
+      // 章载中暂挂的窗口尺寸变化（小窗/全屏切换）在此补应用
+      this.applyViewportUpdate();
     });
     // 资源请求兜底：handler.getResourceContent 返回空时，引擎经此回调获取字体等资源
     this.controller.on('resourceRequest', (fileName: string): ArrayBuffer => {

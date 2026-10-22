@@ -128,6 +128,26 @@ export default class EntryAbility extends UIAbility {
             appState.bottomRect = uiContext.px2vp(data.area.bottomRect.height);
           }
         });
+
+        /*断点及屏幕尺寸获取*/
+        windowStage.getMainWindow().then((data: window.Window) => {
+          let uiContext = data.getUIContext()
+
+          //监听屏幕改变
+          data.on('windowSizeChange', (data) => {
+            //获取屏幕宽高数值
+            appState.screenWidth = data.width
+            appState.screenHeight = data.height
+            //获取横屏断点
+            const widthBp: WidthBreakpoint = uiContext!.getWindowWidthBreakpoint()
+            const heightBp: HeightBreakpoint = uiContext!.getWindowHeightBreakpoint()
+            appState.WidthBp = widthBp
+            appState.HeightBp = heightBp
+            console.info(`#屏幕信息: 断点：${appState.WidthBp}  屏幕尺寸： 宽${ appState.screenWidth},高${appState.screenHeight}`)
+          })
+        }).catch((err: BusinessError) => {
+          console.error(`Failed to obtain the main window. Cause code: ${err.code}, message: ${err.message}`);
+        })
       }).catch((error: BusinessError) => {
         hilog.error(DOMAIN, 'testTag', 'setWindowLayoutFullScreen failed: %{public}s', JSON.stringify(error));
       });

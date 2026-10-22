@@ -16,7 +16,7 @@ import { CommonNav } from './CommonNav';
 /** 通用 bindSheet 参数：拖拽条 + 关闭回调 + 可选高度（默认 300）。 */
 export function FqSheetOptions(onClose: () => void, height?: SheetSize | Length): SheetOptions {
   const options: SheetOptions = {
-    height: height === undefined ? 300 : height,
+    height: height === undefined ? 600 : height,
     dragBar: true,
     showClose: false,
     preferType: SheetType.CENTER,
@@ -155,9 +155,8 @@ export struct CommonSheet {
         click: (): void => {
         },
       })
-        .height(36)
     }
-    .padding({ left: 16, right: 16, top: 6, bottom: 6 })
+    .padding({ left: 16, right: 16 })
     .width('100%')
   }
 }

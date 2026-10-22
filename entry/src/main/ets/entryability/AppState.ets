@@ -20,6 +20,10 @@ class AppState {
   /** 屏幕物理高度（px，启动时由 EntryAbility 同步） */
   @Trace screenHeight: number = 0;
 
+  /*设备断点获取*/
+  @Trace WidthBp: number = 1
+  @Trace HeightBp: number = 1
+
   // 沉浸光感参数
   @Trace materialLevel: hdsMaterial.MaterialLevel = hdsMaterial.MaterialLevel.ADAPTIVE;
   @Trace materialType: hdsMaterial.MaterialType = hdsMaterial.MaterialType.IMMERSIVE;

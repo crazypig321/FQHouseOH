@@ -13,6 +13,7 @@ export struct CommonSearch {
   @Param searchValue: string = '';
   @Param placeholderValue: ResourceStr = '';
   @Param isFocusable: boolean = true;
+  @Param bgColor: ResourceColor = Color.Transparent
   /**
    * 焦点定位 id：必须由使用方传入且保持稳定。
    * 标题栏等 titleBar 内容变化会使 HdsTitleBar 重新执行底部插槽 builder，
@@ -50,7 +51,7 @@ export struct CommonSearch {
       .attributeModifier(searchImmersiveModifier)
       .placeholderColor($r('sys.color.font_tertiary'))
       .placeholderFont({ size: 14, weight: 400 })
-      .backgroundColor(Color.Transparent)
+      .backgroundColor(this.bgColor)
       .textFont({ size: 14, weight: 400 })
       .onSubmit((searchContent: string, event: SubmitEvent) => {
         this.submit(searchContent, event)
