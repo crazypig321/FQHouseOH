@@ -43,6 +43,8 @@ struct Index {
     .navDestination(this.pageMap)
     .width('100%')
     .height('100%')
+    .foregroundBlurStyle(appState.isForegroundBlur ? BlurStyle.Thin : BlurStyle.NONE,
+      { colorMode: ThemeColorMode.SYSTEM, adaptiveColor: AdaptiveColor.DEFAULT, scale: 0.3 })
   }
 
   @Builder

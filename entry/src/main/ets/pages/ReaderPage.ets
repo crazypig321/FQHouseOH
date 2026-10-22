@@ -14,7 +14,7 @@
  */
 
 import { common } from '@kit.AbilityKit';
-import { display, window } from '@kit.ArkUI';
+import { curves, display, window } from '@kit.ArkUI';
 import { fileIo } from '@kit.CoreFileKit';
 import { ReadPageComponent, readerCore } from '@kit.ReaderKit';
 import { BusinessError, batteryInfo } from '@kit.BasicServicesKit';
@@ -97,6 +97,8 @@ export struct ReaderPage {
   @Local sheetVisible: boolean = false;
   @Local sheetSearchActive: boolean = false;
   @Local sheetKeyword: string = '';
+  /** 目录排序：true 倒序（不持久化，每次打开目录重置为正序）。 */
+  @Local sheetDescending: boolean = false;
   @Local settingsSheetVisible: boolean = false;
   @Local chapterIndex: number = 0;
   @Local totalChapters: number = 0;
@@ -203,6 +205,9 @@ export struct ReaderPage {
       hideTitleBar: !this.menuVisible,
       pageBackgroundColor: this.theme().background,
       showBrandGradient: false,
+      scrollMaskExtraHeight: 0,
+      tabMaskHeight: 0,
+      navBlurRadius: 0,
       isShowBar: true,
       readBarKind: 'reader',
       readBarHeight: this.menuVisible ? 56 : 0,
@@ -235,7 +240,11 @@ export struct ReaderPage {
           Column()
             .layoutWeight(1)
             .height('100%')
-            .onClick(() => this.toggleMenu())
+            .onClick(() => {
+              this.getUIContext().animateTo({ duration: 300 }, (): void => {
+                this.toggleMenu()
+              });
+            })
           Column()
             .layoutWeight(1)
             .height('100%')
@@ -273,6 +282,7 @@ export struct ReaderPage {
           .padding({ left: TOP_BOTTOM_PADDING, right: TOP_BOTTOM_PADDING })
           .position({ top: Math.max(appState.maxTopRect, 32) , left: 0 })
           .hitTestBehavior(HitTestMode.None)
+          .transition(TransitionEffect.OPACITY.animation({duration: 300}))
         }
 
         // 眉脚：左时钟+电量图标，右整书页码（已看/估算总数）
@@ -299,6 +309,7 @@ export struct ReaderPage {
           .padding({ left: TOP_BOTTOM_PADDING, right: TOP_BOTTOM_PADDING })
           .position({ bottom: appState.bottomRect + 20, left: 0 })
           .hitTestBehavior(HitTestMode.None)
+          .transition(TransitionEffect.OPACITY.animation({duration: 300}))
         }
 
         if (this.loadingState) {
@@ -418,10 +429,16 @@ export struct ReaderPage {
       locateClick: (): void => {
         this.locateCurrentChapter();
       },
+      showSort: true,
+      sortAscending: !this.sheetDescending,
+      sortClick: (): void => {
+        this.toggleCatalogOrder();
+      },
     }) {
       Column({space: 16}){
         CommonSearch({
           searchValue: this.sheetKeyword,
+          isDefaultFocus: false,
           placeholderValue: '搜索章节',
           focusId: 'reader_sheet_search',
           bgColor: '#F5F5F5',
@@ -461,7 +478,7 @@ export struct ReaderPage {
             }
           }, (chapter: FqChapter): string => chapter.itemId)
         }
-        .contentEndOffset(appState.bottomRect)
+        .contentEndOffset(appState.bottomRect + 56)
         .cachedCount(12)
         .width('100%')
         .height('100%')
@@ -858,7 +875,7 @@ export struct ReaderPage {
     const current: FqChapter | undefined = this.chapters[this.chapterIndex];
     let target: number = this.chapterIndex;
     if (current !== undefined) {
-      const pos: number = this.filteredChapters().indexOf(current);
+      const pos: number = this.displayChapters().indexOf(current);
       if (pos >= 0) {
         target = pos;
       }
@@ -892,6 +909,8 @@ export struct ReaderPage {
   private openSheet(): void {
     this.sheetSearchActive = false;
     this.sheetKeyword = '';
+    // 排序不持久化：每次打开目录恢复正序
+    this.sheetDescending = false;
     this.refreshCatalogSource();
     this.sheetVisible = true;
     setTimeout(() => {
@@ -920,9 +939,29 @@ export struct ReaderPage {
     return result;
   }
 
+  /** 目录显示列表：关键字过滤后按排序输出（倒序时反转）。 */
+  private displayChapters(): FqChapter[] {
+    const list: FqChapter[] = this.filteredChapters();
+    if (!this.sheetDescending) {
+      return list;
+    }
+    const reversed: FqChapter[] = list.slice();
+    reversed.reverse();
+    return reversed;
+  }
+
+  /** 目录排序切换：刷新列表并回到当前章节。 */
+  private toggleCatalogOrder(): void {
+    this.sheetDescending = !this.sheetDescending;
+    this.refreshCatalogSource();
+    setTimeout(() => {
+      this.locateCurrentChapter();
+    }, 100);
+  }
+
   /** 按当前关键字刷新目录懒加载数据源。 */
   private refreshCatalogSource(): void {
-    this.chapterSource.setItems(this.filteredChapters());
+    this.chapterSource.setItems(this.displayChapters());
   }
 
   private chapterIndexOf(chapter: FqChapter): number {

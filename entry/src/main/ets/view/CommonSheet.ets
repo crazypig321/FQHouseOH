@@ -2,13 +2,14 @@
  * 通用半模态 Sheet（配合 bindSheet 使用）：
  * - FqSheetOptions：统一生成 bindSheet 参数（拖拽条 + 关闭回调 + 高度）。
  * - CommonSheet：Sheet 内容壳，内部引用 CommonNav 组件承载标题栏
- *   （主标题 + 可选右侧搜索按钮；搜索展开时 bottomBuilder 挂
+ *   （主标题 + 可选右侧搜索/定位/排序/关闭按钮；搜索展开时 bottomBuilder 挂
  *   CommonSearch 搜索框，样式对齐主页搜索行）。
  */
 
 import { HdsNavDestination,
   HdsNavDestinationTitleMode,
   HdsNavigationMenuItemOptions, TitleBarContentOptions } from '@kit.UIDesignKit';
+import { appState } from '../entryability/AppState';
 import { themeUtils } from '../utils/ThemeUtils';
 import { CommonSearch } from './CommonCom';
 import { CommonNav } from './CommonNav';
@@ -24,8 +25,12 @@ export function FqSheetOptions(onClose: () => void, height?: SheetSize | Length)
       sheetDismiss.dismiss();
       onClose();
     },
-    onDisappear: (): void => {
+    onWillAppear: () => {
+      appState.isForegroundBlur = true
+    },
+    onWillDisappear: (): void => {
       onClose();
+      appState.isForegroundBlur = false
     },
   };
   return options;
@@ -44,12 +49,17 @@ export struct CommonSheet {
   @Param focusId: string = 'common_sheet_search';
   /** 标题栏右侧是否显示定位按钮（目录滚动到当前章节）。 */
   @Param showLocate: boolean = false;
+  /** 标题栏右侧是否显示排序按钮（正/倒序切换）。 */
+  @Param showSort: boolean = false;
+  /** 当前是否正序（控制排序按钮箭头方向）。 */
+  @Param sortAscending: boolean = true;
   /** 标题栏右侧是否显示关闭按钮。 */
   @Param showClose: boolean = false;
   @Event searchToggle: () => void = (): void => {};
   @Event searchChange: (value: string) => void = (_value: string): void => {};
   @Event searchSubmit: (value: string) => void = (_value: string): void => {};
   @Event locateClick: () => void = (): void => {};
+  @Event sortClick: () => void = (): void => {};
   @Event closeClick: () => void = (): void => {};
   @BuilderParam content: () => void;
 
@@ -106,6 +116,17 @@ export struct CommonSheet {
           label: 'locate',
           action: (): void => {
             this.locateClick();
+          },
+        },
+      });
+    }
+    if (this.showSort) {
+      menus.push({
+        content: {
+          icon: this.sortAscending ? $r('sys.symbol.arrow_up') : $r('sys.symbol.arrow_down'),
+          label: 'sort',
+          action: (): void => {
+            this.sortClick();
           },
         },
       });

@@ -19,7 +19,8 @@ class AppState {
   @Trace screenWidth: number = 0;
   /** 屏幕物理高度（px，启动时由 EntryAbility 同步） */
   @Trace screenHeight: number = 0;
-
+  // 是否开启模糊
+  @Trace isForegroundBlur: boolean = false;
   /*设备断点获取*/
   @Trace WidthBp: number = 1
   @Trace HeightBp: number = 1

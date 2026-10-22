@@ -13,6 +13,7 @@ export struct CommonSearch {
   @Param searchValue: string = '';
   @Param placeholderValue: ResourceStr = '';
   @Param isFocusable: boolean = true;
+  @Param isDefaultFocus: boolean = true;
   @Param bgColor: ResourceColor = Color.Transparent
   /**
    * 焦点定位 id：必须由使用方传入且保持稳定。
@@ -86,7 +87,7 @@ export struct CommonSearch {
         this.click()
       })
       .focusable(this.isFocusable)// 无法获焦则无法呼出软键盘
-      .defaultFocus(this.isFocusable)
+      .defaultFocus(this.isDefaultFocus)
   }
 }
 

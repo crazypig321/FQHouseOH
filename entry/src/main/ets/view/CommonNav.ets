@@ -65,6 +65,10 @@ export struct CommonNav {
   @Param showBrandGradient: boolean = true
   /** 底部悬浮条高度（阅读页随菜单显隐 0/56 切换） */
   @Param readBarHeight: number = 56
+  /** nav标题栏模糊度 */
+  @Param navBlurRadius: number = 30
+  /** tab遮罩高度 */
+  @Param tabMaskHeight: number = 56
 
   /** 返回 true 拦截系统返回 */
   @Event backPressed: () => boolean = (): boolean => false
@@ -102,7 +106,7 @@ export struct CommonNav {
     const now: number = Date.now();
     if (this.lastTitleTapTime > 0 && now - this.lastTitleTapTime <= 300) {
       this.lastTitleTapTime = 0;
-      this.scroller.scrollTo({ xOffset: 0, yOffset: this.scrollToTopYOffset, animation: { duration: 250, curve: Curve.EaseOut } });
+      this.scroller.scrollTo({ xOffset: 0, yOffset: this.scrollToTopYOffset, animation: { duration: 300, curve: Curve.EaseOut } });
     } else {
       this.lastTitleTapTime = now;
     }
@@ -122,7 +126,7 @@ export struct CommonNav {
         .scrollable(false)
         .barPosition(BarPosition.End)
         .barHeight(this.readBarHeight)
-        //.animation({duration: 250, curve: Curve.Smooth})
+        .animation({duration: 300})
         .barFloatingStyle({
           barWidth: { smallWidth: 330, mediumWidth: 480, largeWidth: 560 },
           barBottomMargin: 28,
@@ -131,7 +135,7 @@ export struct CommonNav {
             materialLevel: appState.materialLevel
           },
           gradientMask: {
-            maskHeight: this.readBarHeight === 0 ? 0 : 56,
+            maskHeight: this.readBarHeight === 0 ? 0 : this.tabMaskHeight,
           },
           adaptToHandedness: true,
         })
@@ -143,7 +147,7 @@ export struct CommonNav {
       content: this.titleBarOp,
       style: {
         originalStyle: {
-          backgroundStyle: { maskExtraHeight: 0, blurRadius: 30 },
+          backgroundStyle: { maskExtraHeight: 0, blurRadius: this.navBlurRadius },
           contentStyle: {
             // 深浅模式切换时由 themeUtils 触发重渲染（HDS 不会自动刷新系统色）
             titleStyle: { mainTitleColor: themeUtils.textColor, subTitleColor: themeUtils.terTextColor },
@@ -162,7 +166,7 @@ export struct CommonNav {
           blurEffectiveStartOffset: LengthMetrics.vp(0), // 动态样式线性过渡的起始位置
           blurEffectiveEndOffset: LengthMetrics.vp(80), // 动态样式线性过渡的终点位置
         },
-        scrollEffectStyle: { backgroundStyle: { maskExtraHeight: this.scrollMaskExtraHeight, blurRadius: 30 } },
+        scrollEffectStyle: { backgroundStyle: { maskExtraHeight: this.scrollMaskExtraHeight, blurRadius: this.navBlurRadius } },
         blurStrategy: BlurStrategy.ADAPTIVE,
         systemMaterialEffect: {
           materialType: appState.materialType,
@@ -223,6 +227,7 @@ export struct CommonNav {
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
+      .transition(TransitionEffect.OPACITY.animation({duration: 300}))
     } else {
       Row() {
         if (this.readBarKind === 'book') {
