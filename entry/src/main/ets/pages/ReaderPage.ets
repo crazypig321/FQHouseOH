@@ -3,7 +3,8 @@
  * 整本书注册一个 FqOnlineParser（目录/书脊与网络目录一一对应），
  * 章节正文由排版引擎经 getSpineItemContent 按需网络拉取；
  * 换章/目录跳转用 startPlay(spineIndex, domPos)，跨章翻页由引擎自行推进。
- * 交互：三列翻页触区（左=上一页，中=呼出菜单，右=下一页；横向滑动同样翻页）：
+ * 交互：三列点击触区（左=上一页，中=呼出菜单，右=下一页；触区 Transparent
+ * 穿透，滑动直达引擎原生跟手翻页）：
  * CommonNav 标题栏（hideTitleBar 随菜单显隐）+ ReadBar
  * 悬浮工具条（目录/上一章/下一章/设置，readBarHeight 随菜单 0/56）；
  * 目录/设置为 bindSheet 半模态公共 sheet（CommonSheet）；阅读时隐藏系统状态栏。
@@ -138,6 +139,7 @@ export struct ReaderPage {
   private chapterPages: Map<number, number> = new Map();
   /** 各章页数冻结估算（chapterIndex → 页数）：会话内不随翻页重算，整书页码仅跨章校正。 */
   private chapterEstimate: Map<number, number> = new Map();
+
   /** 最近一次显示页在章内的页偏移（0 起）。 */
   @Local shownPageOffset: number = 0;
 
@@ -228,41 +230,18 @@ export struct ReaderPage {
             .layoutWeight(1)
             .height('100%')
             .onClick(() => this.requestFlip(false))
-            .gesture(PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 30 })
-              .onActionEnd((event: GestureEvent) => {
-                if (event.offsetX < -30) {
-                  this.requestFlip(true);
-                } else if (event.offsetX > 30) {
-                  this.requestFlip(false);
-                }
-              }))
           Column()
             .layoutWeight(1)
             .height('100%')
             .onClick(() => this.toggleMenu())
-            .gesture(PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 30 })
-              .onActionEnd((event: GestureEvent) => {
-                if (event.offsetX < -30) {
-                  this.requestFlip(true);
-                } else if (event.offsetX > 30) {
-                  this.requestFlip(false);
-                }
-              }))
           Column()
             .layoutWeight(1)
             .height('100%')
             .onClick(() => this.requestFlip(true))
-            .gesture(PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 30 })
-              .onActionEnd((event: GestureEvent) => {
-                if (event.offsetX < -30) {
-                  this.requestFlip(true);
-                } else if (event.offsetX > 30) {
-                  this.requestFlip(false);
-                }
-              }))
         }
         .width('100%')
         .height('100%')
+        .hitTestBehavior(HitTestMode.Transparent)
         .bindSheet(this.settingsSheetVisible, this.SettingsSheet(), FqSheetOptions((): void => {
           this.settingsSheetVisible = false;
         }, 380))
@@ -273,14 +252,14 @@ export struct ReaderPage {
           Row({ space: 5 }) {
             Text(this.headerChapterLabel())
               .fontColor(this.theme().fontColor)
-              .fontSize(12)
+              .fontSize(14)
               .opacity(0.5)
               .maxLines(1)
               .hitTestBehavior(HitTestMode.None)
             if (this.headerChapterName().length > 0) {
               Text(this.headerChapterName())
                 .fontColor(this.theme().fontColor)
-                .fontSize(12)
+                .fontSize(14)
                 .opacity(0.5)
                 .maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -290,13 +269,13 @@ export struct ReaderPage {
           }
           .alignItems(VerticalAlign.Center)
           .constraintSize({ maxWidth: '80%' })
-          .position({ top: Math.max(appState.maxTopRect, 32) + 8, left: 34 })
+          .position({ top: Math.max(appState.maxTopRect, 32) , left: 34 })
           .hitTestBehavior(HitTestMode.None)
         }
 
         // 眉脚：左时钟+电量图标，右整书页码（已看/估算总数）
         if (!this.menuVisible) {
-          Row() {
+          Row({space: 5}) {
             Text(this.footerClock)
               .fontColor(this.theme().fontColor)
               .fontSize(12)
@@ -366,21 +345,6 @@ export struct ReaderPage {
         this.onSheetClose();
       }))
     }
-  }
-
-  // ---------------------------------------------------------------------------
-  // 标题栏 / ReadBar 分发 / 返回
-  // ---------------------------------------------------------------------------
-
-  /** CommonNav 标题栏：章节标题（MINI 模式仅主标题）。 */
-  private buildTitleBar(): TitleBarContentOptions {
-    const chapterTitle: string = this.currentChapterTitle();
-    const options: TitleBarContentOptions = {
-      title: {
-        mainTitle: chapterTitle.length > 0 ? chapterTitle : this.bookTitle,
-      },
-    };
-    return options;
   }
 
   /** ReadBar 悬浮工具条分发：目录 / 设置 / 上一章 / 下一章。 */
@@ -664,7 +628,7 @@ export struct ReaderPage {
     return this.theme().night ? '#2A2D30' : '#E8E2D4';
   }
 
-  /** 点击/横滑翻页；跨章由排版引擎在书脊间自行推进（内容经解析器按需拉取）。 */
+  /** 点击分区翻页（滑动由引擎原生跟手处理）；跨章由排版引擎在书脊间自行推进。 */
   private requestFlip(isNext: boolean): void {
     if (this.menuVisible || this.settingsSheetVisible) {
       this.menuVisible = false;
