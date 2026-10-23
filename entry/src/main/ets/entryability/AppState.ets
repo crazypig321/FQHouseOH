@@ -3,6 +3,7 @@
  * （对齐 musicfreeOH AppState 模式，页面通过 appState.pageInfos 路由）。
  */
 import { hdsMaterial } from "@kit.UIDesignKit";
+import { common } from '@kit.AbilityKit';
 
 @ObservedV2
 export class AppState {
@@ -37,6 +38,9 @@ export class AppState {
 
   /** 系统当前是否深色模式（EntryAbility 启动与 onConfigurationUpdate 同步） */
   @Trace isDark: boolean = false;
+
+  /** 主 Ability 上下文（EntryAbility 注入：退出应用 terminateSelf 用）。 */
+  public abilityContext: common.UIAbilityContext | null = null;
 }
 
 export const appState: AppState = new AppState();

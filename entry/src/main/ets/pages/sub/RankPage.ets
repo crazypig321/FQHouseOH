@@ -4,7 +4,7 @@
  * 目录藏于 novel homepage(tab_type=2) 载荷，榜单 /api/v1/rank/{rankId} 分页。
  */
 
-import { FqBackend, fqErrorMessage } from '../core/FqBackend';
+import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import {
   FqRankBoard,
   FqRankCatalog,
@@ -12,11 +12,11 @@ import {
   FqRankEntry,
   FqRankTab,
   fqEmptyRankCatalog,
-} from '../model/FqModels';
-import { DetailNavParams, FqTitleBarOptions, ROUTE_DETAIL } from '../model/FqNavModels';
-import { NavPathUtils } from '../utils/NavPathUtils';
-import { CommonNav } from '../view/CommonNav';
-import { CommonLoading, FQ_ACCENT } from '../view/CommonCom';
+} from '../../model/FqModels';
+import { DetailNavParams, FqTitleBarOptions, ROUTE_DETAIL } from '../../model/FqNavModels';
+import { NavPathUtils } from '../../utils/NavPathUtils';
+import { CommonNav } from '../../view/CommonNav';
+import { CommonLoading, FQ_ACCENT } from '../../view/CommonCom';
 
 /** 排名行懒加载数据源。 */
 class FqRankEntryDataSource implements IDataSource {

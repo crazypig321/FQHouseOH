@@ -21,25 +21,25 @@ import { fileIo } from '@kit.CoreFileKit';
 import { batteryInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { HdsAnimationMode, HdsTabsController, TitleBarContentOptions } from '@kit.UIDesignKit';
-import { FqBackend, fqErrorMessage } from '../core/FqBackend';
-import { FqChapter, fqFormatCountInt, fqKindToTab } from '../model/FqModels';
-import { FqReaderProgress, FqReaderStore } from '../core/FqReaderStore';
-import { FqReadStatsStore } from '../core/FqReadStatsStore';
-import { FqLocalBookStore } from '../core/FqLocalBookStore';
-import { ReaderNavParams } from '../model/FqNavModels';
-import { CommonNav, titleBarOf } from '../view/CommonNav';
-import { CommonLoading, FQ_ACCENT } from '../view/CommonCom';
-import { CommonSheet, FqSheetOptions } from '../view/CommonSheet';
-import { FqCommentSheet, fqCommentSheetHeightVp } from '../view/FqCommentSheet';
-import { FqCatalogSheet } from '../view/FqCatalogSheet';
-import { FQ_FONT_OPTIONS, FqFontOption } from '../core/FqOnlineParser';
-import { fqAudioSession } from '../core/FqAudioSession';
-import { FqSubtitleCue, FqSubtitleTrack } from '../model/FqAudioModels';
-import { appState } from '../entryability/AppState';
-import { themeUtils } from '../utils/ThemeUtils';
-import { DialogManager } from '../utils/DialogUtils';
-import { FQ_READER_THEMES, FqReaderTheme } from '../view/dialog/ReaderSettingsDialogContent';
-import { fqReaderSettingsBus } from '../core/FqReaderSettingsBus';
+import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
+import { FqChapter, fqFormatCountInt, fqKindToTab } from '../../model/FqModels';
+import { FqReaderProgress, FqReaderStore } from '../../core/FqReaderStore';
+import { FqReadStatsStore } from '../../core/FqReadStatsStore';
+import { FqLocalBookStore } from '../../core/FqLocalBookStore';
+import { ReaderNavParams } from '../../model/FqNavModels';
+import { CommonNav, titleBarOf } from '../../view/CommonNav';
+import { CommonLoading, FQ_ACCENT } from '../../view/CommonCom';
+import { CommonSheet, FqSheetOptions } from '../../view/CommonSheet';
+import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/FqCommentSheet';
+import { FqCatalogSheet } from '../../view/FqCatalogSheet';
+import { FQ_FONT_OPTIONS, FqFontOption } from '../../core/FqOnlineParser';
+import { fqAudioSession } from '../../core/FqAudioSession';
+import { FqSubtitleCue, FqSubtitleTrack } from '../../model/FqAudioModels';
+import { appState } from '../../entryability/AppState';
+import { themeUtils } from '../../utils/ThemeUtils';
+import { DialogManager } from '../../utils/DialogUtils';
+import { FQ_READER_THEMES, FqReaderTheme } from '../../view/dialog/ReaderSettingsDialogContent';
+import { fqReaderSettingsBus } from '../../core/FqReaderSettingsBus';
 import {
   FQ_BUBBLE_GAP_VP,
   FQ_DEMO_PARAGRAPH_COMMENTS,
@@ -52,10 +52,10 @@ import {
   FqParagraphCommentProvider,
   FqReaderLayoutMetrics,
   FqReaderPageData,
-} from './ReaderTypes';
-import { FqPageCanvas } from './FqPageCanvas';
-import { FqReaderFlip } from './FqReaderFlip';
-import { FqMeasureFn, FqPaginationEngine, fqPageIndexForPosition } from './FqPagination';
+} from '../../reader/ReaderTypes';
+import { FqPageCanvas } from '../../reader/FqPageCanvas';
+import { FqReaderFlip } from '../../reader/FqReaderFlip';
+import { FqMeasureFn, FqPaginationEngine, fqPageIndexForPosition } from '../../reader/FqPagination';
 
 /** 眉页「第N章」前缀匹配（N 支持数字与中文数字，量词：章节回卷集话篇）。 */
 const FQ_HEADER_PREFIX_RE: RegExp = new RegExp('^第[0-9零一二三四五六七八九十百千万]+[章节回卷集话篇]');

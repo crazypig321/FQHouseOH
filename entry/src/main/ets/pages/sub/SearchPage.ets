@@ -7,15 +7,15 @@
 
 import { preferences } from '@kit.ArkData';
 import { TitleBarContentOptions } from '@kit.UIDesignKit';
-import { FqBackend, fqErrorMessage } from '../core/FqBackend';
-import { FqMediaItem, FqSearchTab } from '../model/FqModels';
-import { FqMediaDataSource } from '../core/FqMediaDataSource';
-import { FqItemCard } from '../component/FqItemCard';
-import { DetailNavParams, FqTitleBarOptions, ROUTE_DETAIL } from '../model/FqNavModels';
-import { NavPathUtils } from '../utils/NavPathUtils';
-import { CommonSearch, FQ_ACCENT, CommonLoading } from '../view/CommonCom';
-import { CommonNav } from '../view/CommonNav';
-import { appState } from '../entryability/AppState';
+import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
+import { FqMediaItem, FqSearchTab } from '../../model/FqModels';
+import { FqMediaDataSource } from '../../core/FqMediaDataSource';
+import { FqItemCard } from '../../view/FqItemCard';
+import { DetailNavParams, FqTitleBarOptions, ROUTE_DETAIL } from '../../model/FqNavModels';
+import { NavPathUtils } from '../../utils/NavPathUtils';
+import { CommonSearch, FQ_ACCENT, CommonLoading } from '../../view/CommonCom';
+import { CommonNav } from '../../view/CommonNav';
+import { appState } from '../../entryability/AppState';
 
 interface FqSearchCategoryDef {
   readonly title: string;

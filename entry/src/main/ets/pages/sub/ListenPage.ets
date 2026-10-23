@@ -9,11 +9,11 @@
  */
 
 import { promptAction, display } from '@kit.ArkUI';
-import { FQ_ACCENT } from '../view/CommonCom';
-import { CommonNav } from '../view/CommonNav';
-import { CommonSheet, FqSheetOptions } from '../view/CommonSheet';
-import { FqCatalogSheet } from '../view/FqCatalogSheet';
-import { FqCommentSheet, fqCommentSheetHeightVp } from '../view/FqCommentSheet';
+import { FQ_ACCENT } from '../../view/CommonCom';
+import { CommonNav } from '../../view/CommonNav';
+import { CommonSheet, FqSheetOptions } from '../../view/CommonSheet';
+import { FqCatalogSheet } from '../../view/FqCatalogSheet';
+import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/FqCommentSheet';
 import {
   DetailNavParams,
   FqTitleBarOptions,
@@ -21,12 +21,12 @@ import {
   ReaderNavParams,
   ROUTE_DETAIL,
   ROUTE_READER2,
-} from '../model/FqNavModels';
-import { fqAudioSession, FqChapterOpenOptions } from '../core/FqAudioSession';
-import { FqAudioTone, FqRelatedWork } from '../model/FqAudioModels';
-import { FqShelfItem, FqShelfStore } from '../core/FqShelfStore';
-import { NavPathUtils } from '../utils/NavPathUtils';
-import { appState } from '../entryability/AppState';
+} from '../../model/FqNavModels';
+import { fqAudioSession, FqChapterOpenOptions } from '../../core/FqAudioSession';
+import { FqAudioTone, FqRelatedWork } from '../../model/FqAudioModels';
+import { FqShelfItem, FqShelfStore } from '../../core/FqShelfStore';
+import { NavPathUtils } from '../../utils/NavPathUtils';
+import { appState } from '../../entryability/AppState';
 
 /** 播放倍速档（avPlayer 0.75 ~ 2）。 */
 const FQ_RATES: number[] = [0.75, 1, 1.25, 1.5, 1.75, 2];

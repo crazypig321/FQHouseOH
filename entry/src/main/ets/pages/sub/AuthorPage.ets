@@ -7,15 +7,15 @@
  * 头像 58 + 笔名 18 加粗 + 等级徽标 + 「X粉丝 · N 部作品」+ 简介 + 3 列封面网格。
  */
 
-import { FqBackend, fqErrorMessage } from '../core/FqBackend';
-import { FqAuthorProfile, FqAuthorWork, FqMediaItem } from '../model/FqModels';
-import { FqMediaCard } from '../component/FqMediaCard';
-import { AuthorNavParams, DetailNavParams, FqTitleBarOptions, ROUTE_DETAIL } from '../model/FqNavModels';
-import { NavPathUtils } from '../utils/NavPathUtils';
-import { CommonNav } from '../view/CommonNav';
-import { CommonLoading, FQ_ACCENT } from '../view/CommonCom';
+import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
+import { FqAuthorProfile, FqAuthorWork, FqMediaItem } from '../../model/FqModels';
+import { FqMediaCard } from '../../view/FqMediaCard';
+import { AuthorNavParams, DetailNavParams, FqTitleBarOptions, ROUTE_DETAIL } from '../../model/FqNavModels';
+import { NavPathUtils } from '../../utils/NavPathUtils';
+import { CommonNav } from '../../view/CommonNav';
+import { CommonLoading, FQ_ACCENT } from '../../view/CommonCom';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { appState } from '../entryability/AppState';
+import { appState } from '../../entryability/AppState';
 
 /** 滚动内容起始偏移：标题栏 56。 */
 const FQ_AUTHOR_TOP_INSET: number = 56;

@@ -9,7 +9,7 @@
 
 import pasteboard from '@ohos.pasteboard';
 import { promptAction } from '@kit.ArkUI';
-import { FqBackend, fqErrorMessage } from '../core/FqBackend';
+import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import {
   FqBookComment,
   FqBookCommentPage,
@@ -19,17 +19,17 @@ import {
   fqFormatCountInt,
   fqKindToTab,
   fqKindLabel,
-} from '../model/FqModels';
-import { FqShelfStore, FqShelfItem } from '../core/FqShelfStore';
-import { FqBrowseStore, FqBrowseItem } from '../core/FqBrowseStore';
-import { AuthorNavParams, DetailNavParams, FqTitleBarOptions, ListenNavParams, ReaderNavParams, ROUTE_AUTHOR, ROUTE_LISTEN, ROUTE_READER2 } from '../model/FqNavModels';
-import { NavPathUtils } from '../utils/NavPathUtils';
-import { CommonNav } from '../view/CommonNav';
-import { CommonLoading, FQ_ACCENT } from '../view/CommonCom';
-import { FqSheetOptions } from '../view/CommonSheet';
-import { FqCommentSheet, FqCommentTile, fqCommentSheetHeightVp } from '../view/FqCommentSheet';
-import { FqCatalogSheet } from '../view/FqCatalogSheet';
-import { appState } from '../entryability/AppState';
+} from '../../model/FqModels';
+import { FqShelfStore, FqShelfItem } from '../../core/FqShelfStore';
+import { FqBrowseStore, FqBrowseItem } from '../../core/FqBrowseStore';
+import { AuthorNavParams, DetailNavParams, FqTitleBarOptions, ListenNavParams, ReaderNavParams, ROUTE_AUTHOR, ROUTE_LISTEN, ROUTE_READER2 } from '../../model/FqNavModels';
+import { NavPathUtils } from '../../utils/NavPathUtils';
+import { CommonNav } from '../../view/CommonNav';
+import { CommonLoading, FQ_ACCENT } from '../../view/CommonCom';
+import { FqSheetOptions } from '../../view/CommonSheet';
+import { FqCommentSheet, FqCommentTile, fqCommentSheetHeightVp } from '../../view/FqCommentSheet';
+import { FqCatalogSheet } from '../../view/FqCatalogSheet';
+import { appState } from '../../entryability/AppState';
 
 /** 目录预览行数（对齐 fqapp _previewChapterCount）。 */
 const FQ_PREVIEW_CHAPTER_COUNT: number = 3;

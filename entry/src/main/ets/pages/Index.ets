@@ -6,6 +6,7 @@
 
 import { HdsAnimationMode, HdsNavigation, HdsNavigationTitleMode, HdsTabs, HdsTabsController } from '@kit.UIDesignKit';
 import { CustomContentDialog } from '@kit.ArkUI';
+import { common } from '@kit.AbilityKit';
 import { AppState, appState } from '../entryability/AppState';
 import { MainTabPagesBuilder, PageMapBuilder } from '../view/FqAppPages';
 import { DialogManager } from '../utils/DialogUtils';
@@ -81,6 +82,34 @@ struct Index {
     .height('100%')
     .foregroundBlurStyle(appState.isForegroundBlur ? BlurStyle.Thin : BlurStyle.NONE,
       { colorMode: ThemeColorMode.SYSTEM, adaptiveColor: AdaptiveColor.DEFAULT, scale: 0.3 })
+  }
+
+  /** 返回手势（导航栈空时到达，二级页出栈由 Navigation 处理，参考 musicfreeOH Index.onBackPress）：
+   * 多选模式先退多选 → 非首页 tab 回首页 → 首页弹退出确认弹窗。 */
+  onBackPress(): boolean {
+    if (appState.isBatchMode) {
+      this.getUIContext().animateTo({ duration: 250, curve: Curve.EaseInOut }, (): void => {
+        appState.isBatchMode = false;
+      });
+      return true;
+    }
+    if (appState.currTabsIndex !== 0) {
+      this.tabsController.changeIndex(0);
+      return true;
+    }
+    this.showExitConfirm();
+    return true;
+  }
+
+  /** 退出确认（共用确认弹窗）：确认后终止应用。 */
+  private showExitConfirm(): void {
+    DialogManager.ShowConfirm('退出应用', '是否确认退出应用？', '退出', (): void => {
+      const context: common.UIAbilityContext | null = appState.abilityContext;
+      if (context !== null) {
+        context.terminateSelf().catch((): void => {
+        });
+      }
+    });
   }
 
   @Builder

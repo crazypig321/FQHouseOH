@@ -5,7 +5,7 @@
 
 import { FqBackend } from '../core/FqBackend';
 import { FqMediaItem, fqEmptyMediaItem, fqKindLabel } from '../model/FqModels';
-import { FQ_ACCENT } from '../view/CommonCom';
+import { FQ_ACCENT } from './CommonCom';
 
 @ComponentV2
 export struct FqMediaCard {
@@ -41,12 +41,14 @@ export struct FqMediaCard {
             .width('100%')
             .height('100%')
             .backgroundColor('#59000000')
+            .transition(TransitionEffect.OPACITY)
         }
         if (this.batchMode) {
           SymbolGlyph(this.selected ? $r('sys.symbol.checkmark_circle_fill') : $r('sys.symbol.circle'))
             .fontSize(22)
             .fontColor([this.selected ? FQ_ACCENT : $r('sys.color.icon_tertiary')])
             .margin(6)
+            .transition(TransitionEffect.OPACITY)
         }
         if (!this.batchMode && this.item.kind.length > 0) {
           Text(fqKindLabel(this.item.kind))
@@ -56,6 +58,7 @@ export struct FqMediaCard {
             .borderRadius(5)
             .backgroundColor('#A61C1B1A')
             .margin(5)
+            .transition(TransitionEffect.OPACITY)
         }
         if (!this.batchMode && this.item.ep.length > 0) {
           Column() {
@@ -72,6 +75,7 @@ export struct FqMediaCard {
           .justifyContent(FlexAlign.End)
           .alignItems(HorizontalAlign.End)
           .padding(5)
+          .transition(TransitionEffect.OPACITY)
         }
       }
       .width('100%')
