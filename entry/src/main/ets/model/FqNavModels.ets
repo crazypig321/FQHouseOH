@@ -18,6 +18,8 @@ export const ROUTE_AUTHOR: string = 'author';
 export const ROUTE_READER2: string = 'reader2';
 /** 听书页（ListenPage，应用级播放会话）。 */
 export const ROUTE_LISTEN: string = 'listen';
+/** 视频播放页（PlayerPage，mpv 全屏播放器）。 */
+export const ROUTE_PLAYER: string = 'player';
 
 /** 详情页跳转参数（push 前由来源页赋值，详情页 aboutToAppear 读取）。 */
 export class DetailNavParams {
@@ -55,6 +57,20 @@ export class ListenNavParams {
   static cover: string = '';
   /** 详情页预载章节（小说传其自身章节，TTS 按章生成音频；为空则听书页自行拉目录）。 */
   static chapters: FqChapter[] = [];
+}
+
+/** 播放页跳转参数（短剧/漫剧，mpv 播放器）。 */
+export class PlayerNavParams {
+  /** 剧集内容 id（目录请求用，通常为 seriesId）。 */
+  static contentId: string = '';
+  /** 内容类型（video/manju），决定 fqKindToTab 的取流 tab。 */
+  static kind: string = 'video';
+  static title: string = '';
+  static cover: string = '';
+  /** 详情页预载剧集目录；为空则播放页自行拉目录。 */
+  static chapters: FqChapter[] = [];
+  /** 起播集下标。 */
+  static startIndex: number = 0;
 }
 
 /**

@@ -26,6 +26,8 @@ import {
   FqBookCommentPage,
   FqBookDetail,
   FqChapter,
+  FqEpisodeSource,
+  FqEpisodeVariant,
   FqHomePage,
   FqMediaItem,
   FqRankBoard,
@@ -1608,4 +1610,102 @@ export function fqNormalizeChapterText(raw: string, chapterTitle: string): strin
     }
   }
   return paragraphs.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// /api/content 剧集播放流（fqapp EpisodeSource.fromResponse）
+// ---------------------------------------------------------------------------
+
+const FQ_EPISODE_URL_KEYS: string[] = ['video_url', 'play_url', 'main_url', 'url'];
+const FQ_EPISODE_NESTED_KEYS: string[] = ['data', 'video_info', 'video_list', 'play_info_list', 'video_model'];
+
+/**
+ * 剧集播放流：data.video_url ?? main_url 优先，缺失时深度回退搜索
+ * （老后端形状，对齐 fqapp _extractVideoUrl）；variants 为清晰度档（高→低）。
+ * 地址保持原始形状（/src/ 相对或绝对 URL），锚定由 FqBackend.resourceUrl 负责。
+ */
+export function fqParseEpisodeSource(payload: Record<string, Object>): FqEpisodeSource {
+  const data: Record<string, Object> | null = fqAsRecord(payload['data']);
+  const root: Record<string, Object> = data !== null ? data : payload;
+  let rawUrl: string = fqFirstString(root, ['video_url', 'main_url']).trim();
+  if (rawUrl.length === 0) {
+    rawUrl = fqExtractEpisodeUrl(payload, 0);
+  }
+  if (rawUrl.length === 0) {
+    throw new Error('获取播放地址失败');
+  }
+  const variants: FqEpisodeVariant[] = [];
+  const rawVariants: Object[] | null = fqAsArray(root['variants']);
+  if (rawVariants !== null) {
+    for (const row of rawVariants) {
+      const rec: Record<string, Object> | null = fqAsRecord(row);
+      if (rec === null) {
+        continue;
+      }
+      const name: string = fqStr(rec, 'name').trim();
+      const url: string = fqStr(rec, 'url').trim();
+      if (name.length === 0 || url.length === 0) {
+        continue;
+      }
+      variants.push(new FqEpisodeVariant(name, url, fqStr(rec, 'key_hex').trim(),
+        fqAsInt(rec['height'], 0)));
+    }
+  }
+  return new FqEpisodeSource(rawUrl, fqStr(root, 'key_hex').trim(), variants);
+}
+
+/** 老后端形状深度回退：字符串候选（http(s)://、/src/）→ 嵌套 JSON 串 → 优先键 → 任意子节点。 */
+function fqExtractEpisodeUrl(value: Object | null, depth: number): string {
+  if (value === null || depth > 7) {
+    return '';
+  }
+  if (typeof value === 'string') {
+    const trimmed: string = value.trim();
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')
+      || trimmed.startsWith('/src/')) {
+      return trimmed;
+    }
+    if (trimmed.startsWith('{')) {
+      try {
+        return fqExtractEpisodeUrl(JSON.parse(trimmed), depth + 1);
+      } catch (error) {
+        return '';
+      }
+    }
+    return '';
+  }
+  const rows: Object[] | null = fqAsArray(value);
+  if (rows !== null) {
+    for (let index: number = rows.length - 1; index >= 0; index--) {
+      const found: string = fqExtractEpisodeUrl(rows[index], depth + 1);
+      if (found.length > 0) {
+        return found;
+      }
+    }
+    return '';
+  }
+  const rec: Record<string, Object> | null = fqAsRecord(value);
+  if (rec === null) {
+    return '';
+  }
+  for (const key of FQ_EPISODE_URL_KEYS) {
+    const found: string = fqExtractEpisodeUrl(rec[key], depth + 1);
+    if (found.length > 0) {
+      return found;
+    }
+  }
+  for (const key of FQ_EPISODE_NESTED_KEYS) {
+    const found: string = fqExtractEpisodeUrl(rec[key], depth + 1);
+    if (found.length > 0) {
+      return found;
+    }
+  }
+  const keys: string[] = fqKeys(rec);
+  for (const key of keys) {
+    const found: string = fqExtractEpisodeUrl(rec[key], depth + 1);
+    if (found.length > 0) {
+      return found;
+    }
+  }
+  return '';
 }

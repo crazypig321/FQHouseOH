@@ -6,6 +6,7 @@
   "author": "",
   "license": "",
   "dependencies": {
-    "libfqapi_napi.so": "file:./src/main/cpp/types/libfqapi_napi"
+    "libfqapi_napi.so": "file:./src/main/cpp/types/libfqapi_napi",
+    "@mpv-ohos/mpv-arkts": "@module:mpv"
   }
 }

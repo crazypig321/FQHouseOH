@@ -1,0 +1,3 @@
+[submodule "mpv-arkts"]
+	path = mpv-arkts
+	url = git@github.com:mpv-ohos/mpv-arkts.git

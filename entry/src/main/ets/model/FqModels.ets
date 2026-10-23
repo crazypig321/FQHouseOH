@@ -302,6 +302,35 @@ export class FqChapter {
   }
 }
 
+/** 剧集单个清晰度档（/api/content data.variants 行）。 */
+export class FqEpisodeVariant {
+  readonly name: string;
+  readonly url: string;
+  readonly keyHex: string;
+  readonly height: number;
+
+  constructor(name: string, url: string, keyHex: string, height: number) {
+    this.name = name;
+    this.url = url;
+    this.keyHex = keyHex;
+    this.height = height;
+  }
+}
+
+/** 剧集可播放流（/api/content；ohos 不带 mode → 后端 c1 供流，/src/ 相对路径由 resourceUrl 锚定）。 */
+export class FqEpisodeSource {
+  readonly url: string;
+  readonly keyHex: string;
+  /** 全部清晰度档（官方面板高→低）；上游只给一路时为空。 */
+  readonly variants: FqEpisodeVariant[];
+
+  constructor(url: string, keyHex: string = '', variants: FqEpisodeVariant[] = []) {
+    this.url = url;
+    this.keyHex = keyHex;
+    this.variants = variants;
+  }
+}
+
 /** 对齐 fqapp formatCounter：纯数字 79528 -> 7.9万，非数字原样返回。 */
 export function fqFormatCounter(raw: string): string {
   const text: string = raw.trim();

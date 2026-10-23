@@ -14,7 +14,7 @@ import fq, { FqBridgeResponse } from 'libfqapi_napi.so';
 import { FqDeployer } from './FqDeployer';
 import { FqKeyStore } from './FqKeyStore';
 import {   fqParseAuthorProfile, fqParseBookComments, fqParseBookDetail, fqParseChapterIdeaCounts, fqParseChapterSummaries,
-  fqParseDirectory, fqParseHomepage, fqParseParagraphComments, fqParseRankBoard, fqParseRankCatalog, fqParseSearchTabs,
+  fqParseDirectory, fqParseEpisodeSource, fqParseHomepage, fqParseParagraphComments, fqParseRankBoard, fqParseRankCatalog, fqParseSearchTabs,
   fqParseSeriesFeed, fqLegacyChapterText, fqNormalizeChapterText, fqParseNovelChapter } from './FqParser';
 import {
   fqParseAudioToneSet,
@@ -31,6 +31,8 @@ import {
   FqBookCommentPage,
   FqBookDetail,
   FqChapter,
+  FqEpisodeSource,
+  FqEpisodeVariant,
   FqHomePage,
   FqRankBoard,
   FqRankCatalog,
@@ -379,6 +381,30 @@ export class FqBackend {
     }
     hilog.info(0x0001, 'FqBackend', `directoryChapters n=${chapters.length} versioned=${versioned}`);
     return chapters;
+  }
+
+  /**
+   * 剧集可播放流（/api/content，ohos 不带 mode → 后端 c1 整集下载解密后
+   * loopback /src/ Range 供流，mpv 拉明文无需 key_hex 解密）。
+   * 相对路径由 resourceUrl 锚定；锚定后仍非 http(s) 视为失败。
+   */
+  public async episodeSource(itemId: string, tab: string): Promise<FqEpisodeSource> {
+    const query: string = `source=${encodeURIComponent('番茄')}&item_id=${encodeURIComponent(itemId)}`
+      + `&tab=${encodeURIComponent(tab)}`;
+    const payload: Record<string, Object> = await this.getJson('/api/content', query);
+    const source: FqEpisodeSource = fqParseEpisodeSource(payload);
+    const url: string = this.resourceUrl(source.url);
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      throw new Error('获取播放地址失败');
+    }
+    const variants: FqEpisodeVariant[] = [];
+    for (const variant of source.variants) {
+      const variantUrl: string = this.resourceUrl(variant.url);
+      if (variantUrl.startsWith('http://') || variantUrl.startsWith('https://')) {
+        variants.push(new FqEpisodeVariant(variant.name, variantUrl, variant.keyHex, variant.height));
+      }
+    }
+    return new FqEpisodeSource(url, source.keyHex, variants);
   }
 
   /** 章节试读（/api/v1/books/{id}/chapters/summary）；装饰性数据，失败返回空 Map。 */

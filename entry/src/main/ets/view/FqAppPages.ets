@@ -5,7 +5,7 @@
  */
 
 import { MENU_CONFIG, MenuItem, tabBarSymbolOf } from '../model/FqTabsModels';
-import { ROUTE_DETAIL, ROUTE_RANK, ROUTE_READER2, ROUTE_SEARCH, ROUTE_AUTHOR, ROUTE_LISTEN } from '../model/FqNavModels';
+import { ROUTE_DETAIL, ROUTE_RANK, ROUTE_READER2, ROUTE_SEARCH, ROUTE_AUTHOR, ROUTE_LISTEN, ROUTE_PLAYER } from '../model/FqNavModels';
 import { HomePage } from '../pages/HomePage';
 import { ShelfPage } from '../pages/ShelfPage';
 import { ProfilePlaceholderPage } from '../pages/ProfilePage';
@@ -15,6 +15,7 @@ import { RankPage } from '../pages/sub/RankPage';
 import { AuthorPage } from '../pages/sub/AuthorPage';
 import { ReaderPage } from '../pages/sub/ReaderPage';
 import { ListenPage } from '../pages/sub/ListenPage';
+import { PlayerPage } from '../pages/sub/PlayerPage';
 
 const TAB_ACCENT: string = '#FF7A3D';
 
@@ -57,5 +58,7 @@ export function PageMapBuilder(name: string) {
     ReaderPage()
   } else if (name === ROUTE_LISTEN) {
     ListenPage()
+  } else if (name === ROUTE_PLAYER) {
+    PlayerPage()
   }
 }

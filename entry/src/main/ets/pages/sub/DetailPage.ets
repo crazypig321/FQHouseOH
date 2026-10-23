@@ -22,7 +22,7 @@ import {
 } from '../../model/FqModels';
 import { FqShelfStore, FqShelfItem } from '../../core/FqShelfStore';
 import { FqBrowseStore, FqBrowseItem } from '../../core/FqBrowseStore';
-import { AuthorNavParams, DetailNavParams, FqTitleBarOptions, ListenNavParams, ReaderNavParams, ROUTE_AUTHOR, ROUTE_LISTEN, ROUTE_READER2 } from '../../model/FqNavModels';
+import { AuthorNavParams, DetailNavParams, FqTitleBarOptions, ListenNavParams, PlayerNavParams, ReaderNavParams, ROUTE_AUTHOR, ROUTE_LISTEN, ROUTE_PLAYER, ROUTE_READER2 } from '../../model/FqNavModels';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { CommonNav } from '../../view/CommonNav';
 import { CommonLoading, FQ_ACCENT } from '../../view/CommonCom';
@@ -785,7 +785,8 @@ export struct DetailPage {
     promptAction.showToast({ message: `${feature}功能即将上线`, duration: 1500 });
   }
 
-  /** 底部操作栏：小说"阅读"进阅读器、"听书"/听书详情"收听"进听书页，下载占位。 */
+  /** 底部操作栏：小说"阅读"进阅读器、"听书"/听书详情"收听"进听书页、
+   *  短剧/漫剧"观看"进播放页，下载占位。 */
   private onReadBarAction(key: string): void {
     if (key === '阅读' && this.itemKind === 'book') {
       this.openReader(-1);
@@ -799,7 +800,26 @@ export struct DetailPage {
       this.openListen();
       return;
     }
+    if (key === '观看' && (this.itemKind === 'video' || this.itemKind === 'manju')) {
+      this.openPlayer();
+      return;
+    }
     this.comingSoon(key);
+  }
+
+  /** 短剧/漫剧进播放页：目录预载，单集结果无目录时回退自身 id 为唯一一集。 */
+  private openPlayer(): void {
+    let episodes: FqChapter[] = this.chapters;
+    if (episodes.length === 0) {
+      episodes = [new FqChapter(this.itemId, this.detail.title, '')];
+    }
+    PlayerNavParams.contentId = this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId;
+    PlayerNavParams.kind = this.itemKind;
+    PlayerNavParams.title = this.detail.title;
+    PlayerNavParams.cover = this.itemCover.length > 0 ? this.itemCover : this.detail.cover;
+    PlayerNavParams.chapters = episodes;
+    PlayerNavParams.startIndex = 0;
+    NavPathUtils.push(ROUTE_PLAYER);
   }
 
   private openListen(): void {
