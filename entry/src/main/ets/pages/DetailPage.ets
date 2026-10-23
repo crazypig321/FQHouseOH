@@ -606,9 +606,9 @@ export struct DetailPage {
     })
   }
 
-  /** 评论类型文案：小说书评 / 短剧剧评 / 漫画漫评。 */
+  /** 评论类型文案：小说书评 / 短剧·漫剧剧评 / 漫画漫评。 */
   private commentLabel(): string {
-    if (this.itemKind === 'video') {
+    if (this.itemKind === 'video' || this.itemKind === 'manju') {
       return '剧评';
     }
     if (this.itemKind === 'manga') {

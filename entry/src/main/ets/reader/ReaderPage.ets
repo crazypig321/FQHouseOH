@@ -1586,6 +1586,7 @@ export struct ReaderPage {
           .height(28)
           .borderRadius(14)
           .justifyContent(FlexAlign.Center)
+          .backgroundColor($r('sys.color.comp_background_tertiary'))
           if (comment.userAvatar.length > 0) {
             Image(comment.userAvatar)
               .width(28)
