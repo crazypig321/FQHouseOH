@@ -14,8 +14,8 @@ import { AuthorPage } from '../pages/AuthorPage';
 import { ReaderPage } from '../reader/ReaderPage'
 import { ListenPage } from '../pages/ListenPage';
 import { CommonNav, titleBarOf } from './CommonNav';
-import { FQ_ACCENT, CommonSearch, MenuItemParams } from './CommonCom';
-import { MenuUtils } from '../utils/MenuUtils';
+import { FQ_ACCENT, CommonSearch } from './CommonCom';
+import { FqMenu, FqMenuItem } from './CommonMenu';
 import { FqShelfStore, FqShelfItem } from '../core/FqShelfStore';
 import { FqBrowseStore, FqBrowseItem } from '../core/FqBrowseStore';
 import { FqMediaItem } from '../model/FqModels';
@@ -115,7 +115,7 @@ struct ShelfPage {
         this.refreshData();
       },
     }) {
-      Stack() {
+      Stack({ alignContent: Alignment.Top }) {
         List({ space: 14, scroller: this.scroller }) {
           ForEach(this.visibleItems(), (item: FqMediaItem, index: number) => {
             ListItem() {
@@ -140,7 +140,7 @@ struct ShelfPage {
           this.EmptyHint()
         }
 
-        // 「更多」菜单锚点（标题栏下方右上角，菜单在锚点处弹出）
+        // 「更多」菜单锚点（对齐标题栏更多按钮：右缘 16、垂直居中于 56 高标题栏）
         Row() {
           Column()
             .id(SHELF_MORE_ANCHOR_ID)
@@ -150,7 +150,7 @@ struct ShelfPage {
         .width('100%')
         .justifyContent(FlexAlign.End)
         .padding({ right: 16 })
-        .margin({ top: appState.topRect + 20 })
+        .margin({ top: appState.topRect + 16 })
       }
       .width('100%')
       .height('100%')
@@ -253,11 +253,11 @@ struct ShelfPage {
 
   /** 更多菜单：清空浏览历史（不可恢复，保留确认）。 */
   private openMoreMenu(): void {
-    const clearItem = new MenuItemParams();
+    const clearItem = new FqMenuItem();
     clearItem.icon = $r('sys.symbol.trash');
     clearItem.label = '清空浏览历史';
     clearItem.onAction = (): void => {
-      MenuUtils.Dismiss();
+      FqMenu.dismiss();
       AlertDialog.show({
         title: '清空浏览历史',
         message: '确定要清空全部浏览历史吗？此操作不可恢复。',
@@ -277,9 +277,7 @@ struct ShelfPage {
         alignment: DialogAlignment.Center,
       });
     };
-    MenuUtils.Open(this.getUIContext(), SHELF_MORE_ANCHOR_ID, [clearItem], {
-      placement: Placement.BottomRight,
-    });
+    FqMenu.open(this.getUIContext(), SHELF_MORE_ANCHOR_ID, [clearItem]);
   }
 
   private openDetail(item: FqMediaItem): void {
@@ -340,6 +338,8 @@ struct ShelfPage {
       }
     }
     .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Start)
     .alignItems(HorizontalAlign.Center)
   }
 

@@ -468,14 +468,14 @@ export struct ListenPage {
 
   /** 音色条（选中优先）。 */
   @Builder
-  private ToneChip(tone: FqAudioTone, selected: boolean, narrator: boolean) {
+  private ToneChip(tone: FqAudioTone) {
     Column({ space: 4 }) {
       Text(tone.title)
         .fontSize(12.5)
         .fontWeight(FontWeight.Medium)
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .fontColor(selected ? FQ_ACCENT : $r('sys.color.font_primary'))
+        .fontColor(this.toneChipSelected(tone) ? FQ_ACCENT : $r('sys.color.font_primary'))
       if (tone.description.length > 0) {
         Text(tone.description)
           .fontSize(11)
@@ -490,14 +490,14 @@ export struct ListenPage {
     .height('100%')
     .padding({ left: 12, right: 12, top: 8, bottom: 8 })
     .borderRadius(10)
-    .backgroundColor(selected ? '#1AFF7A3D'
+    .backgroundColor(this.toneChipSelected(tone) ? '#1AFF7A3D'
       : $r('sys.color.comp_background_tertiary'))
     .border({
-      width: selected ? 1.2 : 0,
-      color: selected ? '#52FF7A3D' : Color.Transparent,
+      width: this.toneChipSelected(tone) ? 1.2 : 0,
+      color: this.toneChipSelected(tone) ? '#52FF7A3D' : Color.Transparent,
     })
     .onClick((): void => {
-      if (narrator) {
+      if (fqAudioSession.hasFixedTone) {
         fqAudioSession.selectNarrator(tone);
       } else {
         fqAudioSession.selectTone(tone);
@@ -534,8 +534,7 @@ export struct ListenPage {
           List({ space: 6, scroller: this.toneChipScroller }) {
             ForEach(this.toneChips(), (tone: FqAudioTone) => {
               ListItem(){
-                this.ToneChip(tone, this.toneChipSelected(tone),
-                  fqAudioSession.hasFixedTone)
+                this.ToneChip(tone)
               }
             }, (tone: FqAudioTone) => tone.id)
           }
