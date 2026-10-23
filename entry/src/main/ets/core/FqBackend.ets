@@ -13,9 +13,10 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import fq, { FqBridgeResponse } from 'libfqapi_napi.so';
 import { FqDeployer } from './FqDeployer';
 import { FqKeyStore } from './FqKeyStore';
-import { fqParseBookComments, fqParseBookDetail, fqParseChapterSummaries, fqParseDirectory, fqParseHomepage, fqParseRankBoard, fqParseRankCatalog, fqParseSearchTabs, fqParseSeriesFeed, fqLegacyChapterText, fqNormalizeChapterText, fqParseNovelChapter } from './FqParser';
+import { fqParseAuthorProfile, fqParseBookComments, fqParseBookDetail, fqParseChapterSummaries, fqParseDirectory, fqParseHomepage, fqParseRankBoard, fqParseRankCatalog, fqParseSearchTabs, fqParseSeriesFeed, fqLegacyChapterText, fqNormalizeChapterText, fqParseNovelChapter } from './FqParser';
 import { fqParseObject } from './FqJson';
 import {
+  FqAuthorProfile,
   FqBookCommentPage,
   FqBookDetail,
   FqChapter,
@@ -259,6 +260,13 @@ export class FqBackend {
       + `&tab=${encodeURIComponent(tab)}`;
     const payload: Record<string, Object> = await this.getJson('/api/detail', query);
     return fqParseBookDetail(payload);
+  }
+
+  /** 作者主页 + 全部作品（/api/v1/authors/{id}，作品取自 author_book_info）。 */
+  public async authorProfile(authorId: string): Promise<FqAuthorProfile> {
+    const payload: Record<string, Object> =
+      await this.getJson(`/api/v1/authors/${encodeURIComponent(authorId)}`, '');
+    return fqParseAuthorProfile(payload);
   }
 
   /** 书评一页 + 头部计数（/api/v1/books/{id}/comments，count/offset 分页）。 */

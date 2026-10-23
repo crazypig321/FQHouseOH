@@ -118,6 +118,8 @@ export class FqBookDetail {
   readonly authorAvatar: string;
   /** 在读人数展示文案：优先 formatCounter(read_count)，否则 sub_info。 */
   readonly readLabel: string;
+  /** 作者主页 ID（author_info.user_id；漫画/漫剧的 1_ 前缀不可解析，置空）。 */
+  readonly authorId: string;
 
   constructor(
     bookId: string,
@@ -136,6 +138,7 @@ export class FqBookDetail {
     authorTitle: string,
     authorAvatar: string,
     readLabel: string,
+    authorId: string,
   ) {
     this.bookId = bookId;
     this.title = title;
@@ -153,6 +156,7 @@ export class FqBookDetail {
     this.authorTitle = authorTitle;
     this.authorAvatar = authorAvatar;
     this.readLabel = readLabel;
+    this.authorId = authorId;
   }
 
   get statusLabel(): string {
@@ -175,7 +179,113 @@ export class FqBookDetail {
 
 /** 空详情占位（组件默认值用）。 */
 export function fqEmptyBookDetail(): FqBookDetail {
-  return new FqBookDetail('', '', '', '', '', '', -1, 0, 0, '', '', [], false, '', '', '');
+  return new FqBookDetail('', '', '', '', '', '', -1, 0, 0, '', '', [], false, '', '', '', '');
+}
+
+/** 作者主页作品（/api/v1/authors/{id} 的 author_book_info 条目）。 */
+export class FqAuthorWork {
+  readonly id: string;
+  readonly title: string;
+  readonly cover: string;
+  readonly intro: string;
+  /** 主分类（category 逗号列表取首项）。 */
+  readonly category: string;
+  /** 0 完结 / 1 连载中 / 4 停更 / -1 未知。 */
+  readonly creationStatus: number;
+  readonly wordNumber: number;
+  /** 原始在读计数（纯数字字符串）。 */
+  readonly readCount: string;
+
+  constructor(id: string, title: string, cover: string, intro: string, category: string,
+    creationStatus: number, wordNumber: number, readCount: string) {
+    this.id = id;
+    this.title = title;
+    this.cover = cover;
+    this.intro = intro;
+    this.category = category;
+    this.creationStatus = creationStatus;
+    this.wordNumber = wordNumber;
+    this.readCount = readCount;
+  }
+
+  get statusLabel(): string {
+    if (this.creationStatus === 0) {
+      return '完结';
+    }
+    if (this.creationStatus === 1) {
+      return '连载中';
+    }
+    if (this.creationStatus === 4) {
+      return '停更';
+    }
+    return '';
+  }
+
+  get wordLabel(): string {
+    return formatFqWordCount(this.wordNumber);
+  }
+
+  /** 分类 · 状态 · 字数（对齐详情页元信息行）。 */
+  get metaLabel(): string {
+    const parts: string[] = [];
+    if (this.category.length > 0) {
+      parts.push(this.category);
+    }
+    if (this.statusLabel.length > 0) {
+      parts.push(this.statusLabel);
+    }
+    if (this.wordLabel.length > 0) {
+      parts.push(this.wordLabel);
+    }
+    return parts.join(' · ');
+  }
+}
+
+/** 作者主页（/api/v1/authors/{id}，上游 /reading/user/basic_info/get/v）。 */
+export class FqAuthorProfile {
+  readonly id: string;
+  readonly name: string;
+  readonly avatar: string;
+  /** 作者简介（description，author_desc 通常为空）。 */
+  readonly description: string;
+  /** 等级徽标文案（user_title_infos[].title_text，如 作家Lv.5）。 */
+  readonly level: string;
+  readonly followerCount: number;
+  /** 上游报告的作品总数（可能多于 works 实际条数）。 */
+  readonly workCount: number;
+  readonly works: FqAuthorWork[];
+
+  constructor(id: string, name: string, avatar: string, description: string, level: string,
+    followerCount: number, workCount: number, works: FqAuthorWork[]) {
+    this.id = id;
+    this.name = name;
+    this.avatar = avatar;
+    this.description = description;
+    this.level = level;
+    this.followerCount = followerCount;
+    this.workCount = workCount;
+    this.works = works;
+  }
+
+  get isEmpty(): boolean {
+    return this.id.length === 0 && this.name.length === 0;
+  }
+
+  /** 「2.1万粉丝」；计数未知或为 0 时返回空（0粉丝 是噪音）。 */
+  get followerLabel(): string {
+    if (this.followerCount <= 0) {
+      return '';
+    }
+    const formatted: string = fqFormatCounter(`${this.followerCount}`);
+    if (formatted.length === 0 || formatted === '0') {
+      return '';
+    }
+    return `${formatted}粉丝`;
+  }
+
+  get workCountLabel(): string {
+    return this.workCount > 0 ? `${this.workCount} 部作品` : '';
+  }
 }
 
 /** 目录章节（/api/directory，M1 仅取标题与 itemId）。 */

@@ -9,6 +9,8 @@ import { NavPathUtils } from '../utils/NavPathUtils';
 export const ROUTE_SEARCH: string = 'search';
 export const ROUTE_DETAIL: string = 'detail';
 export const ROUTE_RANK: string = 'rank';
+/** 作者主页。 */
+export const ROUTE_AUTHOR: string = 'author';
 /** 自定义阅读页（ReaderPage，自绘分页引擎版）。 */
 export const ROUTE_READER2: string = 'reader2';
 
@@ -27,6 +29,14 @@ export class ReaderNavParams {
   static title: string = '';
   /** 定位章节下标；-1 表示跟随上次阅读进度。 */
   static chapterIndex: number = -1;
+}
+
+/** 作者主页跳转参数。 */
+export class AuthorNavParams {
+  static authorId: string = '';
+  static fallbackName: string = '';
+  /** 详情页作者头像（加载完成前的占位显示）。 */
+  static avatar: string = '';
 }
 
 /**

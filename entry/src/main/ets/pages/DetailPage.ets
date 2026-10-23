@@ -21,7 +21,7 @@ import {
   fqKindLabel,
 } from '../model/FqModels';
 import { FqShelfStore, FqShelfItem } from '../core/FqShelfStore';
-import { DetailNavParams, FqTitleBarOptions, ReaderNavParams, ROUTE_READER2 } from '../model/FqNavModels';
+import { AuthorNavParams, DetailNavParams, FqTitleBarOptions, ReaderNavParams, ROUTE_AUTHOR, ROUTE_READER2 } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import { CommonNav } from '../view/CommonNav';
 import { CommonLoading, FQ_ACCENT } from '../view/CommonCom';
@@ -288,6 +288,7 @@ export struct DetailPage {
           .fontColor($r('sys.color.font_tertiary'))
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .visibility(this.detail.authorId.length > 0 ? Visibility.Visible : Visibility.None)
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
@@ -297,6 +298,18 @@ export struct DetailPage {
     .borderRadius(16)
     .backgroundColor($r('sys.color.comp_background_primary'))
     .alignItems(VerticalAlign.Center)
+    .onClick(() => this.openAuthor())
+  }
+
+  /** 打开作者主页；无作者 ID（漫画/漫剧 1_ 前缀等）时不响应。 */
+  private openAuthor(): void {
+    if (this.detail.authorId.length === 0) {
+      return;
+    }
+    AuthorNavParams.authorId = this.detail.authorId;
+    AuthorNavParams.fallbackName = this.detail.author;
+    AuthorNavParams.avatar = this.detail.authorAvatar;
+    NavPathUtils.push(ROUTE_AUTHOR);
   }
 
   /** 数据卡：正在阅读 | 评分 + 星级。 */

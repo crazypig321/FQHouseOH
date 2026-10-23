@@ -20,6 +20,8 @@ import {
   fqTruthyAny,
 } from './FqJson';
 import {
+  FqAuthorProfile,
+  FqAuthorWork,
   FqBookComment,
   FqBookCommentPage,
   FqBookDetail,
@@ -792,7 +794,7 @@ function fqReadLabelOf(data: Record<string, Object>, subInfo: string): string {
 export function fqParseBookDetail(payload: Record<string, Object>): FqBookDetail {
   const data: Record<string, Object> | null = fqResolveDetailData(payload);
   if (data === null) {
-    return new FqBookDetail('', '', '', '', '', '', -1, 0, 0, '', '', [], false, '', '', '');
+    return new FqBookDetail('', '', '', '', '', '', -1, 0, 0, '', '', [], false, '', '', '', '');
   }
   let category: string = fqStr(data, 'category');
   const tags: string[] = [];
@@ -825,8 +827,17 @@ export function fqParseBookDetail(payload: Record<string, Object>): FqBookDetail
   const subInfo: string = fqStr(data, 'sub_info');
   const authorInfo: Record<string, Object> | null = fqAsRecord(data['author_info']);
   let authorAvatar: string = '';
+  let authorId: string = '';
   if (authorInfo !== null) {
     authorAvatar = fqStr(authorInfo, 'user_avatar') || fqStr(authorInfo, 'avatar');
+    authorId = fqStr(authorInfo, 'user_id');
+  }
+  if (authorId.length === 0) {
+    // 顶层 author_id 是唯一兜底，但带命名空间：2_ 小说作者可在
+    // /reading/user/basic_info/get/v 解析，1_ 漫画/漫剧作者报 CALL_SERVICE_FAIL，
+    // 裸数字部分会解析成占位非作者用户 — 两者都是死胡同，1_ 直接置空。
+    const fallbackId: string = fqStr(data, 'author_id');
+    authorId = fallbackId.startsWith('1_') ? '' : fallbackId;
   }
   return new FqBookDetail(
     fqStr(data, 'book_id'),
@@ -845,6 +856,7 @@ export function fqParseBookDetail(payload: Record<string, Object>): FqBookDetail
     fqAuthorTitleOf(data),
     authorAvatar,
     fqReadLabelOf(data, subInfo),
+    authorId,
   );
 }
 
@@ -852,9 +864,72 @@ export function fqParseBookDetail(payload: Record<string, Object>): FqBookDetail
 export function fqParseBookDetailText(text: string): FqBookDetail {
   const payload: Record<string, Object> | null = fqParseObject(text);
   if (payload === null) {
-    return new FqBookDetail('', '', '', '', '', '', -1, 0, 0, '', '', [], false, '', '', '');
+    return new FqBookDetail('', '', '', '', '', '', -1, 0, 0, '', '', [], false, '', '', '', '');
   }
   return fqParseBookDetail(payload);
+}
+
+// ---------------------------------------------------------------------------
+// 作者主页（fqapp lib/models/author_profile.dart AuthorProfile.fromPayload）
+// ---------------------------------------------------------------------------
+
+/** category 逗号列表取首项（对齐 fqapp AuthorWork._firstTag）。 */
+function fqFirstTagOf(raw: string): string {
+  if (raw.length === 0) {
+    return '';
+  }
+  return raw.split(/[,,]/)[0].trim();
+}
+
+/**
+ * 解析作者主页（/api/v1/authors/{id}，上游 /reading/user/basic_info/get/v）。
+ * 作品来自 data.author_book_info（不走 /bookshelf，对齐 fqapp 结论）；
+ * 业务错误码或缺失 data 返回空 profile，由页面转成重试态。
+ */
+export function fqParseAuthorProfile(payload: Record<string, Object>): FqAuthorProfile {
+  const code: number = fqAsInt(payload['code'], 0);
+  if (code !== 0 && code !== 200) {
+    return new FqAuthorProfile('', '', '', '', '', 0, 0, []);
+  }
+  const data: Record<string, Object> | null = fqAsRecord(payload['data']);
+  if (data === null) {
+    return new FqAuthorProfile('', '', '', '', '', 0, 0, []);
+  }
+  const works: FqAuthorWork[] = [];
+  const rawWorks: Object[] | null = fqAsArray(data['author_book_info']);
+  if (rawWorks !== null) {
+    for (const entry of rawWorks) {
+      const rec: Record<string, Object> | null = fqAsRecord(entry);
+      if (rec === null) {
+        continue;
+      }
+      const id: string = fqStr(rec, 'book_id');
+      const title: string = fqStr(rec, 'book_name');
+      if (id.length === 0 && title.length === 0) {
+        continue;
+      }
+      works.push(new FqAuthorWork(
+        id,
+        title,
+        fqStr(rec, 'thumb_url'),
+        fqStr(rec, 'abstract'),
+        fqFirstTagOf(fqStr(rec, 'category')),
+        fqAsInt(rec['creation_status'], -1),
+        fqAsInt(rec['word_number'], 0),
+        fqStr(rec, 'read_count'),
+      ));
+    }
+  }
+  return new FqAuthorProfile(
+    fqStr(data, 'user_id'),
+    fqStr(data, 'user_name'),
+    fqStr(data, 'user_avatar'),
+    fqStr(data, 'description') || fqStr(data, 'author_desc'),
+    fqAuthorTitleOf(data),
+    fqAsInt(data['fans_num'], 0),
+    fqAsInt(data['author_book_num'], 0),
+    works,
+  );
 }
 
 // ---------------------------------------------------------------------------
