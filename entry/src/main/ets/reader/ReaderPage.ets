@@ -16,7 +16,7 @@
  */
 
 import { common, ConfigurationConstant } from '@kit.AbilityKit';
-import { CustomContentDialog, display, window } from '@kit.ArkUI';
+import { display, window } from '@kit.ArkUI';
 import { fileIo } from '@kit.CoreFileKit';
 import { batteryInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -38,7 +38,8 @@ import { FqSubtitleCue, FqSubtitleTrack } from '../model/FqAudioModels';
 import { appState } from '../entryability/AppState';
 import { themeUtils } from '../utils/ThemeUtils';
 import { DialogManager } from '../utils/DialogUtils';
-import { FQ_READER_THEMES, FqReaderTheme, ReaderSettingsDialogContent } from '../view/dialog/ReaderSettingsDialogContent';
+import { FQ_READER_THEMES, FqReaderTheme } from '../view/dialog/ReaderSettingsDialogContent';
+import { fqReaderSettingsBus } from '../core/FqReaderSettingsBus';
 import {
   FQ_BUBBLE_GAP_VP,
   FQ_DEMO_PARAGRAPH_COMMENTS,
@@ -129,24 +130,6 @@ export struct ReaderPage {
   private chapterPages: Map<number, number> = new Map();
   private chapterEstimate: Map<number, number> = new Map();
 
-  /** 「阅读设置」公共弹窗：内容组件在 view/dialog，无标题无按钮仅内容区。 */
-  private settingsDialog: CustomDialogController = new CustomDialogController({
-    builder: CustomContentDialog({
-      contentBuilder: (): void => {
-        this.DialogContentBuilder(DialogManager.dialogChangeKey);
-      },
-      contentAreaPadding: { top: 20, bottom: 20, left: 24, right: 24 },
-    }),
-    alignment: DialogAlignment.Bottom,
-    // 工具栏顶 = 窗口底 - (悬浮底边距28 + 栏高56)；弹窗 Bottom 基准为导航避让区底（比窗口底高 bottomRect）。
-    // 窗口化时 bottomRect=0，动态计算保证弹窗始终贴工具栏上沿（手机全屏时 -84+bottomRect 仍为 -68）。
-    offset: { dx: 0, dy: - appState.bottomRect - 84 },
-    autoCancel: true,
-    onWillDisappear: (): void => {
-      DialogManager.DisappearDialog(DialogManager.dialogChangeKey);
-    },
-  });
-
   aboutToAppear(): void {
     this.bookId = ReaderNavParams.id;
     this.kind = ReaderNavParams.kind;
@@ -191,13 +174,7 @@ export struct ReaderPage {
     }, 30000);
     this.cachedMetrics = this.buildMetrics();
     this.applySystemBar(false);
-    DialogManager.Register((): void => {
-      this.settingsDialog.open();
-    }, (message: string): void => {
-      this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 });
-    }, (): void => {
-      this.settingsDialog.close();
-    });
+    this.attachSettingsBus();
     this.load();
   }
 
@@ -206,12 +183,8 @@ export struct ReaderPage {
     this.applySystemBar(true);
     this.loadToken += 1;
     this.saveProgressNow();
-    try {
-      this.settingsDialog.close();
-    } catch (error) {
-      // 弹窗可能未打开
-    }
-    DialogManager.Unregister();
+    fqReaderSettingsBus.handler = null;
+    DialogManager.CloseDialog();
     if (this.clockTimer >= 0) {
       clearInterval(this.clockTimer);
       this.clockTimer = -1;
@@ -1463,6 +1436,39 @@ export struct ReaderPage {
     }
   }
 
+  /** 弹窗宿主在 Index：镜像设置值到 fqReaderSettingsBus 并注册变更处理器（弹窗内容实时刷新）。 */
+  private attachSettingsBus(): void {
+    fqReaderSettingsBus.fontSize = this.fontSize;
+    fqReaderSettingsBus.lineHeight = this.lineHeight;
+    fqReaderSettingsBus.themeIndex = this.themeIndex;
+    fqReaderSettingsBus.flipIndex = this.flipIndex;
+    fqReaderSettingsBus.fontIndex = this.fontIndex;
+    fqReaderSettingsBus.handler = {
+      changeFontSize: (delta: number): void => {
+        this.changeFontSize(delta);
+        fqReaderSettingsBus.fontSize = this.fontSize;
+      },
+      changeLineHeight: (delta: number): void => {
+        this.changeLineHeight(delta);
+        fqReaderSettingsBus.lineHeight = this.lineHeight;
+      },
+      changeTheme: (index: number): void => {
+        this.themeIndex = index;
+        this.applySettingChange(false);
+        fqReaderSettingsBus.themeIndex = this.themeIndex;
+      },
+      changeFont: (index: number): void => {
+        this.changeFont(index);
+        fqReaderSettingsBus.fontIndex = this.fontIndex;
+      },
+      changeFlip: (index: number): void => {
+        this.flipIndex = index;
+        this.applySettingChange(false);
+        fqReaderSettingsBus.flipIndex = this.flipIndex;
+      },
+    };
+  }
+
   private changeFontSize(delta: number): void {
     const next: number = Math.min(32, Math.max(12, this.fontSize + delta));
     if (next === this.fontSize) {
@@ -1869,39 +1875,6 @@ export struct ReaderPage {
     .width('100%')
     .alignItems(HorizontalAlign.Start)
     .padding({ top: 12, bottom: 12, left: 20, right: 20 })
-  }
-
-  /** 公共弹窗内容装配：按 DialogManager 标识分发内容组件（当前仅「阅读设置」）。 */
-  @Builder
-  private DialogContentBuilder(key: string) {
-    if (key === '阅读设置') {
-      ReaderSettingsDialogContent({
-        fontSize: this.fontSize,
-        lineHeight: this.lineHeight,
-        themeIndex: this.themeIndex,
-        flipIndex: this.flipIndex,
-        fontIndex: this.fontIndex,
-        followThemeBg: this.theme().background,
-        followThemeFont: this.theme().fontColor,
-        fontSizeChange: (delta: number): void => {
-          this.changeFontSize(delta);
-        },
-        lineHeightChange: (delta: number): void => {
-          this.changeLineHeight(delta);
-        },
-        themeChange: (index: number): void => {
-          this.themeIndex = index;
-          this.applySettingChange(false);
-        },
-        fontChange: (index: number): void => {
-          this.changeFont(index);
-        },
-        flipChange: (index: number): void => {
-          this.flipIndex = index;
-          this.applySettingChange(false);
-        },
-      })
-    }
   }
 
   /** 面板内分隔线颜色（随阅读主题）。 */

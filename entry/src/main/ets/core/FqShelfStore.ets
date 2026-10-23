@@ -9,6 +9,7 @@ import preferences from '@ohos.data.preferences';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { fqAsArray, fqAsRecord, fqStr } from './FqJson';
+import { fqStoreBus } from './FqStoreBus';
 
 const FQ_SHELF_STORE_NAME: string = 'fq_shelf';
 const FQ_SHELF_KEY_ITEMS: string = 'items';
@@ -94,6 +95,7 @@ export class FqShelfStore {
       }
       FqShelfStore.items = next;
       FqShelfStore.persist();
+      fqStoreBus.shelfVersion++;
       return false;
     }
     if (item.id.length === 0) {
@@ -102,6 +104,7 @@ export class FqShelfStore {
     FqShelfStore.ids.add(item.id);
     FqShelfStore.items.push(item);
     FqShelfStore.persist();
+    fqStoreBus.shelfVersion++;
     return true;
   }
 
@@ -125,6 +128,7 @@ export class FqShelfStore {
     }
     FqShelfStore.items = next;
     FqShelfStore.persist();
+    fqStoreBus.shelfVersion++;
   }
 
   private static persist(): void {

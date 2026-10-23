@@ -5,8 +5,12 @@
  */
 
 import { HdsAnimationMode, HdsNavigation, HdsNavigationTitleMode, HdsTabs, HdsTabsController } from '@kit.UIDesignKit';
+import { CustomContentDialog } from '@kit.ArkUI';
 import { AppState, appState } from '../entryability/AppState';
 import { MainTabPagesBuilder, PageMapBuilder } from '../view/FqAppPages';
+import { DialogManager } from '../utils/DialogUtils';
+import { FqReaderSettingsHandler, fqReaderSettingsBus } from '../core/FqReaderSettingsBus';
+import { fqEffectiveReaderTheme, ReaderSettingsDialogContent } from '../view/dialog/ReaderSettingsDialogContent';
 
 @Entry
 @ComponentV2
@@ -15,6 +19,7 @@ struct Index {
 
   @Local appStateUse: AppState = appState
 
+  /** 监听 tabbar的显示和消失 */
   @Monitor('appStateUse.isBatchMode')
   isShowTabBar(){
     if (this.appStateUse.isBatchMode) {
@@ -22,6 +27,24 @@ struct Index {
     }else{
       this.tabsController.applyShowAnimation(HdsAnimationMode.CLICK_ANIMATION)
     }
+  }
+
+  aboutToAppear(): void {
+    DialogManager.Register((): void => {
+      if (DialogManager.dialogChangeKey === '阅读设置') {
+        this.settingsDialog.open()
+      } else {
+        this.dataDialog.open()
+      }
+    }, (message: string): void => {
+      this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 })
+    }, (): void => {
+      if (DialogManager.dialogChangeKey === '阅读设置') {
+        this.settingsDialog.close()
+      } else {
+        this.dataDialog.close()
+      }
+    })
   }
 
   build() {
@@ -63,5 +86,97 @@ struct Index {
   @Builder
   pageMap(name: string) {
     PageMapBuilder(name)
+  }
+
+  /** 公共弹窗（居中：标题+内容+按钮，参考 musicfreeOH Index dataDialog：参数/按钮集中在 DialogManager）。 */
+  private dataDialog: CustomDialogController = new CustomDialogController({
+    builder: CustomContentDialog({
+      primaryTitle: DialogManager.DialogTitle(DialogManager.dialogChangeKey),
+      contentBuilder: (): void => {
+        this.DialogContentBuilder(DialogManager.dialogChangeKey)
+      },
+      buttons: DialogManager.DialogButtons(DialogManager.dialogChangeKey),
+      contentAreaPadding: {
+        top: 15,
+        bottom: 15,
+        left: 24,
+        right: 24
+      },
+    }),
+    onWillDismiss: (dialog: DismissDialogAction): void => {
+      dialog.dismiss()
+    },
+    onWillDisappear: (): void => {
+      DialogManager.DisappearDialog(DialogManager.dialogChangeKey)
+    }
+  });
+
+  /** 「阅读设置」公共弹窗：内容组件在 view/dialog，无标题无按钮仅内容区，悬于工具条上方。 */
+  private settingsDialog: CustomDialogController = new CustomDialogController({
+    builder: CustomContentDialog({
+      contentBuilder: (): void => {
+        this.DialogContentBuilder(DialogManager.dialogChangeKey)
+      },
+      contentAreaPadding: { top: 20, bottom: 20, left: 24, right: 24 },
+    }),
+    alignment: DialogAlignment.Bottom,
+    // 工具栏顶 = 窗口底 - (悬浮底边距28 + 栏高56)；弹窗 Bottom 基准为导航避让区底（比窗口底高 bottomRect）。
+    // 窗口化时 bottomRect=0，动态计算保证弹窗始终贴工具栏上沿（手机全屏时 -84+bottomRect 仍为 -68）。
+    offset: { dx: 0, dy: - appState.bottomRect - 84 },
+    autoCancel: true,
+    onWillDisappear: (): void => {
+      DialogManager.DisappearDialog(DialogManager.dialogChangeKey);
+    },
+  });
+
+  /** 弹窗中间自定义组件（按 DialogManager 标识分发）。 */
+  @Builder
+  DialogContentBuilder(key: string) {
+    if (key === '通用确认') {
+      Text(DialogManager.confirmMessage)
+        .fontSize(14)
+        .fontColor($r('sys.color.font_primary'))
+        .width('100%')
+    } else if (key === '阅读设置') {
+      ReaderSettingsDialogContent({
+        fontSize: fqReaderSettingsBus.fontSize,
+        lineHeight: fqReaderSettingsBus.lineHeight,
+        themeIndex: fqReaderSettingsBus.themeIndex,
+        flipIndex: fqReaderSettingsBus.flipIndex,
+        fontIndex: fqReaderSettingsBus.fontIndex,
+        followThemeBg: fqEffectiveReaderTheme(fqReaderSettingsBus.themeIndex, appState.isDark).background,
+        followThemeFont: fqEffectiveReaderTheme(fqReaderSettingsBus.themeIndex, appState.isDark).fontColor,
+        fontSizeChange: (delta: number): void => {
+          const handler: FqReaderSettingsHandler | null = fqReaderSettingsBus.handler;
+          if (handler !== null) {
+            handler.changeFontSize(delta);
+          }
+        },
+        lineHeightChange: (delta: number): void => {
+          const handler: FqReaderSettingsHandler | null = fqReaderSettingsBus.handler;
+          if (handler !== null) {
+            handler.changeLineHeight(delta);
+          }
+        },
+        themeChange: (index: number): void => {
+          const handler: FqReaderSettingsHandler | null = fqReaderSettingsBus.handler;
+          if (handler !== null) {
+            handler.changeTheme(index);
+          }
+        },
+        fontChange: (index: number): void => {
+          const handler: FqReaderSettingsHandler | null = fqReaderSettingsBus.handler;
+          if (handler !== null) {
+            handler.changeFont(index);
+          }
+        },
+        flipChange: (index: number): void => {
+          const handler: FqReaderSettingsHandler | null = fqReaderSettingsBus.handler;
+          if (handler !== null) {
+            handler.changeFlip(index);
+          }
+        },
+      })
+    }
   }
 }

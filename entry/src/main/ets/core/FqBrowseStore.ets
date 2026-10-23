@@ -9,6 +9,7 @@ import preferences from '@ohos.data.preferences';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { fqAsArray, fqAsRecord, fqNum, fqStr } from './FqJson';
+import { fqStoreBus } from './FqStoreBus';
 
 const FQ_BROWSE_STORE_NAME: string = 'fq_browse_history';
 const FQ_BROWSE_KEY_ITEMS: string = 'items';
@@ -94,6 +95,7 @@ export class FqBrowseStore {
     }
     FqBrowseStore.items = next;
     FqBrowseStore.persist();
+    fqStoreBus.browseVersion++;
   }
 
   /** 最新在前。 */
@@ -105,6 +107,7 @@ export class FqBrowseStore {
   public static clear(): void {
     FqBrowseStore.items = [];
     FqBrowseStore.persist();
+    fqStoreBus.browseVersion++;
   }
 
   /** 批量删除浏览记录（书架页多选「删除」）。 */
@@ -121,6 +124,7 @@ export class FqBrowseStore {
     }
     FqBrowseStore.items = next;
     FqBrowseStore.persist();
+    fqStoreBus.browseVersion++;
   }
 
   private static persist(): void {

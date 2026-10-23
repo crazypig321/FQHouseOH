@@ -14,10 +14,12 @@ import { AuthorPage } from '../pages/AuthorPage';
 import { ReaderPage } from '../reader/ReaderPage'
 import { ListenPage } from '../pages/ListenPage';
 import { CommonNav, titleBarOf } from './CommonNav';
-import { FQ_ACCENT, CommonSearch } from './CommonCom';
+import { FQ_ACCENT, CommonSearch, CommonBlur } from './CommonCom';
 import { FqMenu, FqMenuItem } from './CommonMenu';
 import { FqShelfStore, FqShelfItem } from '../core/FqShelfStore';
 import { FqBrowseStore, FqBrowseItem } from '../core/FqBrowseStore';
+import { fqStoreBus, FqStoreBus } from '../core/FqStoreBus';
+import { DialogManager } from '../utils/DialogUtils';
 import { FqReadStatsStore } from '../core/FqReadStatsStore';
 import { FqLocalBookStore } from '../core/FqLocalBookStore';
 import { FqMediaItem, fqKindLabel } from '../model/FqModels';
@@ -156,9 +158,17 @@ struct ShelfPage {
   @Local todayMinutesNum: number = 0;
   @Local importing: boolean = false;
   @Local visibleCount: number = 0;
+  /** store 版本总线（监听 shelf/browse 数据变化实时刷新）。 */
+  @Local storeBus: FqStoreBus = fqStoreBus;
   private scroller: Scroller = new Scroller();
   private dataSource: ShelfDataSource = new ShelfDataSource();
   private layoutPref: preferences.Preferences | null = null;
+
+  /** 书架/浏览历史数据变化（详情页收藏、阅读记录、批量移除等）实时刷新列表。 */
+  @Monitor('storeBus.shelfVersion', 'storeBus.browseVersion')
+  onStoreDataChange(): void {
+    this.refreshData();
+  }
 
   aboutToAppear(): void {
     FqShelfStore.init(getContext(this));
@@ -244,54 +254,58 @@ struct ShelfPage {
 
         // 多选模式底部操作栏（musicfreeOH 批量底栏样式）
         if (this.batchMode) {
-          Column({ space: 10 }) {
-            Row() {
-              Text(`已选 ${this.batchSelected.length} 本`)
-                .fontSize(13)
-                .fontColor($r('sys.color.font_secondary'))
-              Blank()
-              Text('取消')
-                .fontSize(16)
-                .fontColor($r('sys.color.font_secondary'))
-                .onClick(() => {
-                  this.exitBatchMode();
-                })
-            }
-            .width('100%')
+          Stack(){
+            CommonBlur()
 
-            Row({ space: 8 }) {
-              Button(this.allSelected() ? '取消全选' : '全选')
-                .layoutWeight(1)
-                .height(36)
-                .fontSize(14)
-                .fontWeight(FontWeight.Medium)
-                .borderRadius(10)
-                .backgroundColor($r('sys.color.comp_background_tertiary'))
-                .fontColor($r('sys.color.font_primary'))
-                .onClick(() => {
-                  this.toggleSelectAll();
-                })
-              Button(this.currentTab === 0 ? '移出书架' : '删除')
-                .layoutWeight(1)
-                .height(36)
-                .fontSize(14)
-                .fontWeight(FontWeight.Medium)
-                .borderRadius(10)
-                .backgroundColor($r('sys.color.comp_background_tertiary'))
-                .fontColor($r('sys.color.font_primary'))
-                .onClick(() => {
-                  this.batchClearSelected();
-                })
+            Column({ space: 10 }) {
+              Row() {
+                Text(`已选 ${this.batchSelected.length} 本`)
+                  .fontSize(13)
+                  .fontColor($r('sys.color.font_secondary'))
+                Blank()
+                Text('取消')
+                  .fontSize(16)
+                  .fontColor($r('sys.color.font_secondary'))
+                  .onClick(() => {
+                    this.exitBatchMode();
+                  })
+              }
+              .width('100%')
+
+              Row({ space: 8 }) {
+                Button(this.allSelected() ? '取消全选' : '全选')
+                  .layoutWeight(1)
+                  .height(36)
+                  .fontSize(14)
+                  .fontWeight(FontWeight.Medium)
+                  .borderRadius(10)
+                  .backgroundColor($r('sys.color.comp_background_tertiary'))
+                  .fontColor($r('sys.color.font_primary'))
+                  .onClick(() => {
+                    this.toggleSelectAll();
+                  })
+                Button(this.currentTab === 0 ? '移出书架' : '删除')
+                  .layoutWeight(1)
+                  .height(36)
+                  .fontSize(14)
+                  .fontWeight(FontWeight.Medium)
+                  .borderRadius(10)
+                  .backgroundColor($r('sys.color.comp_background_tertiary'))
+                  .fontColor($r('sys.color.font_primary'))
+                  .onClick(() => {
+                    this.batchClearSelected();
+                  })
+              }
+              .width('100%')
             }
             .width('100%')
-          }
-          .width('100%')
-          .position({ bottom: 0 })
-          .padding({ top: 14, left: 16, right: 16, bottom: appState.bottomRect + 12 })
-          .backgroundColor('#66000000')
-          .backgroundBlurStyle(BlurStyle.Thick)
-          .transition(TransitionEffect.OPACITY)
+            .position({ bottom: 0 })
+            .padding({ top: 14, left: 16, right: 16, bottom: appState.bottomRect  })
+            .transition(TransitionEffect.OPACITY)
+          }.layoutGravity(LocalizedAlignment.BOTTOM_END)// stack组件中子组件对齐位置
+          .transition(TransitionEffect.move(TransitionEdge.BOTTOM).animation({ duration: 300, curve: Curve.EaseOut }))
         }
+
 
         // 「更多」菜单锚点（对齐标题栏更多按钮：右缘 16、垂直居中于 56 高标题栏）
         Row() {
@@ -505,39 +519,30 @@ struct ShelfPage {
     }
   }
 
-  /** 清空确认（按当前 tab：书架 / 浏览历史）。 */
+  /** 清空确认（按当前 tab：书架 / 浏览历史；共用确认弹窗）。 */
   private confirmClearCurrentTab(): void {
     const isShelf: boolean = this.currentTab === 0;
-    AlertDialog.show({
-      title: isShelf ? '清空书架' : '清空浏览历史',
-      message: isShelf ? '确定要清空书架全部作品吗？此操作不可恢复。'
+    DialogManager.ShowConfirm(
+      isShelf ? '清空书架' : '清空浏览历史',
+      isShelf ? '确定要清空书架全部作品吗？此操作不可恢复。'
         : '确定要清空全部浏览历史吗？此操作不可恢复。',
-      primaryButton: {
-        value: '取消',
-        action: (): void => {
-        }
-      },
-      secondaryButton: {
-        value: '清空',
-        fontColor: FQ_ACCENT,
-        action: (): void => {
-          if (isShelf) {
-            const ids: string[] = [];
-            for (const entry of FqShelfStore.all()) {
-              ids.push(entry.id);
-            }
-            FqShelfStore.removeByIds(ids);
-          } else {
-            FqBrowseStore.clear();
+      '清空',
+      (): void => {
+        if (isShelf) {
+          const ids: string[] = [];
+          for (const entry of FqShelfStore.all()) {
+            ids.push(entry.id);
           }
-          if (this.batchMode) {
-            this.exitBatchMode();
-          }
-          this.refreshData();
+          FqShelfStore.removeByIds(ids);
+        } else {
+          FqBrowseStore.clear();
         }
-      },
-      alignment: DialogAlignment.Center,
-    });
+        if (this.batchMode) {
+          this.exitBatchMode();
+        }
+        this.refreshData();
+      }
+    );
   }
 
   /** 展开/收起标题栏搜索框（收起时清空关键词恢复全部）。 */
@@ -653,7 +658,7 @@ struct ShelfPage {
     this.rebuildRows();
   }
 
-  /** 多选清除：书架 tab 移出书架，历史 tab 删除记录。 */
+  /** 多选清除（先弹共用确认弹窗）：书架 tab 移出书架，历史 tab 删除记录。 */
   private batchClearSelected(): void {
     if (this.batchSelected.length === 0) {
       this.showToast('请先选择条目');
@@ -661,15 +666,23 @@ struct ShelfPage {
     }
     const ids: string[] = this.batchSelected.slice();
     const count: number = ids.length;
-    if (this.currentTab === 0) {
-      FqShelfStore.removeByIds(ids);
-      this.showToast(`已移出 ${count} 本`);
-    } else {
-      FqBrowseStore.removeByIds(ids);
-      this.showToast(`已删除 ${count} 条`);
-    }
-    this.exitBatchMode();
-    this.refreshData();
+    const isShelf: boolean = this.currentTab === 0;
+    DialogManager.ShowConfirm(
+      isShelf ? '移出书架' : '删除记录',
+      isShelf ? `确定将选中的 ${count} 本作品移出书架吗？` : `确定删除选中的 ${count} 条浏览记录吗？`,
+      isShelf ? '移出' : '删除',
+      (): void => {
+        if (isShelf) {
+          FqShelfStore.removeByIds(ids);
+          this.showToast(`已移出 ${count} 本`);
+        } else {
+          FqBrowseStore.removeByIds(ids);
+          this.showToast(`已删除 ${count} 条`);
+        }
+        this.exitBatchMode();
+        this.refreshData();
+      }
+    );
   }
 
   private openDetail(row: ShelfRow): void {
