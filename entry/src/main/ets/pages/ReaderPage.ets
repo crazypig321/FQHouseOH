@@ -26,13 +26,14 @@ import { TitleBarContentOptions } from '@kit.UIDesignKit';
 import { FqBackend, fqErrorMessage } from '../core/FqBackend';
 import { FqBookComment, FqBookCommentPage, FqChapter, fqFormatCountInt, fqKindToTab } from '../model/FqModels';
 import { FqReaderProgress, FqReaderStore } from '../core/FqReaderStore';
-import { ReaderNavParams } from '../model/FqNavModels';
+import { ReaderNavParams, ROUTE_READER2 } from '../model/FqNavModels';
 import { CommonNav, titleBarOf } from '../view/CommonNav';
 import { CommonLoading, CommonSearch, FQ_ACCENT } from '../view/CommonCom';
 import { CommonSheet, FqSheetOptions } from '../view/CommonSheet';
 import { FQ_FONT_OPTIONS, FqFontOption, FqOnlineParser } from '../core/FqOnlineParser';
 import { appState } from '../entryability/AppState';
 import { DialogManager } from '../utils/DialogUtils';
+import { NavPathUtils } from '../utils/NavPathUtils';
 import { FQ_READER_THEMES, FqReaderTheme, ReaderSettingsDialogContent } from '../view/dialog/ReaderSettingsDialogContent';
 
 /** 眉页「第N章」前缀匹配（N 支持数字与中文数字，量词：章节回卷集话篇）。 */
@@ -243,7 +244,7 @@ export struct ReaderPage {
     this.bookId = ReaderNavParams.id;
     this.kind = ReaderNavParams.kind;
     this.bookTitle = ReaderNavParams.title;
-    // 标题栏：书名 + 书评键（HDS 菜单，菜单呼出时随标题栏显示）
+    // 标题栏：书名 + 书评键 + 自绘阅读页切换键（HDS 菜单，菜单呼出时随标题栏显示）
     this.titleBarOp = titleBarOf(this.bookTitle, undefined, [
       {
         content: {
@@ -251,6 +252,15 @@ export struct ReaderPage {
           label: 'comments',
           action: (): void => {
             this.openCommentSheet();
+          },
+        },
+      },
+      {
+        content: {
+          icon: $r('sys.symbol.textformat'),
+          label: 'reader2',
+          action: (): void => {
+            NavPathUtils.push(ROUTE_READER2);
           },
         },
       },
@@ -327,7 +337,6 @@ export struct ReaderPage {
       tabMaskHeight: 0,
       isShowBar: true,
       readBarKind: 'reader',
-      readBarHeight: this.menuVisible ? 56 : 0,
       readerBarClick: (key: string): void => {
         this.onReadBarAction(key);
       },

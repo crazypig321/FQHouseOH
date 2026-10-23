@@ -14,7 +14,8 @@ import { BlurStrategy,
   HideMode,
   HdsTabs,
   HdsTabsController,
-  HdsNavDestinationTitleMode} from '@kit.UIDesignKit';
+  HdsNavDestinationTitleMode,
+  HdsAnimationMode} from '@kit.UIDesignKit';
 import { appState } from '../entryability/AppState';
 import { LengthMetrics } from '@kit.ArkUI';
 import { themeUtils } from '../utils/ThemeUtils';
@@ -51,6 +52,8 @@ export struct CommonNav {
   @Param isSearchBarScroller: boolean = true
   /** 是否显示底部栏 */
   @Param isShowBar: boolean = false
+  /** 是否显示底部栏 */
+  @Param isShowBarController: boolean = false
   /** 底部栏内容类型：book 显示听书/下载，其余仅主按钮；主按钮文案/图标按类型区分 */
   @Param readBarKind: string = 'book'
   /** 双击标题栏区域时列表回滚到顶部 */
@@ -63,8 +66,6 @@ export struct CommonNav {
   @Param pageBackgroundColor: ResourceColor | undefined = undefined
   /** 是否保留品牌橙渐变背景 */
   @Param showBrandGradient: boolean = true
-  /** 底部悬浮条高度（阅读页随菜单显隐 0/56 切换） */
-  @Param readBarHeight: number = 56
   /** nav标题栏模糊度 */
   @Param navBlurRadius: number = 30
   /** tab遮罩高度 */
@@ -111,6 +112,17 @@ export struct CommonNav {
       this.lastTitleTapTime = now;
     }
   }
+  
+  @Monitor('isShowBarController')
+  private isShowTabBar(){
+    if (this.isShowBarController) {
+      // 触发显示动效，恢复页签栏和迷你栏。
+      this.tabsController.applyShowAnimation(HdsAnimationMode.CLICK_ANIMATION);
+    }else{
+      // 触发隐藏动效，页签栏和迷你栏一起隐藏。
+      this.tabsController.applyHideAnimation(HdsAnimationMode.CLICK_ANIMATION);
+    }
+  }
 
   build() {
     HdsNavDestination() {
@@ -125,8 +137,7 @@ export struct CommonNav {
         .vertical(false)
         .scrollable(false)
         .barPosition(BarPosition.End)
-        .barHeight(this.readBarHeight)
-        .animation({duration: 300})
+        .barHeight(56)
         .barFloatingStyle({
           barWidth: { smallWidth: 330, mediumWidth: 480, largeWidth: 560 },
           barBottomMargin: 28,
@@ -135,7 +146,7 @@ export struct CommonNav {
             materialLevel: appState.materialLevel
           },
           gradientMask: {
-            maskHeight: this.readBarHeight === 0 ? 0 : this.tabMaskHeight,
+            maskHeight: !this.isShowBarController ? 0 : this.tabMaskHeight,
           },
           adaptToHandedness: true,
         })

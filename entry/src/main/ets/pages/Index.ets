@@ -23,6 +23,7 @@ struct Index {
       .scrollable(false)
       .barPosition(BarPosition.End)
       .barHeight(56)
+      .animationDuration(500)
       .barFloatingStyle({
         barBottomMargin: 28,
         systemMaterialEffect: {
@@ -33,7 +34,7 @@ struct Index {
         adaptToHandedness: appState.smartReachEnabled,
       })
       .onSelected((index: number) => {
-        appState.currTabsIndex = index;
+        appState.currTabsIndex = index
       })
     }
     .titleMode(HdsNavigationTitleMode.MINI)

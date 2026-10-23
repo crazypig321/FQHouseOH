@@ -15,12 +15,12 @@
  * 无前缀进度回退章首）。
  */
 
-import { common } from '@kit.AbilityKit';
+import { common, ConfigurationConstant } from '@kit.AbilityKit';
 import { CustomContentDialog, display, window } from '@kit.ArkUI';
 import { fileIo } from '@kit.CoreFileKit';
 import { batteryInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { TitleBarContentOptions } from '@kit.UIDesignKit';
+import { HdsTabsController, TitleBarContentOptions } from '@kit.UIDesignKit';
 import { FqBackend, fqErrorMessage } from '../core/FqBackend';
 import { FqBookComment, FqBookCommentPage, FqChapter, fqFormatCountInt, fqKindToTab } from '../model/FqModels';
 import { FqReaderProgress, FqReaderStore } from '../core/FqReaderStore';
@@ -30,6 +30,7 @@ import { CommonLoading, CommonSearch, FQ_ACCENT } from '../view/CommonCom';
 import { CommonSheet, FqSheetOptions } from '../view/CommonSheet';
 import { FQ_FONT_OPTIONS, FqFontOption } from '../core/FqOnlineParser';
 import { appState } from '../entryability/AppState';
+import { themeUtils } from '../utils/ThemeUtils';
 import { DialogManager } from '../utils/DialogUtils';
 import { FQ_READER_THEMES, FqReaderTheme, ReaderSettingsDialogContent } from '../view/dialog/ReaderSettingsDialogContent';
 import {
@@ -254,6 +255,7 @@ export struct ReaderPage2 {
     this.themeIndex = settings.themeIndex;
     this.flipIndex = settings.flipIndex;
     this.fontIndex = settings.fontIndex;
+    this.syncReaderColorMode();
     this.filesDir = getContext(this).filesDir;
     this.chapterPages = FqReaderStore.getChapterPages(this.bookId);
     this.refreshFooterStatus();
@@ -273,6 +275,7 @@ export struct ReaderPage2 {
   }
 
   aboutToDisappear(): void {
+    this.restoreSystemColorMode();
     this.applySystemBar(true);
     this.loadToken += 1;
     this.saveProgressNow();
@@ -297,8 +300,8 @@ export struct ReaderPage2 {
       scrollMaskExtraHeight: 0,
       tabMaskHeight: 0,
       isShowBar: true,
+      isShowBarController: this.menuVisible,
       readBarKind: 'reader',
-      readBarHeight: this.menuVisible ? 56 : 0,
       readerBarClick: (key: string): void => {
         this.onReadBarAction(key);
       },
@@ -326,9 +329,7 @@ export struct ReaderPage2 {
             this.onFlipTurn(isNext);
           },
           onMenuTap: (): void => {
-            this.getUIContext().animateTo({ duration: 300 }, (): void => {
-              this.toggleMenu();
-            });
+            this.toggleMenu();
           },
           onBubbleTap: (paraIndex: number): void => {
             this.openParaSheet(paraIndex);
@@ -471,8 +472,8 @@ export struct ReaderPage2 {
       metrics: this.cachedMetrics,
       fontColor: this.theme().fontColor,
       pageBgColor: this.theme().background,
-      bubbleBgColor: this.theme().night ? '#23262A' : '#E9E3D5',
-      bubbleFontColor: this.theme().night ? '#9AA0A6' : '#8A8578',
+     // bubbleBgColor: this.theme().night ? '#23262A' : '#E9E3D5',
+     // bubbleFontColor: this.theme().night ? '#9AA0A6' : '#8A8578',
       commentCounts: this.layoutForSlot(slot)?.commentCounts ?? [],
       fontFamily: this.readerFontFamily,
     })
@@ -960,6 +961,51 @@ export struct ReaderPage2 {
     return FQ_READER_THEMES[this.effectiveThemeIndex()] ?? FQ_READER_THEMES[0];
   }
 
+  /** 上次已锁定的应用色彩模式（去重，避免重复 setColorMode/刷新）。 */
+  private appliedColorMode: ConfigurationConstant.ColorMode | null = null;
+
+  /**
+   * 将应用色彩模式锁定为与生效阅读主题一致：阅读页内系统色 chrome（标题栏/工具栏/
+   * 设置弹窗卡片/半模态）随阅读主题渲染，避免系统深色 + 浅色主题时白字不可读
+   * （或系统浅色 + 夜间主题时黑字不可读）。「跟随系统」主题不锁定（此时生效主题
+   * 与系统模式天然一致，保留系统切换的实时响应）。
+   */
+  private syncReaderColorMode(): void {
+    const mode: ConfigurationConstant.ColorMode = this.themeIndex === -1
+      ? ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET
+      : (this.theme().night ? ConfigurationConstant.ColorMode.COLOR_MODE_DARK
+        : ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT);
+    if (this.appliedColorMode === mode) {
+      return;
+    }
+    this.appliedColorMode = mode;
+    try {
+      const context: common.UIAbilityContext =
+        this.getUIContext().getHostContext() as common.UIAbilityContext;
+      context.getApplicationContext().setColorMode(mode);
+      if (mode !== ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET) {
+        themeUtils.colorModeChange(mode);
+      }
+    } catch (error) {
+      // 设置失败保持现状
+    }
+  }
+
+  /** 退出阅读页：恢复应用色彩模式跟随系统，并刷新全局系统色绑定。 */
+  private restoreSystemColorMode(): void {
+    this.appliedColorMode = null;
+    try {
+      const context: common.UIAbilityContext =
+        this.getUIContext().getHostContext() as common.UIAbilityContext;
+      context.getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
+      themeUtils.colorModeChange(appState.isDark
+        ? ConfigurationConstant.ColorMode.COLOR_MODE_DARK
+        : ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT);
+    } catch (error) {
+      // 设置失败保持现状
+    }
+  }
+
   /** 槽位页所属章下标（-1 无章）。 */
   private slotChapterIndex(slot: number): number {
     const layout: FqChapterLayout | null = this.layoutForSlot(slot);
@@ -1144,7 +1190,9 @@ export struct ReaderPage2 {
       this.onSheetClose();
       return;
     }
-    this.menuVisible = !this.menuVisible;
+    this.getUIContext().animateTo({ duration: 300 }, ()=>{
+      this.menuVisible = !this.menuVisible;
+    })
   }
 
   private openSheet(): void {
@@ -1473,6 +1521,7 @@ export struct ReaderPage2 {
   }
 
   private applySettingChange(needRelayout: boolean): void {
+    this.syncReaderColorMode();
     FqReaderStore.saveSettings(this.fontSize, this.lineHeight, this.themeIndex, this.flipIndex,
       this.fontIndex);
     if (needRelayout) {

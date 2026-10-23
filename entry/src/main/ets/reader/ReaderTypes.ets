@@ -139,8 +139,8 @@ export class FqReaderLayoutMetrics {
   contentTopVp: number = 0;
   contentBottomVp: number = 0;
   /** 眉页 / 眉脚区高（vp，FqReaderFlip 槽位三区布局用）。 */
-  headerZoneVp: number = 54;
-  footerZoneVp: number = 40;
+  headerZoneVp: number = 20;
+  footerZoneVp: number = 20;
 }
 
 /** 段评条目。 */

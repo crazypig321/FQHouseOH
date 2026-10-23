@@ -5,12 +5,13 @@
  */
 
 import { MENU_CONFIG, MenuItem, tabBarSymbolOf } from '../model/FqTabsModels';
-import { ROUTE_DETAIL, ROUTE_RANK, ROUTE_READER, ROUTE_SEARCH, FqTitleBarOptions } from '../model/FqNavModels';
+import { ROUTE_DETAIL, ROUTE_RANK, ROUTE_READER, ROUTE_READER2, ROUTE_SEARCH, FqTitleBarOptions } from '../model/FqNavModels';
 import { HomePage } from '../pages/HomePage';
 import { SearchPage } from '../pages/SearchPage';
 import { DetailPage } from '../pages/DetailPage';
 import { RankPage } from '../pages/RankPage';
 import { ReaderPage } from '../pages/ReaderPage';
+import { ReaderPage2 } from '../reader/ReaderPage2';
 import { CommonNav } from './CommonNav';
 
 const TAB_ACCENT: string = '#FF7A3D';
@@ -51,6 +52,8 @@ export function PageMapBuilder(name: string) {
     RankPage()
   } else if (name === ROUTE_READER) {
     ReaderPage()
+  } else if (name === ROUTE_READER2) {
+    ReaderPage2()
   }
 }
 

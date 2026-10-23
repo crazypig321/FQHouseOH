@@ -18,8 +18,8 @@ export struct FqPageCanvas {
   @Param fontColor: string = '#1F2329';
   @Param pageBgColor: string = '#F6F4EF';
   /** 段评气泡配色。 */
-  @Param bubbleBgColor: string = '#E9E3D5';
-  @Param bubbleFontColor: string = '#8A8578';
+  @Param bubbleBgColor: ResourceColor = $r('sys.color.comp_background_tertiary');
+  @Param bubbleFontColor: ResourceColor = $r('sys.color.icon_tertiary');
   /** 每段段评数（气泡计数）。 */
   @Param commentCounts: number[] = [];
   /** 阅读字体族（空串回退系统默认）。 */
@@ -95,6 +95,7 @@ export struct FqPageCanvas {
     .borderRadius(this.metrics.bubbleRadiusVp)
     .backgroundColor(this.bubbleBgColor)
     .hitTestBehavior(HitTestMode.None)
+    .alignItems(VerticalAlign.Center)
   }
 
   build() {
