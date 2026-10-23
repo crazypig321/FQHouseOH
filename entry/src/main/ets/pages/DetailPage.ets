@@ -78,7 +78,7 @@ export struct DetailPage {
     this.headerTitle = `${fqKindLabel(this.itemKind)}详情`;
     this.stableTopInset = appState.topRect;
     FqShelfStore.init(getContext(this));
-    this.inShelf = FqShelfStore.contains(this.itemId);
+    this.refreshShelfState();
     this.load();
   }
 
@@ -650,9 +650,20 @@ export struct DetailPage {
     this.catalogSheetVisible = true;
   }
 
-  /** 页面重新显示（从阅读页返回等）：List 回到顶部。 */
+  /** 书架判定/切换统一使用的内容 ID（与听书页 fqAudioSession.bookId 一致）。 */
+  private shelfId(): string {
+    return this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId;
+  }
+
+  /** 书架态刷新（进入/加载完成/页面重新显示时同步，与听书页判定保持一致）。 */
+  private refreshShelfState(): void {
+    this.inShelf = FqShelfStore.contains(this.shelfId());
+  }
+
+  /** 页面重新显示（从阅读页返回等）：List 回到顶部 + 书架态刷新。 */
   private onPageShown(): void {
     this.scroller.scrollEdge(Edge.Top);
+    this.refreshShelfState();
   }
 
   private coverUrl(): string {
@@ -759,7 +770,7 @@ export struct DetailPage {
 
   private toggleShelf(): void {
     const added: boolean = FqShelfStore.toggle(
-      new FqShelfItem(this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId,
+      new FqShelfItem(this.shelfId(),
         this.itemKind, this.detail.title, this.detail.cover));
     this.inShelf = added;
     promptAction.showToast({ message: added ? '已加入书架' : '已移出书架', duration: 1500 });
@@ -821,6 +832,7 @@ export struct DetailPage {
         return;
       }
       this.detail = detail;
+      this.refreshShelfState();
       let chapters: FqChapter[] = [];
       try {
         chapters = await FqBackend.get().directoryChapters(contentId, tab);

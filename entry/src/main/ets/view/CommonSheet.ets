@@ -6,7 +6,9 @@
  *   CommonSearch 搜索框，样式对齐主页搜索行）。
  */
 
-import { HdsNavDestination,
+import {
+  BlurStrategy,
+  HdsNavDestination,
   HdsNavDestinationTitleMode,
   HdsNavigationMenuItemOptions, TitleBarContentOptions } from '@kit.UIDesignKit';
 import { appState } from '../entryability/AppState';
@@ -96,6 +98,11 @@ export struct CommonSheet {
         },
         scrollEffectOpts: {
           enableScrollEffect: false,
+        },
+        blurStrategy: BlurStrategy.ADAPTIVE,
+        systemMaterialEffect: {
+          materialType: appState.materialType,
+          materialLevel: appState.materialLevel
         },
       },
       avoidLayoutSafeArea: false,

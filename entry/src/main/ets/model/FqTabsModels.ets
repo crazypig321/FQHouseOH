@@ -28,7 +28,7 @@ export function tabBarSymbolOf(item: MenuItem): TabBarSymbol {
 }
 
 export const MENU_CONFIG: MenuItem[] = [
-  { icon: $r('sys.symbol.house'), label: '首页' },
+  { icon: $r('sys.symbol.house_fill_1'), label: '首页' },
   { icon: $r('sys.symbol.bookshelf'), label: '书架' },
-  { icon: $r('sys.symbol.person'), label: '我的' },
+  { icon: $r('sys.symbol.person_fill'), label: '我的' },
 ];

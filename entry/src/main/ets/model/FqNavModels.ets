@@ -72,7 +72,8 @@ export function FqTitleBarOptions(mainTitle: ResourceStr, showSearch: boolean,
   if (onShelf !== undefined) {
     menus.push({
       content: {
-        icon: shelfActive === true ? $r('sys.symbol.bookmark_fill') : $r('sys.symbol.bookmark'),
+        icon: shelfActive === true ? $r('sys.symbol.bookshelf_badge_checkmark_fill')
+          : $r('sys.symbol.bookshelf_badge_plus'),
         label: 'shelf',
         action: onShelf,
       },

@@ -319,17 +319,34 @@ export struct ListenPage {
     })
   }
 
+  /** 书架动作键（图标/文案随 inShelf 实时刷新，不走按值传参）。 */
+  @Builder
+  private ShelfActionItem() {
+    Column({ space: 5 }) {
+      SymbolGlyph(this.inShelf ? $r('sys.symbol.bookshelf_badge_checkmark_fill')
+        : $r('sys.symbol.bookshelf_badge_plus'))
+        .fontSize(21)
+        .fontColor([this.inShelf ? FQ_ACCENT : $r('sys.color.font_primary')])
+      Text(this.inShelf ? '已在书架' : '加入书架')
+        .fontSize(11)
+        .maxLines(1)
+        .fontColor(this.inShelf ? FQ_ACCENT : $r('sys.color.font_secondary'))
+    }
+    .layoutWeight(1)
+    .padding({ top: 8, bottom: 8 })
+    .onClick((): void => {
+      this.toggleShelf();
+    })
+  }
+
   /** 动作排：语速 / 书架 / 下载 / 章评 / 更多。 */
   @Builder
   private ActionRow() {
     Row() {
-      this.ActionItem($r('sys.symbol.dial'), '语速', false, (): void => {
+     this.ActionItem($r('sys.symbol.timer'), '语速', false, (): void => {
         this.openSheet(FqListenSheetKind.rates);
       })
-      this.ActionItem($r('sys.symbol.bookmark'), this.inShelf ? '已在书架' : '加入书架',
-        this.inShelf, (): void => {
-          this.toggleShelf();
-        })
+      this.ShelfActionItem()
       this.ActionItem($r('sys.symbol.download'), '下载', false, (): void => {
         promptAction.showToast({ message: '下载功能即将上线', duration: 1500 });
       })
@@ -439,7 +456,7 @@ export struct ListenPage {
         fqAudioSession.hasNextChapter, (): void => {
           fqAudioSession.next();
         })
-      this.TransportItem($r('sys.symbol.timer'), '定时', fqAudioSession.sleepActive, true,
+      this.TransportItem($r('sys.symbol.stopwatch_1'), '定时', fqAudioSession.sleepActive, true,
         (): void => {
           this.openSheet(FqListenSheetKind.sleep);
         })
@@ -960,14 +977,14 @@ export struct ListenPage {
             .fontColor([$r('sys.color.font_secondary')])
         }
         .width('100%')
-        .padding({ left: 16, right: 16, top: 10, bottom: 10 })
+        .padding({ left: 16, right: 16, top: 12, bottom: 12 })
         .onClick((): void => {
           this.openSheet(FqListenSheetKind.sleep);
         })
 
         Divider()
           .color($r('sys.color.comp_divider'))
-          .margin({ left: 68 })
+          .margin({ left: 68, right: 16 })
 
         Row({ space: 12 }) {
           Column() {
@@ -996,14 +1013,14 @@ export struct ListenPage {
             .fontColor([$r('sys.color.font_secondary')])
         }
         .width('100%')
-        .padding({ left: 16, right: 16, top: 10, bottom: 10 })
+        .padding({ left: 16, right: 16, top: 12, bottom: 12 })
         .onClick((): void => {
           this.openCatalog();
         })
 
         Divider()
           .color($r('sys.color.comp_divider'))
-          .margin({ left: 68 })
+          .margin({ left: 68, right: 16 })
 
         Row({ space: 12 }) {
           Column() {
@@ -1033,7 +1050,7 @@ export struct ListenPage {
             })
         }
         .width('100%')
-        .padding({ left: 16, right: 16, top: 10, bottom: 10 })
+        .padding({ left: 16, right: 16, top: 12, bottom: 12 })
       }
       .width('100%')
       .borderRadius(18)
