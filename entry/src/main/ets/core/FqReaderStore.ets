@@ -33,7 +33,7 @@ export class FqReaderSettings {
   themeIndex: number = -1;
   /** 0 仿真翻页 / 1 横滑翻页。 */
   flipIndex: number = 0;
-  /** 字体档位（FQ_FONT_OPTIONS 下标）：0 书宋 / 1 黑体。 */
+  /** 字体档位（FQ_FONT_OPTIONS 下标）：0 系统（跟随系统字体设置）/ 1 书宋 / 2 黑体。 */
   fontIndex: number = 0;
 }
 
@@ -102,6 +102,11 @@ export class FqReaderStore {
       if (typeof fontIndex === 'number') {
         FqReaderStore.settings.fontIndex = Math.max(0, Math.trunc(fontIndex));
       }
+      // v2→v3：字体档位重排（系统档提前）——旧 0 书宋→1、旧 1 黑体→2、旧 2 系统→0
+      if (typeof version !== 'number' || Math.trunc(version) < 3) {
+        const oldFont: number = FqReaderStore.settings.fontIndex;
+        FqReaderStore.settings.fontIndex = oldFont === 0 ? 1 : (oldFont === 1 ? 2 : 0);
+      }
     } catch (error) {
       // 损坏配置按默认处理
     }
@@ -123,7 +128,7 @@ export class FqReaderStore {
       return;
     }
     const rec: Record<string, Object> = {};
-    rec['v'] = 2;
+    rec['v'] = 3;
     rec['fontSize'] = FqReaderStore.settings.fontSize;
     rec['lineHeight'] = FqReaderStore.settings.lineHeight;
     rec['themeIndex'] = FqReaderStore.settings.themeIndex;

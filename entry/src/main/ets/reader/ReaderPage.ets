@@ -22,12 +22,14 @@ import { batteryInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { HdsAnimationMode, HdsTabsController, TitleBarContentOptions } from '@kit.UIDesignKit';
 import { FqBackend, fqErrorMessage } from '../core/FqBackend';
-import { FqBookComment, FqBookCommentPage, FqChapter, fqFormatCountInt, fqKindToTab } from '../model/FqModels';
+import { FqChapter, fqFormatCountInt, fqKindToTab } from '../model/FqModels';
 import { FqReaderProgress, FqReaderStore } from '../core/FqReaderStore';
 import { ReaderNavParams } from '../model/FqNavModels';
 import { CommonNav, titleBarOf } from '../view/CommonNav';
-import { CommonLoading, CommonSearch, FQ_ACCENT } from '../view/CommonCom';
+import { CommonLoading, FQ_ACCENT } from '../view/CommonCom';
 import { CommonSheet, FqSheetOptions } from '../view/CommonSheet';
+import { FqCommentSheet, fqCommentSheetHeightVp } from '../view/FqCommentSheet';
+import { FqCatalogSheet } from '../view/FqCatalogSheet';
 import { FQ_FONT_OPTIONS, FqFontOption } from '../core/FqOnlineParser';
 import { appState } from '../entryability/AppState';
 import { themeUtils } from '../utils/ThemeUtils';
@@ -57,97 +59,7 @@ const FQ_HEADER_PREFIX_RE: RegExp = new RegExp('^第[0-9零一二三四五六七
 const FQ_HEADER_PREFIX_STRIP_RE: RegExp =
   new RegExp('^第[0-9零一二三四五六七八九十百千万]+[章节回卷集话篇]\\s*');
 
-/** 目录懒加载数据源：持过滤后章节，变更时通知 LazyForEach 刷新。 */
-class FqChapterSource implements IDataSource {
-  private items: FqChapter[] = [];
-  private listeners: DataChangeListener[] = [];
-
-  setItems(items: FqChapter[]): void {
-    this.items = items;
-    for (const listener of this.listeners) {
-      listener.onDataReloaded();
-    }
-  }
-
-  totalCount(): number {
-    return this.items.length;
-  }
-
-  getData(index: number): Object {
-    return this.items[index];
-  }
-
-  registerDataChangeListener(listener: DataChangeListener): void {
-    if (this.listeners.indexOf(listener) < 0) {
-      this.listeners.push(listener);
-    }
-  }
-
-  unregisterDataChangeListener(listener: DataChangeListener): void {
-    const index: number = this.listeners.indexOf(listener);
-    if (index >= 0) {
-      this.listeners.splice(index, 1);
-    }
-  }
-}
-
-/** 书评懒加载数据源：持已加载书评，续拉按 comment_id 去重后通知 LazyForEach 刷新。 */
-class FqCommentSource implements IDataSource {
-  private items: FqBookComment[] = [];
-  private listeners: DataChangeListener[] = [];
-
-  setItems(items: FqBookComment[]): void {
-    this.items = items;
-    this.notifyReloaded();
-  }
-
-  /** 续拉追加：非空 comment_id 与已有条目去重，避免分页交界重复渲染。 */
-  appendItems(items: FqBookComment[]): void {
-    for (const item of items) {
-      if (item.id.length > 0 && this.containsId(item.id)) {
-        continue;
-      }
-      this.items.push(item);
-    }
-    this.notifyReloaded();
-  }
-
-  totalCount(): number {
-    return this.items.length;
-  }
-
-  getData(index: number): Object {
-    return this.items[index];
-  }
-
-  registerDataChangeListener(listener: DataChangeListener): void {
-    if (this.listeners.indexOf(listener) < 0) {
-      this.listeners.push(listener);
-    }
-  }
-
-  unregisterDataChangeListener(listener: DataChangeListener): void {
-    const index: number = this.listeners.indexOf(listener);
-    if (index >= 0) {
-      this.listeners.splice(index, 1);
-    }
-  }
-
-  private containsId(id: string): boolean {
-    for (const known of this.items) {
-      if (known.id === id) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  private notifyReloaded(): void {
-    for (const listener of this.listeners) {
-      listener.onDataReloaded();
-    }
-  }
-}
+/** 目录懒加载数据源与目录 Sheet UI 已抽至 view/FqCatalogSheet.ets（与详情页共用）。 */
 
 @ComponentV2
 export struct ReaderPage {
@@ -155,18 +67,10 @@ export struct ReaderPage {
   @Local errorMsg: string = '';
   @Local menuVisible: boolean = false;
   @Local sheetVisible: boolean = false;
-  @Local sheetKeyword: string = '';
-  /** 目录排序：true 倒序（不持久化，每次打开目录重置为正序）。 */
-  @Local sheetDescending: boolean = false;
-  /** 书评半模态（标题栏书评键呼出）。 */
+  /** 目录打开令牌：每次打开 +1（公共 FqCatalogSheet 据此重置搜索/排序并定位当前章）。 */
+  @Local sheetOpenToken: number = 0;
+  /** 书评半模态（标题栏书评键呼出；内容为公共 FqCommentSheet）。 */
   @Local commentSheetVisible: boolean = false;
-  @Local commentLoading: boolean = false;
-  @Local commentError: string = '';
-  @Local commentCount: number = 0;
-  @Local commentTotal: number = 0;
-  @Local commentHasMore: boolean = false;
-  @Local commentLoadingMore: boolean = false;
-  @Local commentMoreFailed: boolean = false;
   /** 段评半模态（段尾气泡呼出）。 */
   @Local paraSheetVisible: boolean = false;
   @Local paraSheetParaIndex: number = -1;
@@ -201,11 +105,6 @@ export struct ReaderPage {
   private filesDir: string = '';
   private loadToken: number = 0;
   private clockTimer: number = -1;
-  private drawerScroller: Scroller = new Scroller();
-  private chapterSource: FqChapterSource = new FqChapterSource();
-  private commentSource: FqCommentSource = new FqCommentSource();
-  private commentScroller: Scroller = new Scroller();
-  private commentNextOffset: number = 0;
   private titleBarOp: TitleBarContentOptions | undefined = undefined;
   /** 排版几何缓存（重排/开章时重建，渲染期间引用稳定）。 */
   private cachedMetrics: FqReaderLayoutMetrics = new FqReaderLayoutMetrics();
@@ -225,7 +124,9 @@ export struct ReaderPage {
       contentAreaPadding: { top: 20, bottom: 20, left: 24, right: 24 },
     }),
     alignment: DialogAlignment.Bottom,
-    offset: { dx: 0, dy: -68 },
+    // 工具栏顶 = 窗口底 - (悬浮底边距28 + 栏高56)；弹窗 Bottom 基准为导航避让区底（比窗口底高 bottomRect）。
+    // 窗口化时 bottomRect=0，动态计算保证弹窗始终贴工具栏上沿（手机全屏时 -84+bottomRect 仍为 -68）。
+    offset: { dx: 0, dy: - appState.bottomRect - 84 },
     autoCancel: true,
     onWillDisappear: (): void => {
       DialogManager.DisappearDialog(DialogManager.dialogChangeKey);
@@ -337,7 +238,7 @@ export struct ReaderPage {
         })
         .bindSheet(this.commentSheetVisible, this.CommentSheet(), FqSheetOptions((): void => {
           this.onCommentSheetClose();
-        }, this.commentSheetHeightVp()))
+        }, fqCommentSheetHeightVp()))
 
         // 段评半模态宿主（0 尺寸稳定节点）
         Column()
@@ -930,6 +831,9 @@ export struct ReaderPage {
       this.menuVisible = false;
       return true;
     }
+    // 返回放行前先恢复系统状态栏：让状态栏在转场开始时即就位（随页面滑动出现），
+    // 而非转场结束后突兀弹出（aboutToDisappear 里仍兜底恢复一次）。
+    this.applySystemBar(true);
     return false;
   }
 
@@ -1164,17 +1068,13 @@ export struct ReaderPage {
     return `${readPages}/${totalPages}`;
   }
 
-  /** 目录定位：滚动到当前章节（搜索过滤时按过滤后位置定位）。 */
-  private locateCurrentChapter(): void {
-    const current: FqChapter | undefined = this.chapters[this.chapterIndex];
-    let target: number = this.chapterIndex;
-    if (current !== undefined) {
-      const pos: number = this.displayChapters().indexOf(current);
-      if (pos >= 0) {
-        target = pos;
-      }
-    }
-    this.drawerScroller.scrollToIndex(target, true);
+  private openSheet(): void {
+    this.sheetOpenToken += 1;
+    this.sheetVisible = true;
+  }
+
+  private onSheetClose(): void {
+    this.sheetVisible = false;
   }
 
   private hasPrev(): boolean {
@@ -1195,128 +1095,13 @@ export struct ReaderPage {
     })
   }
 
-  private openSheet(): void {
-    this.sheetKeyword = '';
-    this.sheetDescending = false;
-    this.refreshCatalogSource();
-    this.sheetVisible = true;
-    setTimeout(() => {
-      this.drawerScroller.scrollToIndex(this.chapterIndex, false);
-    }, 300);
-  }
-
-  private onSheetClose(): void {
-    this.sheetVisible = false;
-    this.sheetKeyword = '';
-  }
-
-  /** 目录搜索过滤：空关键字返回全量目录。 */
-  private filteredChapters(): FqChapter[] {
-    const keyword: string = this.sheetKeyword.trim();
-    if (keyword.length === 0) {
-      return this.chapters;
-    }
-    const result: FqChapter[] = [];
-    for (const chapter of this.chapters) {
-      if (chapter.title.includes(keyword)) {
-        result.push(chapter);
-      }
-    }
-    return result;
-  }
-
-  /** 目录显示列表：关键字过滤后按排序输出（倒序时反转）。 */
-  private displayChapters(): FqChapter[] {
-    const list: FqChapter[] = this.filteredChapters();
-    if (!this.sheetDescending) {
-      return list;
-    }
-    const reversed: FqChapter[] = list.slice();
-    reversed.reverse();
-    return reversed;
-  }
-
-  /** 目录排序切换：刷新列表并回到当前章节。 */
-  private toggleCatalogOrder(): void {
-    this.sheetDescending = !this.sheetDescending;
-    this.refreshCatalogSource();
-  }
-
-  /** 按当前关键字刷新目录懒加载数据源。 */
-  private refreshCatalogSource(): void {
-    this.chapterSource.setItems(this.displayChapters());
-  }
-
-  /** 打开书评半模态：首开自动拉第一页。 */
+  /** 打开书评半模态（数据加载由公共 FqCommentSheet 自理）。 */
   private openCommentSheet(): void {
     this.commentSheetVisible = true;
-    if (this.commentSource.totalCount() === 0 && !this.commentLoading) {
-      this.loadComments(true);
-    }
   }
 
   private onCommentSheetClose(): void {
     this.commentSheetVisible = false;
-  }
-
-  /** 书评 Sheet 标题：总数就绪后带计数（书评 · 123）。 */
-  private commentSheetTitle(): string {
-    return this.commentTotal > 0 ? `书评 · ${this.commentTotal}` : '书评';
-  }
-
-  /** 书评 Sheet 高度：屏高 82%（vp），异常回退 600。 */
-  private commentSheetHeightVp(): number {
-    const displayData: display.Display = display.getDefaultDisplaySync();
-    const density: number = displayData.densityPixels > 0 ? displayData.densityPixels : 1;
-    const screenHeight: number = appState.screenHeight > 0 ? appState.screenHeight : displayData.height;
-    const height: number = Math.round((screenHeight / density) * 0.82);
-    return height > 0 ? height : 600;
-  }
-
-  /** 拉取书评一页：refresh 重置分页（首开/重试），否则触底续拉。 */
-  private async loadComments(refresh: boolean): Promise<void> {
-    if (this.bookId.length === 0) {
-      return;
-    }
-    if (refresh) {
-      if (this.commentLoading) {
-        return;
-      }
-      this.commentLoading = true;
-      this.commentError = '';
-    } else {
-      if (this.commentLoading || this.commentLoadingMore || !this.commentHasMore) {
-        return;
-      }
-      this.commentLoadingMore = true;
-      this.commentMoreFailed = false;
-    }
-    const offset: number = refresh ? 0 : this.commentNextOffset;
-    try {
-      const page: FqBookCommentPage = await FqBackend.get().bookComments(this.bookId, 20, offset);
-      if (refresh) {
-        this.commentSource.setItems(page.comments);
-        this.commentNextOffset = page.nextOffset > 0 ? page.nextOffset : page.comments.length;
-        this.commentHasMore = page.hasMore && page.comments.length > 0;
-        this.commentLoading = false;
-      } else {
-        this.commentSource.appendItems(page.comments);
-        const advanced: number = page.nextOffset > offset ? page.nextOffset : offset + page.comments.length;
-        this.commentNextOffset = advanced;
-        this.commentHasMore = page.hasMore && page.comments.length > 0 && advanced > offset;
-        this.commentLoadingMore = false;
-      }
-      this.commentTotal = page.totalCount;
-      this.commentCount = this.commentSource.totalCount();
-    } catch (error) {
-      if (refresh) {
-        this.commentError = fqErrorMessage(error);
-        this.commentLoading = false;
-      } else {
-        this.commentLoadingMore = false;
-        this.commentMoreFailed = true;
-      }
-    }
   }
 
   // ---------------------------------------------------------------------------
@@ -1557,7 +1342,6 @@ export struct ReaderPage {
       this.chapters = chapters;
       this.totalChapters = chapters.length;
       this.buildChapterEstimates();
-      this.chapterSource.setItems(chapters);
       const progress: FqReaderProgress = FqReaderStore.getProgress(this.bookId);
       let index: number = this.startChapterIndex;
       let domPos: string = '';
@@ -1634,8 +1418,20 @@ export struct ReaderPage {
     return FqBackend.get().chapterText(chapter.itemId, chapter.title);
   }
 
-  private chapterIndexOf(chapter: FqChapter): number {
-    return this.chapters.indexOf(chapter);
+  /** 章节已读进度：当前章按页位置计百分比、之前章节 100%、未读章节 0%。 */
+  private chapterProgressText(idx: number): string {
+    if (idx < this.chapterIndex) {
+      return '100%';
+    }
+    if (idx > this.chapterIndex || this.curLayout === null) {
+      return '0%';
+    }
+    const total: number = this.curLayout.pages.length;
+    if (total <= 0) {
+      return '0%';
+    }
+    const pct: number = Math.round(((this.pageIndex + 1) / total) * 100);
+    return `${Math.min(Math.max(pct, 1), 100)}%`;
   }
 
   private openPrev(): void {
@@ -1672,151 +1468,29 @@ export struct ReaderPage {
   // 半模态 / 弹窗装配
   // ---------------------------------------------------------------------------
 
-  /** 目录半模态：公共 sheet（标题栏+搜索）承载章节列表。 */
+  /** 目录半模态：公共 FqCatalogSheet（搜索/排序/定位/进度自理）。 */
   @Builder
   private CatalogSheet() {
-    CommonSheet({
-      sheetTitle: '目录',
-      showLocate: true,
-      locateClick: (): void => {
-        this.locateCurrentChapter();
+    FqCatalogSheet({
+      chapters: this.chapters,
+      fontColor: this.theme().fontColor,
+      currentChapterIndex: this.chapterIndex,
+      progressOf: (index: number): string => this.chapterProgressText(index),
+      openToken: this.sheetOpenToken,
+      contentEndExtra: 56,
+      chapterClick: (index: number): void => {
+        this.jumpToChapter(index);
       },
-      showSort: true,
-      sortAscending: !this.sheetDescending,
-      sortClick: (): void => {
-        this.toggleCatalogOrder();
-      },
-    }) {
-      Column({ space: 16 }) {
-        CommonSearch({
-          searchValue: this.sheetKeyword,
-          isDefaultFocus: false,
-          placeholderValue: '搜索章节',
-          focusId: 'reader2_sheet_search',
-          bgColor: $r('sys.color.comp_background_float'),
-          change: (value: string): void => {
-            this.sheetKeyword = value;
-            this.refreshCatalogSource();
-          },
-          submit: (value: string, _event: SubmitEvent): void => {
-            this.sheetKeyword = value;
-            this.refreshCatalogSource();
-          },
-          didDelete: (): void => {
-            this.sheetKeyword = '';
-            this.refreshCatalogSource();
-          },
-          click: (): void => {
-          },
-        }).height(36).padding({ right: 20, left: 20, bottom: 10 })
-
-        List({ scroller: this.drawerScroller }) {
-          LazyForEach(this.chapterSource, (chapter: FqChapter) => {
-            ListItem() {
-              Row({ space: 14 }) {
-                Text(chapter.title.length > 0 ? chapter.title
-                  : `第${this.chapterIndexOf(chapter) + 1}章`)
-                  .fontSize(14)
-                  .fontColor(this.chapterIndexOf(chapter) === this.chapterIndex
-                    ? FQ_ACCENT : this.theme().fontColor)
-                  .layoutWeight(1)
-                  .maxLines(1)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-              }
-              .width('100%')
-              .padding({ top: 14, bottom: 14, right: 20, left: 20 })
-              .alignItems(VerticalAlign.Center)
-              .onClick(() => this.jumpToChapter(this.chapterIndexOf(chapter)))
-            }
-          }, (chapter: FqChapter): string => chapter.itemId)
-        }
-        .contentEndOffset(appState.bottomRect + 56)
-        .cachedCount(12)
-        .width('100%')
-        .height('100%')
-        .scrollBar(BarState.Off)
-        .divider({
-          strokeWidth: 0.5,
-          color: this.panelDividerColor(),
-          startMargin: 20,
-          endMargin: 20,
-        })
-      }.padding({ top: 56 })
-    }
+    })
   }
 
-  /** 书评半模态：公共 sheet 承载懒加载列表（首拉 Loading / 错误重试 / 空态 / 分页列表）。 */
+  /** 书评半模态：公共 FqCommentSheet（首拉 Loading / 错误重试 / 空态 / 分页列表）。 */
   @Builder
   private CommentSheet() {
-    CommonSheet({
-      sheetTitle: this.commentSheetTitle(),
-    }) {
-      Column() {
-        if (this.commentLoading) {
-          Column({ space: 10 }) {
-            CommonLoading({ sizeValue: 36, loadColor: FQ_ACCENT })
-          }
-          .width('100%')
-          .layoutWeight(1)
-          .justifyContent(FlexAlign.Center)
-        } else if (this.commentError.length > 0) {
-          Column({ space: 12 }) {
-            Text(this.commentError)
-              .fontSize(14)
-              .fontColor(this.theme().fontColor)
-              .textAlign(TextAlign.Center)
-              .padding({ left: 32, right: 32 })
-            Button('重试')
-              .backgroundColor(FQ_ACCENT)
-              .onClick(() => {
-                this.loadComments(true);
-              })
-          }
-          .width('100%')
-          .layoutWeight(1)
-          .justifyContent(FlexAlign.Center)
-        } else if (this.commentCount === 0) {
-          Column() {
-            Text('暂无书评')
-              .fontSize(14)
-              .fontColor(this.theme().fontColor)
-              .opacity(0.55)
-          }
-          .width('100%')
-          .layoutWeight(1)
-          .justifyContent(FlexAlign.Center)
-        } else {
-          List({ scroller: this.commentScroller }) {
-            LazyForEach(this.commentSource, (comment: FqBookComment) => {
-              ListItem() {
-                this.CommentTile(comment)
-              }
-            }, (comment: FqBookComment): string =>
-              comment.id.length > 0 ? comment.id : `c${comment.createdAtMs}_${comment.text.length}`)
-            ListItem() {
-              this.CommentMoreFooter()
-            }
-          }
-          .width('100%')
-          .layoutWeight(1)
-          .cachedCount(8)
-          .scrollBar(BarState.Off)
-          .contentEndOffset(appState.bottomRect)
-          .divider({
-            strokeWidth: 0.5,
-            color: this.panelDividerColor(),
-            startMargin: 20,
-            endMargin: 20,
-          })
-          .onReachEnd((): void => {
-            this.loadComments(false);
-          })
-        }
-      }
-      .width('100%')
-      .height('100%')
-      .padding({ top: 56 })
-    }
+    FqCommentSheet({
+      bookId: this.bookId,
+      fontColor: this.theme().fontColor,
+    })
   }
 
   /** 段评半模态：所评段落原文 + 段评列表（Loading / 错误重试 / 空态）。 */
@@ -1835,7 +1509,7 @@ export struct ReaderPage {
             .maxLines(4)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .width('100%')
-            .padding({ left: 20, right: 20, top: 12 })
+            .padding({ left: 20, right: 20, bottom: 12 })
         }
         if (this.paraLoading) {
           Column({ space: 10 }) {
@@ -1974,166 +1648,6 @@ export struct ReaderPage {
     .width('100%')
     .alignItems(HorizontalAlign.Start)
     .padding({ top: 12, bottom: 12, left: 20, right: 20 })
-  }
-
-  /** 单条书评：头像 + 名字/星级/时间 + 正文 + 图片 + 点赞回复计数（对齐 ReaderPage）。 */
-  @Builder
-  private CommentTile(comment: FqBookComment) {
-    Column({ space: 10 }) {
-      Row({ space: 10 }) {
-        Stack() {
-          Column() {
-            SymbolGlyph($r('sys.symbol.person'))
-              .fontSize(16)
-              .fontColor([this.theme().fontColor])
-              .opacity(0.55)
-          }
-          .width(30)
-          .height(30)
-          .borderRadius(15)
-          .justifyContent(FlexAlign.Center)
-          if (comment.userAvatar.length > 0) {
-            Image(comment.userAvatar)
-              .width(30)
-              .height(30)
-              .borderRadius(15)
-              .objectFit(ImageFit.Cover)
-          }
-        }
-        Column({ space: 4 }) {
-          Row({ space: 6 }) {
-            Text(comment.userName.length > 0 ? comment.userName : '书友')
-              .fontSize(13)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.theme().fontColor)
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .layoutWeight(1)
-            if (comment.isAuthor) {
-              Text('作者')
-                .fontSize(9)
-                .fontColor(Color.White)
-                .backgroundColor(FQ_ACCENT)
-                .borderRadius(4)
-                .padding({ left: 5, right: 5, top: 1, bottom: 1 })
-            }
-          }
-          .width('100%')
-          Row({ space: 8 }) {
-            Rating({
-              rating: comment.stars,
-              indicator: true,
-            })
-            if (comment.relativeTime().length > 0) {
-              Text(comment.relativeTime())
-                .fontSize(11)
-                .fontColor(this.theme().fontColor)
-                .opacity(0.55)
-                .maxLines(1)
-            }
-            if (comment.readDurationLabel.length > 0) {
-              Text(comment.readDurationLabel)
-                .fontSize(11)
-                .fontColor(this.theme().fontColor)
-                .opacity(0.55)
-                .maxLines(1)
-            }
-          }
-          .alignItems(VerticalAlign.Center)
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-      }
-      .alignItems(VerticalAlign.Top)
-      .width('100%')
-
-      Text(comment.text)
-        .fontSize(13.5)
-        .lineHeight(22)
-        .fontColor(this.theme().fontColor)
-        .width('100%')
-
-      if (comment.imageUrls.length > 0) {
-        Row({ space: 6 }) {
-          ForEach(comment.imageUrls.slice(0, 3), (url: string) => {
-            Image(url)
-              .width(76)
-              .height(76)
-              .borderRadius(6)
-              .objectFit(ImageFit.Cover)
-          }, (url: string): string => url)
-        }
-        .alignItems(VerticalAlign.Top)
-      }
-
-      Row({ space: 14 }) {
-        Row({ space: 4 }) {
-          SymbolGlyph($r('sys.symbol.hand_thumbsup'))
-            .fontSize(13)
-            .fontColor([this.theme().fontColor])
-            .opacity(0.55)
-          Text(fqFormatCountInt(comment.diggCount))
-            .fontSize(11)
-            .fontColor(this.theme().fontColor)
-            .opacity(0.55)
-        }
-        .alignItems(VerticalAlign.Center)
-        Row({ space: 4 }) {
-          SymbolGlyph($r('sys.symbol.message'))
-            .fontSize(13)
-            .fontColor([this.theme().fontColor])
-            .opacity(0.55)
-          Text(fqFormatCountInt(comment.replyCount))
-            .fontSize(11)
-            .fontColor(this.theme().fontColor)
-            .opacity(0.55)
-        }
-        .alignItems(VerticalAlign.Center)
-      }
-      .alignItems(VerticalAlign.Center)
-    }
-    .width('100%')
-    .alignItems(HorizontalAlign.Start)
-    .padding({ top: 14, bottom: 14, left: 20, right: 20 })
-  }
-
-  /** 书评列表底态：续拉 Loading / 失败重试 / 没有更多。 */
-  @Builder
-  private CommentMoreFooter() {
-    if (this.commentLoadingMore) {
-      Row({ space: 8 }) {
-        LoadingProgress()
-          .width(18)
-          .height(18)
-          .color(FQ_ACCENT)
-        Text('正在加载')
-          .fontSize(12)
-          .fontColor(this.theme().fontColor)
-          .opacity(0.55)
-      }
-      .width('100%')
-      .justifyContent(FlexAlign.Center)
-      .padding({ top: 14, bottom: 14 })
-    } else if (this.commentMoreFailed) {
-      Text('加载失败，点击重试')
-        .fontSize(12)
-        .fontColor(this.theme().fontColor)
-        .opacity(0.55)
-        .width('100%')
-        .textAlign(TextAlign.Center)
-        .padding({ top: 14, bottom: 14 })
-        .onClick(() => {
-          this.loadComments(false);
-        })
-    } else if (!this.commentHasMore) {
-      Text('没有更多书评了')
-        .fontSize(12)
-        .fontColor(this.theme().fontColor)
-        .opacity(0.55)
-        .width('100%')
-        .textAlign(TextAlign.Center)
-        .padding({ top: 14, bottom: 14 })
-    }
   }
 
   /** 公共弹窗内容装配：按 DialogManager 标识分发内容组件（当前仅「阅读设置」）。 */

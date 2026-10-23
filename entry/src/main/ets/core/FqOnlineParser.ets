@@ -9,7 +9,8 @@ export type FqChapterFetcher = (spineIndex: number) => Promise<string>;
 
 /** 字体档位：name 为引擎侧字体族名（引擎按「name + .ttf」请求并缓存字体，每档必须
  *  唯一——切档换名才令引擎视为新字体重新加载，否则一直命中启动时加载的旧字体）；
- *  label 供设置面板展示；candidates 为设备系统字体候选（取首个可用）。 */
+ *  label 供设置面板展示；candidates 为设备系统字体候选（取首个可用），为空表示
+ *  系统默认字体档（不拷沙箱、不注册，测量/渲染走系统字体设置）。 */
 export interface FqFontOption {
   readonly name: string;
   readonly label: string;
@@ -18,6 +19,7 @@ export interface FqFontOption {
 
 /** 阅读字体档位（下标持久化于阅读设置 fontIndex）。 */
 export const FQ_FONT_OPTIONS: FqFontOption[] = [
+  { name: '系统', label: '系统', candidates: [] },
   { name: '书宋', label: '书宋', candidates: ['/system/fonts/ShuS-SC.ttf'] },
   { name: '黑体', label: '黑体', candidates: ['/system/fonts/HarmonyOS_Sans_SC.ttf', '/system/fonts/HYQiHeiL3.ttf'] },
 ];

@@ -10,16 +10,31 @@
 import pasteboard from '@ohos.pasteboard';
 import { promptAction } from '@kit.ArkUI';
 import { FqBackend, fqErrorMessage } from '../core/FqBackend';
-import { FqBookDetail, FqChapter, fqEmptyBookDetail, fqKindToTab, fqKindLabel } from '../model/FqModels';
+import {
+  FqBookComment,
+  FqBookCommentPage,
+  FqBookDetail,
+  FqChapter,
+  fqEmptyBookDetail,
+  fqFormatCountInt,
+  fqKindToTab,
+  fqKindLabel,
+} from '../model/FqModels';
 import { FqShelfStore, FqShelfItem } from '../core/FqShelfStore';
 import { DetailNavParams, FqTitleBarOptions, ReaderNavParams, ROUTE_READER2 } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import { CommonNav } from '../view/CommonNav';
 import { CommonLoading, FQ_ACCENT } from '../view/CommonCom';
+import { FqSheetOptions } from '../view/CommonSheet';
+import { FqCommentSheet, FqCommentTile, fqCommentSheetHeightVp } from '../view/FqCommentSheet';
+import { FqCatalogSheet } from '../view/FqCatalogSheet';
 import { appState } from '../entryability/AppState';
 
 /** 目录预览行数（对齐 fqapp _previewChapterCount）。 */
 const FQ_PREVIEW_CHAPTER_COUNT: number = 3;
+
+/** 书评预览条数（超出走书评半模态查看全部）。 */
+const FQ_PREVIEW_COMMENT_COUNT: number = 3;
 
 /** 简介超过该长度才展示展开/收起。 */
 const FQ_DESC_TOGGLE_THRESHOLD: number = 60;
@@ -40,17 +55,28 @@ export struct DetailPage {
   @Local previews: Map<string, string> = new Map();
   @Local descExpanded: boolean = false;
   @Local inShelf: boolean = false;
+  /** 书评预览（前 3 条）与总数；点击「查看全部」打开公共书评半模态。 */
+  @Local previewComments: FqBookComment[] = [];
+  @Local commentTotal: number = 0;
+  @Local commentSheetVisible: boolean = false;
+  /** 目录半模态（查看目录行呼出，复用阅读页公共 FqCatalogSheet）。 */
+  @Local catalogSheetVisible: boolean = false;
+  @Local catalogOpenToken: number = 0;
   private itemId: string = '';
   private itemKind: string = 'book';
   private itemCover: string = '';
   private loadToken: number = 0;
   private scroller: Scroller = new Scroller();
+  /** 进入页面时捕获的顶部避让：阅读页隐藏状态栏期间 topRect 变小，
+   * 用捕获值保持 List 顶部内边稳定（返回详情页内容位置与首进一致）。 */
+  private stableTopInset: number = 0;
 
   aboutToAppear(): void {
     this.itemId = DetailNavParams.id;
     this.itemKind = DetailNavParams.kind;
     this.itemCover = DetailNavParams.cover;
     this.headerTitle = `${fqKindLabel(this.itemKind)}详情`;
+    this.stableTopInset = appState.topRect;
     FqShelfStore.init(getContext(this));
     this.inShelf = FqShelfStore.contains(this.itemId);
     this.load();
@@ -65,10 +91,11 @@ export struct DetailPage {
       }, this.inShelf),
       scroller: this.scroller,
       doubleTapToTop: true,
-      scrollToTopYOffset: -(appState.topRect + FQ_DETAIL_TOP_INSET),
+      scrollToTopYOffset: -(this.stableTopInset + FQ_DETAIL_TOP_INSET),
       isShowBar: true,
       readBarKind: this.itemKind,
-      readerBarClick: (key: string): void => { this.onReadBarAction(key) }
+      readerBarClick: (key: string): void => { this.onReadBarAction(key) },
+      onShown: (): void => { this.onPageShown() }
     }) {
       Stack({ alignContent: Alignment.Bottom }) {
         if (this.loadingState) {
@@ -130,18 +157,31 @@ export struct DetailPage {
             ListItem(){
               this.ChapterPreview()
             }
+            if (this.previewComments.length > 0 || this.commentTotal > 0) {
+              ListItem(){
+                this.ReviewBlock()
+              }
+            }
           }
           .padding({ left: 20, right: 20 })
           .scrollBar(BarState.Off)
-          .contentStartOffset(appState.topRect + FQ_DETAIL_TOP_INSET)
+          .contentStartOffset(this.stableTopInset + FQ_DETAIL_TOP_INSET)
           .contentEndOffset(appState.bottomRect + FQ_DETAIL_BOTTOM_INSET)
           .width('100%')
           .height('100%')
           .align(Alignment.TopStart)
+          .bindSheet(this.commentSheetVisible, this.CommentSheetBuilder(),
+            FqSheetOptions((): void => {
+              this.commentSheetVisible = false;
+            }, fqCommentSheetHeightVp()))
         }
       }
       .width('100%')
       .height('100%')
+      .bindSheet(this.catalogSheetVisible, this.CatalogSheetBuilder(),
+        FqSheetOptions((): void => {
+          this.catalogSheetVisible = false;
+        }))
     }
   }
 
@@ -432,51 +472,45 @@ export struct DetailPage {
     .borderRadius(14)
     .backgroundColor($r('sys.color.comp_background_primary'))
     .alignItems(VerticalAlign.Center)
+    .onClick(() => this.openCatalogSheet())
   }
 
-  /** 章节试读预览：序号 + 章节名 + 正文开头摘录。 */
+  /** 章节试读预览：章节名 + 正文开头摘录。 */
   @Builder
   private ChapterPreview() {
     List() {
       ForEach(this.previewChapters(), (chapter: FqChapter, index: number) => {
         ListItem(){
-          Row({ space: 14 }){
-            Text(this.padIndex(index + 1))
-              .fontSize(12)
-              .fontWeight(FontWeight.Medium)
-              .fontColor($r('sys.color.font_secondary'))
-              .textAlign(TextAlign.Center)
-
-            Column({ space: 10 }) {
-              Row({ space: 10 }) {
-                Text(chapter.title)
-                  .fontSize(14)
-                  .fontColor($r('sys.color.font_primary'))
-                  .lineHeight(22)
-                  .maxLines(1)
-                  .layoutWeight(1)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-                SymbolGlyph($r('sys.symbol.chevron_right'))
-                  .fontSize(15)
-                  .fontColor([$r('sys.color.icon_tertiary')])
-              }
-              .width('100%')
-              .alignItems(VerticalAlign.Center)
-              .justifyContent(FlexAlign.SpaceBetween)
-
-              if (this.previewOf(chapter.itemId).length > 0) {
-                Text(this.previewOf(chapter.itemId))
-                  .fontSize(12)
-                  .fontColor($r('sys.color.font_tertiary'))
-                  .lineHeight(20)
-                  .maxLines(3)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-              }
+          Column({ space: 10 }) {
+            Row({ space: 10 }) {
+              Text(chapter.title)
+                .fontSize(14)
+                .fontColor($r('sys.color.font_primary'))
+                .lineHeight(22)
+                .maxLines(1)
+                .layoutWeight(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+              SymbolGlyph($r('sys.symbol.chevron_right'))
+                .fontSize(15)
+                .fontColor([$r('sys.color.icon_tertiary')])
             }
             .width('100%')
-            .alignItems(HorizontalAlign.Start)
-            .layoutWeight(1)
-          }.width('100%').padding(14).onClick(() => this.openReader(index))
+            .alignItems(VerticalAlign.Center)
+            .justifyContent(FlexAlign.SpaceBetween)
+
+            if (this.previewOf(chapter.itemId).length > 0) {
+              Text(this.previewOf(chapter.itemId))
+                .fontSize(12)
+                .fontColor($r('sys.color.font_tertiary'))
+                .lineHeight(20)
+                .maxLines(3)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+            }
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+          .padding(14)
+          .onClick(() => this.openReader(index))
         }
       }, (chapter: FqChapter): string => chapter.itemId)
       if (this.previewChapters().length === 0) {
@@ -496,10 +530,116 @@ export struct DetailPage {
     .backgroundColor($r('sys.color.comp_background_primary'))
     .divider({
       strokeWidth: 0.5,
-      startMargin: 42,
+      startMargin: 14,
       endMargin: 14,
       color: $r('sys.color.comp_divider')
     })
+  }
+
+  /** 书评预览：小标题（书评 · 共N条）+ 前 3 条书评卡片（复用公共 FqCommentTile）+ 查看全部。 */
+  @Builder
+  private ReviewBlock() {
+    Column({ space: 12 }) {
+      Row({ space: 8 }) {
+        Column()
+          .width(3.5)
+          .height(14)
+          .borderRadius(2)
+          .backgroundColor(FQ_ACCENT)
+        Text(`${this.commentLabel()} · 共${this.commentTotal}条`)
+          .fontSize(16.5)
+          .fontWeight(FontWeight.Bold)
+          .fontColor($r('sys.color.font_primary'))
+      }
+      .alignItems(VerticalAlign.Center)
+      .width('100%')
+
+      Column() {
+        ForEach(this.previewComments, (comment: FqBookComment) => {
+          Column() {
+            FqCommentTile({
+              comment: comment,
+              textMaxLines: 4,
+            })
+            Divider()
+              .strokeWidth(0.5)
+              .color($r('sys.color.comp_divider'))
+              .margin({ left: 20, right: 20 })
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+        }, (comment: FqBookComment): string =>
+          comment.id.length > 0 ? comment.id : `c${comment.createdAtMs}_${comment.text.length}`)
+        Row({ space: 2 }) {
+          Text(`查看全部 ${fqFormatCountInt(this.commentTotal)} 条${this.commentLabel()}`)
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(FQ_ACCENT)
+          SymbolGlyph($r('sys.symbol.chevron_right'))
+            .fontSize(14)
+            .fontColor([FQ_ACCENT])
+        }
+        .alignItems(VerticalAlign.Center)
+        .justifyContent(FlexAlign.Center)
+        .width('100%')
+        .padding({ top: 13, bottom: 13 })
+        .onClick(() => {
+          this.commentSheetVisible = true;
+        })
+      }
+      .width('100%')
+      .borderRadius(16)
+      .backgroundColor($r('sys.color.comp_background_primary'))
+      .clip(true)
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  /** 书评半模态：公共 FqCommentSheet（懒加载分页，文案随作品类型）。 */
+  @Builder
+  private CommentSheetBuilder() {
+    FqCommentSheet({
+      bookId: this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId,
+      fontColor: $r('sys.color.font_primary'),
+      commentLabel: this.commentLabel(),
+    })
+  }
+
+  /** 评论类型文案：小说书评 / 短剧剧评 / 漫画漫评。 */
+  private commentLabel(): string {
+    if (this.itemKind === 'video') {
+      return '剧评';
+    }
+    if (this.itemKind === 'manga') {
+      return '漫评';
+    }
+    return '书评';
+  }
+
+  /** 目录半模态：公共 FqCatalogSheet（无阅读位置，点击章节直接进阅读页对应章）。 */
+  @Builder
+  private CatalogSheetBuilder() {
+    FqCatalogSheet({
+      chapters: this.chapters,
+      fontColor: $r('sys.color.font_primary'),
+      currentChapterIndex: -1,
+      openToken: this.catalogOpenToken,
+      chapterClick: (index: number): void => {
+        this.catalogSheetVisible = false;
+        this.openReader(index);
+      },
+    })
+  }
+
+  private openCatalogSheet(): void {
+    this.catalogOpenToken += 1;
+    this.catalogSheetVisible = true;
+  }
+
+  /** 页面重新显示（从阅读页返回等）：List 回到顶部。 */
+  private onPageShown(): void {
+    this.scroller.scrollEdge(Edge.Top);
   }
 
   private coverUrl(): string {
@@ -583,10 +723,6 @@ export struct DetailPage {
       return '';
     }
     return text;
-  }
-
-  private padIndex(index: number): string {
-    return index < 10 ? `0${index}` : `${index}`;
   }
 
   private copyId(): void {
@@ -677,6 +813,19 @@ export struct DetailPage {
       this.previews = await FqBackend.get().chapterSummaries(contentId, previewIds);
       if (token !== this.loadToken) {
         return;
+      }
+      // 书评预览：前 3 条 + 总数（失败不阻断详情，仅隐藏书评区）
+      try {
+        const commentsPage: FqBookCommentPage =
+          await FqBackend.get().bookComments(contentId, FQ_PREVIEW_COMMENT_COUNT, 0);
+        if (token !== this.loadToken) {
+          return;
+        }
+        this.previewComments = commentsPage.comments.slice(0, FQ_PREVIEW_COMMENT_COUNT);
+        this.commentTotal = commentsPage.totalCount;
+      } catch (error) {
+        this.previewComments = [];
+        this.commentTotal = 0;
       }
     } catch (error) {
       if (token !== this.loadToken) {

@@ -22,12 +22,8 @@ export struct FqPageCanvas {
   @Param bubbleFontColor: ResourceColor = $r('sys.color.icon_tertiary');
   /** 每段段评数（气泡计数）。 */
   @Param commentCounts: number[] = [];
-  /** 阅读字体族（空串回退系统默认）。 */
+  /** 阅读字体族（空串回退系统默认，跟随系统「字体样式」设置）。 */
   @Param fontFamily: string = '';
-
-  private effectiveFontFamily(): string {
-    return this.fontFamily.length > 0 ? this.fontFamily : 'HarmonyOS Sans';
-  }
 
   /** 段评计数（越界返回 0）。 */
   private bubbleCount(frag: FqPageFragment): number {
@@ -68,7 +64,7 @@ export struct FqPageCanvas {
       .fontWeight(frag.isTitle ? FontWeight.Bold : FontWeight.Normal)
       .lineHeight(frag.isTitle ? this.metrics.titleLineFp : this.metrics.lineHeightFp)
       .fontColor(this.fontColor)
-      .fontFamily(this.effectiveFontFamily())
+      .fontFamily(this.fontFamily)
       .maxLines(1)
       .margin({ top: topMarginVp })
   }
@@ -83,7 +79,7 @@ export struct FqPageCanvas {
       Text(`${this.bubbleCount(frag)}`)
         .fontSize(this.metrics.bubbleTextFp)
         .fontColor(this.bubbleFontColor)
-        .fontFamily(this.effectiveFontFamily())
+        .fontFamily(this.fontFamily)
         .maxLines(1)
     }
     .padding({

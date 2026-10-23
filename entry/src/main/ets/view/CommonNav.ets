@@ -73,6 +73,9 @@ export struct CommonNav {
   /** 返回 true 拦截系统返回 */
   @Event backPressed: () => boolean = (): boolean => false
 
+  /** NavDestination 显示回调（每次 onShown 触发，含从上层页面返回）。 */
+  @Event onShown: () => void = (): void => {}
+
   /** readerBar点击回调 */
   @Event readerBarClick: (key: string) => void
 
@@ -192,6 +195,9 @@ export struct CommonNav {
     .height('100%')
     .onBackPressed(() => {
       return this.backPressed()
+    })
+    .onShown(() => {
+      this.onShown()
     })
     .dynamicHideTitleBar({
       hideBottomBuilder: this.isSearchBarScroller,
