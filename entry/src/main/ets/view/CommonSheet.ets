@@ -76,7 +76,7 @@ export struct CommonSheet {
       }
       .width('100%')
       .height('100%')
-      .padding({ top: 56 })
+      .padding({ top: 66 })
     }
     .titleBar({
       content: this.titleBarContent(),

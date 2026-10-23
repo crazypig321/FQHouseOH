@@ -473,7 +473,7 @@ export struct ListenPage {
     .height('100%')
     .padding({ left: 12, right: 12, top: 8, bottom: 8 })
     .borderRadius(10)
-    .backgroundColor(selected ? $r('sys.color.comp_background_primary')
+    .backgroundColor(selected ? '#1AFF7A3D'
       : $r('sys.color.comp_background_tertiary'))
     .border({
       width: selected ? 1.2 : 0,
@@ -663,62 +663,68 @@ export struct ListenPage {
         this.closeSheet();
       },
     }) {
-      Scroll() {
-        Column({ space: 12 }) {
-          if (fqAudioSession.toneSet.narratorTones.length > 0) {
-            Text('真人讲书')
-              .fontSize(16)
-              .fontWeight(FontWeight.Bold)
-              .fontColor($r('sys.color.font_primary'))
-              .alignSelf(ItemAlign.Start)
-            ForEach(fqAudioSession.toneSet.narratorTones, (voice: FqAudioTone) => {
-              Text(voice.title)
-                .fontSize(14)
-                .fontWeight(FontWeight.Medium)
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .fontColor(this.voiceSelected(voice) ? FQ_ACCENT : $r('sys.color.font_primary'))
-                .width('100%')
-                .height(48)
-                .padding({ left: 12, right: 12 })
-                .borderRadius(8)
-                .backgroundColor(this.voiceSelected(voice) ? '#1AFF7A3D'
-                  : $r('sys.color.comp_background_secondary'))
-                .border({
-                  width: this.voiceSelected(voice) ? 1 : 0,
-                  color: this.voiceSelected(voice) ? '#52FF7A3D' : Color.Transparent,
-                })
-                .onClick((): void => {
-                  fqAudioSession.selectNarrator(voice);
-                  this.closeSheet();
-                  this.scrollToneChipsToSelected();
-                })
-            }, (voice: FqAudioTone) => voice.id)
-          }
-          if (fqAudioSession.onlineToneOptions().length > 0) {
-            Text('智能朗读')
-              .fontSize(16)
-              .fontWeight(FontWeight.Bold)
-              .fontColor($r('sys.color.font_primary'))
-              .alignSelf(ItemAlign.Start)
-            GridRow({ columns: 2, gutter: { x: 12, y: 12 } }) {
-              ForEach(fqAudioSession.onlineToneOptions(), (voice: FqAudioTone) => {
-                GridCol() {
-                  this.VoiceCard(voice)
-                }
+      List({ space: 16 }) {
+        if (fqAudioSession.toneSet.narratorTones.length > 0) {
+          ListItem(){
+            Column({ space: 10 }){
+              Text('真人讲书')
+                .fontSize(16)
+                .fontWeight(FontWeight.Bold)
+                .fontColor($r('sys.color.font_primary'))
+                .alignSelf(ItemAlign.Start)
+
+
+              ForEach(fqAudioSession.toneSet.narratorTones, (voice: FqAudioTone) => {
+                Text(voice.title)
+                  .fontSize(14)
+                  .fontWeight(FontWeight.Medium)
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .fontColor(this.voiceSelected(voice) ? FQ_ACCENT : $r('sys.color.font_primary'))
+                  .width('100%')
+                  .height(48)
+                  .padding({ left: 12, right: 12 })
+                  .borderRadius(8)
+                  .backgroundColor(this.voiceSelected(voice) ? '#1AFF7A3D'
+                    : $r('sys.color.comp_background_secondary'))
+                  .border({
+                    width: this.voiceSelected(voice) ? 1 : 0,
+                    color: this.voiceSelected(voice) ? '#52FF7A3D' : Color.Transparent,
+                  })
+                  .onClick((): void => {
+                    fqAudioSession.selectNarrator(voice);
+                    this.closeSheet();
+                    this.scrollToneChipsToSelected();
+                  })
               }, (voice: FqAudioTone) => voice.id)
-            }
-            .width('100%')
+            }.width('100%')
           }
         }
-        .width('100%')
-        .alignItems(HorizontalAlign.Start)
-        .justifyContent(FlexAlign.Start)
-        .padding({ left: 16, right: 16, bottom: 24 })
+        if (fqAudioSession.onlineToneOptions().length > 0) {
+          ListItem() {
+            Column({ space: 10 }){
+              Text('智能朗读')
+                .fontSize(16)
+                .fontWeight(FontWeight.Bold)
+                .fontColor($r('sys.color.font_primary'))
+                .alignSelf(ItemAlign.Start)
+
+              GridRow({ columns: 2, gutter: { x: 12, y: 12 } }) {
+                ForEach(fqAudioSession.onlineToneOptions(), (voice: FqAudioTone) => {
+                  GridCol() {
+                    this.VoiceCard(voice)
+                  }
+                }, (voice: FqAudioTone) => voice.id)
+              }.width('100%')
+            }
+          }.width('100%')
+        }
       }
-      .scrollBar(BarState.Off)
       .width('100%')
       .height('100%')
+      .scrollBar(BarState.Off)
+      .padding({ left: 16, right: 16 })
+      .contentEndOffset(appState.bottomRect)
     }
   }
 
@@ -837,10 +843,10 @@ export struct ListenPage {
           Row() {
             Text(`${minutes} 分钟后`)
               .fontSize(15)
-              .fontColor($r('sys.color.font_primary'))
+              .fontColor(fqAudioSession.sleepMinutesChoice === minutes ? FQ_ACCENT
+                : $r('sys.color.font_primary'))
             Blank()
-            if (fqAudioSession.sleepRemainingSec > 0
-              && fqAudioSession.sleepRemainingSec <= minutes * 60) {
+            if (fqAudioSession.sleepMinutesChoice === minutes) {
               SymbolGlyph($r('sys.symbol.checkmark'))
                 .fontSize(16)
                 .fontColor([FQ_ACCENT])
@@ -848,7 +854,10 @@ export struct ListenPage {
           }
           .width('100%')
           .height(48)
-          .padding({ left: 20, right: 20 })
+          .padding({ left: 10, right: 10 })
+          .borderRadius(8)
+          .backgroundColor(fqAudioSession.sleepMinutesChoice === minutes
+            ? '#1AFF7A3D' : Color.Transparent)
           .onClick((): void => {
             fqAudioSession.setSleepMinutes(minutes);
             this.closeSheet();
@@ -858,7 +867,8 @@ export struct ListenPage {
         Row() {
           Text('播完本章')
             .fontSize(15)
-            .fontColor($r('sys.color.font_primary'))
+            .fontColor(fqAudioSession.sleepAtChapterEnd ? FQ_ACCENT
+              : $r('sys.color.font_primary'))
           Blank()
           if (fqAudioSession.sleepAtChapterEnd) {
             SymbolGlyph($r('sys.symbol.checkmark'))
@@ -868,7 +878,9 @@ export struct ListenPage {
         }
         .width('100%')
         .height(48)
-        .padding({ left: 20, right: 20 })
+        .padding({ left: 10, right: 10 })
+        .borderRadius(8)
+        .backgroundColor(fqAudioSession.sleepAtChapterEnd ? '#1AFF7A3D' : Color.Transparent)
         .onClick((): void => {
           fqAudioSession.setSleepAtChapterEnd();
           this.closeSheet();
@@ -876,11 +888,12 @@ export struct ListenPage {
         })
         Divider()
           .color($r('sys.color.comp_divider'))
-          .margin({ top: 6, bottom: 6 })
+          .margin({ top: 6, bottom: 6, left: 10, right: 10 })
         Row() {
           Text('关闭定时')
             .fontSize(15)
-            .fontColor($r('sys.color.font_primary'))
+            .fontColor(!fqAudioSession.sleepActive ? FQ_ACCENT
+              : $r('sys.color.font_primary'))
           Blank()
           if (!fqAudioSession.sleepActive) {
             SymbolGlyph($r('sys.symbol.checkmark'))
@@ -890,7 +903,9 @@ export struct ListenPage {
         }
         .width('100%')
         .height(48)
-        .padding({ left: 20, right: 20 })
+        .borderRadius(8)
+        .padding({ left: 10, right: 10 })
+        .backgroundColor(!fqAudioSession.sleepActive ? '#1AFF7A3D' : Color.Transparent)
         .onClick((): void => {
           fqAudioSession.clearSleep();
           this.closeSheet();
@@ -898,7 +913,7 @@ export struct ListenPage {
         })
       }
       .width('100%')
-      .padding({ bottom: 8 })
+      .padding({ left: 12, right: 12 })
     }
   }
 
@@ -913,6 +928,7 @@ export struct ListenPage {
       },
     }) {
       Column() {
+        Column() {
         Row({ space: 12 }) {
           Column() {
             SymbolGlyph($r('sys.symbol.timer'))
@@ -1019,8 +1035,10 @@ export struct ListenPage {
       .width('100%')
       .borderRadius(18)
       .backgroundColor($r('sys.color.comp_background_secondary'))
+      }
+      .width('100%')
       .alignItems(HorizontalAlign.Start)
-      .margin({ left: 16, right: 16, top: 12, bottom: 20 })
+      .padding({ left: 16, right: 16, top: 12, bottom: 20 })
     }
   }
 

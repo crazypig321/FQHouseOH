@@ -92,8 +92,11 @@ export class FqAudioSession {
   // ---- 睡眠定时 ----
   private sleepDeadline: number = 0;
   @Trace sleepRemainingSec: number = -1;
+
   @Trace sleepAtChapterEnd: boolean = false;
 
+  /** 定时关闭所选分钟档（0 = 未选分钟档）。 */
+  @Trace sleepMinutesChoice: number = 0;
   // ---- 内部 ----
   private context: common.UIAbilityContext | null = null;
   private readonly engine: FqAudioEngine = new FqAudioEngine();
@@ -259,6 +262,7 @@ export class FqAudioSession {
     this.sleepDeadline = 0;
     this.sleepAtChapterEnd = false;
     this.sleepRemainingSec = -1;
+    this.sleepMinutesChoice = 0;
     this.tonesPromise = null;
     this.voicesPromise = null;
     if (this.tickTimer >= 0) {
@@ -547,6 +551,7 @@ export class FqAudioSession {
   /** minutes <= 0 关闭定时。 */
   public setSleepMinutes(minutes: number): void {
     this.sleepAtChapterEnd = false;
+    this.sleepMinutesChoice = minutes > 0 ? minutes : 0;
     if (minutes <= 0) {
       this.sleepDeadline = 0;
       this.sleepRemainingSec = -1;
@@ -558,6 +563,7 @@ export class FqAudioSession {
 
   public setSleepAtChapterEnd(): void {
     this.sleepAtChapterEnd = true;
+    this.sleepMinutesChoice = 0;
     this.sleepDeadline = 0;
     this.sleepRemainingSec = -1;
   }
@@ -566,6 +572,7 @@ export class FqAudioSession {
     this.sleepDeadline = 0;
     this.sleepRemainingSec = -1;
     this.sleepAtChapterEnd = false;
+    this.sleepMinutesChoice = 0;
   }
 
   // ---------------------------------------------------------------------------
