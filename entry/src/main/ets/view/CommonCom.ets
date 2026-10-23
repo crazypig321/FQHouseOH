@@ -1,8 +1,56 @@
-import { SymbolGlyphModifier } from '@kit.ArkUI';
+import { LengthMetrics, SymbolGlyphModifier } from '@kit.ArkUI';
 import { searchImmersiveModifier } from '../utils/UiUtils';
 
 /** 品牌橙（标题栏/底栏强调色）。 */
 export const FQ_ACCENT: ResourceColor = '#FF7A3D';
+
+/**
+ * 公共菜单项参数（配合 MenuUtils.Open 使用，移植 musicfreeOH）。
+ */
+export class MenuItemParams {
+  icon: ResourceStr = '';                          // 为空字符串时不显示图标
+  label: string = '';
+  onAction: () => void = (): void => {};
+}
+
+/**
+ * 公共菜单内容参数。
+ */
+export class MenuParams {
+  items: Array<MenuItemParams> = [];
+}
+
+/**
+ * 公共菜单内容（openMenu 用）：条目间带分割线。
+ */
+@Builder
+export function commonMenuBuilder(params: MenuParams) {
+  Menu() {
+    ForEach(params.items, (item: MenuItemParams) => {
+      if (typeof item.icon === 'string') {
+        MenuItem({ content: item.label })
+          .onClick(() => {
+            item.onAction();
+          })
+      } else {
+        MenuItem({ startIcon: item.icon, content: item.label })
+          .onClick(() => {
+            item.onAction();
+          })
+      }
+    }, (item: MenuItemParams) => item.label)
+  }
+  // 条目之间的分割线
+  .menuItemDivider({
+    strokeWidth: LengthMetrics.vp(1),
+    color: $r('sys.color.comp_divider'),
+    startMargin: LengthMetrics.vp(12),
+    endMargin: LengthMetrics.vp(12)
+  })
+}
+
+/** 供 ComponentContent 使用的包装 builder */
+export const commonMenuWrapped: WrappedBuilder<[MenuParams]> = wrapBuilder(commonMenuBuilder);
 
 /**
  * 公共搜索组件（移植 musicfreeOH CommonSearch）。

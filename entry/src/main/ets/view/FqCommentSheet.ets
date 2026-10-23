@@ -91,6 +91,7 @@ export struct FqCommentTile {
   @Param fontColor: ResourceColor = $r('sys.color.font_primary');
   /** 正文最大行数（0 不限；详情页预览传 4）。 */
   @Param textMaxLines: number = 0;
+  @Param paddingValue: number = 20
 
   build() {
     Column({ space: 10 }) {
@@ -211,7 +212,7 @@ export struct FqCommentTile {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
-    .padding({ top: 14, bottom: 14, left: 20, right: 20 })
+    .padding({ top: 14, bottom: 14, left: this.paddingValue, right: this.paddingValue })
   }
 }
 

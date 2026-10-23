@@ -21,6 +21,7 @@ import {
   fqKindLabel,
 } from '../model/FqModels';
 import { FqShelfStore, FqShelfItem } from '../core/FqShelfStore';
+import { FqBrowseStore, FqBrowseItem } from '../core/FqBrowseStore';
 import { AuthorNavParams, DetailNavParams, FqTitleBarOptions, ListenNavParams, ReaderNavParams, ROUTE_AUTHOR, ROUTE_LISTEN, ROUTE_READER2 } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import { CommonNav } from '../view/CommonNav';
@@ -78,6 +79,7 @@ export struct DetailPage {
     this.headerTitle = `${fqKindLabel(this.itemKind)}详情`;
     this.stableTopInset = appState.topRect;
     FqShelfStore.init(getContext(this));
+    FqBrowseStore.init(getContext(this));
     this.refreshShelfState();
     this.load();
   }
@@ -573,11 +575,12 @@ export struct DetailPage {
             FqCommentTile({
               comment: comment,
               textMaxLines: 4,
+              paddingValue: 14
             })
             Divider()
               .strokeWidth(0.5)
               .color($r('sys.color.comp_divider'))
-              .margin({ left: 20, right: 20 })
+              .margin({ left: 14, right: 14 })
           }
           .width('100%')
           .alignItems(HorizontalAlign.Start)
@@ -833,6 +836,8 @@ export struct DetailPage {
       }
       this.detail = detail;
       this.refreshShelfState();
+      FqBrowseStore.record(new FqBrowseItem(this.shelfId(), this.itemKind,
+        detail.title, detail.cover, Date.now()));
       let chapters: FqChapter[] = [];
       try {
         chapters = await FqBackend.get().directoryChapters(contentId, tab);
