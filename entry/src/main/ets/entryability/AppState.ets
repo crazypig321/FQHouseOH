@@ -5,7 +5,7 @@
 import { hdsMaterial } from "@kit.UIDesignKit";
 
 @ObservedV2
-class AppState {
+export class AppState {
   /** 全局导航栈（Navigation 根节点使用） */
   @Trace pageInfos: NavPathStack = new NavPathStack();
   @Trace currTabsIndex: number = 0;

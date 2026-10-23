@@ -4,14 +4,25 @@
  * 二级页经 .navDestination 集中页表路由。
  */
 
-import { HdsNavigation, HdsNavigationTitleMode, HdsTabs, HdsTabsController } from '@kit.UIDesignKit';
-import { appState } from '../entryability/AppState';
+import { HdsAnimationMode, HdsNavigation, HdsNavigationTitleMode, HdsTabs, HdsTabsController } from '@kit.UIDesignKit';
+import { AppState, appState } from '../entryability/AppState';
 import { MainTabPagesBuilder, PageMapBuilder } from '../view/FqAppPages';
 
 @Entry
 @ComponentV2
 struct Index {
   private tabsController: HdsTabsController = new HdsTabsController();
+
+  @Local appStateUse: AppState = appState
+
+  @Monitor('appStateUse.isBatchMode')
+  isShowTabBar(){
+    if (this.appStateUse.isBatchMode) {
+      this.tabsController.applyHideAnimation(HdsAnimationMode.CLICK_ANIMATION)
+    }else{
+      this.tabsController.applyShowAnimation(HdsAnimationMode.CLICK_ANIMATION)
+    }
+  }
 
   build() {
     HdsNavigation(appState.pageInfos) {
@@ -23,7 +34,7 @@ struct Index {
       .scrollable(false)
       .barPosition(BarPosition.End)
       // 批量多选模式下隐藏 tab 栏（对齐 musicfreeOH Index）
-      .barHeight(appState.isBatchMode ? 0 : 56)
+      .barHeight(56)
       .animationDuration(500)
       .barFloatingStyle({
         barBottomMargin: 28,
