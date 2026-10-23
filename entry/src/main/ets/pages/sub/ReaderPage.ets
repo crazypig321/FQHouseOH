@@ -7,7 +7,8 @@
  * - 翻页：FqReaderFlip 三层 Stack（覆盖模式 = 仿真翻页过渡实现 / 平移横滑），
  *   拖动跟手 + 松手阈值判定，邻章预载后跨章无缝衔接；
  * - 段评：段尾气泡（引擎装页时记录命中区，翻页容器触区代理点击）→ 段评半模态
- *   （Provider 抽象，默认演示数据源，后端段落接口确认后替换）；
+ *   （气泡计数 /api/v1/chapters/{itemId}/reviews；评论体 /api/v1/books/{bookId}/reviews
+ *   段评配方 server_channel=38，item_version 取目录 version）；
  * - 眉页（章节名）/眉脚（时钟/电量/整书页码估算）、目录半模态（搜索/定位/排序）、
  *   书评半模态（懒加载分页）、阅读设置公共弹窗、沉浸状态栏、进度与设置持久化，
  *   均与 ReaderPage 行为对齐。
@@ -42,14 +43,10 @@ import { FQ_READER_THEMES, FqReaderTheme } from '../../view/dialog/ReaderSetting
 import { fqReaderSettingsBus } from '../../core/FqReaderSettingsBus';
 import {
   FQ_BUBBLE_GAP_VP,
-  FQ_DEMO_PARAGRAPH_COMMENTS,
   FqChapterLayout,
-  FqDemoParagraphCommentProvider,
-  FqEmptyParagraphCommentProvider,
   FqPageBubble,
   FqPageFragment,
   FqParagraphComment,
-  FqParagraphCommentProvider,
   FqReaderLayoutMetrics,
   FqReaderPageData,
 } from '../../reader/ReaderTypes';
@@ -123,9 +120,6 @@ export struct ReaderPage {
   private titleBarOp: TitleBarContentOptions | undefined = undefined;
   /** 排版几何缓存（重排/开章时重建，渲染期间引用稳定）。 */
   private cachedMetrics: FqReaderLayoutMetrics = new FqReaderLayoutMetrics();
-  /** 段评数据源（演示开关切换；后端段落接口确认后替换实现）。 */
-  private commentProvider: FqParagraphCommentProvider = FQ_DEMO_PARAGRAPH_COMMENTS
-    ? new FqDemoParagraphCommentProvider() : new FqEmptyParagraphCommentProvider();
   /** 各章实测页数与冻结估算（整书页码，对齐 ReaderPage 行为）。 */
   private chapterPages: Map<number, number> = new Map();
   private chapterEstimate: Map<number, number> = new Map();
@@ -688,14 +682,28 @@ export struct ReaderPage {
     return code === 0x201c || code === 0x201d;
   }
 
-  /** 章节分页（同步，~百 ms 级；调用方保证 loading 遮罩或预载时机）。 */
-  private layoutChapter(index: number, paragraphs: string[]): FqChapterLayout {
+  /** 章节分页（同步，~百 ms 级；调用方保证 loading 遮罩或预载时机；counts 为已拉取的段评计数）。 */
+  private layoutChapter(index: number, paragraphs: string[], counts: number[]): FqChapterLayout {
     const metrics: FqReaderLayoutMetrics = this.cachedMetrics;
     const engine: FqPaginationEngine = new FqPaginationEngine(this.measureFn());
-    const chapter: FqChapter | undefined = this.chapters[index];
-    const chapterId: string = chapter !== undefined ? chapter.itemId : '';
-    const counts: number[] = this.commentProvider.commentCounts(chapterId, paragraphs.length);
     return engine.layout(index, paragraphs, metrics, counts);
+  }
+
+  /** 段评气泡计数：本地书全 0；联网取 /api/v1/chapters/{itemId}/reviews（装饰性数据，失败全 0）。 */
+  private async fetchIdeaCounts(index: number, paragraphCount: number): Promise<number[]> {
+    const chapter: FqChapter | undefined = this.chapters[index];
+    if (chapter === undefined || FqLocalBookStore.isLocalBookId(this.bookId)) {
+      return this.zeroCounts(paragraphCount);
+    }
+    return FqBackend.get().chapterIdeaCounts(chapter.itemId, paragraphCount);
+  }
+
+  private zeroCounts(paragraphCount: number): number[] {
+    const counts: number[] = [];
+    for (let index: number = 0; index < paragraphCount; index++) {
+      counts.push(0);
+    }
+    return counts;
   }
 
   /** 恢复页下标：'p2:段:字符' 进度解析，非法/缺失回退章首。 */
@@ -724,7 +732,12 @@ export struct ReaderPage {
             return;
           }
         } else {
-          this.nextLayout = this.layoutChapter(nextIndex, this.buildParagraphs(text));
+          const paragraphs: string[] = this.buildParagraphs(text);
+          const counts: number[] = await this.fetchIdeaCounts(nextIndex, paragraphs.length);
+          if (token !== this.loadToken) {
+            return;
+          }
+          this.nextLayout = this.layoutChapter(nextIndex, paragraphs, counts);
         }
       } catch (error) {
         // 邻章预载失败不阻断（跨章时回退整章加载路径）
@@ -738,7 +751,11 @@ export struct ReaderPage {
       try {
         const text: string = await this.fetchChapterText(prevIndex);
         if (token === this.loadToken && text.trim().length > 0) {
-          this.prevLayout = this.layoutChapter(prevIndex, this.buildParagraphs(text));
+          const paragraphs: string[] = this.buildParagraphs(text);
+          const counts: number[] = await this.fetchIdeaCounts(prevIndex, paragraphs.length);
+          if (token === this.loadToken) {
+            this.prevLayout = this.layoutChapter(prevIndex, paragraphs, counts);
+          }
         }
       } catch (error) {
         // 邻章预载失败不阻断
@@ -756,7 +773,7 @@ export struct ReaderPage {
     const para: number = currentPage !== undefined && currentPage.startPara >= 0 ? currentPage.startPara : 0;
     const char: number = currentPage !== undefined && currentPage.startPara >= 0 ? currentPage.startChar : 0;
     this.cachedMetrics = this.buildMetrics();
-    const relaid: FqChapterLayout = this.layoutChapter(this.chapterIndex, layout.paragraphs);
+    const relaid: FqChapterLayout = this.layoutChapter(this.chapterIndex, layout.paragraphs, layout.commentCounts);
     this.curLayout = relaid;
     this.pageIndex = fqPageIndexForPosition(relaid.pages, para, char);
     this.shownPageOffset = this.pageIndex;
@@ -1319,12 +1336,29 @@ export struct ReaderPage {
       return;
     }
     const chapter: FqChapter | undefined = this.chapters[this.chapterIndex];
-    const chapterId: string = chapter !== undefined ? chapter.itemId : '';
+    if (chapter === undefined || FqLocalBookStore.isLocalBookId(this.bookId)) {
+      this.paraComments = [];
+      return;
+    }
     this.paraLoading = true;
     this.paraError = '';
     try {
-      const comments: FqParagraphComment[] =
-        await this.commentProvider.fetchComments(chapterId, paraIndex);
+      // 段评接口必传 item_version：旧目录缺 version 时刷新目录按 itemId 找回
+      let version: string = chapter.version;
+      if (version.length === 0) {
+        const refreshed: FqChapter[] =
+          await FqBackend.get().directoryChapters(this.bookId, fqKindToTab(this.kind));
+        for (const item of refreshed) {
+          if (item.itemId === chapter.itemId) {
+            version = item.version;
+            break;
+          }
+        }
+      }
+      const comments: FqParagraphComment[] = await FqBackend.get().paragraphComments(
+        this.bookId, chapter.itemId, version, paraIndex, 20);
+      hilog.info(0x0001, 'ReaderPage',
+        `loadParaComments item=${chapter.itemId} ver=${version} para=${paraIndex} n=${comments.length}`);
       this.paraComments = comments;
     } catch (error) {
       this.paraError = fqErrorMessage(error);
@@ -1606,7 +1640,11 @@ export struct ReaderPage {
       }
       this.cachedMetrics = this.buildMetrics();
       const paragraphs: string[] = this.buildParagraphs(text);
-      const layout: FqChapterLayout = this.layoutChapter(index, paragraphs);
+      const ideaCounts: number[] = await this.fetchIdeaCounts(index, paragraphs.length);
+      if (token !== this.loadToken) {
+        return;
+      }
+      const layout: FqChapterLayout = this.layoutChapter(index, paragraphs, ideaCounts);
       if (token !== this.loadToken) {
         return;
       }

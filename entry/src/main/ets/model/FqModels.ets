@@ -288,14 +288,17 @@ export class FqAuthorProfile {
   }
 }
 
-/** 目录章节（/api/directory，M1 仅取标题与 itemId）。 */
+/** 目录章节（/api/directory：标题 + itemId + 内容版本 version）。 */
 export class FqChapter {
   readonly itemId: string;
   readonly title: string;
+  /** 章节内容版本（目录 item_data_list.version；段评接口必传，缺失回目录刷新）。 */
+  readonly version: string;
 
-  constructor(itemId: string, title: string) {
+  constructor(itemId: string, title: string, version: string = '') {
     this.itemId = itemId;
     this.title = title;
+    this.version = version;
   }
 }
 

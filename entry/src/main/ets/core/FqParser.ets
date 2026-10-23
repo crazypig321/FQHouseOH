@@ -37,6 +37,7 @@ import {
   fqEmptyRankCatalog,
   fqFormatCounter,
 } from '../model/FqModels';
+import { FqParagraphComment } from '../reader/ReaderTypes';
 
 const VIDEO_RE: RegExp = /短剧|短片|剧集|video|drama/i;
 const MANGA_RE: RegExp = /漫画|轻漫|条漫|comic|manga/i;
@@ -967,13 +968,15 @@ function fqChapterListOf(volume: Object): Object[] | null {
   return list;
 }
 
-/** 目录载荷 -> 章节平铺列表（chapterListWithVolume 多卷拼接）。 */
+/** 目录载荷 -> 章节平铺列表（chapterListWithVolume 多卷拼接；version 优先条目自带，
+ *  缺失从同层 item_data_list 兜底——段评接口必传 item_version）。 */
 export function fqParseDirectory(payload: Record<string, Object>): FqChapter[] {
   const inner: Object | undefined = fqDirectoryInner(payload);
   const innerRec: Record<string, Object> | null = fqAsRecord(inner);
   if (innerRec === null) {
     return [];
   }
+  const versions: Map<string, string> = fqDirectoryVersions(payload);
   const chapters: FqChapter[] = [];
   const volumes: Object[] | null = fqAsArray(innerRec['chapterListWithVolume']);
   if (volumes !== null) {
@@ -991,11 +994,130 @@ export function fqParseDirectory(payload: Record<string, Object>): FqChapter[] {
         if (itemId.length === 0) {
           continue;
         }
-        chapters.push(new FqChapter(itemId, fqStr(rec, 'title') || fqStr(rec, 'chapter_title')));
+        let version: string = fqStr(rec, 'version');
+        if (version.length === 0) {
+          const fallback: string | undefined = versions.get(itemId);
+          version = fallback !== undefined ? fallback : '';
+        }
+        chapters.push(new FqChapter(itemId, fqStr(rec, 'title') || fqStr(rec, 'chapter_title'), version));
       }
     }
   }
   return chapters;
+}
+
+/** 目录 item_data_list 深搜 itemId -> version（桥接 chapterList 条目缺 version 时兜底）。 */
+function fqDirectoryVersions(root: Object | undefined, depth: number = 0): Map<string, string> {
+  const versions: Map<string, string> = new Map();
+  const rec: Record<string, Object> | null = fqAsRecord(root);
+  if (rec === null || depth > 6) {
+    return versions;
+  }
+  const list: Object[] | null = fqAsArray(rec['item_data_list']);
+  if (list !== null) {
+    for (const entry of list) {
+      const itemRec: Record<string, Object> | null = fqAsRecord(entry);
+      if (itemRec === null) {
+        continue;
+      }
+      const id: string = fqFirstString(itemRec, ['item_id', 'itemId', 'id']);
+      const version: string = fqStr(itemRec, 'version');
+      if (id.length > 0 && version.length > 0) {
+        versions.set(id, version);
+      }
+    }
+  }
+  if (versions.size > 0) {
+    return versions;
+  }
+  for (const key of fqKeys(rec)) {
+    const found: Map<string, string> = fqDirectoryVersions(rec[key], depth + 1);
+    if (found.size > 0) {
+      return found;
+    }
+  }
+  return versions;
+}
+
+/** 章段评计数（/api/v1/chapters/{itemId}/reviews：data.data 按段索引为键的 map，
+ *  每项 count；业务码非 0/200（103001 参数非法 / 1301008 无数据）按无段评处理）。 */
+export function fqParseChapterIdeaCounts(payload: Record<string, Object>, paragraphCount: number): number[] {
+  const counts: number[] = [];
+  for (let index: number = 0; index < paragraphCount; index++) {
+    counts.push(0);
+  }
+  const code: number = fqAsInt(payload['code'], 0);
+  if (code !== 0 && code !== 200) {
+    return counts;
+  }
+  const dataRec: Record<string, Object> | null = fqAsRecord(payload['data']);
+  if (dataRec === null) {
+    return counts;
+  }
+  const buckets: Record<string, Object> | null = fqAsRecord(dataRec['data']);
+  if (buckets === null) {
+    return counts;
+  }
+  for (const key of fqKeys(buckets)) {
+    const paraIndex: number = Number.parseInt(key, 10);
+    if (Number.isNaN(paraIndex) || paraIndex < 0 || paraIndex >= paragraphCount) {
+      continue;
+    }
+    const bucket: Record<string, Object> | null = fqAsRecord(buckets[key]);
+    if (bucket === null) {
+      continue;
+    }
+    counts[paraIndex] = fqAsInt(bucket['count'], 0);
+  }
+  return counts;
+}
+
+/** 某段段评列表（/api/v1/books/{bookId}/reviews 段评配方：data.data_list[i].comment 嵌套，
+ *  计数藏于 comment.stat；业务码非 0/200 返回空）。 */
+export function fqParseParagraphComments(payload: Record<string, Object>): FqParagraphComment[] {
+  const comments: FqParagraphComment[] = [];
+  const code: number = fqAsInt(payload['code'], 0);
+  if (code !== 0 && code !== 200) {
+    return comments;
+  }
+  const dataRec: Record<string, Object> | null = fqAsRecord(payload['data']);
+  if (dataRec === null) {
+    return comments;
+  }
+  const list: Object[] | null = fqAsArray(dataRec['data_list']);
+  if (list === null) {
+    return comments;
+  }
+  for (const entry of list) {
+    const entryRec: Record<string, Object> | null = fqAsRecord(entry);
+    if (entryRec === null) {
+      continue;
+    }
+    const commentRec: Record<string, Object> | null = fqAsRecord(entryRec['comment']);
+    if (commentRec === null) {
+      continue;
+    }
+    const common: Record<string, Object> | null = fqAsRecord(commentRec['common']);
+    const content: Record<string, Object> | null = common !== null ? fqAsRecord(common['content']) : null;
+    const text: string = content !== null ? fqStr(content, 'text') : '';
+    if (text.trim().length === 0) {
+      continue;
+    }
+    const userInfo: Record<string, Object> | null = common !== null ? fqAsRecord(common['user_info']) : null;
+    const baseInfo: Record<string, Object> | null = userInfo !== null ? fqAsRecord(userInfo['base_info']) : null;
+    const stat: Record<string, Object> | null = fqAsRecord(commentRec['stat']);
+    const tag: Record<string, Object> | null = userInfo !== null ? fqAsRecord(userInfo['user_tag']) : null;
+    const comment: FqParagraphComment = new FqParagraphComment();
+    comment.id = fqStr(commentRec, 'comment_id');
+    comment.text = text;
+    comment.diggCount = stat !== null ? fqAsInt(stat['digg_count'], 0) : 0;
+    comment.createdAtMs = common !== null ? fqCommentTimestampMs(common['create_timestamp']) : 0;
+    comment.userName = baseInfo !== null ? fqStr(baseInfo, 'user_name') : '';
+    comment.userAvatar = baseInfo !== null ? fqStr(baseInfo, 'user_avatar') : '';
+    comment.isAuthor = tag !== null && tag['is_author'] === true;
+    comments.push(comment);
+  }
+  return comments;
 }
 
 const FQ_PREVIEW_MARKER_RE: RegExp = new RegExp('\\{!--[\\s\\S]*?--\\}|<!--[\\s\\S]*?-->|\\{!--[\\s\\S]*$|<!--[\\s\\S]*$', 'g');

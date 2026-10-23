@@ -143,7 +143,7 @@ export class FqReaderLayoutMetrics {
   footerZoneVp: number = 20;
 }
 
-/** 段评条目。 */
+/** 段评条目（/api/v1/books/{bookId}/reviews 段评配方：data.data_list[i].comment）。 */
 export class FqParagraphComment {
   id: string = '';
   userName: string = '';
@@ -152,87 +152,4 @@ export class FqParagraphComment {
   diggCount: number = 0;
   createdAtMs: number = 0;
   isAuthor: boolean = false;
-}
-
-/** 段评数据源：段落级评论（源站暂无段落接口，先以 Provider 抽象，后续替换实现）。 */
-export interface FqParagraphCommentProvider {
-  /** 各段段评数（长度与段落数一致）。 */
-  commentCounts(chapterId: string, paragraphCount: number): number[];
-  /** 拉取某段段评列表。 */
-  fetchComments(chapterId: string, paraIndex: number): Promise<FqParagraphComment[]>;
-}
-
-/** 空段评源：全部段落 0 条（后端段落级接口确认前的安全默认）。 */
-export class FqEmptyParagraphCommentProvider implements FqParagraphCommentProvider {
-  commentCounts(chapterId: string, paragraphCount: number): number[] {
-    const counts: number[] = [];
-    for (let index: number = 0; index < paragraphCount; index++) {
-      counts.push(0);
-    }
-    return counts;
-  }
-
-  fetchComments(chapterId: string, paraIndex: number): Promise<FqParagraphComment[]> {
-    return Promise.resolve<FqParagraphComment[]>([]);
-  }
-}
-
-/** 段评演示开关：true 时 ReaderPage 使用演示数据（UI/交互联调用；接入真实段评接口前置 false）。 */
-export const FQ_DEMO_PARAGRAPH_COMMENTS: boolean = true;
-
-const FQ_DEMO_COMMENT_TEXTS: string[] = [
-  '这一段的铺垫很扎实，伏笔埋得不着痕迹。',
-  '作者的文笔越来越稳了，画面感十足。',
-  '看到这里终于理清了人物关系，舒服。',
-  '这段对话信息量好大，得回头再读一遍。',
-  '节奏控制得真好，一口气读到这。',
-  '这段的环境描写太有代入感了。',
-  '人物弧光出来了，不再是工具人。',
-  '这个比喻绝了，简单但很准确。',
-];
-
-const FQ_DEMO_COMMENT_NAMES: string[] = [
-  '青梧', '山间信使', '柠檬不酸', '夜航星', '晚风拾遗', '半盏清茶', '折枝为笔', '云中锦书',
-  '雾里灯', '拾荒的猫', '陌上归人', '一舟星河',
-];
-
-/** 演示段评源：确定性伪随机分布（同一章节同一段落结果稳定，便于联调）。 */
-export class FqDemoParagraphCommentProvider implements FqParagraphCommentProvider {
-  commentCounts(chapterId: string, paragraphCount: number): number[] {
-    const counts: number[] = [];
-    for (let index: number = 0; index < paragraphCount; index++) {
-      if (index === 0) {
-        counts.push(0);
-        continue;
-      }
-      const seed: number = FqDemoParagraphCommentProvider.demoSeed(chapterId, index);
-      counts.push(seed % 5 === 0 ? (seed % 11) + 1 : 0);
-    }
-    return counts;
-  }
-
-  fetchComments(chapterId: string, paraIndex: number): Promise<FqParagraphComment[]> {
-    const count: number = this.commentCounts(chapterId, paraIndex + 1)[paraIndex];
-    const comments: FqParagraphComment[] = [];
-    for (let index: number = 0; index < count; index++) {
-      const seed: number = FqDemoParagraphCommentProvider.demoSeed(chapterId, paraIndex * 31 + index);
-      const comment: FqParagraphComment = new FqParagraphComment();
-      comment.id = `demo_${chapterId}_${paraIndex}_${index}`;
-      comment.userName = FQ_DEMO_COMMENT_NAMES[seed % FQ_DEMO_COMMENT_NAMES.length];
-      comment.text = FQ_DEMO_COMMENT_TEXTS[(seed >> 3) % FQ_DEMO_COMMENT_TEXTS.length];
-      comment.diggCount = (seed >> 5) % 260;
-      comment.createdAtMs = Date.now() - ((seed >> 2) % 720) * 3600 * 1000;
-      comments.push(comment);
-    }
-    return Promise.resolve<FqParagraphComment[]>(comments);
-  }
-
-  /** LCG 式确定性散列（正数）。 */
-  private static demoSeed(chapterId: string, salt: number): number {
-    let hash: number = 5381;
-    for (let index: number = 0; index < chapterId.length; index++) {
-      hash = ((hash * 33) ^ chapterId.charCodeAt(index)) & 0x7fffffff;
-    }
-    return ((hash ^ (salt * 2654435761)) & 0x7fffffff) >>> 0;
-  }
 }

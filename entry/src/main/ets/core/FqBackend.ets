@@ -13,7 +13,9 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import fq, { FqBridgeResponse } from 'libfqapi_napi.so';
 import { FqDeployer } from './FqDeployer';
 import { FqKeyStore } from './FqKeyStore';
-import { fqParseAuthorProfile, fqParseBookComments, fqParseBookDetail, fqParseChapterSummaries, fqParseDirectory, fqParseHomepage, fqParseRankBoard, fqParseRankCatalog, fqParseSearchTabs, fqParseSeriesFeed, fqLegacyChapterText, fqNormalizeChapterText, fqParseNovelChapter } from './FqParser';
+import {   fqParseAuthorProfile, fqParseBookComments, fqParseBookDetail, fqParseChapterIdeaCounts, fqParseChapterSummaries,
+  fqParseDirectory, fqParseHomepage, fqParseParagraphComments, fqParseRankBoard, fqParseRankCatalog, fqParseSearchTabs,
+  fqParseSeriesFeed, fqLegacyChapterText, fqNormalizeChapterText, fqParseNovelChapter } from './FqParser';
 import {
   fqParseAudioToneSet,
   fqParseAudioVoices,
@@ -34,6 +36,7 @@ import {
   FqRankCatalog,
   FqSearchTab,
 } from '../model/FqModels';
+import { FqParagraphComment } from '../reader/ReaderTypes';
 import {
   FqAudioSource,
   FqAudioToneSet,
@@ -295,6 +298,47 @@ export class FqBackend {
     return fqParseBookComments(payload);
   }
 
+  /** 章段评气泡计数（/api/v1/chapters/{itemId}/reviews?comment_source=3，data.data 按段 map）；
+   *  装饰性数据，失败返回全 0。 */
+  public async chapterIdeaCounts(itemId: string, paragraphCount: number): Promise<number[]> {
+    try {
+      const payload: Record<string, Object> = await this.getJson(
+        `/api/v1/chapters/${encodeURIComponent(itemId)}/reviews`, 'comment_source=3');
+      return fqParseChapterIdeaCounts(payload, paragraphCount);
+    } catch (error) {
+      const counts: number[] = [];
+      for (let index: number = 0; index < paragraphCount; index++) {
+        counts.push(0);
+      }
+      return counts;
+    }
+  }
+
+  /**
+   * 某段段评列表（/api/v1/books/{bookId}/reviews 段评配方，fqapp paragraphComments）：
+   * group_id=章节 itemId、group_type=15、server_channel=38（43 官方值恒空、39 仅部分书命中）、
+   * item_version 必传（目录 version）；装饰性数据，失败返回空。
+   */
+  public async paragraphComments(bookId: string, itemId: string, itemVersion: string,
+    paraIndex: number, count: number): Promise<FqParagraphComment[]> {
+    try {
+      const query: string = `book_id=${encodeURIComponent(bookId)}`
+        + `&group_id=${encodeURIComponent(itemId)}`
+        + `&group_type=15&comment_source=2&comment_type=1&server_channel=38`
+        + `&para_index=${paraIndex}`
+        + `&item_version=${encodeURIComponent(itemVersion)}`
+        + `&count=${count < 1 ? 20 : count}`;
+      const payload: Record<string, Object> =
+        await this.getJson(`/api/v1/books/${encodeURIComponent(bookId)}/reviews`, query);
+      const comments: FqParagraphComment[] = fqParseParagraphComments(payload);
+      hilog.info(0x0001, 'FqBackend',
+        `paragraphComments ver=${itemVersion} para=${paraIndex} code=${payload['code']} n=${comments.length}`);
+      return comments;
+    } catch (error) {
+      return [];
+    }
+  }
+
   /**
    * 排行榜目录（藏于 novel homepage tab_type=2 载荷）。
    */
@@ -326,7 +370,15 @@ export class FqBackend {
     const query: string = `source=${encodeURIComponent('番茄')}&book_id=${encodeURIComponent(bookId)}`
       + `&tab=${encodeURIComponent(tab)}`;
     const payload: Record<string, Object> = await this.getJson('/api/directory', query);
-    return fqParseDirectory(payload);
+    const chapters: FqChapter[] = fqParseDirectory(payload);
+    let versioned: number = 0;
+    for (const chapter of chapters) {
+      if (chapter.version.length > 0) {
+        versioned++;
+      }
+    }
+    hilog.info(0x0001, 'FqBackend', `directoryChapters n=${chapters.length} versioned=${versioned}`);
+    return chapters;
   }
 
   /** 章节试读（/api/v1/books/{id}/chapters/summary）；装饰性数据，失败返回空 Map。 */

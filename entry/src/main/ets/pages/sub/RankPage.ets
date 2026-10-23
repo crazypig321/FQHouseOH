@@ -18,6 +18,7 @@ import { NavPathUtils } from '../../utils/NavPathUtils';
 import { CommonNav, titleBarOf } from '../../view/CommonNav';
 import { CommonLoading, FQ_ACCENT } from '../../view/CommonCom';
 import { appState } from '../../entryability/AppState';
+import { textImmersiveModifier } from '../../utils/ModifierUtils';
 
 /** 标题栏 bottomBuilder 插槽高：药丸条 46 + 分类条 38 + 间距 8 + 上下 padding 12 */
 const FQ_RANK_BOTTOM_HEIGHT_BOTH: number = 104;
@@ -102,6 +103,7 @@ export struct RankPage {
       // 药丸/分类条常驻标题栏，不随上滑隐藏
       isSearchBarScroller: false,
       doubleTapToTop: true,
+      scrollToTopYOffset: -this.listTopInset(),
     }) {
       Column() {
         if (this.loading && this.entryCount === 0) {
@@ -248,7 +250,8 @@ export struct RankPage {
             .fontColor(this.rankIndex === index ? Color.White : $r('sys.color.font_primary'))
             .padding({ left: 14, right: 14, top: 7, bottom: 7 })
             .borderRadius(999)
-            .backgroundColor(this.rankIndex === index ? '#FF7A3D' : $r('sys.color.comp_background_tertiary'))
+            .backgroundColor(this.rankIndex === index ? '#FF7A3D' : Color.Transparent)
+            .attributeModifier(this.rankIndex === index ? undefined : textImmersiveModifier)
             .onClick(() => this.selectRank(index))
         }, (tab: FqRankTab): string => tab.name)
       }
