@@ -14,8 +14,7 @@ import { BlurStrategy,
   HideMode,
   HdsTabs,
   HdsTabsController,
-  HdsNavDestinationTitleMode,
-  HdsAnimationMode} from '@kit.UIDesignKit';
+  HdsNavDestinationTitleMode} from '@kit.UIDesignKit';
 import { appState } from '../entryability/AppState';
 import { LengthMetrics } from '@kit.ArkUI';
 import { themeUtils } from '../utils/ThemeUtils';
@@ -50,10 +49,10 @@ export struct CommonNav {
   @Param scroller: Scroller | undefined = undefined
   /** 上滑时随标题栏隐藏 bottomBuilder（搜索行） */
   @Param isSearchBarScroller: boolean = true
-  /** 是否显示底部栏 */
+  /** 是否显示底部栏（结构开关：false 时内容不包 HdsTabs） */
   @Param isShowBar: boolean = false
-  /** 是否显示底部栏 */
-  @Param isShowBarController: boolean = false
+  /** 底部栏显隐（false 隐藏，barHeight 0/56 带动画过渡；阅读页随菜单传 menuVisible） */
+  @Param isShowBarController: boolean = true
   /** 底部栏内容类型：book 显示听书/下载，其余仅主按钮；主按钮文案/图标按类型区分 */
   @Param readBarKind: string = 'book'
   /** 双击标题栏区域时列表回滚到顶部 */
@@ -113,17 +112,6 @@ export struct CommonNav {
     }
   }
   
-  @Monitor('isShowBarController')
-  private isShowTabBar(){
-    if (this.isShowBarController) {
-      // 触发显示动效，恢复页签栏和迷你栏。
-      this.tabsController.applyShowAnimation(HdsAnimationMode.CLICK_ANIMATION);
-    }else{
-      // 触发隐藏动效，页签栏和迷你栏一起隐藏。
-      this.tabsController.applyHideAnimation(HdsAnimationMode.CLICK_ANIMATION);
-    }
-  }
-
   build() {
     HdsNavDestination() {
       // PC 侧边栏布局下不渲染页面级迷你条（Index 全局悬浮 PlayBar 常驻覆盖所有页面）
@@ -137,7 +125,8 @@ export struct CommonNav {
         .vertical(false)
         .scrollable(false)
         .barPosition(BarPosition.End)
-        .barHeight(56)
+        .barHeight(this.isShowBarController ? 56 : 0)
+        .animation({duration: 300})
         .barFloatingStyle({
           barWidth: { smallWidth: 330, mediumWidth: 480, largeWidth: 560 },
           barBottomMargin: 28,
@@ -237,6 +226,7 @@ export struct CommonNav {
         this.ReaderTool($r('sys.symbol.textformat'), '设置')
       }
       .width('100%')
+      .height(this.isShowBarController ? 'auto' : 0)
       .alignItems(VerticalAlign.Center)
       .transition(TransitionEffect.OPACITY.animation({duration: 300}))
     } else {

@@ -20,7 +20,7 @@ import { CustomContentDialog, display, window } from '@kit.ArkUI';
 import { fileIo } from '@kit.CoreFileKit';
 import { batteryInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { HdsTabsController, TitleBarContentOptions } from '@kit.UIDesignKit';
+import { HdsAnimationMode, HdsTabsController, TitleBarContentOptions } from '@kit.UIDesignKit';
 import { FqBackend, fqErrorMessage } from '../core/FqBackend';
 import { FqBookComment, FqBookCommentPage, FqChapter, fqFormatCountInt, fqKindToTab } from '../model/FqModels';
 import { FqReaderProgress, FqReaderStore } from '../core/FqReaderStore';

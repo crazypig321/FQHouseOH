@@ -12,7 +12,7 @@ import { promptAction } from '@kit.ArkUI';
 import { FqBackend, fqErrorMessage } from '../core/FqBackend';
 import { FqBookDetail, FqChapter, fqEmptyBookDetail, fqKindToTab, fqKindLabel } from '../model/FqModels';
 import { FqShelfStore, FqShelfItem } from '../core/FqShelfStore';
-import { DetailNavParams, FqTitleBarOptions, ReaderNavParams, ROUTE_READER } from '../model/FqNavModels';
+import { DetailNavParams, FqTitleBarOptions, ReaderNavParams, ROUTE_READER2 } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import { CommonNav } from '../view/CommonNav';
 import { CommonLoading, FQ_ACCENT } from '../view/CommonCom';
@@ -634,7 +634,7 @@ export struct DetailPage {
     ReaderNavParams.kind = this.itemKind;
     ReaderNavParams.title = this.detail.title;
     ReaderNavParams.chapterIndex = chapterIndex;
-    NavPathUtils.push(ROUTE_READER);
+    NavPathUtils.push(ROUTE_READER2);
   }
 
   private async load(): Promise<void> {

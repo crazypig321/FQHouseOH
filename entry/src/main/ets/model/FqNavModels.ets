@@ -9,8 +9,7 @@ import { NavPathUtils } from '../utils/NavPathUtils';
 export const ROUTE_SEARCH: string = 'search';
 export const ROUTE_DETAIL: string = 'detail';
 export const ROUTE_RANK: string = 'rank';
-export const ROUTE_READER: string = 'reader';
-/** 自定义阅读页（ReaderPage2，自绘分页引擎版，与官方 Kit 版并存）。 */
+/** 自定义阅读页（ReaderPage2，自绘分页引擎版）。 */
 export const ROUTE_READER2: string = 'reader2';
 
 /** 详情页跳转参数（push 前由来源页赋值，详情页 aboutToAppear 读取）。 */
