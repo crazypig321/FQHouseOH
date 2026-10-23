@@ -133,6 +133,7 @@ export struct RankPage {
                       .borderRadius(8)
                       .objectFit(ImageFit.Cover)
                       .autoResize(true)
+                      .draggable(false)
                   } else {
                     Column()
                       .width(56)

@@ -21,6 +21,7 @@ export struct FqItemCard {
           .objectFit(ImageFit.Cover)
           .backgroundColor($r('sys.color.comp_background_secondary'))
           .autoResize(true)
+          .draggable(false)
       } else {
         Column()
           .width(78)

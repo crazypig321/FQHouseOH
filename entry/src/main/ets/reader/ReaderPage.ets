@@ -24,6 +24,8 @@ import { HdsAnimationMode, HdsTabsController, TitleBarContentOptions } from '@ki
 import { FqBackend, fqErrorMessage } from '../core/FqBackend';
 import { FqChapter, fqFormatCountInt, fqKindToTab } from '../model/FqModels';
 import { FqReaderProgress, FqReaderStore } from '../core/FqReaderStore';
+import { FqReadStatsStore } from '../core/FqReadStatsStore';
+import { FqLocalBookStore } from '../core/FqLocalBookStore';
 import { ReaderNavParams } from '../model/FqNavModels';
 import { CommonNav, titleBarOf } from '../view/CommonNav';
 import { CommonLoading, FQ_ACCENT } from '../view/CommonCom';
@@ -149,21 +151,29 @@ export struct ReaderPage {
     this.bookId = ReaderNavParams.id;
     this.kind = ReaderNavParams.kind;
     this.bookTitle = ReaderNavParams.title;
-    this.titleBarOp = titleBarOf(this.bookTitle, undefined, [
-      {
-        content: {
-          icon: $r('sys.symbol.message'),
-          label: 'comments',
-          action: (): void => {
-            this.openCommentSheet();
+    // 本地导入书籍无后端数据：隐藏段评入口
+    const isLocalBook: boolean = FqLocalBookStore.isLocalBookId(this.bookId);
+    if (isLocalBook) {
+      this.titleBarOp = titleBarOf(this.bookTitle);
+    } else {
+      this.titleBarOp = titleBarOf(this.bookTitle, undefined, [
+        {
+          content: {
+            icon: $r('sys.symbol.message'),
+            label: 'comments',
+            action: (): void => {
+              this.openCommentSheet();
+            },
           },
         },
-      },
-    ]);
+      ]);
+    }
     this.startChapterIndex = ReaderNavParams.chapterIndex;
     this.listenAlong = ReaderNavParams.listenAlong;
     ReaderNavParams.listenAlong = false;
     FqReaderStore.init(getContext(this));
+    FqLocalBookStore.init(getContext(this));
+    FqReadStatsStore.init(getContext(this));
     const settings = FqReaderStore.getSettings();
     this.fontSize = settings.fontSize;
     this.lineHeight = settings.lineHeight;
@@ -176,6 +186,8 @@ export struct ReaderPage {
     this.refreshFooterStatus();
     this.clockTimer = setInterval((): void => {
       this.refreshFooterStatus();
+      // 阅读页驻留累计今日已读时长（30s 心跳）
+      FqReadStatsStore.addSeconds(30);
     }, 30000);
     this.cachedMetrics = this.buildMetrics();
     this.applySystemBar(false);
@@ -1503,6 +1515,31 @@ export struct ReaderPage {
     this.loadingState = true;
     this.errorMsg = '';
     try {
+      // 本地导入书籍：目录/正文均来自本地文件，不请求后端
+      if (FqLocalBookStore.isLocalBookId(this.bookId)) {
+        const localChapters: FqChapter[] = FqLocalBookStore.chapters(this.bookId);
+        if (token !== this.loadToken) {
+          return;
+        }
+        if (localChapters.length === 0) {
+          this.errorMsg = '本地书籍文件不可用';
+          this.loadingState = false;
+          return;
+        }
+        this.chapters = localChapters;
+        this.totalChapters = localChapters.length;
+        this.buildChapterEstimates();
+        const localProgress: FqReaderProgress = FqReaderStore.getProgress(this.bookId);
+        let localIndex: number = this.startChapterIndex;
+        let localDomPos: string = '';
+        if (localIndex < 0 || localIndex >= localChapters.length) {
+          localIndex = localProgress.chapterIndex >= 0 && localProgress.chapterIndex < localChapters.length
+            ? localProgress.chapterIndex : 0;
+          localDomPos = localIndex === localProgress.chapterIndex ? localProgress.domPos : '';
+        }
+        await this.openChapter(localIndex, localDomPos);
+        return;
+      }
       await FqBackend.get().start(getContext(this));
       const chapters: FqChapter[] =
         await FqBackend.get().directoryChapters(this.bookId, fqKindToTab(this.kind));
@@ -1593,6 +1630,10 @@ export struct ReaderPage {
     const chapter: FqChapter | undefined = this.chapters[index];
     if (chapter === undefined) {
       return '';
+    }
+    // 本地导入书籍正文按导入偏移切片
+    if (FqLocalBookStore.isLocalBookId(this.bookId)) {
+      return FqLocalBookStore.chapterText(this.bookId, index);
     }
     return FqBackend.get().chapterText(chapter.itemId, chapter.title);
   }
@@ -1771,6 +1812,7 @@ export struct ReaderPage {
               .height(28)
               .borderRadius(14)
               .objectFit(ImageFit.Cover)
+              .draggable(false)
           }
         }
         Column({ space: 2 }) {

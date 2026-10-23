@@ -136,6 +136,7 @@ export struct AuthorPage {
             .objectFit(ImageFit.Cover)
             .backgroundColor($r('sys.color.comp_background_tertiary'))
             .autoResize(true)
+            .draggable(false)
         } else {
           Stack({ alignContent: Alignment.Center }) {
             Column()

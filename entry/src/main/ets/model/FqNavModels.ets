@@ -3,7 +3,7 @@
  * （对齐 musicfreeOH NavModels 模式：push 纯路由名，参数由来源页赋静态字段）。
  */
 
-import { BottomBuilderParams, HdsNavigationMenuItemOptions, TitleBarContentOptions } from '@kit.UIDesignKit';
+import { BottomBuilderParams, HdsNavigationMenuItemOptions, HdsNavigationTitle, TitleBarContentOptions } from '@kit.UIDesignKit';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import { FqChapter } from './FqModels';
@@ -64,11 +64,16 @@ export class ListenNavParams {
  */
 export function FqTitleBarOptions(mainTitle: ResourceStr, showSearch: boolean,
   bottomBuilder?: BottomBuilderParams, onRefresh?: () => void,
-  showRank?: boolean, onShelf?: () => void, shelfActive?: boolean): TitleBarContentOptions {
+  showRank?: boolean, onShelf?: () => void, shelfActive?: boolean,
+  subTitle?: ResourceStr): TitleBarContentOptions {
+  const title: HdsNavigationTitle = {
+    mainTitle: mainTitle,
+  };
+  if (subTitle !== undefined) {
+    title.subTitle = subTitle;
+  }
   const content: TitleBarContentOptions = {
-    title: {
-      mainTitle: mainTitle,
-    },
+    title: title,
   };
   const menus: HdsNavigationMenuItemOptions[] = [];
   if (onShelf !== undefined) {

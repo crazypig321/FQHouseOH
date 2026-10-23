@@ -20,6 +20,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { FqAudioEngine } from './FqAudioEngine';
 import { FqAudioHistory, FqListenRecord } from './FqAudioHistory';
+import { FqReadStatsStore } from './FqReadStatsStore';
 import { FqBackend, fqErrorMessage } from './FqBackend';
 import { FqChapter } from '../model/FqModels';
 import {
@@ -107,6 +108,8 @@ export class FqAudioSession {
   private tickTimer: number = -1;
   private lastAvSyncAt: number = 0;
   private lastHistorySaveAt: number = 0;
+  /** 今日已读统计：播放中 tick 计数，满 10 次（5s）累计一次。 */
+  private statPlayingTicks: number = 0;
   private avSessionValue: avSession.AVSession | null = null;
   private bgStarted: boolean = false;
   private coverPixel: image.PixelMap | null = null;
@@ -816,6 +819,16 @@ export class FqAudioSession {
     if (this.engine.isPlaying && now - this.lastHistorySaveAt >= 5000) {
       this.lastHistorySaveAt = now;
       this.persistHistory();
+    }
+    // 播放中累计今日已读时长（每 10 次 tick = 5 秒落一次）
+    if (this.engine.isPlaying) {
+      this.statPlayingTicks += 1;
+      if (this.statPlayingTicks >= 10) {
+        this.statPlayingTicks = 0;
+        FqReadStatsStore.addSeconds(5);
+      }
+    } else {
+      this.statPlayingTicks = 0;
     }
   }
 

@@ -32,6 +32,9 @@ class AppState {
   // 智感握姿开关（持久化设置，启动时由 Bootstrap 恢复，设置页切换时更新）
   @Trace smartReachEnabled: boolean = false;
 
+  /** 批量多选模式（书架页长按进入）：主 TabBar 随之隐藏（barHeight 0/56，参考阅读页底栏模式） */
+  @Trace isBatchMode: boolean = false;
+
   /** 系统当前是否深色模式（EntryAbility 启动与 onConfigurationUpdate 同步） */
   @Trace isDark: boolean = false;
 }

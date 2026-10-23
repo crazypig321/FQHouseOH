@@ -159,6 +159,7 @@ export struct ListenPage {
           .objectFit(ImageFit.Cover)
           .autoResize(true)
           .backgroundColor($r('sys.color.comp_background_secondary'))
+          .draggable(false)
         Column() {
           Blank()
         }
@@ -609,6 +610,7 @@ export struct ListenPage {
           .objectFit(ImageFit.Cover)
           .autoResize(true)
           .backgroundColor($r('sys.color.comp_background_secondary'))
+          .draggable(false)
       } else {
         Column() {
           SymbolGlyph(work.kind === 'video' ? $r('sys.symbol.video') : $r('sys.symbol.book'))

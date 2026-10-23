@@ -114,6 +114,7 @@ export struct FqCommentTile {
               .height(30)
               .borderRadius(15)
               .objectFit(ImageFit.Cover)
+              .draggable(false)
           }
         }
         Column({ space: 4 }) {
@@ -179,6 +180,7 @@ export struct FqCommentTile {
               .height(76)
               .borderRadius(6)
               .objectFit(ImageFit.Cover)
+              .draggable(false)
           }, (url: string): string => url)
         }
         .alignItems(VerticalAlign.Top)

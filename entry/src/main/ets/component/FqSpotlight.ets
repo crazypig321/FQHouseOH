@@ -63,6 +63,7 @@ export struct FqSpotlight {
               .height('100%')
               .objectFit(ImageFit.Cover)
               .autoResize(true)
+              .draggable(false)
             Column()
               .width('100%')
               .height('100%')

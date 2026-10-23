@@ -5,12 +5,16 @@
 
 import { FqBackend } from '../core/FqBackend';
 import { FqMediaItem, fqEmptyMediaItem, fqKindLabel } from '../model/FqModels';
+import { FQ_ACCENT } from '../view/CommonCom';
 
 @ComponentV2
 export struct FqMediaCard {
   @Param item: FqMediaItem = fqEmptyMediaItem();
   @Param onItemClick: (item: FqMediaItem) => void = (item: FqMediaItem): void => {
   };
+  /** 多选模式：封面左上角显示勾选圈、隐藏角标。 */
+  @Param batchMode: boolean = false;
+  @Param selected: boolean = false;
 
   build() {
     Column({ space: 6 }) {
@@ -21,6 +25,7 @@ export struct FqMediaCard {
             .aspectRatio(5 / 7)
             .objectFit(ImageFit.Cover)
             .autoResize(true)
+            .draggable(false)
         } else {
           Stack({ alignContent: Alignment.Center }) {
             SymbolGlyph(this.kindIcon())
@@ -31,7 +36,19 @@ export struct FqMediaCard {
           .aspectRatio(5 / 7)
           .backgroundColor($r('sys.color.comp_background_secondary'))
         }
-        if (this.item.kind.length > 0) {
+        if (this.batchMode && this.selected) {
+          Column()
+            .width('100%')
+            .height('100%')
+            .backgroundColor('#59000000')
+        }
+        if (this.batchMode) {
+          SymbolGlyph(this.selected ? $r('sys.symbol.checkmark_circle_fill') : $r('sys.symbol.circle'))
+            .fontSize(22)
+            .fontColor([this.selected ? FQ_ACCENT : $r('sys.color.icon_tertiary')])
+            .margin(6)
+        }
+        if (!this.batchMode && this.item.kind.length > 0) {
           Text(fqKindLabel(this.item.kind))
             .fontSize(9)
             .fontColor(Color.White)
@@ -40,7 +57,7 @@ export struct FqMediaCard {
             .backgroundColor('#A61C1B1A')
             .margin(5)
         }
-        if (this.item.ep.length > 0) {
+        if (!this.batchMode && this.item.ep.length > 0) {
           Column() {
             Text(this.item.ep)
               .fontSize(9)
@@ -58,6 +75,7 @@ export struct FqMediaCard {
         }
       }
       .width('100%')
+      .aspectRatio(5 / 7)
       .borderRadius(12)
       .clip(true)
       .border({ width: 0.5, color: $r('sys.color.comp_divider') })

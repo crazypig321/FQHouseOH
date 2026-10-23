@@ -109,6 +109,24 @@ export class FqShelfStore {
     return FqShelfStore.items;
   }
 
+  /** 批量移出书架（书架页多选「移出书架」）。 */
+  public static removeByIds(ids: string[]): void {
+    if (ids.length === 0) {
+      return;
+    }
+    const removing: Set<string> = new Set<string>(ids);
+    const next: FqShelfItem[] = [];
+    for (const entry of FqShelfStore.items) {
+      if (!removing.has(entry.id)) {
+        next.push(entry);
+      } else {
+        FqShelfStore.ids.delete(entry.id);
+      }
+    }
+    FqShelfStore.items = next;
+    FqShelfStore.persist();
+  }
+
   private static persist(): void {
     const pref: preferences.Preferences | null = FqShelfStore.pref;
     if (pref === null) {

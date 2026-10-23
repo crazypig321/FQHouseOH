@@ -199,6 +199,7 @@ export struct DetailPage {
           .objectFit(ImageFit.Cover)
           .backgroundColor($r('sys.color.comp_background_secondary'))
           .autoResize(true)
+          .draggable(false)
       } else {
         Column()
           .width(104)
@@ -254,6 +255,7 @@ export struct DetailPage {
           .objectFit(ImageFit.Cover)
           .backgroundColor($r('sys.color.comp_background_tertiary'))
           .autoResize(true)
+          .draggable(false)
       } else {
         Stack({ alignContent: Alignment.Center }) {
           Column()

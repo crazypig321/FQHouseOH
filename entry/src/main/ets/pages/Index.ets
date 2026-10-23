@@ -22,7 +22,8 @@ struct Index {
       .vertical(false)
       .scrollable(false)
       .barPosition(BarPosition.End)
-      .barHeight(56)
+      // 批量多选模式下隐藏 tab 栏（对齐 musicfreeOH Index）
+      .barHeight(appState.isBatchMode ? 0 : 56)
       .animationDuration(500)
       .barFloatingStyle({
         barBottomMargin: 28,

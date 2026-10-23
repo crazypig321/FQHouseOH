@@ -21,6 +21,8 @@ import { display, mediaquery, window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { FqBackend } from '../core/FqBackend';
 import { fqAudioSession } from '../core/FqAudioSession';
+import { FqReadStatsStore } from '../core/FqReadStatsStore';
+import { FqLocalBookStore } from '../core/FqLocalBookStore';
 import { appState } from './AppState';
 import { themeUtils } from '../utils/ThemeUtils';
 
@@ -35,6 +37,8 @@ export default class EntryAbility extends UIAbility {
     }
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
     fqAudioSession.init(this.context);
+    FqReadStatsStore.init(this.context);
+    FqLocalBookStore.init(this.context);
     FqBackend.get().start(this.context).catch((error: Object): void => {
       hilog.error(DOMAIN, 'FqBackend', 'backend start failed: %{public}s', `${error}`);
     });
