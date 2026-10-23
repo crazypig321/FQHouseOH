@@ -14,6 +14,15 @@ import fq, { FqBridgeResponse } from 'libfqapi_napi.so';
 import { FqDeployer } from './FqDeployer';
 import { FqKeyStore } from './FqKeyStore';
 import { fqParseAuthorProfile, fqParseBookComments, fqParseBookDetail, fqParseChapterSummaries, fqParseDirectory, fqParseHomepage, fqParseRankBoard, fqParseRankCatalog, fqParseSearchTabs, fqParseSeriesFeed, fqLegacyChapterText, fqNormalizeChapterText, fqParseNovelChapter } from './FqParser';
+import {
+  fqParseAudioToneSet,
+  fqParseAudioVoices,
+  fqParseLegacyAudioSource,
+  fqParsePlayinfoSource,
+  fqParseRelatedWorks,
+  fqParseSubtitleTrack,
+  fqSubtitleUnavailable,
+} from './FqAudioParser';
 import { fqParseObject } from './FqJson';
 import {
   FqAuthorProfile,
@@ -25,6 +34,15 @@ import {
   FqRankCatalog,
   FqSearchTab,
 } from '../model/FqModels';
+import {
+  FqAudioSource,
+  FqAudioToneSet,
+  FqAudioVoice,
+  fqDefaultVoices,
+  FqRelatedWork,
+  FqSubtitleTrack,
+  fqEmptySubtitleTrack,
+} from '../model/FqAudioModels';
 
 const PORT: number = 8080;
 const REQUEST_TIMEOUT_MS: number = 20000;
@@ -351,6 +369,86 @@ export class FqBackend {
     const legacyText: string = fqNormalizeChapterText(fqLegacyChapterText(payload), chapterTitle);
     hilog.info(0x0001, 'FqBackend', `chapterText legacy=${fqLogHead(legacyText)}`);
     return legacyText;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 听书 API
+  // ---------------------------------------------------------------------------
+
+  /**
+   * 章节可播放流（/reading/reader/audio/playinfo 桥）。
+   * OH 恒带 mode=download：后端整章下载解密，地址改写为 /src/ 相对路径，
+   * 由 resourceUrl 锚定（avPlayer 解不了 CENC 密文）。
+   * 上游业务错误（NO_THIS_TONE 等）原样抛出，由会话层做音色回退。
+   */
+  public async audioChapterSource(bookId: string, chapterId: string,
+    toneId: string): Promise<FqAudioSource> {
+    const tone: string = toneId.trim().length > 0 ? toneId.trim() : '0';
+    const path: string = `/api/v1/audio/books/${encodeURIComponent(bookId)}`
+      + `/chapters/${encodeURIComponent(chapterId)}`;
+    const payload: Record<string, Object> =
+      await this.getJson(path, `tone_id=${encodeURIComponent(tone)}&mode=download`);
+    let source: FqAudioSource;
+    try {
+      source = fqParsePlayinfoSource(payload, chapterId, tone);
+    } catch (error) {
+      const message: string = error instanceof Error ? error.message : `${error}`;
+      // 只有「形状对不上」才回退 legacy mget；业务错误（NO_THIS_TONE 等）必须透传
+      if (!message.includes('未获取到音频地址')) {
+        throw new Error(message);
+      }
+      source = fqParseLegacyAudioSource(payload, chapterId, tone);
+    }
+    return new FqAudioSource(source.itemId, this.resourceUrl(source.url), source.toneId,
+      source.durationSec);
+  }
+
+  /** 音色表（智能朗读 tts + 真人讲书）。 */
+  public async audioTones(bookId: string): Promise<FqAudioToneSet> {
+    const payload: Record<string, Object> =
+      await this.getJson(`/api/v1/books/${encodeURIComponent(bookId)}/tones`, '');
+    return fqParseAudioToneSet(payload);
+  }
+
+  /**
+   * 小说 detail 的 tones CSV voices（fqapp ApiClient.audioVoices）：
+   * /tones 无 tts 音色时智能朗读面板的回退数据源。失败退默认音色。
+   */
+  public async audioVoices(bookId: string): Promise<FqAudioVoice[]> {
+    try {
+      const query: string = `source=${encodeURIComponent('番茄')}`
+        + `&book_id=${encodeURIComponent(bookId)}&tab=${encodeURIComponent('小说')}`;
+      const payload: Record<string, Object> = await this.getJson('/api/detail', query);
+      return fqParseAudioVoices(payload);
+    } catch (error) {
+      return fqDefaultVoices();
+    }
+  }
+
+  /** 相关作品（原著小说 / 改编短剧）。 */
+  public async relatedWorks(bookId: string): Promise<FqRelatedWork[]> {
+    const payload: Record<string, Object> =
+      await this.getJson(`/api/v1/books/${encodeURIComponent(bookId)}/related`, '');
+    return fqParseRelatedWorks(payload);
+  }
+
+  /**
+   * 边听边读字幕（speech-text 桥）。装饰性数据：
+   * 业务错误（1301008 无字幕）与请求失败一律退空轨，不阻塞播放。
+   */
+  public async chapterTimeline(itemId: string, toneId: string): Promise<FqSubtitleTrack> {
+    const tone: string = toneId.trim().length > 0 ? toneId.trim() : '1';
+    try {
+      const payload: Record<string, Object> = await this.getJson(
+        `/api/v1/chapters/${encodeURIComponent(itemId)}/timeline`,
+        `genre=1&tone_id=${encodeURIComponent(tone)}`);
+      if (fqSubtitleUnavailable(payload)) {
+        return fqEmptySubtitleTrack();
+      }
+      return fqParseSubtitleTrack(payload);
+    } catch (error) {
+      return fqEmptySubtitleTrack();
+    }
   }
 }
 

@@ -5,6 +5,7 @@
 
 import { BottomBuilderParams, HdsNavigationMenuItemOptions, TitleBarContentOptions } from '@kit.UIDesignKit';
 import { NavPathUtils } from '../utils/NavPathUtils';
+import { FqChapter } from './FqModels';
 
 export const ROUTE_SEARCH: string = 'search';
 export const ROUTE_DETAIL: string = 'detail';
@@ -13,6 +14,8 @@ export const ROUTE_RANK: string = 'rank';
 export const ROUTE_AUTHOR: string = 'author';
 /** 自定义阅读页（ReaderPage，自绘分页引擎版）。 */
 export const ROUTE_READER2: string = 'reader2';
+/** 听书页（ListenPage，应用级播放会话）。 */
+export const ROUTE_LISTEN: string = 'listen';
 
 /** 详情页跳转参数（push 前由来源页赋值，详情页 aboutToAppear 读取）。 */
 export class DetailNavParams {
@@ -29,6 +32,8 @@ export class ReaderNavParams {
   static title: string = '';
   /** 定位章节下标；-1 表示跟随上次阅读进度。 */
   static chapterIndex: number = -1;
+  /** 边听边读模式：跟随 fqAudioSession 高亮朗读段落（消费后由阅读页复位）。 */
+  static listenAlong: boolean = false;
 }
 
 /** 作者主页跳转参数。 */
@@ -37,6 +42,17 @@ export class AuthorNavParams {
   static fallbackName: string = '';
   /** 详情页作者头像（加载完成前的占位显示）。 */
   static avatar: string = '';
+}
+
+/** 听书页跳转参数。 */
+export class ListenNavParams {
+  static bookId: string = '';
+  /** 详情 tab（fqKindToTab：小说='小说'，听书='听书'），决定目录语义。 */
+  static tab: string = '听书';
+  static title: string = '';
+  static cover: string = '';
+  /** 详情页预载章节（小说传其自身章节，TTS 按章生成音频；为空则听书页自行拉目录）。 */
+  static chapters: FqChapter[] = [];
 }
 
 /**

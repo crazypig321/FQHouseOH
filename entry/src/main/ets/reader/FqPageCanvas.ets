@@ -24,6 +24,15 @@ export struct FqPageCanvas {
   @Param commentCounts: number[] = [];
   /** 阅读字体族（空串回退系统默认，跟随系统「字体样式」设置）。 */
   @Param fontFamily: string = '';
+  /** 边听边读：高亮段落下标（-1 无高亮）。 */
+  @Param highlightParaIndex: number = -1;
+  /** 高亮底色（含透明度，随阅读主题由调用方传入）。 */
+  @Param highlightColor: string = '#1AFF7A3D';
+
+  /** 该片段是否为高亮段（边听边读朗读中段落）。 */
+  private paraHighlighted(frag: FqPageFragment): boolean {
+    return this.highlightParaIndex >= 0 && frag.paraIndex === this.highlightParaIndex;
+  }
 
   /** 段评计数（越界返回 0）。 */
   private bubbleCount(frag: FqPageFragment): number {
@@ -122,6 +131,8 @@ export struct FqPageCanvas {
           }
           .alignItems(HorizontalAlign.Start)
           .width('100%')
+          .backgroundColor(this.paraHighlighted(frag) ? this.highlightColor : 'transparent')
+          .borderRadius(this.paraHighlighted(frag) ? 6 : 0)
         }, (frag: FqPageFragment): string =>
           `f_${frag.paraIndex}_${frag.startChar}_${frag.endChar}_${frag.showBubble ? 1 : 0}_${frag.bubbleInline ? 1 : 0}_${this.bubbleCount(frag)}_${frag.lines.map((l: string): string => String(l.length)).join('.')}`)
       }

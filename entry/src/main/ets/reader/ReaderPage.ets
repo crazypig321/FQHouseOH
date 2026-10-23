@@ -31,6 +31,8 @@ import { CommonSheet, FqSheetOptions } from '../view/CommonSheet';
 import { FqCommentSheet, fqCommentSheetHeightVp } from '../view/FqCommentSheet';
 import { FqCatalogSheet } from '../view/FqCatalogSheet';
 import { FQ_FONT_OPTIONS, FqFontOption } from '../core/FqOnlineParser';
+import { fqAudioSession } from '../core/FqAudioSession';
+import { FqSubtitleCue, FqSubtitleTrack } from '../model/FqAudioModels';
 import { appState } from '../entryability/AppState';
 import { themeUtils } from '../utils/ThemeUtils';
 import { DialogManager } from '../utils/DialogUtils';
@@ -97,6 +99,16 @@ export struct ReaderPage {
   @Local batteryLevel: number = -1;
   /** 当前页章内偏移（整书页码用）。 */
   @Local shownPageOffset: number = 0;
+  /** 边听边读：高亮段落下标（-1 无高亮）。 */
+  @Local highlightParaIndex: number = -1;
+  /** 边听边读模式（进入时消费 ReaderNavParams.listenAlong）。 */
+  private listenAlong: boolean = false;
+  /** 上次已消费的字幕 cue 下标（-2 强制首刷）。 */
+  private lastCueIndex: number = -2;
+  /** 段落匹配游标（字幕与段落均单调，向前优先）。 */
+  private paraCursor: number = 0;
+  /** 去空白段落数组（字幕文本匹配用，与 curLayout.paragraphs 同步重建）。 */
+  private normParas: string[] = [];
   private bookId: string = '';
   private kind: string = 'book';
   private bookTitle: string = '';
@@ -149,6 +161,8 @@ export struct ReaderPage {
       },
     ]);
     this.startChapterIndex = ReaderNavParams.chapterIndex;
+    this.listenAlong = ReaderNavParams.listenAlong;
+    ReaderNavParams.listenAlong = false;
     FqReaderStore.init(getContext(this));
     const settings = FqReaderStore.getSettings();
     this.fontSize = settings.fontSize;
@@ -377,6 +391,8 @@ export struct ReaderPage {
      // bubbleFontColor: this.theme().night ? '#9AA0A6' : '#8A8578',
       commentCounts: this.layoutForSlot(slot)?.commentCounts ?? [],
       fontFamily: this.readerFontFamily,
+      highlightParaIndex: this.slotHighlightPara(slot),
+      highlightColor: this.theme().night ? '#33FF7A3D' : '#1AFF7A3D',
     })
   }
 
@@ -487,6 +503,10 @@ export struct ReaderPage {
     this.chapterPages.set(target.chapterIndex, target.pages.length);
     FqReaderStore.saveChapterPages(this.bookId, this.chapterPages);
     this.saveProgressNow();
+    this.resetListenState();
+    if (this.listenAlong) {
+      this.syncListenHighlight();
+    }
     this.preloadNeighbors(this.loadToken);
   }
 
@@ -798,6 +818,161 @@ export struct ReaderPage {
       return;
     }
     this.relayoutKeepPosition();
+  }
+
+  // ---------------------------------------------------------------------------
+  // 边听边读：跟随 fqAudioSession 章节与字幕，高亮朗读段落并自动翻页
+  // ---------------------------------------------------------------------------
+
+  /** 播放会话当前章下标（供 @Monitor 监听音频换章）。 */
+  @Computed
+  get audioChapterIndex(): number {
+    return fqAudioSession.index;
+  }
+
+  /** 播放会话当前位置（ms，供 @Monitor 监听字幕推进）。 */
+  @Computed
+  get audioPositionMs(): number {
+    return Math.round(fqAudioSession.positionSec * 1000);
+  }
+
+  /** 音频换章：阅读页跟章（itemId 优先、标题次之、下标兜底）。 */
+  @Monitor('audioChapterIndex')
+  onAudioChapterChange(): void {
+    if (!this.listenAlong || this.chapters.length === 0) {
+      return;
+    }
+    const chapter: FqChapter | undefined = fqAudioSession.chapters[fqAudioSession.index];
+    if (chapter === undefined) {
+      return;
+    }
+    let target: number = -1;
+    for (let i: number = 0; i < this.chapters.length; i++) {
+      if (this.chapters[i].itemId === chapter.itemId) {
+        target = i;
+        break;
+      }
+    }
+    if (target < 0) {
+      for (let i: number = 0; i < this.chapters.length; i++) {
+        if (this.chapters[i].title === chapter.title) {
+          target = i;
+          break;
+        }
+      }
+    }
+    if (target < 0 && fqAudioSession.index < this.chapters.length) {
+      target = fqAudioSession.index;
+    }
+    if (target >= 0 && target !== this.chapterIndex) {
+      this.openChapter(target, '');
+    } else {
+      this.syncListenHighlight();
+    }
+  }
+
+  /** 播放位置推进：刷新段落高亮与跟读翻页。 */
+  @Monitor('audioPositionMs')
+  onAudioPositionChange(): void {
+    this.syncListenHighlight();
+  }
+
+  /** 槽位页高亮段（仅当前章页生效，邻章越界页不串高亮）。 */
+  private slotHighlightPara(slot: number): number {
+    if (!this.listenAlong || this.highlightParaIndex < 0) {
+      return -1;
+    }
+    const layout: FqChapterLayout | null = this.layoutForSlot(slot);
+    const cur: FqChapterLayout | null = this.curLayout;
+    if (layout === null || cur === null || layout.chapterIndex !== cur.chapterIndex) {
+      return -1;
+    }
+    return this.highlightParaIndex;
+  }
+
+  /** 跟读高亮同步：cue 变化才重算；段落匹配失败保留旧高亮。 */
+  private syncListenHighlight(): void {
+    if (!this.listenAlong) {
+      return;
+    }
+    const layout: FqChapterLayout | null = this.curLayout;
+    if (layout === null || this.loadingState) {
+      return;
+    }
+    const track: FqSubtitleTrack = fqAudioSession.subtitleTrack;
+    if (track.isEmpty) {
+      this.highlightParaIndex = -1;
+      return;
+    }
+    const cueIndex: number = track.indexAt(fqAudioSession.positionSec * 1000);
+    if (cueIndex === this.lastCueIndex) {
+      return;
+    }
+    this.lastCueIndex = cueIndex;
+    if (cueIndex < 0) {
+      this.highlightParaIndex = -1;
+      return;
+    }
+    const cue: FqSubtitleCue | undefined = track.cues[cueIndex];
+    if (cue === undefined) {
+      return;
+    }
+    const para: number = this.matchParaForCue(cue.text);
+    if (para < 0) {
+      return;
+    }
+    this.highlightParaIndex = para;
+    const pageIdx: number = fqPageIndexForPosition(layout.pages, para, 0);
+    if (pageIdx !== this.pageIndex) {
+      this.pageIndex = pageIdx;
+      this.shownPageOffset = pageIdx;
+      this.afterPageShown();
+    }
+  }
+
+  /** 字幕行 → 段落下标（游标向前优先，未中回绕；去空白双向包含匹配）。 */
+  private matchParaForCue(text: string): number {
+    const normCue: string = ReaderPage.normText(text);
+    if (normCue.length === 0) {
+      return -1;
+    }
+    const paras: string[] = this.normParas;
+    for (let i: number = this.paraCursor; i < paras.length; i++) {
+      if (ReaderPage.cueMatchesPara(normCue, paras[i])) {
+        this.paraCursor = i;
+        return i;
+      }
+    }
+    for (let i: number = 0; i < this.paraCursor && i < paras.length; i++) {
+      if (ReaderPage.cueMatchesPara(normCue, paras[i])) {
+        this.paraCursor = i;
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  /** 章切换/重排后复位跟读匹配态并重建去空白段落缓存。 */
+  private resetListenState(): void {
+    this.lastCueIndex = -2;
+    this.paraCursor = 0;
+    this.highlightParaIndex = -1;
+    const layout: FqChapterLayout | null = this.curLayout;
+    this.normParas = layout === null ? [] : layout.paragraphs.map(
+      (p: string): string => ReaderPage.normText(p));
+  }
+
+  /** 去除全部空白（含全角空格/换行），供字幕与段落文本对齐匹配。 */
+  private static normText(text: string): string {
+    return text.replace(/\s+/g, '');
+  }
+
+  /** 段落匹配：双向包含（字幕行为段落子串，或短段为字幕行子串）。 */
+  private static cueMatchesPara(normCue: string, normPara: string): boolean {
+    if (normPara.length === 0) {
+      return false;
+    }
+    return normPara.indexOf(normCue) >= 0 || normCue.indexOf(normPara) >= 0;
   }
 
   /** ReadBar 悬浮工具条分发：目录 / 设置 / 上一章 / 下一章。 */
@@ -1401,6 +1576,10 @@ export struct ReaderPage {
       FqReaderStore.saveChapterPages(this.bookId, this.chapterPages);
       this.loadingState = false;
       this.saveProgressNow();
+      this.resetListenState();
+      if (this.listenAlong) {
+        this.syncListenHighlight();
+      }
       this.preloadNeighbors(token);
     } catch (error) {
       if (token === this.loadToken) {

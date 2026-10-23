@@ -4,7 +4,7 @@
  * 对齐 fqapp lib/pages/detail_page.dart 与 widgets/detail/*（M1 子集）：
  * Hero（封面+标题+元信息+原创标）/作者卡/数据卡/书籍简介展开/标签/
  * 作品 ID（可复制）/查看目录 + 章节试读预览/底部悬浮操作栏（听书/下载/开始阅读）。
- * 阅读器、听书、下载动作在后续版本接入，当前先占位提示。
+ * 阅读器、听书动作已接入；下载占位提示。
  */
 
 import pasteboard from '@ohos.pasteboard';
@@ -21,7 +21,7 @@ import {
   fqKindLabel,
 } from '../model/FqModels';
 import { FqShelfStore, FqShelfItem } from '../core/FqShelfStore';
-import { AuthorNavParams, DetailNavParams, FqTitleBarOptions, ReaderNavParams, ROUTE_AUTHOR, ROUTE_READER2 } from '../model/FqNavModels';
+import { AuthorNavParams, DetailNavParams, FqTitleBarOptions, ListenNavParams, ReaderNavParams, ROUTE_AUTHOR, ROUTE_LISTEN, ROUTE_READER2 } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import { CommonNav } from '../view/CommonNav';
 import { CommonLoading, FQ_ACCENT } from '../view/CommonCom';
@@ -769,13 +769,30 @@ export struct DetailPage {
     promptAction.showToast({ message: `${feature}功能即将上线`, duration: 1500 });
   }
 
-  /** 底部操作栏：小说"阅读"进阅读器，其余动作占位。 */
+  /** 底部操作栏：小说"阅读"进阅读器、"听书"/听书详情"收听"进听书页，下载占位。 */
   private onReadBarAction(key: string): void {
     if (key === '阅读' && this.itemKind === 'book') {
       this.openReader(-1);
       return;
     }
+    if (key === '听书' && this.itemKind === 'book') {
+      this.openListen();
+      return;
+    }
+    if (key === '收听' && this.itemKind === 'audio') {
+      this.openListen();
+      return;
+    }
     this.comingSoon(key);
+  }
+
+  private openListen(): void {
+    ListenNavParams.bookId = this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId;
+    ListenNavParams.tab = fqKindToTab(this.itemKind);
+    ListenNavParams.title = this.detail.title;
+    ListenNavParams.cover = this.itemCover.length > 0 ? this.itemCover : this.detail.cover;
+    ListenNavParams.chapters = this.chapters;
+    NavPathUtils.push(ROUTE_LISTEN);
   }
 
   private openReader(chapterIndex: number): void {
