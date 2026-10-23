@@ -1,5 +1,5 @@
 /**
- * 自定义阅读页翻页容器（ReaderPage2 专用）：
+ * 自定义阅读页翻页容器（ReaderPage 专用）：
  * - 仿真模式（flipMode=0）：移植 PageFlip-master 折角仿真——槽位页截图 + FqSimFlip
  *   自绘折叠层跟手卷曲，松手按位移/速度阈值完成翻页或回弹取消；
  * - 平移模式（flipMode=1）：三层 Stack（prev / cur / next）两页联动横滑。

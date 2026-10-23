@@ -1,5 +1,5 @@
 /**
- * 自定义阅读页分页排版引擎（ReaderPage2 专用，不依赖 Reader Kit）：
+ * 自定义阅读页分页排版引擎（ReaderPage 专用，不依赖 Reader Kit）：
  *
  * 输入：段落数组（首段章题；非标题段已带 '\u3000\u3000' 缩进前缀）+
  *       排版几何（FqReaderLayoutMetrics，px 基准）+ 每段段评数。
@@ -9,7 +9,7 @@
  *       输出 FqReaderPageData[]（片段 + 行集合 + 气泡命中区 + 页首位置）。
  * 渲染约定：渲染端逐行独立 Text（.maxLines(1)），行内容即引擎切好的行，
  * 断行零分歧；measureText 仅支持 HarmonyOS Sans（自定义字体名会被忽略），
- * 自定义阅读字体时测量回调由 ReaderPage2 以「全角 1em 步进 + 半角系统测量」
+ * 自定义阅读字体时测量回调由 ReaderPage 以「全角 1em 步进 + 半角系统测量」
  * 合成，使满行测量与渲染一致，杜绝满行末字被 maxLines(1) 裁掉。
  */
 

@@ -1,5 +1,5 @@
 /**
- * 仿真翻页绘制核心（ReaderPage2 专用，移植自 PageFlip-master 官方示例）：
+ * 仿真翻页绘制核心（ReaderPage 专用，移植自 PageFlip-master 官方示例）：
  * - FqSimFlipController：折页几何（A~K 点）/路径/阴影/镜像绘制，全 px 坐标系；
  *   修复示例两处问题：drawShadow 内嵌 restore 导致的 save/restore 不平衡
  *   （本模块 drawShadowCore 不 restore，各阴影方法对称 save/restore），

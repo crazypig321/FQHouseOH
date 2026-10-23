@@ -1,5 +1,5 @@
 /**
- * 自定义阅读页（ReaderPage2）数据模型与段评数据源。
+ * 自定义阅读页（ReaderPage）数据模型与段评数据源。
  *
  * 单位约定（分页几何与渲染分离，避免 fp/vp/px 混算错位）：
  * - FqReaderLayoutMetrics 中 *Px / *Fp 后缀字段为物理 px / fp 数值（fp * scaledDensity = px），
@@ -177,7 +177,7 @@ export class FqEmptyParagraphCommentProvider implements FqParagraphCommentProvid
   }
 }
 
-/** 段评演示开关：true 时 ReaderPage2 使用演示数据（UI/交互联调用；接入真实段评接口前置 false）。 */
+/** 段评演示开关：true 时 ReaderPage 使用演示数据（UI/交互联调用；接入真实段评接口前置 false）。 */
 export const FQ_DEMO_PARAGRAPH_COMMENTS: boolean = true;
 
 const FQ_DEMO_COMMENT_TEXTS: string[] = [

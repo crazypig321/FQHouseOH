@@ -10,7 +10,7 @@ import { HomePage } from '../pages/HomePage';
 import { SearchPage } from '../pages/SearchPage';
 import { DetailPage } from '../pages/DetailPage';
 import { RankPage } from '../pages/RankPage';
-import { ReaderPage2 } from '../reader/ReaderPage2';
+import { ReaderPage } from '../reader/ReaderPage'
 import { CommonNav } from './CommonNav';
 
 const TAB_ACCENT: string = '#FF7A3D';
@@ -50,7 +50,7 @@ export function PageMapBuilder(name: string) {
   } else if (name === ROUTE_RANK) {
     RankPage()
   } else if (name === ROUTE_READER2) {
-    ReaderPage2()
+    ReaderPage()
   }
 }
 

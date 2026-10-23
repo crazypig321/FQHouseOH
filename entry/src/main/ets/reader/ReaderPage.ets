@@ -1,5 +1,5 @@
 /**
- * 自定义小说阅读页（ReaderPage2，CommonNav 框架，不依赖 Reader Kit）：
+ * 自定义小说阅读页（ReaderPage，CommonNav 框架，不依赖 Reader Kit）：
  * 与 ReaderPage（官方 ReadPageComponent 版）UI 保持一致，正文由自研分页排版
  * 引擎渲染（FqPagination）：
  * - 分页：章节段落（fqNormalizeChapterText 产物）+ measure 断行 → 页片段/行，
@@ -150,7 +150,7 @@ class FqCommentSource implements IDataSource {
 }
 
 @ComponentV2
-export struct ReaderPage2 {
+export struct ReaderPage {
   @Local loadingState: boolean = true;
   @Local errorMsg: string = '';
   @Local menuVisible: boolean = false;
@@ -748,12 +748,12 @@ export struct ReaderPage2 {
           pos += 1;
           continue;
         }
-        if (ReaderPage2.isFullWidthCode(code)) {
+        if (ReaderPage.isFullWidthCode(code)) {
           if (halfRun.length > 0) {
             width += measureHalf(halfRun);
             halfRun = '';
           }
-          width += ReaderPage2.isHalfQuoteCode(code) ? emPx / 2 : emPx;
+          width += ReaderPage.isHalfQuoteCode(code) ? emPx / 2 : emPx;
         } else {
           halfRun += text.charAt(pos);
         }
@@ -1420,19 +1420,19 @@ export struct ReaderPage2 {
     }
     const target: string = `${this.filesDir}/fq_reader2_font_${this.fontIndex}.ttf`;
     try {
-      if (!ReaderPage2.fontCopyValid(target, option.candidates)) {
-        ReaderPage2.deleteFileQuietly(target);
+      if (!ReaderPage.fontCopyValid(target, option.candidates)) {
+        ReaderPage.deleteFileQuietly(target);
         let copied: boolean = false;
         for (const src of option.candidates) {
-          if (!ReaderPage2.fileExists(src)) {
+          if (!ReaderPage.fileExists(src)) {
             continue;
           }
           await fileIo.copyFile(src, target);
-          if (ReaderPage2.fontCopyValid(target, option.candidates)) {
+          if (ReaderPage.fontCopyValid(target, option.candidates)) {
             copied = true;
             break;
           }
-          ReaderPage2.deleteFileQuietly(target);
+          ReaderPage.deleteFileQuietly(target);
         }
         if (!copied) {
           this.readerFontFamily = '';
@@ -1445,7 +1445,7 @@ export struct ReaderPage2 {
       });
       this.readerFontFamily = option.name;
     } catch (error) {
-      hilog.warn(0x0001, 'ReaderPage2', 'prepareReaderFont failed');
+      hilog.warn(0x0001, 'ReaderPage', 'prepareReaderFont failed');
       this.readerFontFamily = '';
     }
   }
@@ -1460,15 +1460,15 @@ export struct ReaderPage2 {
 
   /** 沙箱副本完整性：存在且大小与任一候选源一致。 */
   private static fontCopyValid(target: string, candidates: string[]): boolean {
-    if (!ReaderPage2.fileExists(target)) {
+    if (!ReaderPage.fileExists(target)) {
       return false;
     }
-    const targetSize: number = ReaderPage2.fileSizeQuietly(target);
+    const targetSize: number = ReaderPage.fileSizeQuietly(target);
     if (targetSize <= 0) {
       return false;
     }
     for (const src of candidates) {
-      if (ReaderPage2.fileSizeQuietly(src) === targetSize) {
+      if (ReaderPage.fileSizeQuietly(src) === targetSize) {
         return true;
       }
     }
@@ -1581,7 +1581,7 @@ export struct ReaderPage2 {
       return;
     }
     const token: number = ++this.loadToken;
-    hilog.info(0x0001, 'ReaderPage2', `openChapter index=${index} domPos=${domPos}`);
+    hilog.info(0x0001, 'ReaderPage', `openChapter index=${index} domPos=${domPos}`);
     this.menuVisible = false;
     this.onSheetClose();
     this.refreshChapterEstimate(this.chapterIndex);
@@ -1911,7 +1911,6 @@ export struct ReaderPage2 {
           .width(28)
           .height(28)
           .borderRadius(14)
-          .backgroundColor(this.panelDividerColor())
           .justifyContent(FlexAlign.Center)
           if (comment.userAvatar.length > 0) {
             Image(comment.userAvatar)
@@ -1992,7 +1991,6 @@ export struct ReaderPage2 {
           .width(30)
           .height(30)
           .borderRadius(15)
-          .backgroundColor(this.panelDividerColor())
           .justifyContent(FlexAlign.Center)
           if (comment.userAvatar.length > 0) {
             Image(comment.userAvatar)
@@ -2172,7 +2170,7 @@ export struct ReaderPage2 {
   }
 
   /** 面板内分隔线颜色（随阅读主题）。 */
-  private panelDividerColor(): string {
-    return this.theme().night ? '#2A2D30' : '#E8E2D4';
+  private panelDividerColor(): ResourceColor {
+    return $r('sys.color.comp_divider');
   }
 }
