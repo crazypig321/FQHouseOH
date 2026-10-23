@@ -193,7 +193,7 @@ export struct ListenPage {
           .width('100%')
           .height(35)
           .padding({ left: 14, right: 14 })
-          .backgroundColor('rgba(0,0,0,0.3)')
+          .backgroundColor($r('sys.color.comp_background_tertiary'))
         }
         .width('100%')
         .height('100%')
@@ -817,7 +817,9 @@ export struct ListenPage {
           }
           .width('100%')
           .height(48)
-          .padding({ left: 20, right: 20 })
+          .borderRadius(8)
+          .padding({ left: 10, right: 10 })
+          .backgroundColor(rate === fqAudioSession.rate ? '#1AFF7A3D' : Color.Transparent)
           .onClick((): void => {
             fqAudioSession.setRate(rate);
             this.closeSheet();
@@ -825,6 +827,7 @@ export struct ListenPage {
         }, (rate: number) => `rate_${rate}`)
       }
       .width('100%')
+      .padding({ left: 12, right: 12 })
     }
   }
 
