@@ -1,5 +1,5 @@
 /**
- * 排行榜页（NavDestination）：榜单药丸条 + 分类文本条 + 排名列表 + 分页。
+ * 排行榜页（NavDestination）：标题栏 bottomBuilder（榜单药丸条 + 分类文本条）+ 排名列表 + 分页。
  * 端点语义对齐 fqapp rank_page.dart / rank.dart：
  * 目录藏于 novel homepage(tab_type=2) 载荷，榜单 /api/v1/rank/{rankId} 分页。
  */
@@ -13,10 +13,17 @@ import {
   FqRankTab,
   fqEmptyRankCatalog,
 } from '../../model/FqModels';
-import { DetailNavParams, FqTitleBarOptions, ROUTE_DETAIL } from '../../model/FqNavModels';
+import { DetailNavParams, ROUTE_DETAIL } from '../../model/FqNavModels';
 import { NavPathUtils } from '../../utils/NavPathUtils';
-import { CommonNav } from '../../view/CommonNav';
+import { CommonNav, titleBarOf } from '../../view/CommonNav';
 import { CommonLoading, FQ_ACCENT } from '../../view/CommonCom';
+import { appState } from '../../entryability/AppState';
+
+/** 标题栏 bottomBuilder 插槽高：药丸条 46 + 分类条 38 + 间距 8 + 上下 padding 12 */
+const FQ_RANK_BOTTOM_HEIGHT_BOTH: number = 104;
+
+/** 仅药丸条时插槽高（短剧/漫剧榜隐藏分类条）。 */
+const FQ_RANK_BOTTOM_HEIGHT_PILLS: number = 58;
 
 /** 排名行懒加载数据源。 */
 class FqRankEntryDataSource implements IDataSource {
@@ -85,8 +92,15 @@ export struct RankPage {
 
   build() {
     CommonNav({
-      titleBarOp: FqTitleBarOptions('排行榜', false),
+      titleBarOp: titleBarOf('排行榜', undefined, undefined, {
+        builder: (): void => {
+          this.RankTopBuilder();
+        },
+        height: this.showCategoryStrip() ? FQ_RANK_BOTTOM_HEIGHT_BOTH : FQ_RANK_BOTTOM_HEIGHT_PILLS,
+      }),
       scroller: this.scroller,
+      // 药丸/分类条常驻标题栏，不随上滑隐藏
+      isSearchBarScroller: false,
       doubleTapToTop: true,
     }) {
       Column() {
@@ -112,10 +126,6 @@ export struct RankPage {
           .width('100%')
           .justifyContent(FlexAlign.Center)
         } else {
-          this.RankPills()
-          if (!this.currentRank().isDrama && this.catalog.categories.length > 0) {
-            this.CategoryStrip()
-          }
           List({ space: 0, scroller: this.scroller }) {
             LazyForEach(this.dataSource, (entry: FqRankEntry) => {
               ListItem() {
@@ -192,12 +202,38 @@ export struct RankPage {
           .layoutWeight(1)
           .width('100%')
           .scrollBar(BarState.Off)
+          .contentStartOffset(this.listTopInset())
+          .contentEndOffset(appState.bottomRect + 60)
           .onReachEnd(() => this.loadMore())
         }
       }
       .width('100%')
       .height('100%')
     }
+  }
+
+  /** 标题栏 bottomBuilder：榜单药丸条 + 分类文本条（短剧/漫剧榜隐藏分类）。 */
+  @Builder
+  private RankTopBuilder() {
+    Column({ space: 8 }) {
+      this.RankPills()
+      if (this.showCategoryStrip()) {
+        this.CategoryStrip()
+      }
+    }
+    .width('100%')
+    .padding({ top: 2, bottom: 10 })
+  }
+
+  /** 分类条显隐：非短剧/漫剧榜且目录含分类。 */
+  private showCategoryStrip(): boolean {
+    return !this.currentRank().isDrama && this.catalog.categories.length > 0;
+  }
+
+  /** 列表顶部避让：状态栏 + 标题栏 56 + bottomBuilder 插槽高。 */
+  private listTopInset(): number {
+    return appState.topRect + 56 +
+      (this.showCategoryStrip() ? FQ_RANK_BOTTOM_HEIGHT_BOTH : FQ_RANK_BOTTOM_HEIGHT_PILLS);
   }
 
   /** 榜单算法药丸条。 */
