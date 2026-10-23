@@ -219,7 +219,7 @@ export struct FqCatalogSheet {
           startMargin: 20,
           endMargin: 20,
         })
-      }.padding({ top: 56 })
+      }
     }
   }
 }

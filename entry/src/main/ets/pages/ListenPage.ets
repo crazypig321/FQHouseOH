@@ -83,6 +83,8 @@ export struct ListenPage {
   /** 书架态刷新令牌（toggle 后驱动 @Computed 重算）。 */
   @Local shelfRefresh: number = 0;
   private scroller: Scroller = new Scroller();
+  /** 音色条横向列表滚动器（定位选中项）。 */
+  private toneChipScroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
     FqShelfStore.init(getContext(this));
@@ -483,6 +485,7 @@ export struct ListenPage {
       } else {
         fqAudioSession.selectTone(tone);
       }
+      this.scrollToneChipsToSelected();
     })
     .accessibilityText(`选择音色 ${tone.title}`)
   }
@@ -511,7 +514,7 @@ export struct ListenPage {
             .padding({ left: 8 })
             .layoutWeight(1)
         } else {
-          List({ space: 6 }) {
+          List({ space: 6, scroller: this.toneChipScroller }) {
             ForEach(this.toneChips(), (tone: FqAudioTone) => {
               ListItem(){
                 this.ToneChip(tone, this.toneChipSelected(tone),
@@ -524,6 +527,9 @@ export struct ListenPage {
           .listDirection(Axis.Horizontal)
           .scrollBar(BarState.Off)
           .layoutWeight(1)
+          .onAppear((): void => {
+            this.scrollToneChipsToSelected();
+          })
         }
       }
       .layoutWeight(237)
@@ -685,6 +691,7 @@ export struct ListenPage {
                 .onClick((): void => {
                   fqAudioSession.selectNarrator(voice);
                   this.closeSheet();
+                  this.scrollToneChipsToSelected();
                 })
             }, (voice: FqAudioTone) => voice.id)
           }
@@ -707,7 +714,7 @@ export struct ListenPage {
         .width('100%')
         .alignItems(HorizontalAlign.Start)
         .justifyContent(FlexAlign.Start)
-        .padding({ left: 16, right: 16, top: 56, bottom: 24 })
+        .padding({ left: 16, right: 16, bottom: 24 })
       }
       .scrollBar(BarState.Off)
       .width('100%')
@@ -756,6 +763,7 @@ export struct ListenPage {
     .onClick((): void => {
       fqAudioSession.selectTone(voice);
       this.closeSheet();
+      this.scrollToneChipsToSelected();
     })
   }
 
@@ -890,31 +898,20 @@ export struct ListenPage {
         })
       }
       .width('100%')
-      .padding({ top: 56, bottom: 8 })
+      .padding({ bottom: 8 })
     }
   }
 
   /** 更多（播放设置）：定时 / 目录 / 自动连播。 */
   @Builder
   private MoreSheetBuilder() {
-    Column() {
-      Row() {
-        Text('播放设置')
-          .fontSize(17)
-          .fontWeight(FontWeight.Bold)
-          .fontColor($r('sys.color.font_primary'))
-        Blank()
-        SymbolGlyph($r('sys.symbol.xmark'))
-          .fontSize(20)
-          .fontColor([$r('sys.color.font_secondary')])
-          .padding(6)
-          .onClick((): void => {
-            this.closeSheet();
-          })
-      }
-      .width('100%')
-      .padding({ top: 14, bottom: 12 })
-
+    CommonSheet({
+      sheetTitle: '播放设置',
+      showClose: true,
+      closeClick: (): void => {
+        this.closeSheet();
+      },
+    }) {
       Column() {
         Row({ space: 12 }) {
           Column() {
@@ -1022,10 +1019,9 @@ export struct ListenPage {
       .width('100%')
       .borderRadius(18)
       .backgroundColor($r('sys.color.comp_background_secondary'))
+      .alignItems(HorizontalAlign.Start)
+      .margin({ left: 16, right: 16, top: 12, bottom: 20 })
     }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 20 })
-    .alignItems(HorizontalAlign.Start)
   }
 
   /** 章节试读全文。 */
@@ -1044,7 +1040,7 @@ export struct ListenPage {
           .lineHeight(25.5)
           .fontColor($r('sys.color.font_primary'))
           .width('100%')
-          .padding({ left: 20, right: 20, top: 4, bottom: 24 })
+          .padding({ left: 20, right: 20, bottom: 24 })
       }
       .scrollBar(BarState.Off)
       .width('100%')
@@ -1167,23 +1163,21 @@ export struct ListenPage {
     NavPathUtils.push(ROUTE_READER2);
   }
 
-  /** 音色条显示列表（选中优先）。 */
+  /** 音色条显示列表（保持原始顺序，滚动定位到选中项）。 */
   private toneChips(): FqAudioTone[] {
-    const tones: FqAudioTone[] = fqAudioSession.hasFixedTone
+    return fqAudioSession.hasFixedTone
       ? fqAudioSession.toneSet.narratorTones : fqAudioSession.toneSet.ttsTones;
-    const selectedId: string = fqAudioSession.hasFixedTone
-      ? fqAudioSession.bookId : fqAudioSession.toneId;
-    const sorted: FqAudioTone[] = tones.slice();
-    sorted.sort((a: FqAudioTone, b: FqAudioTone): number => {
-      if (a.id === selectedId) {
-        return -1;
+  }
+
+  /** 音色条滚动到选中项（不排序，仅定位）。 */
+  private scrollToneChipsToSelected(): void {
+    const chips: FqAudioTone[] = this.toneChips();
+    for (let i = 0; i < chips.length; i++) {
+      if (this.toneChipSelected(chips[i])) {
+        this.toneChipScroller.scrollToIndex(i, false);
+        return;
       }
-      if (b.id === selectedId) {
-        return 1;
-      }
-      return 0;
-    });
-    return sorted;
+    }
   }
 
   private toneChipSelected(tone: FqAudioTone): boolean {
