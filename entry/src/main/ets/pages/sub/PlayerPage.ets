@@ -275,10 +275,6 @@ export struct PlayerPage {
 
         if (!this.fullScreen) {
           this.TopBar()
-          // 「全屏观看」药丸：视频实际画面出现（尺寸就绪）才显示，加载占位期不出现
-          if (this.player.state.videoParams.dw > 0) {
-            this.FullscreenPill()
-          }
           this.CatalogBar()
         }
 
@@ -377,7 +373,7 @@ export struct PlayerPage {
       })
     }
     .width('100%')
-    .padding({ left: 16, right: 16 })
+    .padding({ left: 6, right: 6 })
   }
 
   /**
@@ -416,7 +412,6 @@ export struct PlayerPage {
     .width('100%')
     .height(44)
     .padding({ left: 12, right: 12 })
-    .margin({ left: 16, right: 16 })
     .borderRadius(10)
     .backgroundColor('rgba(255,255,255,0.08)')
     .alignItems(VerticalAlign.Center)
@@ -444,10 +439,6 @@ export struct PlayerPage {
     .borderRadius(8)
     .backgroundColor('#B3262626')
     .alignItems(VerticalAlign.Center)
-    // 官方 _PortraitControlsLayout：top 钳制在信息列顶 − 药丸高 − 间隙
-    // （maximumTop）；原著横幅撑高信息列时药丸随之上移让位
-    .position({ x: this.screenW / 2, y: Math.min(this.videoBottom() + 8, this.bandTopAbs() - 39) })
-    .markAnchor({ x: '50%', y: 0 })
     .onClick((): void => {
       this.enterFullscreen();
     })
@@ -531,6 +522,11 @@ export struct PlayerPage {
   @Builder
   private CatalogBar() {
     Column({ space: 12 }){
+      // 「全屏观看」药丸：视频实际画面出现（尺寸就绪）才显示，加载占位期不出现
+      if (this.player.state.videoParams.dw > 0) {
+        this.FullscreenPill()
+      }
+
       Column({ space: 2 }){
         this.SeriesTitleRow()
 
@@ -538,7 +534,7 @@ export struct PlayerPage {
         if (this.originalBook !== null) {
           this.OriginalBookBanner()
         }
-      }
+      }.padding({ left: 10, right: 10 })
 
       this.SeekBar()
 

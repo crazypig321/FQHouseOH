@@ -202,7 +202,7 @@ export struct ListenPage {
 
         Column() {
           Row() {
-            SymbolGlyph($r('sys.symbol.arrow_clockwise'))
+            SymbolGlyph($r('sys.symbol.waveform_headphones'))
               .fontSize(14)
               .fontColor([Color.White])
           }
@@ -688,7 +688,7 @@ export struct ListenPage {
               Text('真人讲书')
                 .fontSize(16)
                 .fontWeight(FontWeight.Bold)
-                .fontColor($r('sys.color.font_primary'))
+                .fontColor($r('sys.color.font_tertiary'))
                 .alignSelf(ItemAlign.Start)
 
 
@@ -724,7 +724,7 @@ export struct ListenPage {
               Text('智能朗读')
                 .fontSize(16)
                 .fontWeight(FontWeight.Bold)
-                .fontColor($r('sys.color.font_primary'))
+                .fontColor($r('sys.color.font_tertiary'))
                 .alignSelf(ItemAlign.Start)
 
               GridRow({ columns: 2, gutter: { x: 12, y: 12 } }) {
