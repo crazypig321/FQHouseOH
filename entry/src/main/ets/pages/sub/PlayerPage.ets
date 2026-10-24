@@ -22,6 +22,10 @@
  *   右上角菜单呼出「播放设置」半模态（倍速档位）；
  *   评论按钮呼出「剧评」半模态（公共 FqCommentSheet，同详情页全部评论）。
  * - 播完自动连播；aboutToDisappear 销毁 mpv 实例并恢复沉浸前的系统 UI。
+ * - 已看集标记与续播（fqapp watched_episodes.dart / video_progress 一族）：
+ *   已看按集 itemId 持久化（FqWatchedStore），实际播放过（position > 0）才标记，
+ *   跳集观看绝不误标中间集；续播进度（集 + 位置）暂停/切集/周期 5s/退出保存，
+ *   再次进入自动续播上次看到的集与位置（播完则该集从头）。
  * - 弹幕（全屏展示）：/api/v1/videos/{vid}/danmaku 按 cursor 续拉，
  *   切集整池作废、seek 按目标时间重取；FqDanmakuView 车道避让右→左飞行，
  *   全屏控制条「弹幕」开关（官方 Toast 文案）。
@@ -38,6 +42,7 @@ import { FqStoryPanel } from '../../view/FqStoryPanel';
 import { DetailNavParams, PlayerNavParams, ROUTE_DETAIL } from '../../model/FqNavModels';
 import { FqChapter, FqDanmaku, FqDanmakuPage, FqEpisodeSource, FqSeriesRelateBook, fqKindToTab } from '../../model/FqModels';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
+import { FqWatchedStore, FqWatchedProgress } from '../../core/FqWatchedStore';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { appState } from '../../entryability/AppState';
 
@@ -110,6 +115,8 @@ export struct PlayerPage {
   @Local danmakuResetToken: number = 0;
   /** 关联原著（剧有原著才显示横幅；装饰性数据，失败静默）。 */
   @Local originalBook: FqSeriesRelateBook | null = null;
+  /** 已看集 itemId 集合（FqWatchedStore；标记后重赋值驱动选集面板刷新）。 */
+  @Local watchedIds: Set<string> = new Set<string>();
 
   private title: string = '';
   private tab: string = '短剧';
@@ -129,6 +136,14 @@ export struct PlayerPage {
   private centerHideTimer: number = 0;
   /** 弹幕加载令牌（切集/seek 后旧请求作废）。 */
   private danmakuLoadToken: number = 0;
+  /** 当前集已实际播放（position > 0；切集重置，已看标记 guard）。 */
+  private hasDisplayed: boolean = false;
+  /** 本剧续播进度（进页恢复；暂停/切集/周期/退出保存）。 */
+  private progress: FqWatchedProgress | null = null;
+  /** 进页待恢复的续播位置（秒；仅首开命中的那一次消费）。 */
+  private pendingResumeSec: number = -1;
+  /** 周期保存计数（5s 一存，仅播放中）。 */
+  private progressTick: number = 0;
   /** 弹幕续拉游标（common_list_info.cursor）。 */
   private danmakuCursor: string = '';
   /** 弹幕还有更多（common_list_info.has_more）。 */
@@ -160,20 +175,38 @@ export struct PlayerPage {
         this.onEpisodeEnd();
       }
     });
-    // 弹幕进度心跳：接近已加载右界时按 cursor 续拉
+    // 已看集：按集 itemId 持久化（FqWatchedStore），加载本剧已看集合与续播进度
+    FqWatchedStore.init(getContext(this));
+    this.progress = FqWatchedStore.progress(PlayerNavParams.contentId);
+    this.watchedIds = this.copyWatchedIds();
+    // 实际播放 guard：position 走表（非加载期）才视为看过（对齐 fqapp 首帧不标）
+    this.player.stream.position.listen((pos: number): void => {
+      if (pos > 0 && !this.loading) {
+        this.hasDisplayed = true;
+      }
+    });
+    // 弹幕进度心跳：接近已加载右界时按 cursor 续拉；同时周期保存续播进度
     this.danmakuTimer = setInterval((): void => {
       this.danmakuTick();
+      this.progressSaveTick();
     }, 1000);
     if (this.episodes.length === 0) {
       this.loadEpisodes();
     } else {
-      this.loadEpisode(start);
+      // 续播（fqapp resumeEpisodeIndex）：有进度记录则覆盖起播集并挂恢复位置
+      const resumeIndex: number = this.resumeStartIndex();
+      if (resumeIndex >= 0) {
+        this.index = resumeIndex;
+      }
+      this.loadEpisode(this.index);
     }
     // 关联原著（官方 _loadBandExtras：装饰性数据，失败静默不影响播放）
     this.loadOriginalBook();
   }
 
   aboutToDisappear(): void {
+    this.markCurrentWatched();
+    this.saveCurrentProgress();
     this.loadToken += 1;
     this.cancelFsHide();
     this.cancelCenterHide();
@@ -236,8 +269,7 @@ export struct PlayerPage {
             TapGesture({ count: 2 })
               .onAction((): void => {
                 if (this.fullScreen) {
-                  this.togglePlay();
-                  this.syncFsControls();
+                  this.syncFsControls(this.togglePlay());
                 }
               }),
             TapGesture({ count: 1 })
@@ -464,8 +496,7 @@ export struct PlayerPage {
     })
     .markAnchor({ x: '50%', y: '50%' })
     .onClick((): void => {
-      this.togglePlay();
-      this.syncFsControls();
+      this.syncFsControls(this.togglePlay());
     })
   }
 
@@ -667,8 +698,7 @@ export struct PlayerPage {
           .fontSize(26)
           .fontColor([Color.White])
           .onClick((): void => {
-            this.togglePlay();
-            this.syncFsControls();
+            this.syncFsControls(this.togglePlay());
           })
 
         SymbolGlyph($r('sys.symbol.forward_end_fill'))
@@ -811,6 +841,7 @@ export struct PlayerPage {
     FqStoryPanel({
       episodes: this.episodes,
       currentIndex: this.index,
+      watchedIds: this.watchedIds,
       seriesTitle: this.title,
       seriesCover: this.coverUrl,
       seriesIntro: PlayerNavParams.intro,
@@ -1064,23 +1095,30 @@ export struct PlayerPage {
     }
   }
 
-  /** 全屏内播放状态切换后同步控制条：暂停亮出常驻，播放 3s 自动隐藏。 */
-  private syncFsControls(): void {
+  /**
+   * 全屏内播放状态切换后同步控制条（mpv 状态异步，以切换意图为准）：
+   * 播放 → 亮出 3s 自动隐藏；暂停 → 亮出常驻。
+   */
+  private syncFsControls(nowPlaying: boolean): void {
     if (!this.fullScreen) {
       return;
     }
-    if (!this.player.state.playing) {
-      this.fsControlsVisible = true;
-      this.cancelFsHide();
+    this.fsControlsVisible = true;
+    if (nowPlaying) {
+      this.scheduleFsHide(nowPlaying);
     } else {
-      this.scheduleFsHide();
+      this.cancelFsHide();
     }
   }
 
-  /** 全屏控件 3s 自动隐藏计时（暂停态跳过：控制条常驻可见）。 */
-  private scheduleFsHide(): void {
+  /**
+   * 全屏控件 3s 自动隐藏计时（暂停态跳过：控制条常驻可见）；
+   * 显式传入播放意图可避开 mpv 状态异步延迟。
+   */
+  private scheduleFsHide(playing: boolean | null = null): void {
     this.cancelFsHide();
-    if (!this.player.state.playing) {
+    const isPlaying: boolean = playing === null ? this.player.state.playing : playing;
+    if (!isPlaying) {
       return;
     }
     this.fsHideTimer = setTimeout((): void => {
@@ -1162,6 +1200,8 @@ export struct PlayerPage {
       return;
     }
     this.player.pause();
+    // 暂停即保存续播进度（fqapp 暂停写入点；进详情页期间周期保存已停）
+    this.saveCurrentProgress();
     DetailNavParams.id = book.id;
     DetailNavParams.kind = 'book';
     DetailNavParams.title = book.title;
@@ -1188,7 +1228,9 @@ export struct PlayerPage {
         return;
       }
       this.episodes = episodes;
-      this.loadEpisode(0);
+      // 续播（fqapp resumeEpisodeIndex）：有进度记录则起播上次看到的集
+      const resumeIndex: number = this.resumeStartIndex();
+      this.loadEpisode(resumeIndex >= 0 ? resumeIndex : 0);
     } catch (error) {
       if (token !== this.loadToken) {
         return;
@@ -1204,7 +1246,18 @@ export struct PlayerPage {
     if (episode === undefined) {
       return;
     }
+    // 离开的旧集：实际播放过才标已看/存续播进度（this.index 尚未切换）
+    const wasDisplayed: boolean = this.hasDisplayed;
+    const switched: boolean = index !== this.index;
+    this.markCurrentWatched();
+    this.saveCurrentProgress();
     const token: number = ++this.loadToken;
+    // 续播位置（仅进页首开那一次）：Media start 偏移起播
+    let startSec: number = -1;
+    if (this.pendingResumeSec > 0) {
+      startSec = this.pendingResumeSec;
+      this.pendingResumeSec = -1;
+    }
     this.index = index;
     this.loading = true;
     this.errorMsg = '';
@@ -1218,7 +1271,17 @@ export struct PlayerPage {
         return;
       }
       this.loading = false;
-      this.player.open(new Media(source.url));
+      this.player.open(startSec > 0
+        ? new Media(source.url, { start: startSec })
+        : new Media(source.url));
+      // 新集起播：重置「实际播放」guard（旧集残余走表不再计入）
+      this.hasDisplayed = false;
+      if (wasDisplayed && switched) {
+        // 切集：续播记录立即指向新集（位置 0；周期/暂停/退出再精化），
+        // 避免切集后立刻退出仍续播回旧集；同集重试不覆盖原位置
+        this.progress = new FqWatchedProgress(episode.itemId, 0, 0);
+        FqWatchedStore.saveProgress(PlayerNavParams.contentId, this.progress);
+      }
       // 弹幕整池作废（切集），按 0 起取新集首批
       this.resetDanmaku();
     } catch (error) {
@@ -1230,10 +1293,90 @@ export struct PlayerPage {
     }
   }
 
-  /** 播放暂停切换；播完暂停态重播当前集；中央按钮点击才出现（暂停常驻/播放 3s 隐藏）。 */
-  private togglePlay(): void {
-    if (this.errorMsg.length > 0) {
+  /**
+   * 标记当前集已看（对齐 fqapp watched_episodes.dart：按集 itemId 逐集持久化）：
+   * 实际播放过（hasDisplayed）才标，绝不按「当前集之前」补造中间集；
+   * 切集（loadEpisode 入口）与页面销毁时调用。
+   */
+  private markCurrentWatched(): void {
+    if (!this.hasDisplayed) {
       return;
+    }
+    const episode: FqChapter | undefined = this.episodes[this.index];
+    if (episode === undefined || episode.itemId.length === 0) {
+      return;
+    }
+    if (FqWatchedStore.mark(PlayerNavParams.contentId, episode.itemId)) {
+      this.watchedIds = this.copyWatchedIds();
+    }
+  }
+
+  /** 从 store 拷贝本剧已看集合（Set 重赋值驱动选集面板刷新）。 */
+  private copyWatchedIds(): Set<string> {
+    const ids: Set<string> = new Set<string>();
+    FqWatchedStore.ids(PlayerNavParams.contentId).forEach((id: string): void => {
+      ids.add(id);
+    });
+    return ids;
+  }
+
+  /**
+   * 进页续播集下标（fqapp startEpisodeIndex ?? resumeEpisodeIndex ?? 0）：
+   * 按集 itemId 匹配进度记录；命中且未播完时挂待恢复位置（首开 Media start 消费），
+   * 播完则该集从头；无记录/不在目录返回 -1。
+   */
+  private resumeStartIndex(): number {
+    const saved: FqWatchedProgress | null = this.progress;
+    if (saved === null) {
+      return -1;
+    }
+    for (let index: number = 0; index < this.episodes.length; index++) {
+      if (this.episodes[index].itemId === saved.episodeId) {
+        const finished: boolean = saved.duration > 0 && saved.position >= saved.duration - 0.5;
+        this.pendingResumeSec = finished ? -1 : saved.position;
+        return index;
+      }
+    }
+    return -1;
+  }
+
+  /**
+   * 保存当前集续播进度（fqapp _persistProgress：以集 itemId 为键、与已看分开记录）；
+   * 实际播放过才存（hasDisplayed guard，首帧/起播不存）。
+   */
+  private saveCurrentProgress(): void {
+    if (!this.hasDisplayed) {
+      return;
+    }
+    const episode: FqChapter | undefined = this.episodes[this.index];
+    if (episode === undefined || episode.itemId.length === 0) {
+      return;
+    }
+    this.progress = new FqWatchedProgress(episode.itemId,
+      this.player.state.position, this.player.state.duration);
+    FqWatchedStore.saveProgress(PlayerNavParams.contentId, this.progress);
+  }
+
+  /** 周期保存续播进度（5s 一存，仅播放中；暂停不重复盖时间戳）。 */
+  private progressSaveTick(): void {
+    this.progressTick += 1;
+    if (this.progressTick < 5) {
+      return;
+    }
+    this.progressTick = 0;
+    if (this.player.state.playing) {
+      this.saveCurrentProgress();
+    }
+  }
+
+  /**
+   * 播放暂停切换：mpv 状态异步更新，判定一律以返回的切换意图为准；
+   * 暂停即保存续播进度（fqapp 暂停写入点）；中央按钮点击才出现
+   * （暂停常驻/播放 3s 隐藏）。
+   */
+  private togglePlay(): boolean {
+    if (this.errorMsg.length > 0) {
+      return this.player.state.playing;
     }
     const wasPlaying: boolean = this.player.state.playing;
     if (this.player.state.eof) {
@@ -1241,14 +1384,17 @@ export struct PlayerPage {
     } else {
       this.player.playOrPause();
     }
+    const nowPlaying: boolean = !wasPlaying;
     this.centerBtnVisible = true;
     if (wasPlaying) {
       // 点击后进入暂停：按钮常驻
       this.cancelCenterHide();
+      this.saveCurrentProgress();
     } else {
       // 点击后进入播放：3s 后自动隐藏
       this.scheduleCenterHide();
     }
+    return nowPlaying;
   }
 
   /** 中央播放按钮 3s 自动隐藏计时。 */

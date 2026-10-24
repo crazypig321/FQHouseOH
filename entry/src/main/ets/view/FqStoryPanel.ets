@@ -4,7 +4,8 @@
  * 「选集」tab（14sp 粗体、左 20）、>30 集分页条「1-30」、
  * 6 列格子（官方 bbw.xml + hj3/r0.java + colors.xml）：
  * 当前集 文字 #FFFA6725、底 #1AFA6725、粗体 + 右上播放角标；
- * 已看 #66000000；普通 #FF000000；格底 #08000000、圆角 8。
+ * 已看（按集 itemId 持久化记录，跳集不误标）#66000000；普通 #FF000000；
+ * 格底 #08000000、圆角 8。
  * 打开时当前集滚动到视口竖直居中（官方 gj3/o.java:237-272）。
  */
 
@@ -28,6 +29,8 @@ export struct FqStoryPanel {
   @Param episodeLabel: string = '';
   /** 剧简介（头部小字，最多 2 行不全部显示）。 */
   @Param seriesIntro: string = '';
+  /** 已看集 itemId 集合（FqWatchedStore 持久化记录；与下标无关，跳集不误标）。 */
+  @Param watchedIds: Set<string> = new Set<string>();
   /** 选集回调。 */
   @Param onSelectEpisode: (index: number) => void = (index: number): void => {
   };
@@ -228,12 +231,13 @@ export struct FqStoryPanel {
     .scrollBar(BarState.Off)
   }
 
-  /** 格子文字色：当前集橙、已看（当前集之前）灰、普通黑。 */
+  /** 格子文字色：当前集橙、已看（按集 itemId 记录，与下标无关）灰、普通黑。 */
   private tileTextColor(index: number): ResourceColor {
     if (index === this.currentIndex) {
       return '#FFFA6725';
     }
-    if (index < this.currentIndex) {
+    const episode: FqChapter | undefined = this.episodes[index];
+    if (episode !== undefined && this.watchedIds.has(episode.itemId)) {
       return $r('sys.color.font_fourth');
     }
     return $r('sys.color.font');
