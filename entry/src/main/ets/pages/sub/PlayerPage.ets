@@ -22,6 +22,11 @@
  *   右上角菜单呼出「播放设置」半模态（倍速档位）；
  *   评论按钮呼出「剧评」半模态（公共 FqCommentSheet，同详情页全部评论）。
  * - 播完自动连播；aboutToDisappear 销毁 mpv 实例并恢复沉浸前的系统 UI。
+ * - 长按屏幕右侧 2 倍速快进（官方 jq3 长按带外分支 / fqapp _startBoost）：
+ *   按住期间 2x、松开恢复原倍速，画面中央「2倍速快进中」指示。
+ * - 横屏片源全屏防误触锁（官方 fullscreen/d.K6）：左侧竖直居中锁按钮，
+ *   锁定后上下工具不可呼出、画面操作全吞，仅锁按钮可唤出
+ *   （5s 自隐，任意触摸重新唤出）；解锁立即恢复控件。
  * - 已看集标记与续播（fqapp watched_episodes.dart / video_progress 一族）：
  *   已看按集 itemId 持久化（FqWatchedStore），实际播放过（position > 0）才标记，
  *   跳集观看绝不误标中间集；续播进度（集 + 位置）暂停/切集/周期 5s/退出保存，
@@ -54,6 +59,12 @@ const FQ_STORY_ORANGE: string = '#FFFA6725';
 const FQ_FS_HIDE_MS: number = 3000;
 /** 倍速档位（官方 speed 菜单）。 */
 const FQ_SPEEDS: number[] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+/** 长按临时快进倍速（官方长按 setRate(2)）。 */
+const FQ_BOOST_SPEED: number = 2.0;
+/** 长按识别时长（ms）。 */
+const FQ_LONG_PRESS_MS: number = 500;
+/** 锁定按钮自动隐藏延时（官方 d.G6() 5s）。 */
+const FQ_LOCK_HIDE_MS: number = 5000;
 
 /** mm:ss 播放时间。 */
 function fqFormatClock(seconds: number): string {
@@ -144,6 +155,16 @@ export struct PlayerPage {
   private pendingResumeSec: number = -1;
   /** 周期保存计数（5s 一存，仅播放中）。 */
   private progressTick: number = 0;
+  /** 长按右侧 2 倍速快进中（松开恢复原倍速）。 */
+  @Local speedBoost: boolean = false;
+  /** 快进前倍速（松开恢复）。 */
+  private boostRestoreSpeed: number = -1;
+  /** 横屏全屏防误触锁（锁定后控件不可呼出，仅锁按钮可唤出）。 */
+  @Local fsLocked: boolean = false;
+  /** 锁定按钮可见（锁定后 5s 自隐，任意触摸唤出）。 */
+  @Local lockVisible: boolean = false;
+  /** 锁定按钮自动隐藏定时器（0 无任务）。 */
+  private lockHideTimer: number = 0;
   /** 弹幕续拉游标（common_list_info.cursor）。 */
   private danmakuCursor: string = '';
   /** 弹幕还有更多（common_list_info.has_more）。 */
@@ -205,11 +226,13 @@ export struct PlayerPage {
   }
 
   aboutToDisappear(): void {
+    this.endSpeedBoost();
     this.markCurrentWatched();
     this.saveCurrentProgress();
     this.loadToken += 1;
     this.cancelFsHide();
     this.cancelCenterHide();
+    this.cancelLockHide();
     if (this.danmakuTimer !== 0) {
       clearInterval(this.danmakuTimer);
       this.danmakuTimer = 0;
@@ -254,6 +277,16 @@ export struct PlayerPage {
               .fontColor(Color.White)
           }
 
+          // 长按 2 倍速快进指示（官方「2倍速快进中」，长按期间显示）
+          if (this.speedBoost) {
+            Text('2倍速快进中')
+              .fontSize(13)
+              .fontColor(Color.White)
+              .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+              .borderRadius(16)
+              .backgroundColor('rgba(0,0,0,0.55)')
+          }
+
           if (this.errorMsg.length > 0) {
             this.ErrorOverlay()
           }
@@ -263,18 +296,33 @@ export struct PlayerPage {
         .position({ x: 0, y: this.fullScreen ? 0 : this.videoTopAbs() })
         .backgroundColor(Color.Black)
         // 全屏：单击切控件显隐、双击切播放/暂停（互斥识别，双击优先）；
+        // 长按屏幕右侧 2 倍速快进（锁定态全部吞掉，只唤出锁按钮）；
         // 非全屏：单击切播放（保持原样）
         .gesture(
           GestureGroup(GestureMode.Exclusive,
             TapGesture({ count: 2 })
               .onAction((): void => {
                 if (this.fullScreen) {
+                  if (this.fsLocked) {
+                    this.refreshLockVisibility();
+                    return;
+                  }
                   this.syncFsControls(this.togglePlay());
                 }
               }),
             TapGesture({ count: 1 })
               .onAction((): void => {
                 this.onVideoTap();
+              }),
+            LongPressGesture({ duration: FQ_LONG_PRESS_MS })
+              .onAction((event?: GestureEvent): void => {
+                this.beginSpeedBoost(event);
+              })
+              .onActionEnd((): void => {
+                this.endSpeedBoost();
+              })
+              .onActionCancel((): void => {
+                this.endSpeedBoost();
               })
           )
         )
@@ -313,6 +361,13 @@ export struct PlayerPage {
         if (this.fullScreen && !this.sheetVisible && this.fsControlsVisible) {
           this.FsTopBar()
           this.FsBottomBar()
+        }
+
+        // 横屏片源全屏防误触锁（左侧竖直居中）：解锁随控件显隐，
+        // 锁定后仅本按钮可唤出（5s 自隐，任意触摸重新唤出）
+        if (this.fullScreen && this.isLandscapeVideo() && !this.sheetVisible &&
+          (this.fsLocked ? this.lockVisible : this.fsControlsVisible)) {
+          this.LockButton()
         }
       }
       .width('100%')
@@ -769,6 +824,29 @@ export struct PlayerPage {
     .markAnchor({ x: 0, y: '100%' })
   }
 
+  /**
+   * 全屏防误触锁按钮（横屏片源全屏、左侧竖直居中）：44 圆形半透明黑底，
+   * 锁定 lock_fill / 解锁 lock_open；点按切换锁定（官方 uk3/c）。
+   */
+  @Builder
+  private LockButton() {
+    Row() {
+      SymbolGlyph(this.fsLocked ? $r('sys.symbol.lock_fill') : $r('sys.symbol.lock_open'))
+        .fontSize(20)
+        .fontColor([Color.White])
+    }
+    .width(44)
+    .height(44)
+    .borderRadius(22)
+    .justifyContent(FlexAlign.Center)
+    .backgroundColor('rgba(0,0,0,0.45)')
+    .position({ x: 16, y: '50%' })
+    .markAnchor({ x: 0, y: '50%' })
+    .onClick((): void => {
+      this.toggleLock();
+    })
+  }
+
   /** 加载占位：封面 contain + spinner（官方 PlayerCover/PlayerLoadingFeedback）。 */
   @Builder
   private LoadingOverlay() {
@@ -1073,8 +1151,12 @@ export struct PlayerPage {
     }, 0);
   }
 
-  /** 画面单击：全屏（横竖屏）切控件显隐，非全屏切播放（官方 tapTogglesPlayback）。 */
+  /** 画面单击：锁定态只唤出锁按钮（官方 G6）；全屏切控件显隐，非全屏切播放。 */
   private onVideoTap(): void {
+    if (this.fullScreen && this.fsLocked) {
+      this.refreshLockVisibility();
+      return;
+    }
     if (this.fullScreen) {
       this.toggleFsControls();
     } else {
@@ -1142,10 +1224,13 @@ export struct PlayerPage {
     this.applyImmersive(true);
   }
 
-  /** 退出全屏沉浸：恢复方向与系统栏。 */
+  /** 退出全屏沉浸：恢复方向与系统栏；离开横屏解除防误触锁（官方 _releaseLock）。 */
   private exitFullscreen(): void {
     this.fullScreen = false;
+    this.fsLocked = false;
+    this.lockVisible = false;
     this.cancelFsHide();
+    this.cancelLockHide();
     this.fsControlsVisible = true;
     this.applyImmersive(false);
   }
@@ -1366,6 +1451,85 @@ export struct PlayerPage {
     this.progressTick = 0;
     if (this.player.state.playing) {
       this.saveCurrentProgress();
+    }
+  }
+
+  /**
+   * 长按屏幕右侧 2 倍速快进（官方 jq3 长按带外分支 / fqapp _startBoost）：
+   * 按住期间 2x，松开恢复原倍速；锁定态不响应（只唤出锁按钮）。
+   */
+  private beginSpeedBoost(event?: GestureEvent): void {
+    if (this.fsLocked) {
+      this.refreshLockVisibility();
+      return;
+    }
+    if (this.speedBoost || event === undefined || event.fingerList.length === 0) {
+      return;
+    }
+    // 仅屏幕右侧生效（globalX 与 display 宽同取当前方向、统一换算 vp）
+    const displayData: display.Display = display.getDefaultDisplaySync();
+    const density: number = displayData.densityPixels > 0 ? displayData.densityPixels : 1;
+    const widthVp: number = displayData.width / density;
+    if (event.fingerList[0].globalX < widthVp / 2) {
+      return;
+    }
+    const current: number = this.player.state.speed;
+    this.boostRestoreSpeed = current > 0 ? current : 1.0;
+    this.speedBoost = true;
+    this.player.setSpeed(FQ_BOOST_SPEED);
+  }
+
+  /** 松开长按：结束 2 倍速快进，恢复原倍速。 */
+  private endSpeedBoost(): void {
+    if (!this.speedBoost) {
+      return;
+    }
+    this.speedBoost = false;
+    this.player.setSpeed(this.boostRestoreSpeed > 0 ? this.boostRestoreSpeed : 1.0);
+    this.boostRestoreSpeed = -1;
+  }
+
+  /** 锁定态任意触摸：唤出锁按钮并重新计 5s 自隐（官方 d.G6()）。 */
+  private refreshLockVisibility(): void {
+    this.lockVisible = true;
+    this.scheduleLockHide();
+  }
+
+  /**
+   * 全屏防误触锁切换（官方 d.K6）：锁定 → 控件隐藏且不可呼出、画面操作全吞，
+   * 仅锁按钮可唤出（5s 自隐）；解锁 → 控件立即恢复可见；锁不改变播放状态。
+   */
+  private toggleLock(): void {
+    if (this.fsLocked) {
+      this.fsLocked = false;
+      this.lockVisible = false;
+      this.cancelLockHide();
+      this.fsControlsVisible = true;
+      this.scheduleFsHide();
+    } else {
+      this.fsLocked = true;
+      this.fsControlsVisible = false;
+      this.cancelFsHide();
+      this.lockVisible = true;
+      this.scheduleLockHide();
+    }
+  }
+
+  /** 锁定按钮自动隐藏计时（锁定后 5s；官方 d.G6()）。 */
+  private scheduleLockHide(): void {
+    this.cancelLockHide();
+    this.lockHideTimer = setTimeout((): void => {
+      this.lockHideTimer = 0;
+      if (this.fsLocked) {
+        this.lockVisible = false;
+      }
+    }, FQ_LOCK_HIDE_MS);
+  }
+
+  private cancelLockHide(): void {
+    if (this.lockHideTimer !== 0) {
+      clearTimeout(this.lockHideTimer);
+      this.lockHideTimer = 0;
     }
   }
 
