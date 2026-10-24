@@ -12,6 +12,8 @@
  *   隐藏系统栏），底部控制条（播放/下一集/时间/进度/倍速/选集）3s 自动隐藏；
  *   全屏（横竖屏）单击切控件显隐、双击切播放/暂停；竖屏片源全屏顶栏避让
  *   maxTopRect（沉浸隐藏状态栏后 topRect 归零），且不渲染中央播放按钮。
+ *   横屏片源全屏的选集/播放设置改走右侧边栏（深色面板 + 全屏遮罩，
+ *   遮罩点击收起；底部 sheet 遮幅大影响观看，侧边栏只占右侧一条）。
  * - 选集半模态 FqStoryPanel（官方 StoryPlayerPanel 白底样式）；剧名行与
  *   「全屏观看」药丸层锚定底部信息区，恒在进度线与选集胶囊上方。
  * - 原著横幅（官方 _originalBookCard）：剧名行与进度线之间，仅剧有原著
@@ -66,6 +68,10 @@ const FQ_BOOST_SPEED: number = 2.0;
 const FQ_LONG_PRESS_MS: number = 500;
 /** 锁定按钮自动隐藏延时（官方 d.G6() 5s）。 */
 const FQ_LOCK_HIDE_MS: number = 5000;
+/** 横屏全屏右侧边栏宽（选集/播放设置共用）。 */
+const FQ_FS_SIDE_PANEL_W: number = 300;
+/** 侧边栏背景（近黑高不透明，压得住浅色画面又不糊死视频）。 */
+const FQ_FS_SIDE_BG: string = '#F0141414';
 
 /** mm:ss 播放时间。 */
 function fqFormatClock(seconds: number): string {
@@ -129,6 +135,8 @@ export struct PlayerPage {
   @Local originalBook: FqSeriesRelateBook | null = null;
   /** 已看集 itemId 集合（FqWatchedStore；标记后重赋值驱动选集面板刷新）。 */
   @Local watchedIds: Set<string> = new Set<string>();
+  /** 横屏全屏右侧边栏（'episodes' 选集 / 'settings' 播放设置；'' 关闭）。 */
+  @Local sidePanel: string = '';
 
   private title: string = '';
   private tab: string = '短剧';
@@ -166,6 +174,10 @@ export struct PlayerPage {
   @Local lockVisible: boolean = false;
   /** 锁定按钮自动隐藏定时器（0 无任务）。 */
   private lockHideTimer: number = 0;
+  /** 侧边栏选集滚动器（打开时滚到当前集竖直居中）。 */
+  private sideScroller: Scroller = new Scroller();
+  /** 侧边栏选集定位定时器（0 无任务）。 */
+  private sideLocateTimer: number = 0;
   /** 弹幕续拉游标（common_list_info.cursor）。 */
   private danmakuCursor: string = '';
   /** 弹幕还有更多（common_list_info.has_more）。 */
@@ -234,6 +246,7 @@ export struct PlayerPage {
     this.cancelFsHide();
     this.cancelCenterHide();
     this.cancelLockHide();
+    this.cancelSideLocate();
     if (this.danmakuTimer !== 0) {
       clearInterval(this.danmakuTimer);
       this.danmakuTimer = 0;
@@ -344,7 +357,8 @@ export struct PlayerPage {
           this.CenterPlayButton()
         }
 
-        // 弹幕层：只占屏上 20% 高度、锚定顶部（尽量少遮挡画面），
+        // 弹幕层：只占屏上 20% 高度、锚定顶部（尽量少遮挡画面）；
+        // 竖屏片源全屏沉浸后 topRect 归零，用 maxTopRect 保底下移避开摄像头孔条（同 FsTopBar 语义）；
         // 且整棵子树不参与触摸测试，绝不影响底部控制条交互
         if (this.fullScreen && this.danmakuOn && this.errorMsg.length === 0 && this.danmakuItems.length > 0) {
           FqDanmakuView({
@@ -355,7 +369,7 @@ export struct PlayerPage {
           })
             .width('100%')
             .height('20%')
-            .position({ x: 0, y: 0 })
+            .position({ x: 0, y: this.isLandscapeVideo() ? appState.topRect : appState.maxTopRect })
             .hitTestBehavior(HitTestMode.None)
         }
 
@@ -364,7 +378,7 @@ export struct PlayerPage {
           this.CatalogBar()
         }
 
-        if (this.fullScreen && !this.sheetVisible && this.fsControlsVisible) {
+        if (this.fullScreen && !this.sheetVisible && this.sidePanel.length === 0 && this.fsControlsVisible) {
           this.FsTopBar()
           this.FsBottomBar()
         }
@@ -374,6 +388,34 @@ export struct PlayerPage {
         if (this.fullScreen && !this.sheetVisible &&
           (this.fsLocked ? this.lockVisible : this.fsControlsVisible)) {
           this.LockButton()
+        }
+
+        // 横屏全屏右侧边栏（选集/播放设置）：全屏遮罩点击收起，深色面板贴右滑入；
+        // 底部 sheet 遮幅大影响观看，侧边栏只占右侧一条，视频不停播
+        if (this.fullScreen && this.isLandscapeVideo() && this.sidePanel.length > 0) {
+          Column()
+            .width('100%')
+            .height('100%')
+            .backgroundColor('rgba(0,0,0,0.35)')
+            .onClick((): void => {
+              this.closeSidePanel();
+            })
+            .transition(TransitionEffect.OPACITY.animation({ duration: 200 }))
+
+          Column() {
+            if (this.sidePanel === 'episodes') {
+              this.SideEpisodes()
+            } else {
+              this.SideSettings()
+            }
+          }
+          .width(FQ_FS_SIDE_PANEL_W)
+          .height('100%')
+          .position({ x: '100%', y: 0 })
+          .markAnchor({ x: FQ_FS_SIDE_PANEL_W, y: 0 })
+          .backgroundColor(FQ_FS_SIDE_BG)
+          .transition(TransitionEffect.translate({ x: FQ_FS_SIDE_PANEL_W })
+            .animation({ duration: 200, curve: Curve.Friction }))
         }
       }
       .width('100%')
@@ -1026,6 +1068,145 @@ export struct PlayerPage {
   }
 
   // ---------------------------------------------------------------------------
+  // 横屏全屏右侧边栏（选集/播放设置）
+  // ---------------------------------------------------------------------------
+
+  /** 侧边栏头：标题 + 右上关闭。 */
+  @Builder
+  private SidePanelHeader(title: string) {
+    Row() {
+      Text(title)
+        .fontSize(16)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(Color.White)
+        .layoutWeight(1)
+      SymbolGlyph($r('sys.symbol.xmark'))
+        .fontSize(16)
+        .fontColor([Color.White])
+        .padding(10)
+        .onClick((): void => {
+          this.closeSidePanel();
+        })
+    }
+    .width('100%')
+    .height(48)
+    .padding({ left: 16, right: 6 })
+    .alignItems(VerticalAlign.Center)
+  }
+
+  /** 侧边栏·选集：4 列序号格（当前集橙、已看灰、普通白），点选切集并收起。 */
+  @Builder
+  private SideEpisodes() {
+    Column() {
+      this.SidePanelHeader('选集')
+
+      if (this.episodes.length === 0) {
+        Column() {
+          Text('暂无剧集')
+            .fontSize(14)
+            .fontColor('#99FFFFFF')
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .justifyContent(FlexAlign.Center)
+      } else {
+        Grid(this.sideScroller) {
+          ForEach(this.episodes, (episode: FqChapter, index: number) => {
+            GridItem() {
+              Row() {
+                Text(`${index + 1}`)
+                  .fontSize(15)
+                  .fontWeight(index === this.index ? FontWeight.Bold : FontWeight.Normal)
+                  .fontColor(this.sideEpisodeColor(index))
+              }
+              .width('100%')
+              .aspectRatio(1)
+              .justifyContent(FlexAlign.Center)
+              .alignItems(VerticalAlign.Center)
+              .borderRadius(8)
+              .backgroundColor(index === this.index ? '#1AFA6725' : '#26FFFFFF')
+              .onClick((): void => {
+                this.closeSidePanel();
+                this.loadEpisode(index);
+              })
+            }
+          }, (episode: FqChapter, index: number) => `${episode.itemId}-${index}`)
+        }
+        .columnsTemplate('1fr 1fr 1fr 1fr')
+        .columnsGap(8)
+        .rowsGap(8)
+        .scrollBar(BarState.Off)
+        .padding({ left: 12, right: 12, top: 4, bottom: 16 })
+        .width('100%')
+        .layoutWeight(1)
+      }
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  /** 侧边栏·播放设置：倍速档位 3 列格子（当前档橙底高亮），点选生效并收起。 */
+  @Builder
+  private SideSettings() {
+    Column() {
+      this.SidePanelHeader('播放设置')
+
+      Row() {
+        Text('倍速')
+          .fontSize(14)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(Color.White)
+      }
+      .width('100%')
+      .height(36)
+      .padding({ left: 16 })
+      .alignItems(VerticalAlign.Center)
+
+      Grid() {
+        ForEach(FQ_SPEEDS, (speed: number) => {
+          GridItem() {
+            Column() {
+              Text(`${speed}×`)
+                .fontSize(15)
+                .fontWeight(this.isCurrentSpeed(speed) ? FontWeight.Bold : FontWeight.Normal)
+                .fontColor(this.isCurrentSpeed(speed) ? FQ_STORY_ORANGE : Color.White)
+            }
+            .width('100%')
+            .aspectRatio(2.2)
+            .justifyContent(FlexAlign.Center)
+            .alignItems(HorizontalAlign.Center)
+            .borderRadius(8)
+            .backgroundColor(this.isCurrentSpeed(speed) ? '#1AFA6725' : '#26FFFFFF')
+            .onClick((): void => {
+              this.player.setSpeed(speed);
+              this.closeSidePanel();
+            })
+          }
+        }, (speed: number) => `${speed}`)
+      }
+      .columnsTemplate('1fr 1fr 1fr')
+      .columnsGap(8)
+      .rowsGap(8)
+      .padding({ left: 12, right: 12, top: 4 })
+      .width('100%')
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  /** 侧边栏选集格文字色：当前集橙、已看（按集 itemId 记录）灰、普通白。 */
+  private sideEpisodeColor(index: number): ResourceColor {
+    if (index === this.index) {
+      return FQ_STORY_ORANGE;
+    }
+    const episode: FqChapter | undefined = this.episodes[index];
+    if (episode !== undefined && this.watchedIds.has(episode.itemId)) {
+      return '#99FFFFFF';
+    }
+    return Color.White;
+  }
+
+  // ---------------------------------------------------------------------------
   // 布局几何（官方 PlayerVideoLayout 竖屏语义）
   // ---------------------------------------------------------------------------
 
@@ -1137,8 +1318,12 @@ export struct PlayerPage {
     return Math.abs(this.player.state.speed - speed) < 0.01;
   }
 
-  /** 打开播放设置半模态（右上角菜单 / 全屏控制条倍速入口）。 */
+  /** 打开播放设置（横屏全屏走右侧边栏，其余右上角菜单半模态）。 */
   private openSettings(): void {
+    if (this.fullScreen && this.isLandscapeVideo()) {
+      this.openSidePanel('settings');
+      return;
+    }
     this.getUIContext().animateTo({ duration: 200 }, (): void => {
       this.settingsVisible = true;
     });
@@ -1711,10 +1896,48 @@ export struct PlayerPage {
     if (this.episodes.length === 0) {
       return;
     }
+    // 横屏全屏走右侧边栏（少遮挡画面），其余走官方底部半模态
+    if (this.fullScreen && this.isLandscapeVideo()) {
+      this.openSidePanel('episodes');
+      return;
+    }
     // 官方面板展开 200ms：视频区随面板撑满全屏（_positionVideo panelFraction）
     this.getUIContext().animateTo({ duration: 200 }, (): void => {
       this.sheetVisible = true;
     });
+  }
+
+  /** 横屏全屏右侧边栏打开：收控件、面板贴右滑入；选集滚到当前集竖直居中。 */
+  private openSidePanel(kind: string): void {
+    this.cancelFsHide();
+    this.fsControlsVisible = false;
+    this.getUIContext().animateTo({ duration: 200 }, (): void => {
+      this.sidePanel = kind;
+    });
+    if (kind === 'episodes' && this.episodes.length > 0) {
+      this.cancelSideLocate();
+      this.sideLocateTimer = setTimeout((): void => {
+        this.sideLocateTimer = 0;
+        this.sideScroller.scrollToIndex(this.index, false, ScrollAlign.CENTER);
+      }, 120);
+    }
+  }
+
+  /** 关闭横屏全屏右侧边栏：面板滑出，亮出全屏控件并重新计自动隐藏。 */
+  private closeSidePanel(): void {
+    this.cancelSideLocate();
+    this.getUIContext().animateTo({ duration: 200 }, (): void => {
+      this.sidePanel = '';
+    });
+    this.fsControlsVisible = true;
+    this.scheduleFsHide();
+  }
+
+  private cancelSideLocate(): void {
+    if (this.sideLocateTimer !== 0) {
+      clearTimeout(this.sideLocateTimer);
+      this.sideLocateTimer = 0;
+    }
   }
 
   /** 关闭半模态：延迟一拍置 isShow（面板事件内同步改 isShow 会被框架丢弃）。 */
