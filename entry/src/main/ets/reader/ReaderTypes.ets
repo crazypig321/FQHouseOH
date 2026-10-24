@@ -120,7 +120,7 @@ export class FqReaderLayoutMetrics {
   /** fp 文本渲染换算密度（scaledDensity = densityPixels × fontScale）。 */
   textDensity: number = 1;
   /** 气泡图标 / 计数字号（fp，随 bubbleScale 缩放）。 */
-  bubbleIconFp: number = 13;
+  bubbleIconFp: number = 30;
   bubbleTextFp: number = 11;
   /** 气泡左右/上下内边距、圆角、图标与计数间距（vp，随 bubbleScale 缩放）。 */
   bubblePadHVp: number = 9;

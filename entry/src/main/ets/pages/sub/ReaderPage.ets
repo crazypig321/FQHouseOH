@@ -366,8 +366,6 @@ export struct ReaderPage {
       metrics: this.cachedMetrics,
       fontColor: this.theme().fontColor,
       pageBgColor: this.theme().background,
-     // bubbleBgColor: this.theme().night ? '#23262A' : '#E9E3D5',
-     // bubbleFontColor: this.theme().night ? '#9AA0A6' : '#8A8578',
       commentCounts: this.layoutForSlot(slot)?.commentCounts ?? [],
       fontFamily: this.readerFontFamily,
       highlightParaIndex: this.slotHighlightPara(slot),

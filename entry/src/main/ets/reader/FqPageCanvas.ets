@@ -7,8 +7,6 @@ export struct FqPageCanvas {
   @Param metrics: FqReaderLayoutMetrics = new FqReaderLayoutMetrics();
   @Param fontColor: string = '#1F2329';
   @Param pageBgColor: string = '#F6F4EF';
-  @Param bubbleBgColor: ResourceColor = $r('sys.color.comp_background_tertiary');
-  @Param bubbleFontColor: ResourceColor = $r('sys.color.icon_tertiary');
   @Param commentCounts: number[] = [];
   @Param fontFamily: string = '';
   @Param highlightParaIndex: number = -1;
@@ -32,36 +30,27 @@ export struct FqPageCanvas {
     return frag.isTitle ? this.metrics.titleTopVp : this.metrics.paraGapVp;
   }
 
-  @Builder
-  private bubbleCapsule(frag: FqPageFragment) {
-    Row({ space: this.metrics.bubbleSpaceVp }) {
-      SymbolGlyph($r('sys.symbol.message'))
-        .fontSize(this.metrics.bubbleIconFp)
-        .fontColor([this.bubbleFontColor])
-      Text(`${this.bubbleCount(frag)}`)
-        .fontSize(this.metrics.bubbleTextFp)
-        .fontColor(this.bubbleFontColor)
-        .fontFamily(this.fontFamily)
-        .maxLines(1)
-    }
-    .padding({
-      left: this.metrics.bubblePadHVp,
-      right: this.metrics.bubblePadHVp,
-      top: this.metrics.bubblePadVVp,
-      bottom: this.metrics.bubblePadVVp,
-    })
-    .borderRadius(this.metrics.bubbleRadiusVp)
-    .backgroundColor(this.bubbleBgColor)
-    .hitTestBehavior(HitTestMode.None)
-    .alignItems(VerticalAlign.Center)
-  }
-
   build() {
     Column() {
       if (this.page !== null) {
         ForEach(this.page.fragments, (frag: FqPageFragment) => {
           Column() {
-            Text(frag.text)
+            Text(){
+              Span(frag.text)
+              if (frag.showBubble && this.bubbleCount(frag) > 0) {
+                SymbolSpan($r('sys.symbol.message'))
+                  .width(this.metrics.bubbleIconFp)
+                  .height(this.metrics.bubbleIconFp)
+                  .fontColor([$r('sys.color.icon_tertiary')])
+                  .onClick(() => {
+
+                  })
+                Span(` ${this.bubbleCount(frag)}`)
+                  .fontSize(this.metrics.bubbleTextFp)
+                  .fontColor($r('sys.color.icon_tertiary'))
+                  .fontFamily(this.fontFamily)
+              }
+            }
               .fontSize(frag.isTitle ? this.metrics.titleFontFp : this.metrics.fontSizeFp)
               .fontWeight(frag.isTitle ? FontWeight.Bold : FontWeight.Normal)
               .lineHeight(frag.isTitle ? this.metrics.titleLineFp : this.metrics.lineHeightFp)
@@ -74,13 +63,6 @@ export struct FqPageCanvas {
                 const h: number = typeof newArea.height === 'number' ? newArea.height : 0;
                 hilog.info(0x0001, 'FqC', `frag=${frag.paraIndex} textH=${h}`);
               })
-            if (frag.showBubble && this.bubbleCount(frag) > 0) {
-              Row() {
-                this.bubbleCapsule(frag)
-              }.width('100%')
-              .justifyContent(FlexAlign.Start)
-              .margin({ top: this.metrics.bubbleMarginTopVp })
-            }
           }
           .alignItems(HorizontalAlign.Center)
           .width('100%')
