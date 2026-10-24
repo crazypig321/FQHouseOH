@@ -1,0 +1,1034 @@
+/**
+ * 漫画阅读页（ComicPage，CommonNav 框架，复用 ReaderPage 阅读体验）：
+ * - 正文：整页图片（objectFit Contain，纯黑底），一页一张图；
+ * - 翻页方式：0 仿真 / 1 覆盖（FqReaderFlip flipMode=0/2）/ 2 上下滚动
+ *   （webtoon：List + LazyForEach 整章图片连续纵向滚动，滚到章尾自动追加下一话）；
+ * - 眉页（章节名）/眉脚（时钟/电量/章内图序），目录半模态、漫评半模态、
+ *   「漫画设置」公共弹窗（仅翻页方式）、沉浸状态栏、进度持久化，
+ *   均与 ReaderPage 行为对齐（不锁定应用色彩模式，工具栏跟随系统深浅色）。
+ * 进度编码：domPos = 'img:N'（章内图片下标），与小说 'p2:' 格式互不冲突。
+ */
+
+import { common } from '@kit.AbilityKit';
+import { promptAction, window } from '@kit.ArkUI';
+import { batteryInfo } from '@kit.BasicServicesKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+import { TitleBarContentOptions } from '@kit.UIDesignKit';
+import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
+import { FqChapter, fqKindToTab } from '../../model/FqModels';
+import { FqReaderProgress, FqReaderStore } from '../../core/FqReaderStore';
+import { FqReadStatsStore } from '../../core/FqReadStatsStore';
+import { ComicNavParams } from '../../model/FqNavModels';
+import { CommonNav, titleBarOf } from '../../view/CommonNav';
+import { CommonLoading, FQ_ACCENT } from '../../view/CommonCom';
+import { FqSheetOptions } from '../../view/CommonSheet';
+import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/FqCommentSheet';
+import { FqCatalogSheet } from '../../view/FqCatalogSheet';
+import { appState } from '../../entryability/AppState';
+import { DialogManager } from '../../utils/DialogUtils';
+import { FqReaderFlip } from '../../reader/FqReaderFlip';
+import { fqComicSettingsBus } from '../../core/FqComicSettingsBus';
+
+/** 漫画正文底色（纯黑）。 */
+const FQ_COMIC_BG: string = '#000000';
+/** 漫画眉页/眉脚文字色（黑底白字）。 */
+const FQ_COMIC_TEXT: string = '#E6E6E6';
+
+/** 上下滚动模式单图条目（所属章下标 + 章内图下标 + 图片地址）。 */
+export class FqComicImageItem {
+  readonly chapterIndex: number;
+  readonly imageIndex: number;
+  readonly url: string;
+
+  constructor(chapterIndex: number, imageIndex: number, url: string) {
+    this.chapterIndex = chapterIndex;
+    this.imageIndex = imageIndex;
+    this.url = url;
+  }
+}
+
+/** 上下滚动模式懒加载数据源（List + LazyForEach；追加逐项通知、重置整体通知）。 */
+export class FqComicImageSource implements IDataSource {
+  private items: FqComicImageItem[] = [];
+  private listeners: DataChangeListener[] = [];
+
+  totalCount(): number {
+    return this.items.length;
+  }
+
+  getData(index: number): FqComicImageItem {
+    return this.items[index];
+  }
+
+  registerDataChangeListener(listener: DataChangeListener): void {
+    if (this.listeners.indexOf(listener) === -1) {
+      this.listeners.push(listener);
+    }
+  }
+
+  unregisterDataChangeListener(listener: DataChangeListener): void {
+    const index: number = this.listeners.indexOf(listener);
+    if (index >= 0) {
+      this.listeners.splice(index, 1);
+    }
+  }
+
+  /** 追加单条（onDataAdd 逐项通知，滚动位置稳定）。 */
+  append(item: FqComicImageItem): void {
+    this.items.push(item);
+    const index: number = this.items.length - 1;
+    for (const listener of this.listeners) {
+      listener.onDataAdd(index);
+    }
+  }
+
+  /** 清空重建（onDataReloaded 整体通知）。 */
+  reset(): void {
+    this.items = [];
+    for (const listener of this.listeners) {
+      listener.onDataReloaded();
+    }
+  }
+}
+
+@ComponentV2
+export struct ComicPage {
+  @Local loadingState: boolean = true;
+  @Local errorMsg: string = '';
+  @Local menuVisible: boolean = false;
+  @Local sheetVisible: boolean = false;
+  /** 目录打开令牌：每次打开 +1（公共 FqCatalogSheet 据此重置搜索/排序并定位当前章）。 */
+  @Local sheetOpenToken: number = 0;
+  /** 漫评半模态（标题栏评论键呼出）。 */
+  @Local commentSheetVisible: boolean = false;
+  @Local chapterIndex: number = 0;
+  @Local totalChapters: number = 0;
+  /** 翻页方式：0 仿真 / 1 覆盖 / 2 上下滚动。 */
+  @Local comicFlipIndex: number = 0;
+  /** 当前章图片 / 邻章预载缓存（引用替换驱动翻页容器刷新）。 */
+  @Local curImages: string[] = [];
+  @Local prevImages: string[] = [];
+  @Local nextImages: string[] = [];
+  /** 当前页（章内图片下标）。 */
+  @Local pageIndex: number = 0;
+  /** 眉脚时钟文本（HH:mm）与电量百分比（-1 未知）。 */
+  @Local footerClock: string = '';
+  @Local batteryLevel: number = -1;
+  /** 上下滚动模式：章尾追加中 / 已到最后一话（提示去重）。 */
+  @Local verticalAppending: boolean = false;
+  /** 翻页容器眉页/眉脚区高（vp，避让区变化时更新）。 */
+  @Local headerZoneVp: number = 20;
+  @Local footerZoneVp: number = 20;
+
+  private bookId: string = '';
+  private bookTitle: string = '';
+  private startChapterIndex: number = -1;
+  private chapters: FqChapter[] = [];
+  private loadToken: number = 0;
+  private clockTimer: number = -1;
+  private titleBarOp: TitleBarContentOptions | undefined = undefined;
+  /** 各章图片缓存（跨章翻页/上下追加复用，会话内有效）。 */
+  private chapterImageCache: Map<number, string[]> = new Map();
+  /** 上下滚动模式数据源与滚动控制器。 */
+  private verticalSource: FqComicImageSource = new FqComicImageSource();
+  private verticalScroller: Scroller = new Scroller();
+  /** 「已经是最后一话」提示去重（跳章/重建时复位）。 */
+  private verticalEndedToastOnce: boolean = false;
+
+  aboutToAppear(): void {
+    this.bookId = ComicNavParams.id;
+    this.bookTitle = ComicNavParams.title;
+    this.startChapterIndex = ComicNavParams.chapterIndex;
+    this.titleBarOp = titleBarOf(this.bookTitle, undefined, [
+      {
+        content: {
+          icon: $r('sys.symbol.message'),
+          label: 'comments',
+          action: (): void => {
+            this.openCommentSheet();
+          },
+        },
+      },
+    ]);
+    FqReaderStore.init(getContext(this));
+    FqReadStatsStore.init(getContext(this));
+    this.comicFlipIndex = FqReaderStore.getSettings().comicFlipIndex;
+    this.updateZones();
+    this.refreshFooterStatus();
+    this.clockTimer = setInterval((): void => {
+      this.refreshFooterStatus();
+      // 阅读页驻留累计今日已读时长（30s 心跳）
+      FqReadStatsStore.addSeconds(30);
+    }, 30000);
+    this.applySystemBar(false);
+    this.attachSettingsBus();
+    this.load();
+  }
+
+  aboutToDisappear(): void {
+    this.applySystemBar(true);
+    this.loadToken += 1;
+    this.saveProgressNow();
+    fqComicSettingsBus.handler = null;
+    DialogManager.CloseDialog();
+    if (this.clockTimer >= 0) {
+      clearInterval(this.clockTimer);
+      this.clockTimer = -1;
+    }
+  }
+
+  build() {
+    CommonNav({
+      hideTitleBar: !this.menuVisible,
+      titleBarOp: this.titleBarOp,
+      pageBackgroundColor: FQ_COMIC_BG,
+      showBrandGradient: false,
+      scrollMaskExtraHeight: 0,
+      tabMaskHeight: 0,
+      isShowBar: true,
+      isShowBarController: this.menuVisible,
+      readBarKind: 'reader',
+      readerBarClick: (key: string): void => {
+        this.onReadBarAction(key);
+      },
+      backPressed: (): boolean => this.handleBackPressed(),
+    }) {
+      Stack() {
+        if (this.comicFlipIndex === 2) {
+          this.VerticalBody()
+        } else {
+          FqReaderFlip({
+            flipMode: this.comicFlipIndex === 0 ? 0 : 2,
+            snapshotPrefix: 'fq_comic',
+            hasPrev: this.flipHasPrev(),
+            hasNext: this.flipHasNext(),
+            headerZoneVp: this.headerZoneVp,
+            footerZoneVp: this.footerZoneVp,
+            pageBgColor: FQ_COMIC_BG,
+            pageRenderer: (slot: number): void => {
+              this.imageSlot(slot);
+            },
+            headerRenderer: (slot: number): void => {
+              this.slotHeader(slot);
+            },
+            footerRenderer: (slot: number): void => {
+              this.slotFooter(slot);
+            },
+            onTurn: (isNext: boolean): void => {
+              this.onFlipTurn(isNext);
+            },
+            onMenuTap: (): void => {
+              this.toggleMenu();
+            },
+          })
+        }
+
+        // 漫评半模态宿主（0 尺寸稳定节点）
+        Column()
+          .width(0)
+          .height(0)
+          .bindSheet(this.commentSheetVisible, this.CommentSheet(), FqSheetOptions((): void => {
+            this.onCommentSheetClose();
+          }, fqCommentSheetHeightVp()))
+
+        if (this.loadingState) {
+          Column({ space: 12 }) {
+            CommonLoading({ sizeValue: 36, loadColor: FQ_ACCENT })
+            Text('正在加载本话内容')
+              .fontSize(14)
+              .fontColor(FQ_COMIC_TEXT)
+          }
+          .width('100%')
+          .height('100%')
+          .justifyContent(FlexAlign.Center)
+          .backgroundColor(FQ_COMIC_BG)
+        } else if (this.errorMsg.length > 0) {
+          Column({ space: 12 }) {
+            Text(this.errorMsg)
+              .fontSize(14)
+              .fontColor(FQ_COMIC_TEXT)
+              .textAlign(TextAlign.Center)
+              .padding({ left: 32, right: 32 })
+            Button('重试')
+              .backgroundColor(FQ_ACCENT)
+              .onClick(() => this.retry())
+          }
+          .width('100%')
+          .height('100%')
+          .justifyContent(FlexAlign.Center)
+          .backgroundColor(FQ_COMIC_BG)
+        }
+
+        if (this.menuVisible) {
+          Column()
+            .width('100%')
+            .height('100%')
+            .onClick(() => {
+              this.menuVisible = false;
+              this.sheetVisible = false;
+            })
+        }
+      }
+      .width('100%')
+      .height('100%')
+      .backgroundColor(FQ_COMIC_BG)
+      .bindSheet(this.sheetVisible, this.CatalogSheet(), FqSheetOptions((): void => {
+        this.onSheetClose();
+      }))
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 翻页模式正文
+  // ---------------------------------------------------------------------------
+
+  /** 仿真/覆盖模式槽位图（slot：-1 / 0 / +1，章内邻图优先，越界取预载邻章）。 */
+  @Builder
+  private imageSlot(slot: number) {
+    Column() {
+      if (this.imageForSlot(slot).length > 0) {
+        Image(this.imageForSlot(slot))
+          .width('100%')
+          .height('100%')
+          .objectFit(ImageFit.Contain)
+          .draggable(false)
+      }
+    }
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+  }
+
+  /** 槽位图片地址（空串 = 无图，越界且邻章未预载）。 */
+  private imageForSlot(slot: number): string {
+    const images: string[] = this.curImages;
+    const index: number = this.pageIndex + slot;
+    if (index >= 0 && index < images.length) {
+      return images[index];
+    }
+    if (index < 0) {
+      return this.prevImages.length > 0 ? this.prevImages[this.prevImages.length - 1] : '';
+    }
+    return this.nextImages.length > 0 ? this.nextImages[0] : '';
+  }
+
+  /** 槽位图所属章下标（-1 无章）。 */
+  private slotChapterIndex(slot: number): number {
+    const index: number = this.pageIndex + slot;
+    if (index >= 0 && index < this.curImages.length) {
+      return this.chapterIndex;
+    }
+    if (index < 0) {
+      return this.pageIndex > 0 ? this.chapterIndex
+        : (this.prevImages.length > 0 ? this.chapterIndex - 1 : -1);
+    }
+    return this.pageIndex + 1 < this.curImages.length ? this.chapterIndex
+      : (this.nextImages.length > 0 ? this.chapterIndex + 1 : -1);
+  }
+
+  /** 槽位图在所属章内的图片下标（-1 无图）。 */
+  private slotImageInChapter(slot: number): number {
+    const index: number = this.pageIndex + slot;
+    if (index >= 0 && index < this.curImages.length) {
+      return index;
+    }
+    if (index < 0) {
+      return this.prevImages.length > 0 ? this.prevImages.length - 1 : -1;
+    }
+    return this.nextImages.length > 0 ? 0 : -1;
+  }
+
+  /** 槽位所属章图片总数（0 无图）。 */
+  private slotChapterImageCount(slot: number): number {
+    const chapter: number = this.slotChapterIndex(slot);
+    if (chapter === this.chapterIndex) {
+      return this.curImages.length;
+    }
+    if (chapter === this.chapterIndex - 1) {
+      return this.prevImages.length;
+    }
+    if (chapter === this.chapterIndex + 1) {
+      return this.nextImages.length;
+    }
+    return 0;
+  }
+
+  /** 槽位所属章标题。 */
+  private slotChapterTitle(slot: number): string {
+    const chapter: number = this.slotChapterIndex(slot);
+    const item: FqChapter | undefined = this.chapters[chapter];
+    return item !== undefined ? item.title : '';
+  }
+
+  /** 槽位眉页：章节名（菜单弹出淡出；空槽位不渲染，随仿真截图卷曲）。 */
+  @Builder
+  private slotHeader(slot: number) {
+    if (!this.menuVisible && this.slotChapterIndex(slot) >= 0) {
+      Text(this.slotChapterTitle(slot))
+        .fontColor(FQ_COMIC_TEXT)
+        .fontSize(14)
+        .opacity(0.5)
+        .maxLines(1)
+        .width('100%')
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .padding({ left: 20, right: 20 })
+        .hitTestBehavior(HitTestMode.None)
+        .transition(TransitionEffect.OPACITY.animation({ duration: 300 }))
+    }
+  }
+
+  /** 槽位眉脚：左时钟+电量图标，右章内图序（菜单弹出淡出，随仿真截图卷曲）。 */
+  @Builder
+  private slotFooter(slot: number) {
+    if (!this.menuVisible && this.slotChapterIndex(slot) >= 0) {
+      Row({ space: 5 }) {
+        Text(this.footerClock)
+          .fontColor(FQ_COMIC_TEXT)
+          .fontSize(12)
+          .opacity(0.5)
+          .maxLines(1)
+        SymbolGlyph(this.batteryIcon())
+          .fontSize(14)
+          .fontColor([FQ_COMIC_TEXT])
+          .opacity(0.5)
+        Blank()
+        Text(this.slotFooterPages(slot))
+          .fontColor(FQ_COMIC_TEXT)
+          .fontSize(12)
+          .opacity(0.5)
+          .maxLines(1)
+      }
+      .alignItems(VerticalAlign.Center)
+      .width('100%')
+      .padding({ left: 20, right: 20 })
+      .hitTestBehavior(HitTestMode.None)
+      .transition(TransitionEffect.OPACITY.animation({ duration: 300 }))
+    }
+  }
+
+  /** 眉脚章内图序：第N张/共M张。 */
+  private slotFooterPages(slot: number): string {
+    const count: number = this.slotChapterImageCount(slot);
+    const image: number = this.slotImageInChapter(slot);
+    if (count <= 0 || image < 0) {
+      return '';
+    }
+    return `${image + 1}/${count}`;
+  }
+
+  private flipHasPrev(): boolean {
+    return this.pageIndex > 0 || (this.chapterIndex > 0 && this.prevImages.length > 0);
+  }
+
+  private flipHasNext(): boolean {
+    return this.pageIndex + 1 < this.curImages.length
+      || (this.chapterIndex + 1 < this.totalChapters && this.nextImages.length > 0);
+  }
+
+  /** 翻页完成：章内翻图或跨章切换（邻章已预载时无缝，未就绪回退整章加载）。 */
+  private onFlipTurn(isNext: boolean): void {
+    if (isNext) {
+      if (this.pageIndex + 1 < this.curImages.length) {
+        this.pageIndex += 1;
+        this.saveProgressNow();
+      } else if (this.nextImages.length > 0) {
+        this.switchToChapter(this.nextImages, this.chapterIndex + 1, 0);
+      } else if (this.chapterIndex + 1 < this.totalChapters) {
+        this.openChapter(this.chapterIndex + 1, '');
+      }
+    } else {
+      if (this.pageIndex - 1 >= 0) {
+        this.pageIndex -= 1;
+        this.saveProgressNow();
+      } else if (this.prevImages.length > 0) {
+        const lastIndex: number = Math.max(0, this.prevImages.length - 1);
+        this.switchToChapter(this.prevImages, this.chapterIndex - 1, lastIndex);
+      } else if (this.chapterIndex > 0) {
+        this.openChapter(this.chapterIndex - 1, '');
+      }
+    }
+  }
+
+  /** 邻章无缝切换（预载就绪后的跨章翻页路径；旧章图片顺势转为反向邻章）。 */
+  private switchToChapter(targetImages: string[], targetChapter: number, pageIndex: number): void {
+    const oldImages: string[] = this.curImages;
+    const goingNext: boolean = targetChapter > this.chapterIndex;
+    this.curImages = targetImages;
+    this.chapterIndex = targetChapter;
+    this.pageIndex = pageIndex;
+    if (goingNext) {
+      this.prevImages = oldImages;
+      this.nextImages = [];
+    } else {
+      this.nextImages = oldImages;
+      this.prevImages = [];
+    }
+    this.saveProgressNow();
+    this.preloadNeighbors(this.loadToken);
+  }
+
+  // ---------------------------------------------------------------------------
+  // 上下滚动模式（webtoon）
+  // ---------------------------------------------------------------------------
+
+  /** 上下滚动模式正文：整章图片连续纵向滚动，滚到章尾自动追加下一话。 */
+  @Builder
+  private VerticalBody() {
+    Column() {
+      List({
+        scroller: this.verticalScroller,
+        space: 4,
+      }) {
+        LazyForEach(this.verticalSource, (item: FqComicImageItem) => {
+          ListItem() {
+            Image(item.url)
+              .width('100%')
+              .objectFit(ImageFit.Contain)
+              .draggable(false)
+          }
+        }, (item: FqComicImageItem): string => `${item.chapterIndex}_${item.imageIndex}`)
+      }
+      .width('100%')
+      .layoutWeight(1)
+      .scrollBar(BarState.Off)
+      .cachedCount(4)
+      .onScrollIndex((first: number, last: number): void => {
+        this.onVerticalScrollIndex(first);
+      })
+      .onReachEnd((): void => {
+        this.onVerticalReachEnd();
+      })
+      .onClick((): void => {
+        this.toggleMenu();
+      })
+
+      if (this.verticalAppending) {
+        Row({ space: 8 }) {
+          CommonLoading({ sizeValue: 18, loadColor: FQ_COMIC_TEXT })
+          Text('正在加载下一话')
+            .fontSize(12)
+            .fontColor(FQ_COMIC_TEXT)
+            .opacity(0.6)
+        }
+        .width('100%')
+        .height(44)
+        .justifyContent(FlexAlign.Center)
+      }
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor(FQ_COMIC_BG)
+  }
+
+  /** 上下滚动模式重建：当前章图片入源并定位（startImage 章内图下标）。 */
+  private buildVertical(startImage: number): void {
+    this.verticalSource.reset();
+    this.verticalEndedToastOnce = false;
+    const images: string[] = this.curImages;
+    for (let i: number = 0; i < images.length; i++) {
+      this.verticalSource.append(new FqComicImageItem(this.chapterIndex, i, images[i]));
+    }
+    const target: number = Math.min(Math.max(0, startImage), Math.max(0, images.length - 1));
+    setTimeout((): void => {
+      if (this.verticalSource.totalCount() > target) {
+        this.verticalScroller.scrollToIndex(target, false);
+      }
+    }, 50);
+  }
+
+  /** 滚动位置 → 阅读进度（首可见条目所属章/图，驱动目录定位与进度持久化）。 */
+  private onVerticalScrollIndex(first: number): void {
+    if (first < 0 || first >= this.verticalSource.totalCount()) {
+      return;
+    }
+    const item: FqComicImageItem = this.verticalSource.getData(first);
+    if (item.chapterIndex !== this.chapterIndex || item.imageIndex !== this.pageIndex) {
+      this.chapterIndex = item.chapterIndex;
+      this.pageIndex = item.imageIndex;
+      this.saveProgressNow();
+    }
+  }
+
+  /** 滚到章尾：追加下一话图片；无下话提示一次。 */
+  private onVerticalReachEnd(): void {
+    if (this.verticalAppending || this.loadingState) {
+      return;
+    }
+    const nextIndex: number = this.chapterIndex + 1;
+    if (nextIndex >= this.totalChapters) {
+      if (!this.verticalEndedToastOnce) {
+        this.verticalEndedToastOnce = true;
+        promptAction.showToast({ message: '已经是最后一话了', duration: 1500 });
+      }
+      return;
+    }
+    this.appendVerticalChapter(nextIndex);
+  }
+
+  private async appendVerticalChapter(index: number): Promise<void> {
+    const token: number = this.loadToken;
+    this.verticalAppending = true;
+    try {
+      const images: string[] = await this.fetchChapterImages(index);
+      if (token !== this.loadToken) {
+        return;
+      }
+      for (let i: number = 0; i < images.length; i++) {
+        this.verticalSource.append(new FqComicImageItem(index, i, images[i]));
+      }
+    } catch (error) {
+      promptAction.showToast({ message: fqErrorMessage(error), duration: 1500 });
+    }
+    this.verticalAppending = false;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 行为（对齐 ReaderPage）
+  // ---------------------------------------------------------------------------
+
+  /** ReadBar 悬浮工具条分发：目录 / 设置 / 上一话 / 下一话。 */
+  private onReadBarAction(key: string): void {
+    if (key === '目录') {
+      this.openSheet();
+    } else if (key === '设置') {
+      DialogManager.OpenDialog('漫画设置');
+    } else if (key === '上一章') {
+      this.openPrev();
+    } else if (key === '下一章') {
+      this.openNext();
+    }
+  }
+
+  /** 系统返回：先关漫评/目录半模态，再关菜单，最后放行返回上一页。 */
+  private handleBackPressed(): boolean {
+    if (this.commentSheetVisible) {
+      this.onCommentSheetClose();
+      return true;
+    }
+    if (this.sheetVisible) {
+      this.onSheetClose();
+      return true;
+    }
+    if (this.menuVisible) {
+      this.menuVisible = false;
+      return true;
+    }
+    // 返回放行前先恢复系统状态栏（aboutToDisappear 里仍兜底恢复一次）
+    this.applySystemBar(true);
+    return false;
+  }
+
+  /** 沉浸控制：阅读时隐藏系统状态栏，菜单呼出（标题栏/工具栏出现）时恢复。 */
+  @Monitor('menuVisible')
+  onMenuVisibleChange(): void {
+    this.applySystemBar(this.menuVisible);
+  }
+
+  private applySystemBar(show: boolean): void {
+    const context: common.UIAbilityContext =
+      this.getUIContext().getHostContext() as common.UIAbilityContext;
+    window.getLastWindow(context).then((win: window.Window) => {
+      if (show) {
+        win.setWindowSystemBarEnable(['status', 'navigation']);
+      } else {
+        win.setWindowSystemBarEnable(['navigation']);
+      }
+    }).catch((): void => {
+    });
+  }
+
+  /** 避让区高度（供 @Monitor 监听状态栏/手势条变化）。 */
+  @Computed
+  get avoidBottom(): number {
+    return appState.bottomRect;
+  }
+
+  @Computed
+  get avoidTop(): number {
+    return appState.maxTopRect;
+  }
+
+  /** 避让区变化：更新翻页容器眉页/眉脚区高。 */
+  @Monitor('avoidBottom', 'avoidTop')
+  onAvoidAreaChange(): void {
+    this.updateZones();
+  }
+
+  private updateZones(): void {
+    this.headerZoneVp = Math.max(appState.maxTopRect, 32) + 22;
+    this.footerZoneVp = appState.bottomRect + 40;
+  }
+
+  /** 眉脚电量图标：按系统电量映射到档位图标资源。 */
+  private batteryIcon(): Resource {
+    const level: number = this.batteryLevel;
+    if (level >= 100) {
+      return $r('sys.symbol.battery_100percent');
+    }
+    if (level >= 95) {
+      return $r('sys.symbol.battery_95percent');
+    }
+    if (level >= 90) {
+      return $r('sys.symbol.battery_90percent');
+    }
+    if (level >= 80) {
+      return $r('sys.symbol.battery_80percent');
+    }
+    if (level >= 75) {
+      return $r('sys.symbol.battery_75percent');
+    }
+    if (level >= 70) {
+      return $r('sys.symbol.battery_70percent');
+    }
+    if (level >= 60) {
+      return $r('sys.symbol.battery_60percent');
+    }
+    if (level >= 50) {
+      return $r('sys.symbol.battery_50percent');
+    }
+    if (level >= 40) {
+      return $r('sys.symbol.battery_40percent');
+    }
+    if (level >= 30) {
+      return $r('sys.symbol.battery_30percent');
+    }
+    if (level >= 20) {
+      return $r('sys.symbol.battery_20percent');
+    }
+    if (level >= 15) {
+      return $r('sys.symbol.battery_15percent');
+    }
+    if (level >= 10) {
+      return $r('sys.symbol.battery_10percent');
+    }
+    return $r('sys.symbol.battery_5percent');
+  }
+
+  /** 刷新眉脚时钟与电量（启动时与 30s 定时器调用）。 */
+  private refreshFooterStatus(): void {
+    const now: Date = new Date();
+    const hours: number = now.getHours();
+    const minutes: number = now.getMinutes();
+    const hh: string = hours < 10 ? `0${hours}` : `${hours}`;
+    const mm: string = minutes < 10 ? `0${minutes}` : `${minutes}`;
+    this.footerClock = `${hh}:${mm}`;
+    this.batteryLevel = batteryInfo.batterySOC;
+  }
+
+  private openSheet(): void {
+    this.sheetOpenToken += 1;
+    this.sheetVisible = true;
+  }
+
+  private onSheetClose(): void {
+    this.sheetVisible = false;
+  }
+
+  private hasPrev(): boolean {
+    return this.chapterIndex > 0;
+  }
+
+  private hasNext(): boolean {
+    return this.chapterIndex < this.totalChapters - 1;
+  }
+
+  private toggleMenu(): void {
+    if (this.sheetVisible) {
+      this.onSheetClose();
+      return;
+    }
+    this.getUIContext().animateTo({ duration: 300 }, (): void => {
+      this.menuVisible = !this.menuVisible;
+    });
+  }
+
+  private openCommentSheet(): void {
+    this.commentSheetVisible = true;
+  }
+
+  private onCommentSheetClose(): void {
+    this.commentSheetVisible = false;
+  }
+
+  private openPrev(): void {
+    if (!this.hasPrev()) {
+      return;
+    }
+    this.openChapter(this.chapterIndex - 1, '');
+  }
+
+  private openNext(): void {
+    if (!this.hasNext()) {
+      return;
+    }
+    this.openChapter(this.chapterIndex + 1, '');
+  }
+
+  private jumpToChapter(index: number): void {
+    this.onSheetClose();
+    if (index < 0 || index >= this.totalChapters || index === this.chapterIndex) {
+      return;
+    }
+    this.openChapter(index, '');
+  }
+
+  private retry(): void {
+    if (this.chapters.length === 0) {
+      this.load();
+    } else {
+      this.openChapter(this.chapterIndex, '');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 设置（fqComicSettingsBus 桥接「漫画设置」弹窗）
+  // ---------------------------------------------------------------------------
+
+  /** 弹窗宿主在 Index：镜像翻页方式并注册变更处理器（弹窗内容实时刷新）。 */
+  private attachSettingsBus(): void {
+    fqComicSettingsBus.comicFlipIndex = this.comicFlipIndex;
+    fqComicSettingsBus.handler = {
+      changeFlip: (index: number): void => {
+        this.changeFlip(index);
+      },
+    };
+  }
+
+  /** 切换翻页方式：0/1 仅换渲染模式，进出上下滚动模式时迁移阅读位置。 */
+  private changeFlip(index: number): void {
+    if (index === this.comicFlipIndex || index < 0 || index > 2) {
+      return;
+    }
+    const prevMode: number = this.comicFlipIndex;
+    this.comicFlipIndex = index;
+    FqReaderStore.saveComicFlip(index);
+    fqComicSettingsBus.comicFlipIndex = index;
+    if (prevMode === 2) {
+      // 上下 → 仿真/覆盖：缓存命中直接还原分页态，缺失回退整章重载
+      this.restorePagedFromVertical();
+    } else {
+      // 仿真/覆盖 → 上下：当前章图片入源并定位
+      this.buildVertical(this.pageIndex);
+    }
+  }
+
+  /** 上下 → 分页：按当前滚动位置还原当前章分页态。 */
+  private restorePagedFromVertical(): void {
+    const images: string[] | undefined = this.chapterImageCache.get(this.chapterIndex);
+    if (images === undefined || images.length === 0) {
+      this.openChapter(this.chapterIndex, `img:${this.pageIndex}`);
+      return;
+    }
+    this.curImages = images;
+    if (this.pageIndex >= images.length) {
+      this.pageIndex = Math.max(0, images.length - 1);
+    }
+    this.prevImages = [];
+    this.nextImages = [];
+    this.saveProgressNow();
+    this.preloadNeighbors(this.loadToken);
+  }
+
+  // ---------------------------------------------------------------------------
+  // 加载
+  // ---------------------------------------------------------------------------
+
+  private async load(): Promise<void> {
+    if (this.bookId.length === 0) {
+      this.errorMsg = '无效的作品';
+      this.loadingState = false;
+      return;
+    }
+    const token: number = ++this.loadToken;
+    this.loadingState = true;
+    this.errorMsg = '';
+    try {
+      await FqBackend.get().start(getContext(this));
+      const chapters: FqChapter[] =
+        await FqBackend.get().directoryChapters(this.bookId, fqKindToTab('manga'));
+      if (token !== this.loadToken) {
+        return;
+      }
+      if (chapters.length === 0) {
+        this.errorMsg = '未获取到目录章节';
+        this.loadingState = false;
+        return;
+      }
+      this.chapters = chapters;
+      this.totalChapters = chapters.length;
+      const progress: FqReaderProgress = FqReaderStore.getProgress(this.bookId);
+      let index: number = this.startChapterIndex;
+      let domPos: string = '';
+      if (index < 0 || index >= chapters.length) {
+        index = progress.chapterIndex >= 0 && progress.chapterIndex < chapters.length
+          ? progress.chapterIndex : 0;
+        domPos = index === progress.chapterIndex ? progress.domPos : '';
+      }
+      await this.openChapter(index, domPos);
+    } catch (error) {
+      if (token === this.loadToken) {
+        this.errorMsg = fqErrorMessage(error);
+        this.loadingState = false;
+      }
+    }
+  }
+
+  private async openChapter(index: number, domPos: string): Promise<void> {
+    const chapter: FqChapter | undefined = this.chapters[index];
+    if (chapter === undefined) {
+      return;
+    }
+    const token: number = ++this.loadToken;
+    hilog.info(0x0001, 'ComicPage', `openChapter index=${index} domPos=${domPos}`);
+    this.menuVisible = false;
+    this.onSheetClose();
+    this.chapterIndex = index;
+    this.loadingState = true;
+    this.errorMsg = '';
+    try {
+      const images: string[] = await this.fetchChapterImages(index);
+      if (token !== this.loadToken) {
+        return;
+      }
+      if (images.length === 0) {
+        this.errorMsg = '本话内容为空';
+        this.loadingState = false;
+        return;
+      }
+      this.curImages = images;
+      this.prevImages = [];
+      this.nextImages = [];
+      this.pageIndex = this.restoreImageIndex(domPos, images.length);
+      this.loadingState = false;
+      this.saveProgressNow();
+      if (this.comicFlipIndex === 2) {
+        this.buildVertical(this.pageIndex);
+      }
+      this.preloadNeighbors(token);
+    } catch (error) {
+      if (token === this.loadToken) {
+        this.errorMsg = fqErrorMessage(error);
+        this.loadingState = false;
+      }
+    }
+  }
+
+  /** 章图片获取（会话缓存优先，未命中请求后端并回填）。 */
+  private async fetchChapterImages(index: number): Promise<string[]> {
+    const cached: string[] | undefined = this.chapterImageCache.get(index);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const chapter: FqChapter | undefined = this.chapters[index];
+    if (chapter === undefined) {
+      return [];
+    }
+    const images: string[] = await FqBackend.get().chapterImages(chapter.itemId);
+    if (images.length > 0) {
+      this.chapterImageCache.set(index, images);
+    }
+    return images;
+  }
+
+  /** 邻章预载（后台，token 保护；先 next 后 prev；上下滚动模式按需追加不预载）。 */
+  private async preloadNeighbors(token: number): Promise<void> {
+    if (this.comicFlipIndex === 2) {
+      return;
+    }
+    const nextIndex: number = this.chapterIndex + 1;
+    if (nextIndex < this.totalChapters && this.nextImages.length === 0) {
+      try {
+        const images: string[] = await this.fetchChapterImages(nextIndex);
+        if (token === this.loadToken && images.length > 0) {
+          this.nextImages = images;
+        }
+      } catch (error) {
+        // 邻章预载失败不阻断（跨章时回退整章加载路径）
+      }
+    }
+    if (token !== this.loadToken) {
+      return;
+    }
+    const prevIndex: number = this.chapterIndex - 1;
+    if (prevIndex >= 0 && this.prevImages.length === 0) {
+      try {
+        const images: string[] = await this.fetchChapterImages(prevIndex);
+        if (token === this.loadToken && images.length > 0) {
+          this.prevImages = images;
+        }
+      } catch (error) {
+        // 邻章预载失败不阻断
+      }
+    }
+  }
+
+  /** 恢复图下标：'img:N' 进度解析，非法/越界回退首图。 */
+  private restoreImageIndex(domPos: string, total: number): number {
+    if (domPos.startsWith('img:')) {
+      const n: number = parseInt(domPos.substring(4), 10);
+      if (!Number.isNaN(n) && n >= 0 && n < total) {
+        return n;
+      }
+    }
+    return 0;
+  }
+
+  /** 进度持久化：domPos = 'img:章内图下标'。 */
+  private saveProgressNow(): void {
+    if (this.chapters.length === 0
+      || this.chapterIndex < 0 || this.chapterIndex >= this.chapters.length) {
+      return;
+    }
+    FqReaderStore.saveProgress(this.bookId, this.chapterIndex, `img:${this.pageIndex}`);
+  }
+
+  /** 章节已读进度：当前章按图位置计百分比、之前章节 100%、未读章节 0%。 */
+  private chapterProgressText(idx: number): string {
+    if (idx < this.chapterIndex) {
+      return '100%';
+    }
+    if (idx > this.chapterIndex) {
+      return '0%';
+    }
+    let total: number = this.curImages.length;
+    const cached: string[] | undefined = this.chapterImageCache.get(idx);
+    if (cached !== undefined && cached.length > 0) {
+      total = cached.length;
+    }
+    if (total <= 0) {
+      return '0%';
+    }
+    const pct: number = Math.round(((this.pageIndex + 1) / total) * 100);
+    return `${Math.min(Math.max(pct, 1), 100)}%`;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 半模态装配
+  // ---------------------------------------------------------------------------
+
+  /** 目录半模态：公共 FqCatalogSheet（搜索/排序/定位/进度自理）。 */
+  @Builder
+  private CatalogSheet() {
+    FqCatalogSheet({
+      chapters: this.chapters,
+      fontColor: $r('sys.color.font_primary'),
+      currentChapterIndex: this.chapterIndex,
+      progressOf: (index: number): string => this.chapterProgressText(index),
+      openToken: this.sheetOpenToken,
+      contentEndExtra: 56,
+      chapterClick: (index: number): void => {
+        this.jumpToChapter(index);
+      },
+    })
+  }
+
+  /** 漫评半模态：公共 FqCommentSheet（首拉 Loading / 错误重试 / 空态 / 分页列表）。 */
+  @Builder
+  private CommentSheet() {
+    FqCommentSheet({
+      bookId: this.bookId,
+      fontColor: $r('sys.color.font_primary'),
+      commentLabel: '漫评',
+    })
+  }
+}
