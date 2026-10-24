@@ -492,7 +492,7 @@ export struct ListenPage {
     .padding({ left: 12, right: 12, top: 8, bottom: 8 })
     .borderRadius(10)
     .backgroundColor(this.toneChipSelected(tone) ? '#1AFF7A3D'
-      : $r('sys.color.comp_background_tertiary'))
+      : $r('sys.color.comp_background_list_card'))
     .border({
       width: this.toneChipSelected(tone) ? 1.2 : 0,
       color: this.toneChipSelected(tone) ? '#52FF7A3D' : Color.Transparent,
@@ -553,7 +553,7 @@ export struct ListenPage {
       .height(116)
       .padding({ left: 4, right: 4, top: 8, bottom: 8 })
       .borderRadius(12)
-      .backgroundColor($r('sys.color.comp_background_secondary'))
+      .backgroundColor($r('sys.color.comp_background_tertiary'))
       .alignItems(HorizontalAlign.Start)
       .onClick((): void => {
         this.openVoices();
@@ -586,7 +586,7 @@ export struct ListenPage {
       .height(116)
       .padding({ left: 4, right: 4, top: 8, bottom: 8 })
       .borderRadius(12)
-      .backgroundColor($r('sys.color.comp_background_secondary'))
+      .backgroundColor($r('sys.color.comp_background_tertiary'))
       .alignItems(HorizontalAlign.Start)
       .onClick((): void => {
         this.openReadAlong();
@@ -704,7 +704,7 @@ export struct ListenPage {
                   .padding({ left: 12, right: 12 })
                   .borderRadius(8)
                   .backgroundColor(this.voiceSelected(voice) ? '#1AFF7A3D'
-                    : $r('sys.color.comp_background_secondary'))
+                    : $r('sys.color.comp_background_list_card'))
                   .border({
                     width: this.voiceSelected(voice) ? 1 : 0,
                     color: this.voiceSelected(voice) ? '#52FF7A3D' : Color.Transparent,
@@ -779,7 +779,7 @@ export struct ListenPage {
     .padding({ left: 12, right: 12, top: 10, bottom: 10 })
     .borderRadius(8)
     .backgroundColor(this.voiceSelected(voice) ? '#1AFF7A3D'
-      : $r('sys.color.comp_background_secondary'))
+      : $r('sys.color.comp_background_list_card'))
     .border({
       width: this.voiceSelected(voice) ? 1 : 0,
       color: this.voiceSelected(voice) ? '#52FF7A3D' : Color.Transparent,

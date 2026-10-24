@@ -416,6 +416,7 @@ export struct PlayerPage {
     .width('100%')
     .height(44)
     .padding({ left: 12, right: 12 })
+    .margin({ left: 16, right: 16 })
     .borderRadius(10)
     .backgroundColor('rgba(255,255,255,0.08)')
     .alignItems(VerticalAlign.Center)
@@ -530,11 +531,13 @@ export struct PlayerPage {
   @Builder
   private CatalogBar() {
     Column({ space: 12 }){
-      this.SeriesTitleRow()
+      Column({ space: 2 }){
+        this.SeriesTitleRow()
 
-      // 原著横幅（官方 _originalBookCard）：剧名行与进度线之间，仅有原著时显示
-      if (this.originalBook !== null) {
-        this.OriginalBookBanner()
+        // 原著横幅（官方 _originalBookCard）：剧名行与进度线之间，仅有原著时显示
+        if (this.originalBook !== null) {
+          this.OriginalBookBanner()
+        }
       }
 
       this.SeekBar()
