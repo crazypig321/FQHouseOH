@@ -71,6 +71,8 @@ export class PlayerNavParams {
   static chapters: FqChapter[] = [];
   /** 起播集下标。 */
   static startIndex: number = 0;
+  /** 剧集状态（FqBookDetail.creationStatus：0 完结 / 1 连载中；-1 未知）。 */
+  static creationStatus: number = -1;
 }
 
 /**

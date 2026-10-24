@@ -17,8 +17,9 @@ import { CommonSearch } from './CommonCom';
 import { CommonNav } from './CommonNav';
 import { uiMaterial } from '@kit.ArkUI';
 
-/** 通用 bindSheet 参数：拖拽条 + 关闭回调 + 可选高度（默认 300）。 */
-export function FqSheetOptions(onClose: () => void, height?: SheetSize | Length): SheetOptions {
+/** 通用 bindSheet 参数：拖拽条 + 关闭回调 + 可选高度（默认 600）；前景光感模糊可选关闭。 */
+export function FqSheetOptions(onClose: () => void, height?: SheetSize | Length,
+  foregroundBlur: boolean = true): SheetOptions {
   const options: SheetOptions = {
     height: height === undefined ? 600 : height,
     dragBar: true,
@@ -34,11 +35,15 @@ export function FqSheetOptions(onClose: () => void, height?: SheetSize | Length)
     },
     onWillSpringBackWhenDismiss: ()=>{},
     onWillAppear: () => {
-      appState.isForegroundBlur = true
+      if (foregroundBlur) {
+        appState.isForegroundBlur = true
+      }
     },
     onWillDisappear: (): void => {
       onClose();
-      appState.isForegroundBlur = false
+      if (foregroundBlur) {
+        appState.isForegroundBlur = false
+      }
     },
   };
   return options;

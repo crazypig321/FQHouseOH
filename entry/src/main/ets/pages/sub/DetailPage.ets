@@ -819,6 +819,7 @@ export struct DetailPage {
     PlayerNavParams.cover = this.itemCover.length > 0 ? this.itemCover : this.detail.cover;
     PlayerNavParams.chapters = episodes;
     PlayerNavParams.startIndex = 0;
+    PlayerNavParams.creationStatus = this.detail.creationStatus;
     NavPathUtils.push(ROUTE_PLAYER);
   }
 
