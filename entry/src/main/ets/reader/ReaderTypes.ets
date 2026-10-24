@@ -16,8 +16,8 @@ export class FqPageFragment {
   readonly paraIndex: number;
   /** 是否章题段（加大加粗样式）。 */
   readonly isTitle: boolean;
-  /** 片段行集合（引擎已断行，渲染逐行独立 Text，无换行分歧）。 */
-  lines: string[] = [];
+  /** 片段文本（段的可见子串，含缩进前缀若是段首；渲染整段 Text 自然换行两端对齐）。 */
+  text: string = '';
   /** 段内起始字符（含缩进前缀）。 */
   startChar: number = 0;
   /** 段内结束字符（不含）。 */
@@ -26,8 +26,6 @@ export class FqPageFragment {
   isParaEnd: boolean = false;
   /** 是否在片段末尾渲染段评气泡。 */
   showBubble: boolean = false;
-  /** 气泡行内化：true = 气泡拼在末行文本后（不占行高）；false = 独立气泡行。 */
-  bubbleInline: boolean = false;
 
   constructor(paraIndex: number, isTitle: boolean) {
     this.paraIndex = paraIndex;

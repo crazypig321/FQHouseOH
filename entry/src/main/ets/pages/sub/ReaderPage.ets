@@ -531,7 +531,7 @@ export struct ReaderPage {
     const headerZoneVp: number = Math.max(appState.maxTopRect, 32) + 22;
     const footerZoneVp: number = appState.bottomRect + 40;
     const contentTopVp: number = 10;
-    const contentBottomVp: number = 10;
+    const contentBottomVp: number = 0;
     metrics.sidePaddingVp = sideVp;
     metrics.contentTopVp = contentTopVp;
     metrics.contentBottomVp = contentBottomVp;
@@ -575,6 +575,7 @@ export struct ReaderPage {
     metrics.contentWidthPx = screenW - sideVp * 2 * density;
     metrics.contentHeightPx = screenH
       - (headerZoneVp + contentTopVp + contentBottomVp + footerZoneVp) * density;
+    hilog.info(0x0001, 'FqM', `buildMetrics footer=${metrics.footerZoneVp} header=${metrics.headerZoneVp} contentH=${metrics.contentHeightPx} lineH=${metrics.lineHeightPx} fontSize=${this.fontSize}`);
     return metrics;
   }
 
@@ -766,6 +767,7 @@ export struct ReaderPage {
   /** 配置变化重排：保持当前页首位置（字号/行距/字体/窗口尺寸变化）。 */
   private relayoutKeepPosition(): void {
     const layout: FqChapterLayout | null = this.curLayout;
+    hilog.info(0x0001, 'FqM', `relayout triggered curLayout!=null=${layout !== null}`);
     if (layout === null || layout.pages.length === 0) {
       return;
     }
@@ -813,6 +815,17 @@ export struct ReaderPage {
     return appState.screenHeight;
   }
 
+  /** 避让区高度（供 @Monitor 监听状态栏/手势条变化）。 */
+  @Computed
+  get avoidBottom(): number {
+    return appState.bottomRect;
+  }
+
+  @Computed
+  get avoidTop(): number {
+    return appState.maxTopRect;
+  }
+
   /** 窗口尺寸变化：重建几何并保位重排。 */
   @Monitor('windowWidth', 'windowHeight')
   onWindowSizeChange(): void {
@@ -820,6 +833,12 @@ export struct ReaderPage {
       return;
     }
     this.relayoutKeepPosition();
+  }
+
+  /** 避让区变化（状态栏/手势条显隐）：更新几何（眉脚高度跟随），不重排避免页码跳动。 */
+  @Monitor('avoidBottom', 'avoidTop')
+  onAvoidAreaChange(): void {
+    this.cachedMetrics = this.buildMetrics();
   }
 
   // ---------------------------------------------------------------------------

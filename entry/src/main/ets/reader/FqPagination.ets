@@ -15,6 +15,7 @@
 
 import { FqChapterLayout, FqPageBubble, FqPageFragment, FqReaderLayoutMetrics,
   FqReaderPageData } from './ReaderTypes';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 
 /** 文本宽度测量回调：(文本, 字号fp, 字重) → 宽度 px（UIContext.getMeasureUtils().measureText 包装）。 */
 export type FqMeasureFn = (text: string, fontSizeFp: number, fontWeight: string) => number;
@@ -46,7 +47,8 @@ export class FqPaginationEngine {
     return width;
   }
 
-  /** 段落断行：贪心逐字符累加，禁则回退（行尾起始标点下移、行首收尾标点再下移至多 2 字符）。 */
+  /** 段落断行：单字符宽度缓存累加（O(N) 快，调字号重排不卡顿），累加超宽时整行实测验证
+   * （含标点压缩），使断行行数与 Text 自然换行一致（减少页底留空）；禁则回退。 */
   private splitLines(text: string, firstMaxW: number, restMaxW: number,
     fontFp: number, weight: string): string[] {
     // 码点切字符（代理对合并，emoji 安全）
@@ -71,6 +73,12 @@ export class FqPaginationEngine {
       const ch: string = chars[index];
       const w: number = this.charWidth(ch, fontFp, weight);
       if (cur.length > 0 && curW + w > maxW) {
+        // 累加超宽：整行实测验证（含标点压缩），若整行仍 <= maxW 则继续放（标点压缩省空间）
+        if (this.measureFn(cur + ch, fontFp, weight) <= maxW) {
+          cur += ch;
+          curW += w;
+          continue;
+        }
         let cut: number = cur.length;
         // 行尾禁则：切点前字符为起始标点 → 一并下移
         if (cut > 1 && FQ_LINE_TAIL_BAN.indexOf(cur.charAt(cut - 1)) >= 0) {
@@ -106,19 +114,6 @@ export class FqPaginationEngine {
     return chromePx + this.measureFn(`${count}`, metrics.bubbleTextFp, '400') + 2 * metrics.density;
   }
 
-  /** 行内气泡登记：气泡拼在末行文本后，行高按 max(行高, 胶囊高) 预留；命中区为页面级坐标。 */
-  private recordInlineBubble(page: FqReaderPageData, frag: FqPageFragment,
-    metrics: FqReaderLayoutMetrics, para: number, usedPx: number, rowH: number,
-    lastLineW: number, bubbleW: number): void {
-    frag.showBubble = true;
-    frag.bubbleInline = true;
-    page.bubbles.push(new FqPageBubble(para,
-      metrics.headerZoneVp + metrics.contentTopVp + (usedPx - rowH) / metrics.density,
-      rowH / metrics.density,
-      metrics.sidePaddingVp + lastLineW / metrics.density + metrics.bubbleGapVp,
-      bubbleW / metrics.density));
-  }
-
   /** 章节装页：返回带片段/行/页首位置的完整分页结果。 */
   public layout(chapterIndex: number, paragraphs: string[], metrics: FqReaderLayoutMetrics,
     commentCounts: number[]): FqChapterLayout {
@@ -149,6 +144,7 @@ export class FqPaginationEngine {
         const need: number = blockTop + lineH;
         if (page.fragments.length > 0 && used + need > contentH) {
           // 收页：页片段已满，开新页继续装当前段剩余行
+          hilog.info(0x0001, 'FqPag', `page used=${used} contentH=${contentH} ratio=${(used / contentH).toFixed(3)}`);
           pages.push(page);
           page = new FqReaderPageData();
           used = 0;
@@ -163,7 +159,7 @@ export class FqPaginationEngine {
             page.startChar = charIdx;
           }
         }
-        frag.lines.push(lines[li]);
+        frag.text += lines[li];
         charIdx += lines[li].length;
         frag.endChar = charIdx;
         used += need;
@@ -174,69 +170,35 @@ export class FqPaginationEngine {
       if (isTitle) {
         used += metrics.titleBottomPx;
       } else if (commentCounts.length > para && commentCounts[para] > 0) {
-        // 段评气泡：优先行内化（拼在末行文本后，不占行高）；
-        // 末行放不下时按「预留气泡宽」窄列重排末行；仍不行回退独立气泡行。
+        // 段尾独立气泡行（渲染端整段 Text 两端对齐，气泡独立行跟在段尾）
         const count: number = commentCounts[para];
         const bubbleW: number = this.bubbleWidthPx(metrics, count);
-        const reservePx: number = bubbleW + metrics.bubbleGapVp * metrics.density;
-        // 行内气泡所在行高按 max(行高, 胶囊高) 预留：胶囊高于行高（小字号/系统字体放大）
-        // 时不再挤占后续行空间，杜绝页底溢出切行
-        const inlineRowPx: number = Math.max(lineH, metrics.bubbleCapsulePx);
-        const capsuleExtraPx: number = Math.max(0, metrics.bubbleCapsulePx - lineH);
-        let inlined: boolean = false;
-        if (frag !== null && frag.lines.length > 0
-          && metrics.contentWidthPx - reservePx >= metrics.fontSizePx * 3) {
-          const lastIdx: number = frag.lines.length - 1;
-          const lastLine: string = frag.lines[lastIdx];
-          const lastW: number = this.measureFn(lastLine, fontFp, weight);
-          if (lastW + reservePx <= metrics.contentWidthPx) {
-            used += capsuleExtraPx;
-            this.recordInlineBubble(page, frag, metrics, para, used, inlineRowPx, lastW, bubbleW);
-            inlined = true;
-          } else {
-            // 窄列重排末行（首/续行同宽）；多出的行与胶囊增高需装得下当前页
-            const narrowMax: number = metrics.contentWidthPx - reservePx;
-            const reSplit: string[] = this.splitLines(lastLine, narrowMax, narrowMax, fontFp, weight);
-            if (reSplit.length >= 2 && used + inlineRowPx <= contentH) {
-              frag.lines.splice(lastIdx, 1);
-              for (let ri: number = 0; ri < reSplit.length; ri++) {
-                frag.lines.push(reSplit[ri]);
-              }
-              used += lineH + capsuleExtraPx;
-              const newLastW: number = this.measureFn(reSplit[reSplit.length - 1], fontFp, weight);
-              this.recordInlineBubble(page, frag, metrics, para, used, inlineRowPx, newLastW, bubbleW);
-              inlined = true;
-            }
-          }
+        if (page.fragments.length > 0 && used + metrics.bubbleRowPx > contentH) {
+          pages.push(page);
+          page = new FqReaderPageData();
+          used = 0;
+          const bubbleFrag: FqPageFragment = new FqPageFragment(para, false);
+          bubbleFrag.startChar = text.length;
+          bubbleFrag.endChar = text.length;
+          bubbleFrag.isParaEnd = true;
+          bubbleFrag.showBubble = true;
+          page.fragments.push(bubbleFrag);
+          page.startPara = para;
+          page.startChar = text.length;
+          frag = bubbleFrag;
+        } else if (frag !== null) {
+          frag.showBubble = true;
         }
-        if (!inlined) {
-          // 独立气泡行兜底：装不下则气泡片段独立开新页（气泡永远与段尾逻辑同章同段）
-          if (page.fragments.length > 0 && used + metrics.bubbleRowPx > contentH) {
-            pages.push(page);
-            page = new FqReaderPageData();
-            used = 0;
-            const bubbleFrag: FqPageFragment = new FqPageFragment(para, false);
-            bubbleFrag.startChar = text.length;
-            bubbleFrag.endChar = text.length;
-            bubbleFrag.isParaEnd = true;
-            bubbleFrag.showBubble = true;
-            page.fragments.push(bubbleFrag);
-            page.startPara = para;
-            page.startChar = text.length;
-            frag = bubbleFrag;
-          } else if (frag !== null) {
-            frag.showBubble = true;
-          }
-          page.bubbles.push(new FqPageBubble(para,
-            metrics.headerZoneVp + metrics.contentTopVp + used / metrics.density,
-            metrics.bubbleRowPx / metrics.density,
-            metrics.sidePaddingVp,
-            bubbleW / metrics.density));
-          used += metrics.bubbleRowPx;
-        }
+        page.bubbles.push(new FqPageBubble(para,
+          metrics.headerZoneVp + metrics.contentTopVp + used / metrics.density,
+          metrics.bubbleRowPx / metrics.density,
+          metrics.sidePaddingVp,
+          bubbleW / metrics.density));
+        used += metrics.bubbleRowPx;
       }
     }
     if (page.fragments.length > 0) {
+      hilog.info(0x0001, 'FqPag', `last page used=${used} contentH=${contentH} ratio=${(used / contentH).toFixed(3)}`);
       pages.push(page);
     }
     result.pages = pages;

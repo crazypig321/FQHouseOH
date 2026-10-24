@@ -41,8 +41,8 @@ export struct FqReaderFlip {
   /** 当前页段评气泡命中区（触区点击仲裁，页面级坐标）。 */
   @Param bubbles: FqPageBubble[] = [];
   /** 眉页 / 眉脚区高（vp，槽位三区布局）。 */
-  @Param headerZoneVp: number = 54;
-  @Param footerZoneVp: number = 40;
+  @Param headerZoneVp: number = 20
+  @Param footerZoneVp: number = 20;
   /** 页底色（槽位三区背景，与仿真截图底色一致）。 */
   @Param pageBgColor: string = '#F6F4EF';
   /** 正文渲染回调：slot -1 = 上一页 / 0 = 当前页 / 1 = 下一页。 */
