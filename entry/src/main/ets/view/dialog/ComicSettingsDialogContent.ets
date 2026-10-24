@@ -34,6 +34,7 @@ export struct ComicSettingsDialogContent {
       }, (label: string): string => label)
     }
     .width('100%')
+    .height(60)
     .alignItems(VerticalAlign.Center)
   }
 }

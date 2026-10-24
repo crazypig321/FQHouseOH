@@ -839,8 +839,8 @@ export struct ComicPage {
     this.headerZoneVp = Math.max(appState.maxTopRect, 32) + 22;
     this.footerZoneVp = appState.bottomRect + 40;
     const body: number = this.bodyHeightVp > 0 ? this.bodyHeightVp : this.screenHeightVp();
-    const height: number = body - this.headerZoneVp - this.footerZoneVp;
-    this.pagedImageHeightVp = height > 0 ? height : 640;
+    const height: number = body - 100;
+    this.pagedImageHeightVp = height;
   }
 
   /** 内容区窗口纵坐标基线（vp，globalPosition.y；-1 = 未测）：
