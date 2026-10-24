@@ -6,15 +6,17 @@
  *   底部信息区（自上而下：剧名行 → 细进度线（#FFFA6725、4vp）→
  *   「选集 · 已完结 · 全N集」胶囊（#E6222222、圆角 8））；
  *   控件常驻（官方竖屏无自动收起）；画面中央播放/暂停按钮点击才出现
- *   （暂停时常驻、播放 3s 后自动隐藏，单击画面切播放）。
+ *   （仅非全屏渲染；暂停时常驻、播放 3s 后自动隐藏，单击画面切播放）。
  * - 全屏（fqapp _landscapeBar / _fullscreenPill）：
  *   横屏片源（videoParams.dw > dh）进入沉浸横屏（AUTO_ROTATION_LANDSCAPE +
- *   隐藏系统栏），底部控制条（播放/下一集/时间/进度/倍速/选集）3s 自动隐藏，
- *   单击画面切控件显隐；竖屏片源全屏保持竖屏沉浸。
+ *   隐藏系统栏），底部控制条（播放/下一集/时间/进度/倍速/选集）3s 自动隐藏；
+ *   全屏（横竖屏）单击切控件显隐、双击切播放/暂停；竖屏片源全屏顶栏避让
+ *   maxTopRect（沉浸隐藏状态栏后 topRect 归零），且不渲染中央播放按钮。
  * - 选集半模态 FqStoryPanel（官方 StoryPlayerPanel 白底样式）；剧名行与
  *   「全屏观看」药丸层锚定底部信息区，恒在进度线与选集胶囊上方。
  * - 半模态均走公共框架 FqSheetOptions，只是不触发前景光感模糊；
- *   右上角菜单呼出「播放设置」半模态（倍速档位）。
+ *   右上角菜单呼出「播放设置」半模态（倍速档位）；
+ *   评论按钮呼出「剧评」半模态（公共 FqCommentSheet，同详情页全部评论）。
  * - 播完自动连播；aboutToDisappear 销毁 mpv 实例并恢复沉浸前的系统 UI。
  */
 
@@ -23,6 +25,7 @@ import { Player, PlayerSurface, Media, PlayerConfig } from '@mpv-ohos/mpv-arkts'
 import { FQ_ACCENT } from '../../view/CommonCom';
 import { CommonNav } from '../../view/CommonNav';
 import { FqSheetOptions } from '../../view/CommonSheet';
+import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/FqCommentSheet';
 import { FqStoryPanel } from '../../view/FqStoryPanel';
 import { PlayerNavParams } from '../../model/FqNavModels';
 import { FqChapter, FqEpisodeSource, fqKindToTab } from '../../model/FqModels';
@@ -79,6 +82,8 @@ export struct PlayerPage {
   @Local sheetVisible: boolean = false;
   /** 播放设置半模态（右上角菜单呼出：倍速档位；公共框架、不触发前景模糊）。 */
   @Local settingsVisible: boolean = false;
+  /** 剧评半模态（评论按钮呼出：公共 FqCommentSheet，同详情页全部评论）。 */
+  @Local commentSheetVisible: boolean = false;
   /** 全屏沉浸态（「全屏观看」进入；横屏片源锁横屏 + 隐藏系统栏）。 */
   @Local fullScreen: boolean = false;
   /** 全屏控件显隐（横片源 3s 自动隐藏，单击画面切换）。 */
@@ -100,6 +105,8 @@ export struct PlayerPage {
   private sheetCloseToken: number = 0;
   /** 播放设置半模态关闭令牌。 */
   private settingsCloseToken: number = 0;
+  /** 剧评半模态关闭令牌。 */
+  private commentCloseToken: number = 0;
   /** 全屏控件自动隐藏定时器（0 无任务）。 */
   private fsHideTimer: number = 0;
   /** 中央播放按钮 3s 自动隐藏定时器（0 无任务）。 */
@@ -159,7 +166,7 @@ export struct PlayerPage {
       },
     }) {
       Stack() {
-        // 视频区（contain；mpv 内部保持比例留黑边；面板展开/全屏时撑满全屏）
+        // 视频区（contain；mpv 内部保持比例留黑边；全屏时撑满，面板展开时几何不变）
         Stack() {
           PlayerSurface({ player: this.player, ignoreSafeArea: false })
 
@@ -186,19 +193,31 @@ export struct PlayerPage {
         .height(this.fullScreen ? '100%' : this.videoRegionHeight())
         .position({ x: 0, y: this.fullScreen ? 0 : this.videoTopAbs() })
         .backgroundColor(Color.Black)
-        .onClick((): void => {
-          this.onVideoTap();
-        })
+        // 全屏：单击切控件显隐、双击切播放/暂停（互斥识别，双击优先）；
+        // 非全屏：单击切播放（保持原样）
+        .gesture(
+          GestureGroup(GestureMode.Exclusive,
+            TapGesture({ count: 2 })
+              .onAction((): void => {
+                if (this.fullScreen) {
+                  this.togglePlay();
+                  this.syncFsControls();
+                }
+              }),
+            TapGesture({ count: 1 })
+              .onAction((): void => {
+                this.onVideoTap();
+              })
+          )
+        )
         // 右上角菜单呼出的播放设置半模态（公共框架，不触发前景模糊）
         .bindSheet(this.settingsVisible, this.SettingsSheetBuilder(),
           FqSheetOptions((): void => {
             this.closeSettings();
           }, 320, false))
 
-        // 中央播放/暂停按钮（点击才出现：暂停时常驻、播放 3s 后隐藏；
-        // 横屏片源全屏走底部控制条不渲染）
-        if (this.errorMsg.length === 0 && !this.loading && !this.sheetVisible &&
-          (!this.fullScreen || !this.isLandscapeVideo()) &&
+        // 中央播放/暂停按钮（非全屏渲染：点击才出现：暂停时常驻、播放 3s 后隐藏）
+        if (this.errorMsg.length === 0 && !this.loading && !this.sheetVisible && !this.fullScreen &&
           (!this.player.state.playing || this.centerBtnVisible)) {
           this.CenterPlayButton()
         }
@@ -211,9 +230,7 @@ export struct PlayerPage {
 
         if (this.fullScreen && !this.sheetVisible && this.fsControlsVisible) {
           this.FsTopBar()
-          if (this.isLandscapeVideo()) {
-            this.FsBottomBar()
-          }
+          this.FsBottomBar()
         }
       }
       .width('100%')
@@ -353,15 +370,23 @@ export struct PlayerPage {
     .markAnchor({ x: '50%', y: '50%' })
     .onClick((): void => {
       this.togglePlay();
-      this.scheduleFsHide();
+      this.syncFsControls();
     })
   }
 
-  /** 细进度线：4vp 轨道、官方橙进度、白拖点；拖动时中央出时间浮层。 */
+  /** 细进度线：4vp 轨道、官方橙进度、白拖点；两侧显示当前时间/总时长。 */
   @Builder
   private SeekBar() {
     Row() {
+      Text(fqFormatClock(this.displayPosition()))
+        .fontSize(11)
+        .fontColor('rgba(255,255,255,0.85)')
+        .margin({ right: 8 })
       this.SeekSlider()
+      Text(fqFormatClock(this.player.state.duration))
+        .fontSize(11)
+        .fontColor('rgba(255,255,255,0.85)')
+        .margin({ left: 8 })
     }
     .width('100%')
     .padding({ left: 16, right: 16 })
@@ -430,7 +455,7 @@ export struct PlayerPage {
           this.openCatalog();
         })
 
-        // 评论入口：并入选集行右端（官方评论区入口占位），能力待后端支持
+        // 评论入口：并入选集行右端，呼出剧评半模态（公共 FqCommentSheet）
         Column({ space: 1 }) {
           SymbolGlyph($r('sys.symbol.message'))
             .fontSize(22)
@@ -449,9 +474,12 @@ export struct PlayerPage {
         .alignItems(HorizontalAlign.Center)
         .justifyContent(FlexAlign.Center)
         .onClick((): void => {
-          this.getUIContext().getPromptAction()
-            .showToast({ message: '评论功能即将上线', duration: 1500 });
+          this.openComments();
         })
+        .bindSheet(this.commentSheetVisible, this.CommentsSheetBuilder(),
+          FqSheetOptions((): void => {
+            this.closeComments();
+          }, fqCommentSheetHeightVp(), false))
       }
       .width('100%')
       .padding({ left: 16, right: 16 })
@@ -512,7 +540,9 @@ export struct PlayerPage {
       .alignItems(VerticalAlign.Center)
     }
     .width('100%')
-    .padding({ top: appState.topRect, left: 8, right: 8 })
+    // 竖屏片源全屏沉浸隐藏状态栏后 topRect 归零，用 maxTopRect 保底避让；
+    // 横屏片源维持 topRect（沉浸态贴边）
+    .padding({ top: this.isLandscapeVideo() ? appState.topRect : appState.maxTopRect, left: 8, right: 8 })
     .linearGradient({
       angle: 180,
       colors: [['rgba(0,0,0,0.54)', 0.0], ['rgba(0,0,0,0.0)', 1.0]],
@@ -530,7 +560,7 @@ export struct PlayerPage {
           .fontColor([Color.White])
           .onClick((): void => {
             this.togglePlay();
-            this.scheduleFsHide();
+            this.syncFsControls();
           })
 
         SymbolGlyph($r('sys.symbol.forward_end_fill'))
@@ -675,6 +705,16 @@ export struct PlayerPage {
     })
   }
 
+  /** 剧评半模态：公共 FqCommentSheet（首拉 Loading / 错误重试 / 空态 / 分页列表）。 */
+  @Builder
+  private CommentsSheetBuilder() {
+    FqCommentSheet({
+      bookId: PlayerNavParams.contentId,
+      fontColor: $r('sys.color.font_primary'),
+      commentLabel: '剧评',
+    })
+  }
+
   /** 播放设置半模态（右上角菜单）：白底面板，倍速档位 3×2 格子，当前档位橙底高亮。 */
   @Builder
   private SettingsSheetBuilder() {
@@ -739,17 +779,17 @@ export struct PlayerPage {
   // 布局几何（官方 PlayerVideoLayout 竖屏语义）
   // ---------------------------------------------------------------------------
 
-  /** 视频区顶：全屏贴顶；面板展开态撑满全屏（官方 _positionVideo 语义，避免余屏不对称下移）；常驻态顶栏 44 + 状态栏。 */
+  /** 视频区顶：全屏贴顶；常驻态顶栏 44 + 状态栏（与面板展开无关，面板只是覆盖）。 */
   private videoTopAbs(): number {
-    if (this.fullScreen || this.sheetVisible) {
+    if (this.fullScreen) {
       return 0;
     }
     return appState.topRect + 44;
   }
 
-  /** 视频区高：全屏/面板展开态撑满全屏；常驻态 = 屏高 − 顶栏 − 底部 163 信息区。 */
+  /** 视频区高：全屏撑满；常驻态 = 屏高 − 顶栏 − 底部 163 信息区（与面板展开无关）。 */
   private videoRegionHeight(): number {
-    if (this.fullScreen || this.sheetVisible) {
+    if (this.fullScreen) {
       return this.screenH;
     }
     return Math.max(0,
@@ -846,6 +886,22 @@ export struct PlayerPage {
     }
   }
 
+  /** 打开剧评半模态（数据加载由公共 FqCommentSheet 自理）。 */
+  private openComments(): void {
+    this.commentCloseToken += 1;
+    this.commentSheetVisible = true;
+  }
+
+  /** 关闭剧评半模态：延迟一拍置 isShow（面板事件内同步改 isShow 会被框架丢弃）。 */
+  private closeComments(): void {
+    const token: number = ++this.commentCloseToken;
+    setTimeout((): void => {
+      if (token === this.commentCloseToken) {
+        this.commentSheetVisible = false;
+      }
+    }, 0);
+  }
+
   /** 关闭播放设置半模态：延迟一拍置 isShow（面板事件内同步改 isShow 会被框架丢弃）。 */
   private closeSettings(): void {
     const token: number = ++this.settingsCloseToken;
@@ -858,29 +914,47 @@ export struct PlayerPage {
     }, 0);
   }
 
-  /** 画面单击：横屏全屏切控件显隐，其余切播放（官方 tapTogglesPlayback）。 */
+  /** 画面单击：全屏（横竖屏）切控件显隐，非全屏切播放（官方 tapTogglesPlayback）。 */
   private onVideoTap(): void {
-    if (this.fullScreen && this.isLandscapeVideo()) {
+    if (this.fullScreen) {
       this.toggleFsControls();
     } else {
       this.togglePlay();
     }
   }
 
-  /** 全屏控件显隐切换（显示时重新计时自动隐藏）。 */
+  /** 全屏控件显隐切换（播放态显示时重新计时自动隐藏，暂停态常驻）。 */
   private toggleFsControls(): void {
     if (this.fsControlsVisible) {
       this.fsControlsVisible = false;
       this.cancelFsHide();
     } else {
       this.fsControlsVisible = true;
+      if (this.player.state.playing) {
+        this.scheduleFsHide();
+      }
+    }
+  }
+
+  /** 全屏内播放状态切换后同步控制条：暂停亮出常驻，播放 3s 自动隐藏。 */
+  private syncFsControls(): void {
+    if (!this.fullScreen) {
+      return;
+    }
+    if (!this.player.state.playing) {
+      this.fsControlsVisible = true;
+      this.cancelFsHide();
+    } else {
       this.scheduleFsHide();
     }
   }
 
-  /** 全屏控件 3s 自动隐藏计时。 */
+  /** 全屏控件 3s 自动隐藏计时（暂停态跳过：控制条常驻可见）。 */
   private scheduleFsHide(): void {
     this.cancelFsHide();
+    if (!this.player.state.playing) {
+      return;
+    }
     this.fsHideTimer = setTimeout((): void => {
       this.fsHideTimer = 0;
       this.fsControlsVisible = false;
