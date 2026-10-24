@@ -65,7 +65,7 @@ export struct FqStoryPanel {
           .padding({ left: 20 })
       }
       .width('100%')
-      .height(40)
+      .padding({ bottom: 10 })
       .alignItems(VerticalAlign.Center)
 
       if (this.episodes.length > FQ_STORY_PAGE_SIZE) {
@@ -76,7 +76,6 @@ export struct FqStoryPanel {
         Column() {
           Text('暂无剧集')
             .fontSize(14)
-            .fontColor('#FF9499A0')
         }
         .width('100%')
         .layoutWeight(1)
@@ -202,7 +201,7 @@ export struct FqStoryPanel {
           Text(label)
             .fontSize(14)
             .fontWeight(page === this.page ? FontWeight.Bold : FontWeight.Normal)
-            .fontColor(page === this.page ? '#FF1B1B1B' : '#66000000')
+            .fontColor(page === this.page ? $r('sys.color.font_secondary') : $r('sys.color.font_tertiary'))
             .onClick((): void => {
               this.page = page;
               this.scroller.scrollToIndex(page * FQ_STORY_PAGE_SIZE, false, ScrollAlign.START);
@@ -223,7 +222,7 @@ export struct FqStoryPanel {
       return '#FFFA6725';
     }
     if (index < this.currentIndex) {
-      return $r('sys.color.font_tertiary');
+      return $r('sys.color.font_fourth');
     }
     return $r('sys.color.font');
   }

@@ -203,7 +203,7 @@ export struct PlayerPage {
           this.CenterPlayButton()
         }
 
-        if (!this.fullScreen && !this.sheetVisible) {
+        if (!this.fullScreen) {
           this.TopBar()
           this.PillAndCommentRow()
           this.CatalogBar()
@@ -310,10 +310,6 @@ export struct PlayerPage {
   @Builder
   private PillAndCommentRow() {
     Row() {
-      // 左占位与右侧评论按钮等宽，保持药丸大致水平居中
-      Column()
-        .width(58)
-
       Row({ space: 4 }) {
         SymbolGlyph($r('sys.symbol.arrow_up_left_and_arrow_down_right'))
           .fontSize(16)
