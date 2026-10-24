@@ -820,6 +820,7 @@ export struct DetailPage {
     PlayerNavParams.chapters = episodes;
     PlayerNavParams.startIndex = 0;
     PlayerNavParams.creationStatus = this.detail.creationStatus;
+    PlayerNavParams.intro = this.detail.abstractText;
     NavPathUtils.push(ROUTE_PLAYER);
   }
 

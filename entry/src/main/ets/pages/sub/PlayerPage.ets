@@ -205,7 +205,7 @@ export struct PlayerPage {
 
         if (!this.fullScreen) {
           this.TopBar()
-          this.PillAndCommentRow()
+          this.FullscreenPill()
           this.CatalogBar()
         }
 
@@ -306,51 +306,30 @@ export struct PlayerPage {
     .padding({ left: 16, right: 16 })
   }
 
-  /** 「全屏观看」药丸 + 右侧评论按钮（官方 _fullscreenPill，锚定底部信息区）。 */
+  /**
+   * 「全屏观看」药丸（官方 _fullscreenPill）：水平居中，纵向在画面下沿与
+   * 底部信息区之间的空带居中（不与剧名行/进度线/选集胶囊重叠）。
+   */
   @Builder
-  private PillAndCommentRow() {
-    Row() {
-      Row({ space: 4 }) {
-        SymbolGlyph($r('sys.symbol.arrow_up_left_and_arrow_down_right'))
-          .fontSize(16)
-          .fontColor([Color.White])
-        Text('全屏观看')
-          .fontSize(14)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(Color.White)
-      }
-      .padding({ left: 16, right: 16, top: 6, bottom: 6 })
-      .borderRadius(8)
-      .backgroundColor('#B3262626')
-      .alignItems(VerticalAlign.Center)
-      .onClick((): void => {
-        this.enterFullscreen();
-      })
-
-      Blank()
-
-      Column({ space: 1 }) {
-        SymbolGlyph($r('sys.symbol.message'))
-          .fontSize(24)
-          .fontColor([Color.White])
-          .opacity(0.85)
-        Text('评论')
-          .fontSize(11)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('rgba(255,255,255,0.8)')
-      }
-      .width(58)
-      .alignItems(HorizontalAlign.Center)
-      .onClick((): void => {
-        // 评论能力待后端支持，先占位提示
-        this.getUIContext().getPromptAction()
-          .showToast({ message: '评论功能即将上线', duration: 1500 });
-      })
+  private FullscreenPill() {
+    Row({ space: 4 }) {
+      SymbolGlyph($r('sys.symbol.arrow_up_left_and_arrow_down_right'))
+        .fontSize(16)
+        .fontColor([Color.White])
+      Text('全屏观看')
+        .fontSize(14)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(Color.White)
     }
-    .width('100%')
-    .padding({ left: 16, right: 4 })
-    .alignItems(VerticalAlign.Top)
-    .position({ x: 0, y: this.videoBottom() + 30 })
+    .padding({ left: 16, right: 16, top: 6, bottom: 6 })
+    .borderRadius(8)
+    .backgroundColor('#B3262626')
+    .alignItems(VerticalAlign.Center)
+    .position({ x: this.screenW / 2, y: this.videoBottom() + 8 })
+    .markAnchor({ x: '50%', y: 0 })
+    .onClick((): void => {
+      this.enterFullscreen();
+    })
   }
 
   /** 中央播放/暂停按钮（暂停态实心、播放态半透明提示可暂停）。 */
@@ -449,6 +428,29 @@ export struct PlayerPage {
         .layoutWeight(1)
         .onClick((): void => {
           this.openCatalog();
+        })
+
+        // 评论入口：并入选集行右端（官方评论区入口占位），能力待后端支持
+        Column({ space: 1 }) {
+          SymbolGlyph($r('sys.symbol.message'))
+            .fontSize(22)
+            .fontColor([Color.White])
+            .opacity(0.9)
+          Text('评论')
+            .fontSize(11)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('rgba(255,255,255,0.9)')
+        }
+        .width(44)
+        .height(40)
+        .margin({ left: 8 })
+        .borderRadius(8)
+        .backgroundColor('#E6222222')
+        .alignItems(HorizontalAlign.Center)
+        .justifyContent(FlexAlign.Center)
+        .onClick((): void => {
+          this.getUIContext().getPromptAction()
+            .showToast({ message: '评论功能即将上线', duration: 1500 });
         })
       }
       .width('100%')
@@ -664,6 +666,7 @@ export struct PlayerPage {
       currentIndex: this.index,
       seriesTitle: this.title,
       seriesCover: this.coverUrl,
+      seriesIntro: PlayerNavParams.intro,
       episodeLabel: this.episodeLabel(),
       onSelectEpisode: (index: number): void => {
         this.closeSheet();
@@ -736,21 +739,18 @@ export struct PlayerPage {
   // 布局几何（官方 PlayerVideoLayout 竖屏语义）
   // ---------------------------------------------------------------------------
 
-  /** 视频区顶：全屏贴顶；面板展开只让状态栏；常驻态顶栏 44 + 状态栏。 */
+  /** 视频区顶：全屏贴顶；面板展开态撑满全屏（官方 _positionVideo 语义，避免余屏不对称下移）；常驻态顶栏 44 + 状态栏。 */
   private videoTopAbs(): number {
-    if (this.fullScreen) {
+    if (this.fullScreen || this.sheetVisible) {
       return 0;
     }
-    return this.sheetVisible ? appState.topRect : appState.topRect + 44;
+    return appState.topRect + 44;
   }
 
-  /** 视频区高：全屏撑满；常驻态 = 屏高 − 顶栏 − 底部 163 信息区；面板展开态撑满余屏。 */
+  /** 视频区高：全屏/面板展开态撑满全屏；常驻态 = 屏高 − 顶栏 − 底部 163 信息区。 */
   private videoRegionHeight(): number {
-    if (this.fullScreen) {
+    if (this.fullScreen || this.sheetVisible) {
       return this.screenH;
-    }
-    if (this.sheetVisible) {
-      return Math.max(0, this.screenH - appState.topRect);
     }
     return Math.max(0,
       this.screenH - (appState.topRect + 44) - appState.bottomRect - FQ_STORY_BOTTOM_INSET);

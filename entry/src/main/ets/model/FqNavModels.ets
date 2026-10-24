@@ -73,6 +73,8 @@ export class PlayerNavParams {
   static startIndex: number = 0;
   /** 剧集状态（FqBookDetail.creationStatus：0 完结 / 1 连载中；-1 未知）。 */
   static creationStatus: number = -1;
+  /** 剧简介（FqBookDetail.abstractText，选集面板头部小字展示）。 */
+  static intro: string = '';
 }
 
 /**

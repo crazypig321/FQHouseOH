@@ -1,7 +1,7 @@
 /**
  * 官方短剧选集面板（对齐 fqapp widgets/player/story_player_panel.dart）：
- * 白底、grabber 36×4、剧信息头（封面 64×86 + 标题 + 集数文案）、
- * 「选集」tab（14sp 粗体 #FF1B1B1B、左 20）、>30 集分页条「1-30」、
+ * 剧信息头（封面 64×86 + 标题 + 集数文案 + 简介小字 2 行省略）、
+ * 「选集」tab（14sp 粗体、左 20）、>30 集分页条「1-30」、
  * 6 列格子（官方 bbw.xml + hj3/r0.java + colors.xml）：
  * 当前集 文字 #FFFA6725、底 #1AFA6725、粗体 + 右上播放角标；
  * 已看 #66000000；普通 #FF000000；格底 #08000000、圆角 8。
@@ -26,6 +26,8 @@ export struct FqStoryPanel {
   @Param seriesCover: string = '';
   /** 集数/状态文案（头部，如「已完结 共82集」）。 */
   @Param episodeLabel: string = '';
+  /** 剧简介（头部小字，最多 2 行不全部显示）。 */
+  @Param seriesIntro: string = '';
   /** 选集回调。 */
   @Param onSelectEpisode: (index: number) => void = (index: number): void => {
   };
@@ -177,8 +179,18 @@ export struct FqStoryPanel {
           if (this.episodeLabel.length > 0) {
             Text(this.episodeLabel)
               .fontSize(13)
-              .fontColor('#FF9499A0')
+              .fontColor($r('sys.color.font_secondary'))
               .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+
+          // 剧简介小字：不全部显示（最多 2 行，末尾省略）
+          if (this.seriesIntro.length > 0) {
+            Text(this.seriesIntro)
+              .fontSize(12)
+              .lineHeight(17)
+              .fontColor($r('sys.color.font_secondary'))
+              .maxLines(2)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
           }
         }
