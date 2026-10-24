@@ -331,6 +331,51 @@ export class FqEpisodeSource {
   }
 }
 
+/** 弹幕条目（/api/v1/videos/{vid}/danmaku 的 data_list[i]，时间点毫秒）。 */
+export class FqDanmaku {
+  readonly id: string;
+  readonly text: string;
+  /** 出现时间点（comment.expand.offset_time，毫秒）。 */
+  readonly offsetMs: number;
+
+  constructor(id: string, text: string, offsetMs: number) {
+    this.id = id;
+    this.text = text;
+    this.offsetMs = offsetMs;
+  }
+}
+
+/** 弹幕一页（cursor 续拉；nextQueryMs 为官方建议的下一次查询时间，毫秒）。 */
+export class FqDanmakuPage {
+  readonly items: FqDanmaku[];
+  readonly hasMore: boolean;
+  readonly cursor: string;
+  readonly nextQueryMs: number;
+
+  constructor(items: FqDanmaku[], hasMore: boolean, cursor: string, nextQueryMs: number) {
+    this.items = items;
+    this.hasMore = hasMore;
+    this.cursor = cursor;
+    this.nextQueryMs = nextQueryMs;
+  }
+}
+
+/**
+ * 短剧关联原著（/api/v1/series/{id} 的 data.video_relate_book.book_info，
+ * 官方 SaasBookInfo 子集：book_id/book_name/thumb_url）。剧无原著关联为 null。
+ */
+export class FqSeriesRelateBook {
+  readonly id: string;
+  readonly title: string;
+  readonly cover: string;
+
+  constructor(id: string, title: string, cover: string) {
+    this.id = id;
+    this.title = title;
+    this.cover = cover;
+  }
+}
+
 /** 对齐 fqapp formatCounter：纯数字 79528 -> 7.9万，非数字原样返回。 */
 export function fqFormatCounter(raw: string): string {
   const text: string = raw.trim();

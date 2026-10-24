@@ -26,6 +26,8 @@ import {
   FqBookCommentPage,
   FqBookDetail,
   FqChapter,
+  FqDanmaku,
+  FqDanmakuPage,
   FqEpisodeSource,
   FqEpisodeVariant,
   FqHomePage,
@@ -36,6 +38,7 @@ import {
   FqRankEntry,
   FqRankTab,
   FqSearchTab,
+  FqSeriesRelateBook,
   fqEmptyRankCatalog,
   fqFormatCounter,
 } from '../model/FqModels';
@@ -1499,6 +1502,82 @@ export function fqParseBookComments(payload: Record<string, Object>): FqBookComm
     data['has_more'] === true,
     fqAsInt(data['next_offset'], 0),
   );
+}
+
+/**
+ * 解析 /api/v1/videos/{vid}/danmaku 载荷为弹幕一页（对齐 fqapp
+ * PlayletCommentPage.fromDanmakuPayload）：
+ * data.data_list[i].comment.common.content.text + comment.expand.offset_time，
+ * common_list_info.has_more/cursor，extra.next_query_danmaku_list_time。
+ */
+export function fqParseDanmaku(payload: Record<string, Object>): FqDanmakuPage {
+  const data: Record<string, Object> | null = fqResolveCommentData(payload);
+  if (data === null) {
+    return new FqDanmakuPage([], false, '', 0);
+  }
+  const items: FqDanmaku[] = [];
+  const rawList: Object[] | null = fqAsArray(data['data_list']);
+  if (rawList !== null) {
+    for (const entry of rawList) {
+      const rec: Record<string, Object> | null = fqAsRecord(entry);
+      if (rec === null) {
+        continue;
+      }
+      const comment: Record<string, Object> = fqAsRecord(rec['comment']) ?? fqEmptyRecord();
+      const common: Record<string, Object> = fqAsRecord(comment['common']) ?? fqEmptyRecord();
+      const content: Record<string, Object> = fqAsRecord(common['content']) ?? fqEmptyRecord();
+      const text: string = fqStr(content, 'text');
+      // 弹幕是纯文字时间轴：空文本条目不进弹幕流
+      if (text.length === 0) {
+        continue;
+      }
+      const expand: Record<string, Object> = fqAsRecord(comment['expand']) ?? fqEmptyRecord();
+      const offsetMs: number = fqAsInt(expand['offset_time'], fqAsInt(expand['offset'], 0));
+      const id: string = fqStr(comment, 'comment_id');
+      items.push(new FqDanmaku(
+        id.length > 0 ? id : `d${offsetMs}_${text.length}`,
+        text,
+        offsetMs,
+      ));
+    }
+  }
+  const info: Record<string, Object> = fqAsRecord(data['common_list_info']) ?? fqEmptyRecord();
+  const extra: Record<string, Object> = fqAsRecord(data['extra']) ?? fqEmptyRecord();
+  return new FqDanmakuPage(
+    items,
+    info['has_more'] === true,
+    fqStr(info, 'cursor'),
+    fqAsInt(extra['next_query_danmaku_list_time'], 0),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 短剧关联原著（fqapp lib/models/series_detail.dart SeriesRelateBook/_relateBook）
+// ---------------------------------------------------------------------------
+
+/**
+ * 解析短剧关联原著（/api/v1/series/{id}，data.video_relate_book.book_info：
+ * book_id/book_name/thumb_url）。剧无原著关联返回 null。
+ */
+export function fqParseSeriesRelateBook(payload: Record<string, Object>): FqSeriesRelateBook | null {
+  const data: Record<string, Object> | null = fqAsRecord(payload['data']);
+  if (data === null) {
+    return null;
+  }
+  const relate: Record<string, Object> | null = fqAsRecord(data['video_relate_book']);
+  if (relate === null) {
+    return null;
+  }
+  const info: Record<string, Object> | null = fqAsRecord(relate['book_info']);
+  if (info === null) {
+    return null;
+  }
+  const id: string = fqStr(info, 'book_id');
+  const title: string = fqStr(info, 'book_name');
+  if (id.length === 0 || title.length === 0) {
+    return null;
+  }
+  return new FqSeriesRelateBook(id, title, fqStr(info, 'thumb_url'));
 }
 
 // ---------------------------------------------------------------------------

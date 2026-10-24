@@ -14,10 +14,17 @@
  *   maxTopRect（沉浸隐藏状态栏后 topRect 归零），且不渲染中央播放按钮。
  * - 选集半模态 FqStoryPanel（官方 StoryPlayerPanel 白底样式）；剧名行与
  *   「全屏观看」药丸层锚定底部信息区，恒在进度线与选集胶囊上方。
+ * - 原著横幅（官方 _originalBookCard）：剧名行与进度线之间，仅剧有原著
+ *   （/api/v1/series/{id} 的 video_relate_book.book_info）才显示；白方徽
+ *   书本图标 + 「原著《书名》」+ 右箭头，点击进原著详情页。横幅出现时信息
+ *   列向上生长（官方 informationTop 上移），全屏药丸钳制让位（官方 maximumTop）。
  * - 半模态均走公共框架 FqSheetOptions，只是不触发前景光感模糊；
  *   右上角菜单呼出「播放设置」半模态（倍速档位）；
  *   评论按钮呼出「剧评」半模态（公共 FqCommentSheet，同详情页全部评论）。
  * - 播完自动连播；aboutToDisappear 销毁 mpv 实例并恢复沉浸前的系统 UI。
+ * - 弹幕（全屏展示）：/api/v1/videos/{vid}/danmaku 按 cursor 续拉，
+ *   切集整池作废、seek 按目标时间重取；FqDanmakuView 车道避让右→左飞行，
+ *   全屏控制条「弹幕」开关（官方 Toast 文案）。
  */
 
 import { display, window } from '@kit.ArkUI';
@@ -26,9 +33,10 @@ import { FQ_ACCENT } from '../../view/CommonCom';
 import { CommonNav } from '../../view/CommonNav';
 import { FqSheetOptions } from '../../view/CommonSheet';
 import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/FqCommentSheet';
+import { FqDanmakuView } from '../../view/FqDanmakuView';
 import { FqStoryPanel } from '../../view/FqStoryPanel';
-import { PlayerNavParams } from '../../model/FqNavModels';
-import { FqChapter, FqEpisodeSource, fqKindToTab } from '../../model/FqModels';
+import { DetailNavParams, PlayerNavParams, ROUTE_DETAIL } from '../../model/FqNavModels';
+import { FqChapter, FqDanmaku, FqDanmakuPage, FqEpisodeSource, FqSeriesRelateBook, fqKindToTab } from '../../model/FqModels';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { appState } from '../../entryability/AppState';
@@ -94,6 +102,14 @@ export struct PlayerPage {
   @Local seekPreview: number = -1;
   /** 封面绝对地址（加载占位图/面板头部；start 后由 resourceUrl 锚定）。 */
   @Local coverUrl: string = '';
+  /** 弹幕开关（全屏弹幕层显隐；官方开关 Toast 文案）。 */
+  @Local danmakuOn: boolean = true;
+  /** 当前集已加载弹幕（offsetMs 升序，按 id 去重）。 */
+  @Local danmakuItems: FqDanmaku[] = [];
+  /** 弹幕层重置令牌（seek/切集 +1，清已飞/在飞状态）。 */
+  @Local danmakuResetToken: number = 0;
+  /** 关联原著（剧有原著才显示横幅；装饰性数据，失败静默）。 */
+  @Local originalBook: FqSeriesRelateBook | null = null;
 
   private title: string = '';
   private tab: string = '短剧';
@@ -111,6 +127,16 @@ export struct PlayerPage {
   private fsHideTimer: number = 0;
   /** 中央播放按钮 3s 自动隐藏定时器（0 无任务）。 */
   private centerHideTimer: number = 0;
+  /** 弹幕加载令牌（切集/seek 后旧请求作废）。 */
+  private danmakuLoadToken: number = 0;
+  /** 弹幕续拉游标（common_list_info.cursor）。 */
+  private danmakuCursor: string = '';
+  /** 弹幕还有更多（common_list_info.has_more）。 */
+  private danmakuHasMore: boolean = false;
+  /** 弹幕已加载覆盖到的位置（毫秒，next_query_danmaku_list_time）。 */
+  private danmakuLoadedToMs: number = 0;
+  /** 弹幕进度心跳定时器（0 无任务）。 */
+  private danmakuTimer: number = 0;
   /** 屏幕尺寸（vp，布局定位用）。 */
   private screenW: number = 0;
   private screenH: number = 0;
@@ -134,17 +160,27 @@ export struct PlayerPage {
         this.onEpisodeEnd();
       }
     });
+    // 弹幕进度心跳：接近已加载右界时按 cursor 续拉
+    this.danmakuTimer = setInterval((): void => {
+      this.danmakuTick();
+    }, 1000);
     if (this.episodes.length === 0) {
       this.loadEpisodes();
     } else {
       this.loadEpisode(start);
     }
+    // 关联原著（官方 _loadBandExtras：装饰性数据，失败静默不影响播放）
+    this.loadOriginalBook();
   }
 
   aboutToDisappear(): void {
     this.loadToken += 1;
     this.cancelFsHide();
     this.cancelCenterHide();
+    if (this.danmakuTimer !== 0) {
+      clearInterval(this.danmakuTimer);
+      this.danmakuTimer = 0;
+    }
     if (this.fullScreen) {
       this.applyImmersive(false);
     }
@@ -222,9 +258,27 @@ export struct PlayerPage {
           this.CenterPlayButton()
         }
 
+        // 弹幕层：只占屏上 20% 高度、锚定顶部（尽量少遮挡画面），
+        // 且整棵子树不参与触摸测试，绝不影响底部控制条交互
+        if (this.fullScreen && this.danmakuOn && this.errorMsg.length === 0 && this.danmakuItems.length > 0) {
+          FqDanmakuView({
+            items: this.danmakuItems,
+            positionMs: Math.floor(this.player.state.position * 1000),
+            resetToken: this.danmakuResetToken,
+            playing: this.player.state.playing,
+          })
+            .width('100%')
+            .height('20%')
+            .position({ x: 0, y: 0 })
+            .hitTestBehavior(HitTestMode.None)
+        }
+
         if (!this.fullScreen) {
           this.TopBar()
-          this.FullscreenPill()
+          // 「全屏观看」药丸：视频实际画面出现（尺寸就绪）才显示，加载占位期不出现
+          if (this.player.state.videoParams.dw > 0) {
+            this.FullscreenPill()
+          }
           this.CatalogBar()
         }
 
@@ -309,6 +363,9 @@ export struct PlayerPage {
           .fontColor(Color.White)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
+          // 官方标题行 Shadow(black45, blur 8)：原著横幅撑高信息列后剧名行
+          // 可能压到画面下沿，靠阴影保可读
+          .textShadow({ radius: 8, color: 'rgba(0,0,0,0.45)', offsetX: 0, offsetY: 0 })
         SymbolGlyph($r('sys.symbol.chevron_right'))
           .fontSize(16)
           .fontColor([Color.White])
@@ -321,6 +378,50 @@ export struct PlayerPage {
     }
     .width('100%')
     .padding({ left: 16, right: 16 })
+  }
+
+  /**
+   * 原著横幅（官方 _originalBookCard）：深色圆角条，白色小方徽（20×20、
+   * 深色书本图标）+「原著《书名》」14sp bold 白 + 右箭头；点击进原著详情页
+   * （官方 /related kind=book 跳转链路）。
+   */
+  @Builder
+  private OriginalBookBanner() {
+    Row({ space: 8 }) {
+      Row() {
+        SymbolGlyph($r('sys.symbol.book_open_fill'))
+          .fontSize(13)
+          .fontColor(['#FF1B1B1B'])
+      }
+      .width(20)
+      .height(20)
+      .borderRadius(5)
+      .backgroundColor(Color.White)
+      .justifyContent(FlexAlign.Center)
+      .alignItems(VerticalAlign.Center)
+
+      Text(`原著《${this.originalBookTitle()}》`)
+        .fontSize(14)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(Color.White)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .layoutWeight(1)
+
+      SymbolGlyph($r('sys.symbol.chevron_right'))
+        .fontSize(14)
+        .fontColor([Color.White])
+        .opacity(0.85)
+    }
+    .width('100%')
+    .height(44)
+    .padding({ left: 12, right: 12 })
+    .borderRadius(10)
+    .backgroundColor('rgba(255,255,255,0.08)')
+    .alignItems(VerticalAlign.Center)
+    .onClick((): void => {
+      this.openOriginalBook();
+    })
   }
 
   /**
@@ -342,7 +443,9 @@ export struct PlayerPage {
     .borderRadius(8)
     .backgroundColor('#B3262626')
     .alignItems(VerticalAlign.Center)
-    .position({ x: this.screenW / 2, y: this.videoBottom() + 8 })
+    // 官方 _PortraitControlsLayout：top 钳制在信息列顶 − 药丸高 − 间隙
+    // （maximumTop）；原著横幅撑高信息列时药丸随之上移让位
+    .position({ x: this.screenW / 2, y: Math.min(this.videoBottom() + 8, this.bandTopAbs() - 39) })
     .markAnchor({ x: '50%', y: 0 })
     .onClick((): void => {
       this.enterFullscreen();
@@ -415,6 +518,7 @@ export struct PlayerPage {
         } else {
           if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) {
             this.player.seek(value);
+            this.seekDanmaku(value * 1000);
           }
           this.seekPreview = -1;
           this.scheduleFsHide();
@@ -427,6 +531,11 @@ export struct PlayerPage {
   private CatalogBar() {
     Column({ space: 12 }){
       this.SeriesTitleRow()
+
+      // 原著横幅（官方 _originalBookCard）：剧名行与进度线之间，仅有原著时显示
+      if (this.originalBook !== null) {
+        this.OriginalBookBanner()
+      }
 
       this.SeekBar()
 
@@ -591,6 +700,15 @@ export struct PlayerPage {
       .alignItems(VerticalAlign.Center)
 
       Row({ space: 24 }) {
+        Text('弹幕')
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(Color.White)
+          .opacity(this.danmakuOn ? 1 : 0.45)
+          .onClick((): void => {
+            this.toggleDanmaku();
+          })
+
         Text(`${this.player.state.speed}×`)
           .fontSize(14)
           .fontWeight(FontWeight.Medium)
@@ -821,6 +939,17 @@ export struct PlayerPage {
     return this.videoTopAbs() + (regionH + videoH) / 2;
   }
 
+  /** 底部信息列内容高：剧名行 22 + 进度线 30 + 选集行 40 + 间距 12×3；原著横幅 +12+44。 */
+  private bandContentHeight(): number {
+    const base: number = 22 + 12 + 30 + 12 + 40;
+    return this.originalBook !== null ? base + 12 + 44 : base;
+  }
+
+  /** 底部信息列顶（列自底向上生长，官方 informationTop；药丸让位钳制用）。 */
+  private bandTopAbs(): number {
+    return this.screenH - appState.bottomRect - this.bandContentHeight();
+  }
+
   // ---------------------------------------------------------------------------
   // 文案
   // ---------------------------------------------------------------------------
@@ -1008,6 +1137,39 @@ export struct PlayerPage {
     }
   }
 
+  /** 加载关联原著（/api/v1/series/{id} 的 video_relate_book；失败静默，不显示横幅）。 */
+  private async loadOriginalBook(): Promise<void> {
+    const seriesId: string = PlayerNavParams.contentId;
+    if (seriesId.length === 0) {
+      return;
+    }
+    try {
+      await FqBackend.get().start(getContext(this));
+      this.originalBook = await FqBackend.get().seriesRelateBook(seriesId);
+    } catch (error) {
+      this.originalBook = null;
+    }
+  }
+
+  /** 原著书名（横幅文案；无原著为空）。 */
+  private originalBookTitle(): string {
+    return this.originalBook !== null ? this.originalBook.title : '';
+  }
+
+  /** 原著横幅点击 → 原著详情页（官方 kind=book 跳转链路；先暂停播放）。 */
+  private openOriginalBook(): void {
+    const book: FqSeriesRelateBook | null = this.originalBook;
+    if (book === null || book.id.length === 0) {
+      return;
+    }
+    this.player.pause();
+    DetailNavParams.id = book.id;
+    DetailNavParams.kind = 'book';
+    DetailNavParams.title = book.title;
+    DetailNavParams.cover = book.cover;
+    NavPathUtils.push(ROUTE_DETAIL);
+  }
+
   /** 目录为空时先拉剧集目录（tab 由 kind 映射：短剧/漫剧）。 */
   private async loadEpisodes(): Promise<void> {
     const token: number = ++this.loadToken;
@@ -1058,6 +1220,8 @@ export struct PlayerPage {
       }
       this.loading = false;
       this.player.open(new Media(source.url));
+      // 弹幕整池作废（切集），按 0 起取新集首批
+      this.resetDanmaku();
     } catch (error) {
       if (token !== this.loadToken) {
         return;
@@ -1102,6 +1266,91 @@ export struct PlayerPage {
       clearTimeout(this.centerHideTimer);
       this.centerHideTimer = 0;
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 弹幕（/api/v1/videos/{vid}/danmaku，vid = 当前集 itemId）
+  // ---------------------------------------------------------------------------
+
+  /** 切集：弹幕整池作废（官方 w()），按 0 起取新集首批。 */
+  private resetDanmaku(): void {
+    this.danmakuLoadToken += 1;
+    this.danmakuCursor = '';
+    this.danmakuHasMore = false;
+    this.danmakuLoadedToMs = 0;
+    this.danmakuItems = [];
+    this.danmakuResetToken += 1;
+    this.fetchDanmaku(0);
+  }
+
+  /** seek：清已飞状态、cursor 清空，按目标时间重取（官方 ON_SEEK_FINISH）。 */
+  private seekDanmaku(targetMs: number): void {
+    this.danmakuCursor = '';
+    this.danmakuHasMore = false;
+    this.danmakuResetToken += 1;
+    this.fetchDanmaku(Math.max(0, targetMs));
+  }
+
+  /** 弹幕进度心跳：接近已加载右界时按 cursor 续拉下一批。 */
+  private danmakuTick(): void {
+    if (this.errorMsg.length > 0 || this.episodes.length === 0 || !this.danmakuOn) {
+      return;
+    }
+    const posMs: number = Math.floor(this.player.state.position * 1000);
+    if (this.danmakuHasMore && posMs + 4000 >= this.danmakuLoadedToMs) {
+      this.fetchDanmaku(this.danmakuLoadedToMs);
+    }
+  }
+
+  /** 取弹幕一页：按 id 去重合并、保持 offsetMs 升序；失败静默降级不影响播放。 */
+  private async fetchDanmaku(startMs: number): Promise<void> {
+    const episode: FqChapter | undefined = this.episodes[this.index];
+    if (episode === undefined || episode.itemId.length === 0) {
+      return;
+    }
+    const token: number = ++this.danmakuLoadToken;
+    try {
+      const page: FqDanmakuPage = await FqBackend.get().videoDanmaku(
+        episode.itemId, PlayerNavParams.contentId,
+        startMs, Math.floor(this.player.state.duration), this.danmakuCursor);
+      if (token !== this.danmakuLoadToken) {
+        return;
+      }
+      this.danmakuCursor = page.cursor;
+      this.danmakuHasMore = page.hasMore;
+      this.danmakuLoadedToMs = page.nextQueryMs > startMs ? page.nextQueryMs : startMs + 5000;
+      const seen: Set<string> = new Set<string>();
+      const merged: FqDanmaku[] = [];
+      for (const item of this.danmakuItems) {
+        if (!seen.has(item.id)) {
+          seen.add(item.id);
+          merged.push(item);
+        }
+      }
+      for (const item of page.items) {
+        if (!seen.has(item.id)) {
+          seen.add(item.id);
+          merged.push(item);
+        }
+      }
+      merged.sort((a: FqDanmaku, b: FqDanmaku): number => a.offsetMs - b.offsetMs);
+      this.danmakuItems = merged;
+    } catch (error) {
+      // 弹幕拉取失败静默降级：不影响播放
+      if (token === this.danmakuLoadToken) {
+        this.danmakuHasMore = false;
+      }
+    }
+  }
+
+  /** 弹幕开关（官方 Toast 文案：弹幕已开启/已关闭）。 */
+  private toggleDanmaku(): void {
+    this.danmakuOn = !this.danmakuOn;
+    this.getUIContext().getPromptAction().showToast({
+      message: this.danmakuOn ? '弹幕已开启' : '弹幕已关闭',
+      duration: 1200,
+    });
+    this.scheduleFsHide();
   }
 
   /** 下一集（横屏控制条/自动连播共用）。 */

@@ -14,8 +14,8 @@ import fq, { FqBridgeResponse } from 'libfqapi_napi.so';
 import { FqDeployer } from './FqDeployer';
 import { FqKeyStore } from './FqKeyStore';
 import {   fqParseAuthorProfile, fqParseBookComments, fqParseBookDetail, fqParseChapterIdeaCounts, fqParseChapterSummaries,
-  fqParseDirectory, fqParseEpisodeSource, fqParseHomepage, fqParseParagraphComments, fqParseRankBoard, fqParseRankCatalog, fqParseSearchTabs,
-  fqParseSeriesFeed, fqLegacyChapterText, fqNormalizeChapterText, fqParseNovelChapter } from './FqParser';
+  fqParseDanmaku, fqParseDirectory, fqParseEpisodeSource, fqParseHomepage, fqParseParagraphComments, fqParseRankBoard, fqParseRankCatalog,
+  fqParseSearchTabs, fqParseSeriesFeed, fqParseSeriesRelateBook, fqLegacyChapterText, fqNormalizeChapterText, fqParseNovelChapter } from './FqParser';
 import {
   fqParseAudioToneSet,
   fqParseAudioVoices,
@@ -31,12 +31,14 @@ import {
   FqBookCommentPage,
   FqBookDetail,
   FqChapter,
+  FqDanmakuPage,
   FqEpisodeSource,
   FqEpisodeVariant,
   FqHomePage,
   FqRankBoard,
   FqRankCatalog,
   FqSearchTab,
+  FqSeriesRelateBook,
 } from '../model/FqModels';
 import { FqParagraphComment } from '../reader/ReaderTypes';
 import {
@@ -298,6 +300,32 @@ export class FqBackend {
     const payload: Record<string, Object> =
       await this.getJson(`/api/v1/books/${encodeURIComponent(bookId)}/comments`, query);
     return fqParseBookComments(payload);
+  }
+
+  /**
+   * 短剧弹幕一页（/api/v1/videos/{vid}/danmaku，官方 DanmakuRequestHelper）：
+   * vid 为当前集 id（group_id），seriesId 进 series_id；时间单位毫秒，cursor 续拉。
+   */
+  public async videoDanmaku(vid: string, seriesId: string, startOffsetMs: number,
+    itemDurationSec: number, cursor: string): Promise<FqDanmakuPage> {
+    const query: string = `series_id=${encodeURIComponent(seriesId)}`
+      + `&start_offset_time=${startOffsetMs < 0 ? 0 : startOffsetMs}`
+      + `&playlet_item_duration=${itemDurationSec < 0 ? 0 : itemDurationSec}`
+      + (cursor.length > 0 ? `&cursor=${encodeURIComponent(cursor)}` : '');
+    const payload: Record<string, Object> =
+      await this.getJson(`/api/v1/videos/${encodeURIComponent(vid)}/danmaku`, query);
+    return fqParseDanmaku(payload);
+  }
+
+  /**
+   * 短剧关联原著（/api/v1/series/{id} 的 data.video_relate_book.book_info，
+   * 官方播放页底部 BottomRelateBookView 数据源）。剧无原著关联返回 null；
+   * 装饰性数据，异常由调用方静默降级。
+   */
+  public async seriesRelateBook(seriesId: string): Promise<FqSeriesRelateBook | null> {
+    const payload: Record<string, Object> =
+      await this.getJson(`/api/v1/series/${encodeURIComponent(seriesId)}`, '');
+    return fqParseSeriesRelateBook(payload);
   }
 
   /** 章段评气泡计数（/api/v1/chapters/{itemId}/reviews?comment_source=3，data.data 按段 map）；
