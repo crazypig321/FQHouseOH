@@ -6,6 +6,7 @@
  * 与 lib/models/book_detail.dart 的 BookDetail.fromPayload（M1 用到的子集）。
  */
 
+import { util } from '@kit.ArkTS';
 import {
   fqAsArray,
   fqAsInt,
@@ -1787,4 +1788,82 @@ function fqExtractEpisodeUrl(value: Object | null, depth: number): string {
     }
   }
   return '';
+}
+
+// ---------------------------------------------------------------------------
+// 漫画章节图片（/api/content?tab=漫画，对齐 comic.html loadChapter/decodeBase64Maybe）
+// ---------------------------------------------------------------------------
+
+const FQ_IMG_SRC_RE: RegExp = /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/gi;
+
+/** HTML 抽取 <img src> 列表（保持出现顺序，忽略空白项）。 */
+export function fqExtractImgSrcs(html: string): string[] {
+  const srcs: string[] = [];
+  if (html.length === 0) {
+    return srcs;
+  }
+  FQ_IMG_SRC_RE.lastIndex = 0;
+  let match: RegExpExecArray | null = FQ_IMG_SRC_RE.exec(html);
+  while (match !== null) {
+    const src: string = match[1].trim();
+    if (src.length > 0) {
+      srcs.push(src);
+    }
+    match = FQ_IMG_SRC_RE.exec(html);
+  }
+  return srcs;
+}
+
+/** Base64（含 URL-safe 变体）解码为 UTF-8 文本；已含 <img 或解码失败返回原文。 */
+export function fqDecodeBase64Text(raw: string): string {
+  if (raw.length === 0 || /<img/i.test(raw)) {
+    return raw;
+  }
+  let normalized: string = raw.replace(/-/g, '+').replace(/_/g, '/');
+  while (normalized.length % 4 !== 0) {
+    normalized += '=';
+  }
+  try {
+    const bytes: Uint8Array = new util.Base64Helper().decodeSync(normalized);
+    return util.TextDecoder.create('utf-8').decodeToString(bytes);
+  } catch (error) {
+    return raw;
+  }
+}
+
+/**
+ * 漫画章节图片解析：data.images 数组直接收；
+ * images/content 字符串先按 HTML 抽取，空则 base64 解码后抽取。
+ */
+export function fqParseChapterImages(payload: Record<string, Object>): string[] {
+  const data: Record<string, Object> | null = fqAsRecord(payload['data']);
+  if (data === null) {
+    return [];
+  }
+  const rawImages: Object | undefined = data['images'];
+  const rawArr: Object[] | null = fqAsArray(rawImages);
+  if (rawArr !== null) {
+    const images: string[] = [];
+    for (const entry of rawArr) {
+      const src: string = typeof entry === 'string' ? entry.trim() : '';
+      if (src.length > 0) {
+        images.push(src);
+      }
+    }
+    return images;
+  }
+  let html: string = '';
+  if (typeof rawImages === 'string') {
+    html = rawImages;
+  } else {
+    const content: Object | undefined = data['content'];
+    if (typeof content === 'string') {
+      html = content;
+    }
+  }
+  const direct: string[] = fqExtractImgSrcs(html);
+  if (direct.length > 0) {
+    return direct;
+  }
+  return fqExtractImgSrcs(fqDecodeBase64Text(html));
 }

@@ -12,6 +12,8 @@ import { MainTabPagesBuilder, PageMapBuilder } from '../view/FqAppPages';
 import { DialogManager } from '../utils/DialogUtils';
 import { FqReaderSettingsHandler, fqReaderSettingsBus } from '../core/FqReaderSettingsBus';
 import { fqEffectiveReaderTheme, ReaderSettingsDialogContent } from '../view/dialog/ReaderSettingsDialogContent';
+import { FqComicSettingsHandler, fqComicSettingsBus } from '../core/FqComicSettingsBus';
+import { ComicSettingsDialogContent } from '../view/dialog/ComicSettingsDialogContent';
 
 @Entry
 @ComponentV2
@@ -32,7 +34,7 @@ struct Index {
 
   aboutToAppear(): void {
     DialogManager.Register((): void => {
-      if (DialogManager.dialogChangeKey === '阅读设置') {
+      if (DialogManager.dialogChangeKey === '阅读设置' || DialogManager.dialogChangeKey === '漫画设置') {
         this.settingsDialog.open()
       } else {
         this.dataDialog.open()
@@ -40,7 +42,7 @@ struct Index {
     }, (message: string): void => {
       this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 })
     }, (): void => {
-      if (DialogManager.dialogChangeKey === '阅读设置') {
+      if (DialogManager.dialogChangeKey === '阅读设置' || DialogManager.dialogChangeKey === '漫画设置') {
         this.settingsDialog.close()
       } else {
         this.dataDialog.close()
@@ -201,6 +203,16 @@ struct Index {
         },
         flipChange: (index: number): void => {
           const handler: FqReaderSettingsHandler | null = fqReaderSettingsBus.handler;
+          if (handler !== null) {
+            handler.changeFlip(index);
+          }
+        },
+      })
+    } else if (key === '漫画设置') {
+      ComicSettingsDialogContent({
+        comicFlipIndex: fqComicSettingsBus.comicFlipIndex,
+        flipChange: (index: number): void => {
+          const handler: FqComicSettingsHandler | null = fqComicSettingsBus.handler;
           if (handler !== null) {
             handler.changeFlip(index);
           }

@@ -16,6 +16,8 @@ export const ROUTE_RANK: string = 'rank';
 export const ROUTE_AUTHOR: string = 'author';
 /** 自定义阅读页（ReaderPage，自绘分页引擎版）。 */
 export const ROUTE_READER2: string = 'reader2';
+/** 漫画阅读页（ComicPage，整页图片 + 仿真/覆盖/上下翻页）。 */
+export const ROUTE_COMIC: string = 'comic';
 /** 听书页（ListenPage，应用级播放会话）。 */
 export const ROUTE_LISTEN: string = 'listen';
 /** 视频播放页（PlayerPage，mpv 全屏播放器）。 */
@@ -75,6 +77,14 @@ export class PlayerNavParams {
   static creationStatus: number = -1;
   /** 剧简介（FqBookDetail.abstractText，选集面板头部小字展示）。 */
   static intro: string = '';
+}
+
+/** 漫画页跳转参数。 */
+export class ComicNavParams {
+  static id: string = '';
+  /** 定位章节下标；-1 表示跟随上次阅读进度。 */
+  static chapterIndex: number = -1;
+  static title: string = '';
 }
 
 /**

@@ -2,7 +2,8 @@
  * 自定义阅读页翻页容器（ReaderPage 专用）：
  * - 仿真模式（flipMode=0）：移植 PageFlip-master 折角仿真——槽位页截图 + FqSimFlip
  *   自绘折叠层跟手卷曲，松手按位移/速度阈值完成翻页或回弹取消；
- * - 平移模式（flipMode=1）：三层 Stack（prev / cur / next）两页联动横滑。
+ * - 平移模式（flipMode=1）：三层 Stack（prev / cur / next）两页联动横滑；
+ * - 覆盖模式（flipMode=2）：邻页单向滑入覆盖当前页（coverDir 锁定方向）。
  * 槽位三区：眉页 / 正文 / 眉脚（headerRenderer / pageRenderer / footerRenderer），
  * 仿真截图随页卷曲。顶层三列触区：左=上一页 / 中=呼出菜单 / 右=下一页；
  * 触区点击先按引擎输出的气泡 rect 仲裁段评气泡命中（页面级坐标含眉页区）。
@@ -33,8 +34,10 @@ const FQ_SIM_SETTLE_DIV: number = 20;
 
 @ComponentV2
 export struct FqReaderFlip {
-  /** 翻页模式：0 仿真 / 1 平移。 */
+  /** 翻页模式：0 仿真 / 1 平移 / 2 覆盖。 */
   @Param flipMode: number = 0;
+  /** 截图 id 前缀（多实例共存时避免 getComponentSnapshot id 冲突）。 */
+  @Param snapshotPrefix: string = 'fq_reader2';
   /** 上一页/下一页可用（章内邻页或已预载邻章）。 */
   @Param hasPrev: boolean = false;
   @Param hasNext: boolean = false;
@@ -59,6 +62,8 @@ export struct FqReaderFlip {
 
   /** 平移模式：拖拽/动画偏移（vp，+向右；0 = 静止）。 */
   @Local dragVp: number = 0;
+  /** 覆盖模式：覆盖方向（-1 = 下一页自右滑入 / 1 = 上一页自左滑入 / 0 = 未定）。 */
+  @Local coverDir: number = 0;
   @Local animating: boolean = false;
   /** 仿真折叠层显隐 / 当前页槽位隐藏（截图顶替）。 */
   @Local simNodeShow: boolean = false;
@@ -140,6 +145,16 @@ export struct FqReaderFlip {
       // 平移：三页联动
       return this.dragVp + slot * w;
     }
+    if (this.flipMode === 2) {
+      // 覆盖：当前页恒静止，覆盖页单向滑入，另一邻页常驻屏外
+      if (slot === 0) {
+        return 0;
+      }
+      if (slot === 1) {
+        return this.coverDir === -1 ? w + this.dragVp : w;
+      }
+      return this.coverDir === 1 ? -w + this.dragVp : -w;
+    }
     // 仿真：prev 常驻屏外左侧（截图源），cur/next 静止
     return slot === -1 ? -w : 0;
   }
@@ -148,6 +163,16 @@ export struct FqReaderFlip {
   private slotZ(slot: number): number {
     if (this.flipMode === 1) {
       return 1;
+    }
+    if (this.flipMode === 2) {
+      // 覆盖层最上，当前页次之，屏外邻页垫底
+      if (slot === 0) {
+        return 2;
+      }
+      if (this.coverDir === -1) {
+        return slot === 1 ? 3 : 1;
+      }
+      return slot === -1 ? 3 : 1;
     }
     return slot === 1 ? 1 : (slot === 0 ? 2 : 3);
   }
@@ -208,13 +233,13 @@ export struct FqReaderFlip {
       // 前翻上一页：截图 prev（屏外左侧），对齐示例强制中部折角
       this.sim.dir = FqFlipDir.FORWARD;
       this.sim.zone = FqFlipZone.MIDDLE;
-      if (!this.snapshotPage('fq_reader2_prev')) {
+      if (!this.snapshotPage(`${this.snapshotPrefix}_prev`)) {
         return;
       }
     } else {
       // 后翻下一页：截图 cur 并隐藏（截图顶替原页）
       this.sim.dir = FqFlipDir.BACKWARD;
-      if (!this.snapshotPage('fq_reader2_cur')) {
+      if (!this.snapshotPage(`${this.snapshotPrefix}_cur`)) {
         return;
       }
       this.simCurHidden = true;
@@ -345,13 +370,13 @@ export struct FqReaderFlip {
     this.sim.positionY = heightPx - 1;
     this.sim.flipPositionY = heightPx - 1;
     if (isNext) {
-      if (!this.snapshotPage('fq_reader2_cur')) {
+      if (!this.snapshotPage(`${this.snapshotPrefix}_cur`)) {
         this.sim.reset();
         return;
       }
       this.simCurHidden = true;
     } else {
-      if (!this.snapshotPage('fq_reader2_prev')) {
+      if (!this.snapshotPage(`${this.snapshotPrefix}_prev`)) {
         this.sim.reset();
         return;
       }
@@ -477,6 +502,66 @@ export struct FqReaderFlip {
     });
   }
 
+  /** 覆盖模式：点击翻页（锁定覆盖方向后滑入）。 */
+  private tapFlipCover(isNext: boolean): void {
+    if (this.animating || this.dragVp !== 0) {
+      return;
+    }
+    if (isNext && !this.hasNext) {
+      return;
+    }
+    if (!isNext && !this.hasPrev) {
+      return;
+    }
+    this.coverDir = isNext ? -1 : 1;
+    this.settleCover(isNext);
+  }
+
+  /** 覆盖模式：邻页滑入到位完成翻页。 */
+  private settleCover(isNext: boolean): void {
+    if (this.animating) {
+      return;
+    }
+    this.animating = true;
+    const w: number = this.pageWidthVp();
+    const target: number = isNext ? -w : w;
+    this.getUIContext().animateTo({
+      duration: FQ_FLIP_SETTLE_DURATION,
+      curve: Curve.Friction,
+      onFinish: (): void => {
+        this.animating = false;
+        this.dragVp = 0;
+        this.coverDir = 0;
+        this.onTurn(isNext);
+      },
+    }, (): void => {
+      this.dragVp = target;
+    });
+  }
+
+  /** 覆盖模式：未过阈值滑出回弹。 */
+  private springBackCover(): void {
+    if (this.animating) {
+      return;
+    }
+    if (this.dragVp === 0) {
+      this.coverDir = 0;
+      return;
+    }
+    this.animating = true;
+    this.getUIContext().animateTo({
+      duration: FQ_FLIP_BACK_DURATION,
+      curve: Curve.Friction,
+      onFinish: (): void => {
+        this.animating = false;
+        this.dragVp = 0;
+        this.coverDir = 0;
+      },
+    }, (): void => {
+      this.dragVp = 0;
+    });
+  }
+
   /** 槽位三区：眉页 / 正文 / 眉脚（仿真截图随页卷曲）。 */
   @Builder
   private slotContent(slot: number) {
@@ -526,7 +611,7 @@ export struct FqReaderFlip {
       .translate({ x: this.slotX(0) })
       .zIndex(this.slotZ(0))
       .visibility(this.flipMode === 0 && this.simCurHidden ? Visibility.None : Visibility.Visible)
-      .id('fq_reader2_cur')
+      .id(`${this.snapshotPrefix}_cur`)
 
       // 上一页层（仿真前翻截图源，常驻屏外左侧）
       Column() {
@@ -536,7 +621,7 @@ export struct FqReaderFlip {
       .height('100%')
       .translate({ x: this.slotX(-1) })
       .zIndex(this.slotZ(-1))
-      .id('fq_reader2_prev')
+      .id(`${this.snapshotPrefix}_prev`)
 
       if (this.flipMode === 0) {
         // 仿真折叠层（常驻挂载，makeNode 仅首帧执行；显隐由 simNodeShow 控制）
@@ -561,6 +646,8 @@ export struct FqReaderFlip {
             }
             if (this.flipMode === 0) {
               this.tapFlipSim(event, 0, false);
+            } else if (this.flipMode === 2) {
+              this.tapFlipCover(false);
             } else {
               this.tapFlip(false);
             }
@@ -589,6 +676,8 @@ export struct FqReaderFlip {
             }
             if (this.flipMode === 0) {
               this.tapFlipSim(event, this.pageWidthVp() * 2 / 3, true);
+            } else if (this.flipMode === 2) {
+              this.tapFlipCover(true);
             } else {
               this.tapFlip(true);
             }
@@ -612,6 +701,12 @@ export struct FqReaderFlip {
               return;
             }
             this.dragVp = 0;
+          } else if (this.flipMode === 2) {
+            if (this.animating) {
+              return;
+            }
+            this.dragVp = 0;
+            this.coverDir = 0;
           } else {
             if (this.simTimer !== -1) {
               // 提交在途自动翻页后，新手势基于新页数据
@@ -640,6 +735,24 @@ export struct FqReaderFlip {
             }
             const w: number = this.pageWidthVp();
             this.dragVp = Math.max(-w, Math.min(w, offset));
+          } else if (this.flipMode === 2) {
+            if (this.animating) {
+              return;
+            }
+            const w2: number = this.pageWidthVp();
+            // 首次位移定覆盖方向（单向锁定），其后 dragVp 按方向 clamp
+            if (this.coverDir === 0) {
+              if (event.offsetX < 0 && this.hasNext) {
+                this.coverDir = -1;
+              } else if (event.offsetX > 0 && this.hasPrev) {
+                this.coverDir = 1;
+              }
+            }
+            if (this.coverDir === -1) {
+              this.dragVp = Math.max(-w2, Math.min(0, event.offsetX));
+            } else if (this.coverDir === 1) {
+              this.dragVp = Math.max(0, Math.min(w2, event.offsetX));
+            }
           } else {
             this.onSimPanUpdate(event);
           }
@@ -664,6 +777,28 @@ export struct FqReaderFlip {
             } else {
               this.springBack();
             }
+          } else if (this.flipMode === 2) {
+            if (this.animating) {
+              return;
+            }
+            const w2: number = this.pageWidthVp();
+            const drag2: number = this.dragVp;
+            if (drag2 === 0) {
+              this.coverDir = 0;
+              return;
+            }
+            const passDistance2: boolean = Math.abs(drag2) > w2 * FQ_FLIP_DISTANCE_RATIO;
+            // 速度须与覆盖方向一致才算抛动
+            const passVelocity2: boolean = this.coverDir === -1
+              ? event.velocityX < -FQ_FLIP_VELOCITY_VPS
+              : event.velocityX > FQ_FLIP_VELOCITY_VPS;
+            if (this.coverDir === -1 && (passDistance2 || passVelocity2)) {
+              this.settleCover(true);
+            } else if (this.coverDir === 1 && (passDistance2 || passVelocity2)) {
+              this.settleCover(false);
+            } else {
+              this.springBackCover();
+            }
           } else {
             this.onSimPanEnd(event);
           }
@@ -671,6 +806,8 @@ export struct FqReaderFlip {
         .onActionCancel(() => {
           if (this.flipMode === 1) {
             this.springBack();
+          } else if (this.flipMode === 2) {
+            this.springBackCover();
           } else if (this.simDrawing) {
             this.startSimAuto(false);
           }

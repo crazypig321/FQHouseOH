@@ -33,6 +33,8 @@ export class FqReaderSettings {
   themeIndex: number = -1;
   /** 0 仿真翻页 / 1 横滑翻页。 */
   flipIndex: number = 0;
+  /** 漫画翻页方式：0 仿真 / 1 覆盖 / 2 上下滚动。 */
+  comicFlipIndex: number = 0;
   /** 字体档位（FQ_FONT_OPTIONS 下标）：0 系统（跟随系统字体设置）/ 1 书宋 / 2 黑体。 */
   fontIndex: number = 0;
 }
@@ -98,6 +100,10 @@ export class FqReaderStore {
       if (typeof flipIndex === 'number') {
         FqReaderStore.settings.flipIndex = Math.min(1, Math.max(0, Math.trunc(flipIndex)));
       }
+      const comicFlipIndex: Object | undefined = rec['comicFlipIndex'];
+      if (typeof comicFlipIndex === 'number') {
+        FqReaderStore.settings.comicFlipIndex = Math.min(2, Math.max(0, Math.trunc(comicFlipIndex)));
+      }
       const fontIndex: Object | undefined = rec['fontIndex'];
       if (typeof fontIndex === 'number') {
         FqReaderStore.settings.fontIndex = Math.max(0, Math.trunc(fontIndex));
@@ -123,16 +129,28 @@ export class FqReaderStore {
     FqReaderStore.settings.themeIndex = Math.min(2, Math.max(-1, Math.trunc(themeIndex)));
     FqReaderStore.settings.flipIndex = Math.min(1, Math.max(0, Math.trunc(flipIndex)));
     FqReaderStore.settings.fontIndex = Math.max(0, Math.trunc(fontIndex));
+    FqReaderStore.persistSettings();
+  }
+
+  /** 漫画翻页方式单独保存（不动小说设置）。 */
+  public static saveComicFlip(comicFlipIndex: number): void {
+    FqReaderStore.settings.comicFlipIndex = Math.min(2, Math.max(0, Math.trunc(comicFlipIndex)));
+    FqReaderStore.persistSettings();
+  }
+
+  /** 设置整体落盘（记录 v:4，含小说与漫画全部字段）。 */
+  private static persistSettings(): void {
     const pref: preferences.Preferences | null = FqReaderStore.pref;
     if (pref === null) {
       return;
     }
     const rec: Record<string, Object> = {};
-    rec['v'] = 3;
+    rec['v'] = 4;
     rec['fontSize'] = FqReaderStore.settings.fontSize;
     rec['lineHeight'] = FqReaderStore.settings.lineHeight;
     rec['themeIndex'] = FqReaderStore.settings.themeIndex;
     rec['flipIndex'] = FqReaderStore.settings.flipIndex;
+    rec['comicFlipIndex'] = FqReaderStore.settings.comicFlipIndex;
     rec['fontIndex'] = FqReaderStore.settings.fontIndex;
     try {
       pref.putSync(FQ_READER_KEY_SETTINGS, JSON.stringify(rec));

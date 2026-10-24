@@ -22,7 +22,7 @@ import {
 } from '../../model/FqModels';
 import { FqShelfStore, FqShelfItem } from '../../core/FqShelfStore';
 import { FqBrowseStore, FqBrowseItem } from '../../core/FqBrowseStore';
-import { AuthorNavParams, DetailNavParams, FqTitleBarOptions, ListenNavParams, PlayerNavParams, ReaderNavParams, ROUTE_AUTHOR, ROUTE_LISTEN, ROUTE_PLAYER, ROUTE_READER2 } from '../../model/FqNavModels';
+import { AuthorNavParams, ComicNavParams, DetailNavParams, FqTitleBarOptions, ListenNavParams, PlayerNavParams, ReaderNavParams, ROUTE_AUTHOR, ROUTE_COMIC, ROUTE_LISTEN, ROUTE_PLAYER, ROUTE_READER2 } from '../../model/FqNavModels';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { CommonNav } from '../../view/CommonNav';
 import { CommonLoading, FQ_ACCENT } from '../../view/CommonCom';
@@ -788,7 +788,7 @@ export struct DetailPage {
   /** 底部操作栏：小说"阅读"进阅读器、"听书"/听书详情"收听"进听书页、
    *  短剧/漫剧"观看"进播放页，下载占位。 */
   private onReadBarAction(key: string): void {
-    if (key === '阅读' && this.itemKind === 'book') {
+    if (key === '阅读' && (this.itemKind === 'book' || this.itemKind === 'manga')) {
       this.openReader(-1);
       return;
     }
@@ -833,7 +833,15 @@ export struct DetailPage {
     NavPathUtils.push(ROUTE_LISTEN);
   }
 
+  /** 进阅读页：小说 → ReaderPage；漫画 → ComicPage。 */
   private openReader(chapterIndex: number): void {
+    if (this.itemKind === 'manga') {
+      ComicNavParams.id = this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId;
+      ComicNavParams.title = this.detail.title;
+      ComicNavParams.chapterIndex = chapterIndex;
+      NavPathUtils.push(ROUTE_COMIC);
+      return;
+    }
     ReaderNavParams.id = this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId;
     ReaderNavParams.kind = this.itemKind;
     ReaderNavParams.title = this.detail.title;

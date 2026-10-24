@@ -15,7 +15,8 @@ import { FqDeployer } from './FqDeployer';
 import { FqKeyStore } from './FqKeyStore';
 import {   fqParseAuthorProfile, fqParseBookComments, fqParseBookDetail, fqParseChapterIdeaCounts, fqParseChapterSummaries,
   fqParseDanmaku, fqParseDirectory, fqParseEpisodeSource, fqParseHomepage, fqParseParagraphComments, fqParseRankBoard, fqParseRankCatalog,
-  fqParseSearchTabs, fqParseSeriesFeed, fqParseSeriesRelateBook, fqLegacyChapterText, fqNormalizeChapterText, fqParseNovelChapter } from './FqParser';
+  fqParseSearchTabs, fqParseSeriesFeed, fqParseSeriesRelateBook, fqLegacyChapterText, fqNormalizeChapterText, fqParseNovelChapter,
+  fqParseChapterImages } from './FqParser';
 import {
   fqParseAudioToneSet,
   fqParseAudioVoices,
@@ -480,6 +481,29 @@ export class FqBackend {
   // ---------------------------------------------------------------------------
   // 听书 API
   // ---------------------------------------------------------------------------
+
+  /**
+   * 漫画章节图片（/api/content?tab=漫画&cmd=1，对齐 comic.html）：
+   * data.images 数组或 content/images 字符串（base64 解码后 <img> 抽取）。
+   * 相对路径由 resourceUrl 锚定；锚定后仍非 http(s) 的条目丢弃。
+   */
+  public async chapterImages(itemId: string): Promise<string[]> {
+    const query: string = `source=${encodeURIComponent('番茄')}&item_id=${encodeURIComponent(itemId)}`
+      + `&tab=${encodeURIComponent('漫画')}&cmd=1`;
+    const payload: Record<string, Object> = await this.getJson('/api/content', query);
+    const rawImages: string[] = fqParseChapterImages(payload);
+    const images: string[] = [];
+    for (const raw of rawImages) {
+      const url: string = this.resourceUrl(raw.trim());
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        images.push(url);
+      }
+    }
+    if (images.length === 0) {
+      throw new Error('未获取到漫画图片');
+    }
+    return images;
+  }
 
   /**
    * 章节可播放流（/reading/reader/audio/playinfo 桥）。
