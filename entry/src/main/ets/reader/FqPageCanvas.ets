@@ -75,7 +75,6 @@ export struct FqPageCanvas {
       .fontColor(this.fontColor)
       .fontFamily(this.fontFamily)
       .maxLines(1)
-      .margin({ top: topMarginVp })
   }
 
   /** 段评胶囊（行内/独立两态共用；尺寸随正文字号等比缩放）。 */
@@ -116,7 +115,7 @@ export struct FqPageCanvas {
                 }
                 .alignItems(VerticalAlign.Center)
                 .width('100%')
-                .margin({ top: this.lineTopMarginVp(frag, idx) })
+               // .margin({ top: this.lineTopMarginVp(frag, idx) })
               } else {
                 this.lineText(frag, line, this.lineTopMarginVp(frag, idx))
               }
@@ -126,13 +125,14 @@ export struct FqPageCanvas {
               Row() {
                 this.bubbleCapsule(frag)
               }
-              .margin({ top: this.metrics.bubbleMarginTopVp })
+             // .margin({ top: this.metrics.bubbleMarginTopVp })
             }
           }
           .alignItems(HorizontalAlign.Start)
           .width('100%')
-          .backgroundColor(this.paraHighlighted(frag) ? this.highlightColor : 'transparent')
+          .margin({ top: 5, bottom: 5 })
           .borderRadius(this.paraHighlighted(frag) ? 6 : 0)
+          .backgroundColor(this.paraHighlighted(frag) ? this.highlightColor : 'transparent')
         }, (frag: FqPageFragment): string =>
           `f_${frag.paraIndex}_${frag.startChar}_${frag.endChar}_${frag.showBubble ? 1 : 0}_${frag.bubbleInline ? 1 : 0}_${this.bubbleCount(frag)}_${frag.lines.map((l: string): string => String(l.length)).join('.')}`)
       }
