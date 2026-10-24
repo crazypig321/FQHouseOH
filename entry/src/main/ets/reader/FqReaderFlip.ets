@@ -5,8 +5,8 @@
  * - 平移模式（flipMode=1）：三层 Stack（prev / cur / next）两页联动横滑；
  * - 覆盖模式（flipMode=2）：邻页单向滑入覆盖当前页（coverDir 锁定方向）。
  * 槽位三区：眉页 / 正文 / 眉脚（headerRenderer / pageRenderer / footerRenderer），
- * 仿真截图随页卷曲。顶层三列触区：左=上一页 / 中=呼出菜单 / 右=下一页；
- * 触区点击先按引擎输出的气泡 rect 仲裁段评气泡命中（页面级坐标含眉页区）。
+ * 仿真截图随页卷曲。整页点击（根节点）：左/右三分之一翻页 / 中区呼出菜单；
+ * 段评气泡点击由正文行内计数 Span 消费（子级手势优先于根节点，翻页容器不再仲裁）。
  * 翻页完成回调 onTurn 由父级同步切换页数据（预载就绪后无缝衔接，无二次加载）。
  */
 
@@ -14,7 +14,6 @@ import { display } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { appState } from '../entryability/AppState';
-import { FqPageBubble } from './ReaderTypes';
 import { FqFlipDir, FqFlipPhase, FqFlipZone, FqSimFlipController, FqSimFlipRenderNode } from './FqSimFlip';
 
 /** 平移模式：松手完成动画时长（ms）。 */
@@ -41,8 +40,6 @@ export struct FqReaderFlip {
   /** 上一页/下一页可用（章内邻页或已预载邻章）。 */
   @Param hasPrev: boolean = false;
   @Param hasNext: boolean = false;
-  /** 当前页段评气泡命中区（触区点击仲裁，页面级坐标）。 */
-  @Param bubbles: FqPageBubble[] = [];
   /** 眉页 / 眉脚区高（vp，槽位三区布局）。 */
   @Param headerZoneVp: number = 20
   @Param footerZoneVp: number = 20;
@@ -55,16 +52,19 @@ export struct FqReaderFlip {
   @BuilderParam footerRenderer: (slot: number) => void;
   /** 翻页完成（isNext=true 向后翻页）。 */
   @Event onTurn: (isNext: boolean) => void = (isNext: boolean): void => {};
+  /** 翻页前置校验（false = 目标页未就绪，拒绝本次翻页/提交回弹；父级应触发预载）。 */
+  @Event canTurn: (isNext: boolean) => boolean = (_isNext: boolean): boolean => true;
   /** 中区点击呼出菜单。 */
   @Event onMenuTap: () => void = (): void => {};
-  /** 气泡命中段评（paraIndex）。 */
-  @Event onBubbleTap: (paraIndex: number) => void = (paraIndex: number): void => {};
 
   /** 平移模式：拖拽/动画偏移（vp，+向右；0 = 静止）。 */
   @Local dragVp: number = 0;
   /** 覆盖模式：覆盖方向（-1 = 下一页自右滑入 / 1 = 上一页自左滑入 / 0 = 未定）。 */
   @Local coverDir: number = 0;
   @Local animating: boolean = false;
+  /** 物理层旋转基（0/1/2）：提交翻页时轮换层身份——已显示目标页的层成为当前层，
+   *  可见层提交帧永不换图源（Image 换源渲染滞后是提交帧闪旧页的根因）。 */
+  @Local layerBase: number = 0;
   /** 仿真折叠层显隐 / 当前页槽位隐藏（截图顶替）。 */
   @Local simNodeShow: boolean = false;
   @Local simCurHidden: boolean = false;
@@ -177,17 +177,57 @@ export struct FqReaderFlip {
     return slot === 1 ? 1 : (slot === 0 ? 2 : 3);
   }
 
-  /** 触区点击的气泡命中仲裁：返回命中的段落下标（-1 未命中）。 */
-  private bubbleHit(event: ClickEvent, xBaseVp: number): number {
-    const x: number = xBaseVp + event.x;
-    for (let index: number = 0; index < this.bubbles.length; index++) {
-      const bubble: FqPageBubble = this.bubbles[index];
-      if (x >= bubble.xVp - 6 && x <= bubble.xVp + bubble.widthVp + 6
-        && event.y >= bubble.topVp - 6 && event.y <= bubble.topVp + bubble.heightVp + 6) {
-        return bubble.paraIndex;
+  /** 物理层 → 逻辑槽位（随 layerBase 旋转，结果 ∈ {-1,0,1}）。 */
+  private logicalSlotOf(layer: number): number {
+    const v: number = ((layer - this.layerBase) % 3 + 3) % 3;
+    return v === 2 ? -1 : v;
+  }
+
+  /** 逻辑槽位 → 物理层。 */
+  private physicalLayerOf(slot: number): number {
+    return ((slot + this.layerBase) % 3 + 3) % 3;
+  }
+
+  /** 物理层快照 id（固定随层，提交轮换后 id 不变，快照调用侧动态解析）。 */
+  private layerIdOf(layer: number): string {
+    return `${this.snapshotPrefix}_l${layer}`;
+  }
+
+  /** 提交翻页：层身份轮换（isNext=true 后翻）。
+   *  轮换后：原显示目标页的层 → 新当前层（内容不变，零换源）；
+   *  原当前层 → 反向邻页（其内容随 pageIndex 平移后恰为原图，零换源）；
+   *  仅被释放的远端层加载新邻页（屏外/被盖，换源不可见）。 */
+  private rotateLayers(isNext: boolean): void {
+    this.layerBase = (this.layerBase + (isNext ? 1 : 2)) % 3;
+  }
+
+  /** 整页点击分发：左/右三分之一翻页（按 x 定折点），中区呼出菜单。
+   *  段评气泡由正文行内计数 Span 消费（子级点击手势优先，本回调不触发）。 */
+  private onPageTap(event: ClickEvent): void {
+    const w: number = this.pageWidthVp();
+    if (event.x < w / 3) {
+      if (this.flipMode === 0) {
+        this.tapFlipSim(event, 0, false);
+      } else if (this.flipMode === 2) {
+        this.tapFlipCover(false);
+      } else {
+        this.tapFlip(false);
       }
+      return;
     }
-    return -1;
+    if (event.x >= w * 2 / 3) {
+      if (this.flipMode === 0) {
+        this.tapFlipSim(event, 0, true);
+      } else if (this.flipMode === 2) {
+        this.tapFlipCover(true);
+      } else {
+        this.tapFlip(true);
+      }
+      return;
+    }
+    if (!this.animating && !this.simDrawing && this.simTimer === -1) {
+      this.onMenuTap();
+    }
   }
 
   /** 截图指定槽位页（先释放旧图）。 */
@@ -233,13 +273,13 @@ export struct FqReaderFlip {
       // 前翻上一页：截图 prev（屏外左侧），对齐示例强制中部折角
       this.sim.dir = FqFlipDir.FORWARD;
       this.sim.zone = FqFlipZone.MIDDLE;
-      if (!this.snapshotPage(`${this.snapshotPrefix}_prev`)) {
+      if (!this.snapshotPage(this.layerIdOf(this.physicalLayerOf(-1)))) {
         return;
       }
     } else {
       // 后翻下一页：截图 cur 并隐藏（截图顶替原页）
       this.sim.dir = FqFlipDir.BACKWARD;
-      if (!this.snapshotPage(`${this.snapshotPrefix}_cur`)) {
+      if (!this.snapshotPage(this.layerIdOf(this.physicalLayerOf(0)))) {
         return;
       }
       this.simCurHidden = true;
@@ -298,6 +338,8 @@ export struct FqReaderFlip {
     if (cancelled) {
       return;
     }
+    // 层身份轮换与拖拽/覆盖归位同帧：折叠层收起瞬间，已显示目标页的层原位顶替当前层
+    this.rotateLayers(dir === FqFlipDir.BACKWARD);
     if (dir === FqFlipDir.BACKWARD) {
       this.onTurn(true);
     } else if (dir === FqFlipDir.FORWARD) {
@@ -359,6 +401,9 @@ export struct FqReaderFlip {
     if (!isNext && !this.hasPrev) {
       return;
     }
+    if (!this.canTurn(isNext)) {
+      return;
+    }
     const heightPx: number = this.pageHeightPx();
     this.sim.setSize(this.pageWidthPx(), heightPx);
     this.sim.isFinished = false;
@@ -370,13 +415,13 @@ export struct FqReaderFlip {
     this.sim.positionY = heightPx - 1;
     this.sim.flipPositionY = heightPx - 1;
     if (isNext) {
-      if (!this.snapshotPage(`${this.snapshotPrefix}_cur`)) {
+      if (!this.snapshotPage(this.layerIdOf(this.physicalLayerOf(0)))) {
         this.sim.reset();
         return;
       }
       this.simCurHidden = true;
     } else {
-      if (!this.snapshotPage(`${this.snapshotPrefix}_prev`)) {
+      if (!this.snapshotPage(this.layerIdOf(this.physicalLayerOf(-1)))) {
         this.sim.reset();
         return;
       }
@@ -430,7 +475,10 @@ export struct FqReaderFlip {
     const passVelocity: boolean = this.sim.dir === FqFlipDir.FORWARD
       ? event.velocityX > FQ_FLIP_VELOCITY_VPS
       : event.velocityX < -FQ_FLIP_VELOCITY_VPS;
-    this.startSimAuto(passDistance || passVelocity);
+    // 目标页未就绪 → 按回弹取消处理（canTurn 内部触发预载，就绪后重试翻页）
+    const commit: boolean = (passDistance || passVelocity)
+      && this.canTurn(this.sim.dir === FqFlipDir.BACKWARD);
+    this.startSimAuto(commit);
   }
 
   /** 占用区变化（菜单栏弹出等）：同步仿真页尺寸。 */
@@ -467,6 +515,10 @@ export struct FqReaderFlip {
     if (this.animating) {
       return;
     }
+    if (!this.canTurn(isNext)) {
+      this.springBack();
+      return;
+    }
     this.animating = true;
     const w: number = this.pageWidthVp();
     const target: number = isNext ? -w : w;
@@ -475,8 +527,9 @@ export struct FqReaderFlip {
       curve: Curve.Friction,
       onFinish: (): void => {
         this.animating = false;
-        // 与父级同帧完成：dragVp 归零 + 父切换页数据，视觉上旧“下一页”原位成为当前页
+        // 与父级同帧完成：dragVp 归零 + 层身份轮换 + 父切换页数据，视觉上旧“下一页”原位成为当前页
         this.dragVp = 0;
+        this.rotateLayers(isNext);
         this.onTurn(isNext);
       },
     }, (): void => {
@@ -522,6 +575,10 @@ export struct FqReaderFlip {
     if (this.animating) {
       return;
     }
+    if (!this.canTurn(isNext)) {
+      this.springBackCover();
+      return;
+    }
     this.animating = true;
     const w: number = this.pageWidthVp();
     const target: number = isNext ? -w : w;
@@ -530,8 +587,10 @@ export struct FqReaderFlip {
       curve: Curve.Friction,
       onFinish: (): void => {
         this.animating = false;
+        // 覆盖层已滑入到位：dragVp/coverDir 归零 + 层身份轮换同帧——覆盖层原位转正当前层，零换源
         this.dragVp = 0;
         this.coverDir = 0;
+        this.rotateLayers(isNext);
         this.onTurn(isNext);
       },
     }, (): void => {
@@ -562,25 +621,27 @@ export struct FqReaderFlip {
     });
   }
 
-  /** 槽位三区：眉页 / 正文 / 眉脚（仿真截图随页卷曲）。 */
+  /** 槽位三区：眉页 / 正文 / 眉脚（仿真截图随页卷曲）。
+   *  参数为恒定物理层号（@Builder 按值传参，参数变化不触发重渲染）；
+   *  逻辑槽位在体内经 logicalSlotOf 读取 layerBase——层身份轮换时这里被跟踪刷新。 */
   @Builder
-  private slotContent(slot: number) {
+  private slotContent(layer: number) {
     Column() {
       Column() {
-        this.headerRenderer(slot)
+        this.headerRenderer(this.logicalSlotOf(layer))
       }
       .width('100%')
       .height(this.headerZoneVp)
       .justifyContent(FlexAlign.End)
 
       Column() {
-        this.pageRenderer(slot)
+        this.pageRenderer(this.logicalSlotOf(layer))
       }
       .width('100%')
       .layoutWeight(1)
 
       Column() {
-        this.footerRenderer(slot)
+        this.footerRenderer(this.logicalSlotOf(layer))
       }
       .width('100%')
       .height(this.footerZoneVp)
@@ -593,35 +654,40 @@ export struct FqReaderFlip {
 
   build() {
     Stack() {
-      // 下一页层（仿真后翻时的底页）
-      Column() {
-        this.slotContent(1)
-      }
-      .width('100%')
-      .height('100%')
-      .translate({ x: this.slotX(1) })
-      .zIndex(this.slotZ(1))
-
-      // 当前页层（仿真后翻截图源）
+      // 三个物理层（0/1/2）：内容经 slotContent(layer) 体内解析逻辑槽位（层身份轮换可跟踪），
+      // 位置/层级/显隐/快照 id 按层静态固定
       Column() {
         this.slotContent(0)
       }
       .width('100%')
       .height('100%')
-      .translate({ x: this.slotX(0) })
-      .zIndex(this.slotZ(0))
-      .visibility(this.flipMode === 0 && this.simCurHidden ? Visibility.None : Visibility.Visible)
-      .id(`${this.snapshotPrefix}_cur`)
+      .translate({ x: this.slotX(this.logicalSlotOf(0)) })
+      .zIndex(this.slotZ(this.logicalSlotOf(0)))
+      .visibility(this.flipMode === 0 && this.simCurHidden && this.logicalSlotOf(0) === 0
+        ? Visibility.None : Visibility.Visible)
+      .id(this.layerIdOf(0))
 
-      // 上一页层（仿真前翻截图源，常驻屏外左侧）
       Column() {
-        this.slotContent(-1)
+        this.slotContent(1)
       }
       .width('100%')
       .height('100%')
-      .translate({ x: this.slotX(-1) })
-      .zIndex(this.slotZ(-1))
-      .id(`${this.snapshotPrefix}_prev`)
+      .translate({ x: this.slotX(this.logicalSlotOf(1)) })
+      .zIndex(this.slotZ(this.logicalSlotOf(1)))
+      .visibility(this.flipMode === 0 && this.simCurHidden && this.logicalSlotOf(1) === 0
+        ? Visibility.None : Visibility.Visible)
+      .id(this.layerIdOf(1))
+
+      Column() {
+        this.slotContent(2)
+      }
+      .width('100%')
+      .height('100%')
+      .translate({ x: this.slotX(this.logicalSlotOf(2)) })
+      .zIndex(this.slotZ(this.logicalSlotOf(2)))
+      .visibility(this.flipMode === 0 && this.simCurHidden && this.logicalSlotOf(2) === 0
+        ? Visibility.None : Visibility.Visible)
+      .id(this.layerIdOf(2))
 
       if (this.flipMode === 0) {
         // 仿真折叠层（常驻挂载，makeNode 仅首帧执行；显隐由 simNodeShow 控制）
@@ -632,64 +698,12 @@ export struct FqReaderFlip {
           .zIndex(5)
           .hitTestBehavior(HitTestMode.None)
       }
-
-      // 顶层三列触区（点击含气泡仲裁；滑动由 PanGesture 处理）
-      Row() {
-        Column()
-          .layoutWeight(1)
-          .height('100%')
-          .onClick((event: ClickEvent) => {
-            const para: number = this.bubbleHit(event, 0);
-            if (para >= 0) {
-              this.onBubbleTap(para);
-              return;
-            }
-            if (this.flipMode === 0) {
-              this.tapFlipSim(event, 0, false);
-            } else if (this.flipMode === 2) {
-              this.tapFlipCover(false);
-            } else {
-              this.tapFlip(false);
-            }
-          })
-        Column()
-          .layoutWeight(1)
-          .height('100%')
-          .onClick((event: ClickEvent) => {
-            const para: number = this.bubbleHit(event, this.pageWidthVp() / 3);
-            if (para >= 0) {
-              this.onBubbleTap(para);
-              return;
-            }
-            if (!this.animating && !this.simDrawing && this.simTimer === -1) {
-              this.onMenuTap();
-            }
-          })
-        Column()
-          .layoutWeight(1)
-          .height('100%')
-          .onClick((event: ClickEvent) => {
-            const para: number = this.bubbleHit(event, this.pageWidthVp() * 2 / 3);
-            if (para >= 0) {
-              this.onBubbleTap(para);
-              return;
-            }
-            if (this.flipMode === 0) {
-              this.tapFlipSim(event, this.pageWidthVp() * 2 / 3, true);
-            } else if (this.flipMode === 2) {
-              this.tapFlipCover(true);
-            } else {
-              this.tapFlip(true);
-            }
-          })
-      }
-      .width('100%')
-      .height('100%')
-      .zIndex(10)
-      .hitTestBehavior(HitTestMode.Transparent)
     }
     .width('100%')
     .height('100%')
+    .onClick((event: ClickEvent) => {
+      this.onPageTap(event);
+    })
     .onAreaChange((_oldArea: Area, newArea: Area) => {
       this.onAreaChanged(newArea);
     })

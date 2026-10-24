@@ -44,7 +44,6 @@ import { fqReaderSettingsBus } from '../../core/FqReaderSettingsBus';
 import {
   FQ_BUBBLE_GAP_VP,
   FqChapterLayout,
-  FqPageBubble,
   FqPageFragment,
   FqParagraphComment,
   FqReaderLayoutMetrics,
@@ -206,7 +205,6 @@ export struct ReaderPage {
           flipMode: this.flipIndex,
           hasPrev: this.flipHasPrev(),
           hasNext: this.flipHasNext(),
-          bubbles: this.curBubbles(),
           headerZoneVp: this.cachedMetrics.headerZoneVp,
           footerZoneVp: this.cachedMetrics.footerZoneVp,
           pageBgColor: this.theme().background,
@@ -224,9 +222,6 @@ export struct ReaderPage {
           },
           onMenuTap: (): void => {
             this.toggleMenu();
-          },
-          onBubbleTap: (paraIndex: number): void => {
-            this.openParaSheet(paraIndex);
           },
         })
         .bindSheet(this.commentSheetVisible, this.CommentSheet(), FqSheetOptions((): void => {
@@ -331,16 +326,6 @@ export struct ReaderPage {
     return this.pageIndex + 1 < layout.pages.length ? layout : this.nextLayout;
   }
 
-  /** 翻页容器当前页气泡命中区。 */
-  private curBubbles(): FqPageBubble[] {
-    const layout: FqChapterLayout | null = this.curLayout;
-    if (layout === null) {
-      return [];
-    }
-    const page: FqReaderPageData | undefined = layout.pages[this.pageIndex];
-    return page !== undefined ? page.bubbles : [];
-  }
-
   private flipHasPrev(): boolean {
     const layout: FqChapterLayout | null = this.curLayout;
     if (layout === null) {
@@ -370,6 +355,9 @@ export struct ReaderPage {
       fontFamily: this.readerFontFamily,
       highlightParaIndex: this.slotHighlightPara(slot),
       highlightColor: this.theme().night ? '#33FF7A3D' : '#1AFF7A3D',
+      onBubbleTap: (paraIndex: number): void => {
+        this.openParaSheet(paraIndex);
+      },
     })
   }
 
@@ -557,7 +545,7 @@ export struct ReaderPage {
     const bubbleScale: number = Math.max(0.55, this.fontSize / 19);
     metrics.textDensity = textDensity;
     metrics.bubbleScale = bubbleScale;
-    metrics.bubbleIconFp = Math.max(8, Math.round(13 * bubbleScale));
+    metrics.bubbleIconFp = Math.max(10, Math.round( 24 * bubbleScale));
     metrics.bubbleTextFp = Math.max(7, Math.round(11 * bubbleScale));
     metrics.bubblePadHVp = Math.max(4, Math.round(9 * bubbleScale));
     metrics.bubblePadVVp = Math.max(2, Math.round(3 * bubbleScale));

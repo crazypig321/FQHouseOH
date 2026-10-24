@@ -1,6 +1,8 @@
 /**
  * 漫画阅读页（ComicPage，CommonNav 框架，复用 ReaderPage 阅读体验）：
- * - 正文：整页图片（objectFit Contain，纯黑底），一页一张图；
+ * - 正文：整页图片（objectFit Contain，纯黑底，显式定高不随菜单呼出的容器
+ *   resize 缩放），一页一张图；邻图预解码为 PixelMap（翻页提交同帧渲染，
+ *   杜绝旧图残留闪帧；未就绪回退 URL 异步加载兜底）；
  * - 翻页方式：0 仿真 / 1 覆盖（FqReaderFlip flipMode=0/2）/ 2 上下滚动
  *   （webtoon：List + LazyForEach 整章图片连续纵向滚动，滚到章尾自动追加下一话）；
  * - 眉页（章节名）/眉脚（时钟/电量/章内图序），目录半模态、漫评半模态、
@@ -10,8 +12,10 @@
  */
 
 import { common } from '@kit.AbilityKit';
-import { promptAction, window } from '@kit.ArkUI';
-import { batteryInfo } from '@kit.BasicServicesKit';
+import { display, promptAction, window } from '@kit.ArkUI';
+import { image } from '@kit.ImageKit';
+import { http } from '@kit.NetworkKit';
+import { batteryInfo, BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { TitleBarContentOptions } from '@kit.UIDesignKit';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
@@ -31,6 +35,8 @@ import { fqComicSettingsBus } from '../../core/FqComicSettingsBus';
 
 /** 漫画正文底色（纯黑）。 */
 const FQ_COMIC_BG: string = '#000000';
+/** 日志标签。 */
+const FQ_COMIC_TAG: string = 'FqComicPage';
 /** 漫画眉页/眉脚文字色（黑底白字）。 */
 const FQ_COMIC_TEXT: string = '#E6E6E6';
 
@@ -116,9 +122,18 @@ export struct ComicPage {
   @Local batteryLevel: number = -1;
   /** 上下滚动模式：章尾追加中 / 已到最后一话（提示去重）。 */
   @Local verticalAppending: boolean = false;
+  /** 分页模式图高（窗口高 - 眉页/眉脚区；显式定值，菜单呼出容器 resize 不再缩放图片）。 */
+  @Local pagedImageHeightVp: number = 0;
+  /** 三槽位图源（下标 0..2 对应 slot -1..+1；PixelMap 优先 / URL 回退，整体替换驱动重渲染）。 */
+  @Local slotSources: Array<image.PixelMap | string> = ['', '', ''];
   /** 翻页容器眉页/眉脚区高（vp，避让区变化时更新）。 */
   @Local headerZoneVp: number = 20;
   @Local footerZoneVp: number = 20;
+  /** 阅读体高（vp；菜单隐藏时实测校准，0=未测回退全窗高）。
+   *  显式定高 + 顶偏移补偿：呼出菜单标题栏下压内容区时，阅读体钉在窗口原位不动。 */
+  @Local bodyHeightVp: number = 0;
+  /** 标题栏下压补偿量（vp，外层实测；0=未下压）。 */
+  @Local bodyTopCompVp: number = 0;
 
   private bookId: string = '';
   private bookTitle: string = '';
@@ -134,6 +149,17 @@ export struct ComicPage {
   private verticalScroller: Scroller = new Scroller();
   /** 「已经是最后一话」提示去重（跳章/重建时复位）。 */
   private verticalEndedToastOnce: boolean = false;
+  /** 图片预解码缓存（URL → PixelMap，翻页提交同帧渲染）。 */
+  private pixelCache: Map<string, image.PixelMap> = new Map();
+  /** 在途预解码去重。 */
+  private pixelInflight: Set<string> = new Set();
+  /** 缓存 LRU 序列。 */
+  private pixelOrder: string[] = [];
+  /** 预解码失败 URL（放行翻页兜底 + 后台重试）。 */
+  private pixelFailed: Set<string> = new Set();
+  /** 预解码失败 toast 只提示一次（诊断通道）。 */
+  private decodeFailToastShown: boolean = false;
+  private disposed: boolean = false;
 
   aboutToAppear(): void {
     this.bookId = ComicNavParams.id;
@@ -166,6 +192,8 @@ export struct ComicPage {
   }
 
   aboutToDisappear(): void {
+    this.disposed = true;
+    this.releasePixelCache();
     this.applySystemBar(true);
     this.loadToken += 1;
     this.saveProgressNow();
@@ -193,88 +221,100 @@ export struct ComicPage {
       },
       backPressed: (): boolean => this.handleBackPressed(),
     }) {
+      // 外层：跟随容器（呼出菜单时被标题栏压缩，实测下压量）
       Stack() {
-        if (this.comicFlipIndex === 2) {
-          this.VerticalBody()
-        } else {
-          FqReaderFlip({
-            flipMode: this.comicFlipIndex === 0 ? 0 : 2,
-            snapshotPrefix: 'fq_comic',
-            hasPrev: this.flipHasPrev(),
-            hasNext: this.flipHasNext(),
-            headerZoneVp: this.headerZoneVp,
-            footerZoneVp: this.footerZoneVp,
-            pageBgColor: FQ_COMIC_BG,
-            pageRenderer: (slot: number): void => {
-              this.imageSlot(slot);
-            },
-            headerRenderer: (slot: number): void => {
-              this.slotHeader(slot);
-            },
-            footerRenderer: (slot: number): void => {
-              this.slotFooter(slot);
-            },
-            onTurn: (isNext: boolean): void => {
-              this.onFlipTurn(isNext);
-            },
-            onMenuTap: (): void => {
-              this.toggleMenu();
-            },
-          })
-        }
-
-        // 漫评半模态宿主（0 尺寸稳定节点）
-        Column()
-          .width(0)
-          .height(0)
-          .bindSheet(this.commentSheetVisible, this.CommentSheet(), FqSheetOptions((): void => {
-            this.onCommentSheetClose();
-          }, fqCommentSheetHeightVp()))
-
-        if (this.loadingState) {
-          Column({ space: 12 }) {
-            CommonLoading({ sizeValue: 36, loadColor: FQ_ACCENT })
-            Text('正在加载本话内容')
-              .fontSize(14)
-              .fontColor(FQ_COMIC_TEXT)
+        // 内层：阅读体（显式定高 + 顶偏移补偿，钉在窗口原位——菜单呼出/收起全程图片不动）
+        Stack() {
+          if (this.comicFlipIndex === 2) {
+            this.VerticalBody()
+          } else {
+            FqReaderFlip({
+              flipMode: this.comicFlipIndex === 0 ? 0 : 2,
+              snapshotPrefix: 'fq_comic',
+              hasPrev: this.flipHasPrev(),
+              hasNext: this.flipHasNext(),
+              canTurn: (isNext: boolean): boolean => this.flipTargetReady(isNext),
+              headerZoneVp: this.headerZoneVp,
+              footerZoneVp: this.footerZoneVp,
+              pageBgColor: FQ_COMIC_BG,
+              pageRenderer: (slot: number): void => {
+                this.imageSlot(slot);
+              },
+              headerRenderer: (slot: number): void => {
+                this.slotHeader(slot);
+              },
+              footerRenderer: (slot: number): void => {
+                this.slotFooter(slot);
+              },
+              onTurn: (isNext: boolean): void => {
+                this.onFlipTurn(isNext);
+              },
+              onMenuTap: (): void => {
+                this.toggleMenu();
+              },
+            })
           }
-          .width('100%')
-          .height('100%')
-          .justifyContent(FlexAlign.Center)
-          .backgroundColor(FQ_COMIC_BG)
-        } else if (this.errorMsg.length > 0) {
-          Column({ space: 12 }) {
-            Text(this.errorMsg)
-              .fontSize(14)
-              .fontColor(FQ_COMIC_TEXT)
-              .textAlign(TextAlign.Center)
-              .padding({ left: 32, right: 32 })
-            Button('重试')
-              .backgroundColor(FQ_ACCENT)
-              .onClick(() => this.retry())
-          }
-          .width('100%')
-          .height('100%')
-          .justifyContent(FlexAlign.Center)
-          .backgroundColor(FQ_COMIC_BG)
-        }
 
-        if (this.menuVisible) {
+          // 漫评半模态宿主（0 尺寸稳定节点）
           Column()
+            .width(0)
+            .height(0)
+            .bindSheet(this.commentSheetVisible, this.CommentSheet(), FqSheetOptions((): void => {
+              this.onCommentSheetClose();
+            }, fqCommentSheetHeightVp()))
+
+          if (this.loadingState) {
+            Column({ space: 12 }) {
+              CommonLoading({ sizeValue: 36, loadColor: FQ_ACCENT })
+              Text('正在加载本话内容')
+                .fontSize(14)
+                .fontColor(FQ_COMIC_TEXT)
+            }
             .width('100%')
             .height('100%')
-            .onClick(() => {
-              this.menuVisible = false;
-              this.sheetVisible = false;
-            })
+            .justifyContent(FlexAlign.Center)
+            .backgroundColor(FQ_COMIC_BG)
+          } else if (this.errorMsg.length > 0) {
+            Column({ space: 12 }) {
+              Text(this.errorMsg)
+                .fontSize(14)
+                .fontColor(FQ_COMIC_TEXT)
+                .textAlign(TextAlign.Center)
+                .padding({ left: 32, right: 32 })
+              Button('重试')
+                .backgroundColor(FQ_ACCENT)
+                .onClick(() => this.retry())
+            }
+            .width('100%')
+            .height('100%')
+            .justifyContent(FlexAlign.Center)
+            .backgroundColor(FQ_COMIC_BG)
+          }
+
+          if (this.menuVisible) {
+            Column()
+              .width('100%')
+              .height('100%')
+              .onClick(() => {
+                this.menuVisible = false;
+                this.sheetVisible = false;
+              })
+          }
         }
+        .width('100%')
+        .height(this.bodyHeightVp > 0 ? this.bodyHeightVp : '100%')
+        .offset({ y: -this.bodyTopCompVp })
+        .backgroundColor(FQ_COMIC_BG)
+        .bindSheet(this.sheetVisible, this.CatalogSheet(), FqSheetOptions((): void => {
+          this.onSheetClose();
+        }))
       }
       .width('100%')
       .height('100%')
-      .backgroundColor(FQ_COMIC_BG)
-      .bindSheet(this.sheetVisible, this.CatalogSheet(), FqSheetOptions((): void => {
-        this.onSheetClose();
-      }))
+      .alignContent(Alignment.Top)
+      .onAreaChange((_oldArea: Area, newArea: Area): void => {
+        this.onBodyAreaChange(newArea);
+      })
     }
   }
 
@@ -282,21 +322,18 @@ export struct ComicPage {
   // 翻页模式正文
   // ---------------------------------------------------------------------------
 
-  /** 仿真/覆盖模式槽位图（slot：-1 / 0 / +1，章内邻图优先，越界取预载邻章）。 */
+  /** 仿真/覆盖模式槽位图（slot：-1 / 0 / +1，章内邻图优先，越界取预载邻章）：
+   *  显式定高（窗口高 - 眉页/眉脚区），菜单呼出容器 resize 不缩放图片（治“弹一下”）；
+   *  图源优先预解码 PixelMap（翻页提交同帧渲染，治“闪一下”），未就绪回退 URL。 */
   @Builder
   private imageSlot(slot: number) {
-    Column() {
-      if (this.imageForSlot(slot).length > 0) {
-        Image(this.imageForSlot(slot))
-          .width('100%')
-          .height('100%')
-          .objectFit(ImageFit.Contain)
-          .draggable(false)
-      }
+    if (this.imageForSlot(slot).length > 0) {
+      Image(this.slotSources[slot + 1])
+        .width('100%')
+        .height(this.pagedImageHeightVp)
+        .objectFit(ImageFit.Contain)
+        .draggable(false)
     }
-    .width('100%')
-    .height('100%')
-    .justifyContent(FlexAlign.Center)
   }
 
   /** 槽位图片地址（空串 = 无图，越界且邻章未预载）。 */
@@ -310,6 +347,151 @@ export struct ComicPage {
       return this.prevImages.length > 0 ? this.prevImages[this.prevImages.length - 1] : '';
     }
     return this.nextImages.length > 0 ? this.nextImages[0] : '';
+  }
+
+  // ---------------------------------------------------------------------------
+  // 图片预解码（PixelMap 缓存：翻页提交同帧渲染，杜绝旧图残留闪帧）
+  // ---------------------------------------------------------------------------
+
+  /** 刷新三槽位图源（页面状态或解码完成后调用；整体替换驱动槽位重渲染）。 */
+  private refreshSlotSources(): void {
+    const sources: Array<image.PixelMap | string> = [];
+    for (let slot: number = -1; slot <= 1; slot++) {
+      const url: string = this.imageForSlot(slot);
+      const map: image.PixelMap | undefined = url.length > 0 ? this.pixelCache.get(url) : undefined;
+      sources.push(map !== undefined ? map : url);
+    }
+    this.slotSources = sources;
+  }
+
+  /** 预解码当前三槽位图（上下滚动模式跳过）。 */
+  private preloadVisiblePixels(): void {
+    if (this.comicFlipIndex === 2 || this.curImages.length === 0) {
+      return;
+    }
+    this.refreshSlotSources();
+    for (let slot: number = -1; slot <= 1; slot++) {
+      this.ensurePixelMap(this.imageForSlot(slot));
+    }
+  }
+
+  /** 预解码单图（缓存/在途去重；失败记录 + 日志 + 一次性 toast 诊断，可重试）。 */
+  private ensurePixelMap(url: string): void {
+    if (url.length === 0 || this.pixelCache.has(url) || this.pixelInflight.has(url)) {
+      return;
+    }
+    this.pixelInflight.add(url);
+    ComicPage.fetchPixelMap(url).then((map: image.PixelMap) => {
+      this.pixelInflight.delete(url);
+      if (this.disposed) {
+        this.releasePixelMapQuietly(map);
+        return;
+      }
+      this.pixelFailed.delete(url);
+      this.pixelCache.set(url, map);
+      this.pixelOrder.push(url);
+      this.trimPixelCache();
+      this.refreshSlotSources();
+    }).catch((error: BusinessError) => {
+      this.pixelInflight.delete(url);
+      if (this.disposed) {
+        return;
+      }
+      this.pixelFailed.add(url);
+      hilog.error(0x0000, FQ_COMIC_TAG, 'fetchPixelMap failed: %{public}s code=%{public}d message=%{public}s',
+        url, error.code, error.message);
+      if (!this.decodeFailToastShown) {
+        this.decodeFailToastShown = true;
+        promptAction.showToast({ message: '图片预载失败，已回退在线加载', duration: 2000 });
+      }
+    });
+  }
+
+  /** 翻页目标页图源是否就绪（FqReaderFlip canTurn 门禁）：
+   *  已解码 / 无图 / 曾失败（回退 URL 兜底）→ 放行；未就绪 → 拒绝并触发预解码。 */
+  private flipTargetReady(isNext: boolean): boolean {
+    const url: string = this.imageForSlot(isNext ? 1 : -1);
+    if (url.length === 0 || this.pixelCache.has(url) || this.pixelFailed.has(url)) {
+      return true;
+    }
+    this.ensurePixelMap(url);
+    return false;
+  }
+
+  /** 下载并解码网络图片（http → ArrayBuffer → ImageSource → PixelMap）。 */
+  private static async fetchPixelMap(url: string): Promise<image.PixelMap> {
+    const client: http.HttpRequest = http.createHttp();
+    try {
+      const response: http.HttpResponse = await client.request(url, {
+        method: http.RequestMethod.GET,
+        expectDataType: http.HttpDataType.ARRAY_BUFFER,
+        usingCache: true,
+        connectTimeout: 15000,
+        readTimeout: 30000,
+      });
+      if (response.responseCode < 200 || response.responseCode >= 300) {
+        throw new Error(`HTTP ${response.responseCode}`);
+      }
+      const result: string | Object | ArrayBuffer = response.result;
+      if (!(result instanceof ArrayBuffer)) {
+        throw new Error('图片数据格式异常');
+      }
+      const source: image.ImageSource = image.createImageSource(result);
+      const map: image.PixelMap = await source.createPixelMap();
+      source.release();
+      return map;
+    } finally {
+      client.destroy();
+    }
+  }
+
+  /** LRU 淘汰超限条目（当前三槽位在用条目跳过；上限 6 张约 30-40MB 解码内存）。 */
+  private trimPixelCache(): void {
+    const cap: number = 6;
+    while (this.pixelOrder.length > cap) {
+      let evicted: boolean = false;
+      for (let index: number = 0; index < this.pixelOrder.length; index++) {
+        const url: string = this.pixelOrder[index];
+        if (this.urlInUse(url)) {
+          continue;
+        }
+        this.pixelOrder.splice(index, 1);
+        const map: image.PixelMap | undefined = this.pixelCache.get(url);
+        this.pixelCache.delete(url);
+        if (map !== undefined) {
+          this.releasePixelMapQuietly(map);
+        }
+        evicted = true;
+        break;
+      }
+      if (!evicted) {
+        break;
+      }
+    }
+  }
+
+  /** URL 是否被当前三槽位显示（淘汰保护）。 */
+  private urlInUse(url: string): boolean {
+    return this.imageForSlot(-1) === url || this.imageForSlot(0) === url || this.imageForSlot(1) === url;
+  }
+
+  private releasePixelMapQuietly(map: image.PixelMap): void {
+    try {
+      map.release();
+    } catch (error) {
+      // 释放失败忽略
+    }
+  }
+
+  /** 释放全部预解码图片（页面销毁）。 */
+  private releasePixelCache(): void {
+    this.pixelCache.forEach((map: image.PixelMap): void => {
+      this.releasePixelMapQuietly(map);
+    });
+    this.pixelCache.clear();
+    this.pixelOrder = [];
+    this.pixelInflight.clear();
+    this.pixelFailed.clear();
   }
 
   /** 槽位图所属章下标（-1 无章）。 */
@@ -447,6 +629,7 @@ export struct ComicPage {
         this.openChapter(this.chapterIndex - 1, '');
       }
     }
+    this.preloadVisiblePixels();
   }
 
   /** 邻章无缝切换（预载就绪后的跨章翻页路径；旧章图片顺势转为反向邻章）。 */
@@ -464,6 +647,7 @@ export struct ComicPage {
       this.prevImages = [];
     }
     this.saveProgressNow();
+    this.preloadVisiblePixels();
     this.preloadNeighbors(this.loadToken);
   }
 
@@ -475,10 +659,7 @@ export struct ComicPage {
   @Builder
   private VerticalBody() {
     Column() {
-      List({
-        scroller: this.verticalScroller,
-        space: 4,
-      }) {
+      List({ scroller: this.verticalScroller }) {
         LazyForEach(this.verticalSource, (item: FqComicImageItem) => {
           ListItem() {
             Image(item.url)
@@ -657,6 +838,67 @@ export struct ComicPage {
   private updateZones(): void {
     this.headerZoneVp = Math.max(appState.maxTopRect, 32) + 22;
     this.footerZoneVp = appState.bottomRect + 40;
+    const body: number = this.bodyHeightVp > 0 ? this.bodyHeightVp : this.screenHeightVp();
+    const height: number = body - this.headerZoneVp - this.footerZoneVp;
+    this.pagedImageHeightVp = height > 0 ? height : 640;
+  }
+
+  /** 内容区窗口纵坐标基线（vp，globalPosition.y；-1 = 未测）：
+   *  标题栏收起（容器最靠上）时的位置，呼出下压按此差值上补偿。 */
+  private bodyTopBaseVp: number = -1;
+
+  /** 外层实测（onAreaChange）：
+   *  - 高度基线（bodyHeightVp）：容器最大高（标题栏收起），内层阅读体按此定高，容器压缩不再重排；
+   *  - 顶压补偿（bodyTopCompVp）= 当前窗口纵坐标 - 基线（globalPosition.y）：
+   *    标题栏呼出把内容区整体下压 → 上移等量钉回窗口原位；底部压缩（ReadBar）不改变
+   *    顶坐标 → 零补偿，仅靠定高保持不动。两类压缩均不产生图片位移。 */
+  private onBodyAreaChange(area: Area): void {
+    const heightVp: number = typeof area.height === 'number' ? area.height : 0;
+    const topVp: number = typeof area.globalPosition.y === 'number' ? area.globalPosition.y : -1;
+    if (heightVp <= 0) {
+      return;
+    }
+    if (this.bodyHeightVp <= 0 || heightVp >= this.bodyHeightVp) {
+      if (this.bodyHeightVp !== heightVp) {
+        this.bodyHeightVp = heightVp;
+        this.updateZones();
+      }
+    }
+    if (topVp < 0) {
+      return;
+    }
+    if (this.bodyTopBaseVp < 0 || topVp <= this.bodyTopBaseVp) {
+      this.bodyTopBaseVp = topVp;
+    }
+    const comp: number = topVp - this.bodyTopBaseVp;
+    this.bodyTopCompVp = comp > 0.5 ? comp : 0;
+  }
+
+  /** 窗口高（vp，含避让区整屏）。 */
+  private screenHeightVp(): number {
+    const displayData: display.Display = display.getDefaultDisplaySync();
+    const density: number = displayData.densityPixels > 0 ? displayData.densityPixels : 1;
+    return (appState.screenHeight > 0 ? appState.screenHeight : displayData.height) / density;
+  }
+
+  /** 窗口宽度/高度（供 @Monitor 监听小窗/全屏切换）。 */
+  @Computed
+  get windowWidth(): number {
+    return appState.screenWidth;
+  }
+
+  @Computed
+  get windowHeight(): number {
+    return appState.screenHeight;
+  }
+
+  /** 窗口尺寸变化：重置实测基线（onAreaChange 重新校准），更新眉页/眉脚区。 */
+  @Monitor('windowWidth', 'windowHeight')
+  onWindowSizeChange(): void {
+    this.bodyHeightVp = 0;
+    this.bodyTopCompVp = 0;
+    this.bodyTopBaseVp = -1;
+    this.updateZones();
   }
 
   /** 眉脚电量图标：按系统电量映射到档位图标资源。 */
@@ -826,6 +1068,7 @@ export struct ComicPage {
     this.prevImages = [];
     this.nextImages = [];
     this.saveProgressNow();
+    this.preloadVisiblePixels();
     this.preloadNeighbors(this.loadToken);
   }
 
@@ -903,6 +1146,8 @@ export struct ComicPage {
       this.saveProgressNow();
       if (this.comicFlipIndex === 2) {
         this.buildVertical(this.pageIndex);
+      } else {
+        this.preloadVisiblePixels();
       }
       this.preloadNeighbors(token);
     } catch (error) {
@@ -941,6 +1186,8 @@ export struct ComicPage {
         const images: string[] = await this.fetchChapterImages(nextIndex);
         if (token === this.loadToken && images.length > 0) {
           this.nextImages = images;
+          // 跨章目标从 URL 兜底变为真实地址 → 立即刷新槽位并预解码（否则跨章翻页必走 URL 路径闪旧页）
+          this.preloadVisiblePixels();
         }
       } catch (error) {
         // 邻章预载失败不阻断（跨章时回退整章加载路径）
@@ -955,6 +1202,7 @@ export struct ComicPage {
         const images: string[] = await this.fetchChapterImages(prevIndex);
         if (token === this.loadToken && images.length > 0) {
           this.prevImages = images;
+          this.preloadVisiblePixels();
         }
       } catch (error) {
         // 邻章预载失败不阻断
