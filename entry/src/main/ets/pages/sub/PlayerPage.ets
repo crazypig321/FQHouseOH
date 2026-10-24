@@ -24,8 +24,9 @@
  * - 播完自动连播；aboutToDisappear 销毁 mpv 实例并恢复沉浸前的系统 UI。
  * - 长按屏幕右侧 2 倍速快进（官方 jq3 长按带外分支 / fqapp _startBoost）：
  *   按住期间 2x、松开恢复原倍速，画面中央「2倍速快进中」指示。
- * - 横屏片源全屏防误触锁（官方 fullscreen/d.K6）：左侧竖直居中锁按钮，
- *   锁定后上下工具不可呼出、画面操作全吞，仅锁按钮可唤出
+ * - 全屏防误触锁（官方 fullscreen/d.K6）：横屏片源左侧竖直居中（圆形
+ *   半透明黑底），竖屏片源最底部左边（无底色）；锁定后上下工具不可呼出、
+ *   画面操作与返回手势全吞（禁止手势退出全屏），仅锁按钮可唤出
  *   （5s 自隐，任意触摸重新唤出）；解锁立即恢复控件。
  * - 已看集标记与续播（fqapp watched_episodes.dart / video_progress 一族）：
  *   已看按集 itemId 持久化（FqWatchedStore），实际播放过（position > 0）才标记，
@@ -249,8 +250,13 @@ export struct PlayerPage {
       showBrandGradient: false,
       pageBackgroundColor: Color.Black,
       backPressed: (): boolean => {
-        // 全屏沉浸态先退全屏（官方返回语义），再返回上一页
+        // 全屏沉浸态先退全屏（官方返回语义），再返回上一页；
+        // 防误触锁开启时吞掉返回手势：禁止手势退出全屏，只唤出锁按钮
         if (this.fullScreen) {
+          if (this.fsLocked) {
+            this.refreshLockVisibility();
+            return true;
+          }
           this.exitFullscreen();
           return true;
         }
@@ -363,9 +369,9 @@ export struct PlayerPage {
           this.FsBottomBar()
         }
 
-        // 横屏片源全屏防误触锁（左侧竖直居中）：解锁随控件显隐，
-        // 锁定后仅本按钮可唤出（5s 自隐，任意触摸重新唤出）
-        if (this.fullScreen && this.isLandscapeVideo() && !this.sheetVisible &&
+        // 全屏防误触锁：横屏左侧竖直居中（黑底圆钮）/ 竖屏最底部左边（无底色）；
+        // 解锁随控件显隐，锁定后仅本按钮可唤出（5s 自隐，任意触摸重新唤出）
+        if (this.fullScreen && !this.sheetVisible &&
           (this.fsLocked ? this.lockVisible : this.fsControlsVisible)) {
           this.LockButton()
         }
@@ -735,8 +741,8 @@ export struct PlayerPage {
     }
     .width('100%')
     // 竖屏片源全屏沉浸隐藏状态栏后 topRect 归零，用 maxTopRect 保底避让；
-    // 横屏片源维持 topRect（沉浸态贴边）
-    .padding({ top: this.isLandscapeVideo() ? appState.topRect : appState.maxTopRect, left: 8, right: 8 })
+    // 横屏片源维持 topRect（沉浸态贴边）；左右 padding 横竖屏区分（竖屏 8）
+    .padding({ top: this.isLandscapeVideo() ? appState.topRect : appState.maxTopRect, left: this.isLandscapeVideo() ? 20 : 8, right: this.isLandscapeVideo() ? 20 : 8 })
     .linearGradient({
       angle: 180,
       colors: [['rgba(0,0,0,0.54)', 0.0], ['rgba(0,0,0,0.0)', 1.0]],
@@ -815,7 +821,7 @@ export struct PlayerPage {
       .alignItems(VerticalAlign.Center)
     }
     .width('100%')
-    .padding({ left: 16, right: 16, bottom: appState.bottomRect > 0 ? appState.bottomRect : 8 })
+    .padding({ left: 20, right: 20, bottom: appState.bottomRect > 0 ? appState.bottomRect : 8 })
     .linearGradient({
       angle: 180,
       colors: [['rgba(0,0,0,0.0)', 0.0], ['rgba(0,0,0,0.5)', 1.0]],
@@ -825,26 +831,44 @@ export struct PlayerPage {
   }
 
   /**
-   * 全屏防误触锁按钮（横屏片源全屏、左侧竖直居中）：44 圆形半透明黑底，
-   * 锁定 lock_fill / 解锁 lock_open；点按切换锁定（官方 uk3/c）。
+   * 全屏防误触锁按钮（官方 uk3/c）：横屏片源左侧竖直居中（44 圆形半透明
+   * 黑底）；竖屏片源最底部左边（无底色，避让底部条第二行左空带）；
+   * 锁定 lock_fill / 解锁 lock_open；点按切换锁定。
    */
   @Builder
   private LockButton() {
-    Row() {
-      SymbolGlyph(this.fsLocked ? $r('sys.symbol.lock_fill') : $r('sys.symbol.lock_open'))
-        .fontSize(20)
-        .fontColor([Color.White])
+    if (this.isLandscapeVideo()) {
+      Row() {
+        SymbolGlyph(this.fsLocked ? $r('sys.symbol.lock_fill') : $r('sys.symbol.lock_open'))
+          .fontSize(20)
+          .fontColor([Color.White])
+      }
+      .width(44)
+      .height(44)
+      .borderRadius(22)
+      .justifyContent(FlexAlign.Center)
+      .backgroundColor('rgba(78, 78, 78, 0.45)')
+      .position({ x: 36, y: '50%' })
+      .markAnchor({ x: 0, y: '50%' })
+      .onClick((): void => {
+        this.toggleLock();
+      })
+    } else {
+      Row() {
+        SymbolGlyph(this.fsLocked ? $r('sys.symbol.lock_fill') : $r('sys.symbol.lock_open'))
+          .fontSize(22)
+          .fontColor([Color.White])
+      }
+      .padding({
+        left: 16,
+        bottom: 12 + (appState.bottomRect > 0 ? appState.bottomRect : 0),
+      })
+      .position({ x: 0, y: '100%' })
+      .markAnchor({ x: 0, y: '100%' })
+      .onClick((): void => {
+        this.toggleLock();
+      })
     }
-    .width(44)
-    .height(44)
-    .borderRadius(22)
-    .justifyContent(FlexAlign.Center)
-    .backgroundColor('rgba(0,0,0,0.45)')
-    .position({ x: 16, y: '50%' })
-    .markAnchor({ x: 0, y: '50%' })
-    .onClick((): void => {
-      this.toggleLock();
-    })
   }
 
   /** 加载占位：封面 contain + spinner（官方 PlayerCover/PlayerLoadingFeedback）。 */
