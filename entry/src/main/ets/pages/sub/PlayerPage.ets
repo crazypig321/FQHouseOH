@@ -680,23 +680,12 @@ export struct PlayerPage {
   @Builder
   private SettingsSheetBuilder() {
     Column() {
-      // grabber：36×4、#1A000000、圆角 2（对齐选集面板）
-      Column() {
-        Column()
-          .width(36)
-          .height(4)
-          .borderRadius(2)
-          .backgroundColor('#1A000000')
-      }
-      .width('100%')
-      .height(12)
-      .justifyContent(FlexAlign.Center)
+      Column().height(12)
 
       Row() {
         Text('播放设置')
           .fontSize(16)
           .fontWeight(FontWeight.Bold)
-          .fontColor('#FF1B1B1B')
       }
       .width('100%')
       .height(48)
@@ -707,7 +696,6 @@ export struct PlayerPage {
         Text('倍速')
           .fontSize(14)
           .fontWeight(FontWeight.Bold)
-          .fontColor('#FF1B1B1B')
       }
       .width('100%')
       .height(36)
@@ -721,14 +709,14 @@ export struct PlayerPage {
               Text(`${speed}×`)
                 .fontSize(15)
                 .fontWeight(this.isCurrentSpeed(speed) ? FontWeight.Bold : FontWeight.Normal)
-                .fontColor(this.isCurrentSpeed(speed) ? '#FFFA6725' : '#FF000000')
+                .fontColor(this.isCurrentSpeed(speed) ? '#FFFA6725' : $r('sys.color.font'))
             }
             .width('100%')
             .height('100%')
             .justifyContent(FlexAlign.Center)
             .alignItems(HorizontalAlign.Center)
             .borderRadius(8)
-            .backgroundColor(this.isCurrentSpeed(speed) ? '#1AFA6725' : '#08000000')
+            .backgroundColor(this.isCurrentSpeed(speed) ? '#1AFA6725' : $r('sys.color.comp_background_list_card'))
             .onClick((): void => {
               this.player.setSpeed(speed);
               this.closeSettings();

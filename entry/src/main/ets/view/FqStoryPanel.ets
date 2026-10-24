@@ -53,17 +53,7 @@ export struct FqStoryPanel {
 
   build() {
     Column() {
-      // grabber：36×4、#1A000000、圆角 2（官方 aa8.xml:6）
-      Column() {
-        Column()
-          .width(36)
-          .height(4)
-          .borderRadius(2)
-          .backgroundColor('#1A000000')
-      }
-      .width('100%')
-      .height(12)
-      .justifyContent(FlexAlign.Center)
+      Column().width('100%').height(12)
 
       this.SeriesHeader()
 
@@ -72,7 +62,6 @@ export struct FqStoryPanel {
         Text('选集')
           .fontSize(14)
           .fontWeight(FontWeight.Bold)
-          .fontColor('#FF1B1B1B')
           .padding({ left: 20 })
       }
       .width('100%')
@@ -121,7 +110,7 @@ export struct FqStoryPanel {
               .width('100%')
               .aspectRatio(53 / 52)
               .borderRadius(8)
-              .backgroundColor(index === this.currentIndex ? '#1AFA6725' : '#08000000')
+              .backgroundColor(index === this.currentIndex ? '#1AFA6725' : $r('sys.color.comp_background_list_card'))
               .onClick((): void => {
                 this.onSelectEpisode(index);
               })
@@ -177,7 +166,6 @@ export struct FqStoryPanel {
             Text(this.seriesTitle.length > 0 ? this.seriesTitle : '短剧')
               .fontSize(16)
               .fontWeight(FontWeight.Bold)
-              .fontColor('#FF1B1B1B')
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .layoutWeight(1)
@@ -230,14 +218,14 @@ export struct FqStoryPanel {
   }
 
   /** 格子文字色：当前集橙、已看（当前集之前）灰、普通黑。 */
-  private tileTextColor(index: number): string {
+  private tileTextColor(index: number): ResourceColor {
     if (index === this.currentIndex) {
       return '#FFFA6725';
     }
     if (index < this.currentIndex) {
-      return '#66000000';
+      return $r('sys.color.font_tertiary');
     }
-    return '#FF000000';
+    return $r('sys.color.font');
   }
 
   private lastPage(): number {
