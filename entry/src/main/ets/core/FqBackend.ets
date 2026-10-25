@@ -96,6 +96,18 @@ export class FqBackend {
   }
 
   /**
+   * 内置 Web UI 入口（对齐 fqapp BackendService.webUiEntryUrl）：
+   * loopback 适配器只响应携带 capability 的请求，浏览器打开此入口会以会话
+   * cookie 形式下发 capability 后重定向到 /；直接打开裸 baseUrl 会 401。
+   */
+  public get webUiEntryUrl(): string {
+    const capPrefix: string = this.capabilityValue.length > 0
+      ? `/_session/${this.capabilityValue}`
+      : '';
+    return `${this.baseUrlValue}${capPrefix}/`;
+  }
+
+  /**
    * 启动后端。幂等：并发/重复调用共享同一次启动；失败后清除缓存，允许重试。
    */
   public start(context: common.Context): Promise<void> {

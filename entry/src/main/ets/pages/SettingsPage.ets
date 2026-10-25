@@ -3,13 +3,15 @@
  * - 外观：深色模式（跟随系统/浅色/深色，FqMenu 档位直选，即时生效）；
  * - 播放：开启后台播放开关（开=支持后台播放，关=无法后台播放）；
  * - 数据：章节缓存/剧集缓存入口、清空历史（确认弹窗，清浏览+收听+观看+统计）；
- * - 服务：本地后端地址展示；
+ * - 服务：本地后端地址展示（点击浏览器打开 + 刷新按钮）；
  * - 关于：关于我们入口。
  */
 
 import { CommonNav } from '../view/CommonNav';
 import { FqMenu, FqMenuItem } from '../view/CommonMenu';
-import { FQ_ACCENT } from '../view/CommonCom';
+import { CommonLoading, FQ_ACCENT } from '../view/CommonCom';
+import { common } from '@kit.AbilityKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 import { FqTitleBarOptions, ROUTE_ABOUT, ROUTE_CACHED_BOOKS, ROUTE_CACHED_DRAMAS } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import {
@@ -64,6 +66,7 @@ export struct SettingsPage {
   @Local themeMode: number = FQ_THEME_FOLLOW;
   @Local backgroundAudio: boolean = true;
   @Local backendUrl: string = '';
+  @Local backendRefreshing: boolean = false;
 
   aboutToAppear(): void {
     this.themeMode = FqAppSettingsStore.getThemeMode();
@@ -315,7 +318,7 @@ export struct SettingsPage {
     .width('100%')
   }
 
-  /** 本地后端地址行（只读展示）。 */
+  /** 本地后端地址行：点击打开浏览器访问后端地址，右侧刷新按钮重读地址。 */
   @Builder
   private BackendRow() {
     Row({ space: 12 }) {
@@ -348,8 +351,85 @@ export struct SettingsPage {
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
+
+      Stack() {
+        if (this.backendRefreshing) {
+          CommonLoading({ sizeValue: 15, loadColor: $r('sys.color.font_secondary') })
+        } else {
+          SymbolGlyph($r('sys.symbol.arrow_clockwise'))
+            .fontSize(15)
+            .fontColor([$r('sys.color.font_secondary')])
+        }
+      }
+      .width(30)
+      .height(30)
+      .borderRadius(15)
+      .backgroundColor($r('sys.color.comp_background_tertiary'))
+      .onClick((): void => {
+        this.refreshBackendUrl();
+      })
     }
     .padding({ left: 14, right: 14, top: 11, bottom: 11 })
     .width('100%')
+    .onClick((): void => {
+      this.openBackendInBrowser();
+    })
+  }
+
+  /** 打开浏览器访问内置 Web UI 入口（携带 capability，未启动时提示）。 */
+  private openBackendInBrowser(): void {
+    const url: string = FqBackend.get().webUiEntryUrl;
+    if (this.backendUrl.length === 0 || url.length === 0) {
+      this.getUIContext().getPromptAction().showToast({ message: '本地后端未启动', duration: 1500 });
+      return;
+    }
+    const context: common.UIAbilityContext | null = appState.abilityContext;
+    if (context === null) {
+      return;
+    }
+    context.openLink(url, { appLinkingOnly: false }).catch((_error: BusinessError): void => {
+      this.getUIContext().getPromptAction().showToast({ message: '打开浏览器失败', duration: 1500 });
+    });
+  }
+
+  /** 刷新本地后端地址（后端启动幂等：未启动/失败时重试拉起，期间按钮转 Loading）。 */
+  private refreshBackendUrl(): void {
+    if (this.backendRefreshing) {
+      return;
+    }
+    this.backendRefreshing = true;
+    this.backendUrl = FqBackend.get().baseUrl;
+    const context: common.UIAbilityContext | null = appState.abilityContext;
+    if (context === null) {
+      this.backendRefreshing = false;
+      return;
+    }
+    const begin: number = Date.now();
+    FqBackend.get().start(context)
+      .then((): void => {
+        this.backendUrl = FqBackend.get().baseUrl;
+        this.finishBackendRefresh(begin, '');
+      })
+      .catch((): void => {
+        // 启动失败保持原值
+        this.finishBackendRefresh(begin, '本地后端启动失败');
+      });
+  }
+
+  /**
+   * 收尾刷新：start 命中缓存 Promise 时微任务内即完成，Loading 一帧都渲染
+   * 不到（表现为“点了没反应”），故保证最少转 500ms，并给出结果 toast。
+   */
+  private finishBackendRefresh(begin: number, failedMessage: string): void {
+    const elapsed: number = Date.now() - begin;
+    const remainMs: number = elapsed >= 500 ? 0 : 500 - elapsed;
+    setTimeout((): void => {
+      this.backendRefreshing = false;
+      if (failedMessage.length > 0) {
+        this.getUIContext().getPromptAction().showToast({ message: failedMessage, duration: 1500 });
+      } else {
+        this.getUIContext().getPromptAction().showToast({ message: '已刷新', duration: 1000 });
+      }
+    }, remainMs);
   }
 }
