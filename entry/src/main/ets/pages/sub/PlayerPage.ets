@@ -24,6 +24,10 @@
  *   右上角菜单呼出「播放设置」半模态（倍速档位）；
  *   评论按钮呼出「集评」半模态（公共 FqCommentSheet + 弹幕接口加载器：
  *   当前播放集的评论而非整部剧剧评，切集面板开着自动重载）。
+ * - 离线缓存（fqapp DramaDownloadSheet 语义）：选集胶囊行「缓存」入口 /
+ *   播放设置「离线缓存」行呼出缓存选集半模态（已缓存集置灰打勾、任务态
+ *   实时进度、默认全选未缓存集、头部「管理」进剧集缓存管理页）；
+ *   已缓存集 loadEpisode 直接播本地文件，在线取流失败也回退缓存文件。
  * - 播完自动连播；aboutToDisappear 销毁 mpv 实例并恢复沉浸前的系统 UI。
  * - 长按屏幕右侧 2 倍速快进（官方 jq3 长按带外分支 / fqapp _startBoost）：
  *   按住期间 2x、松开恢复原倍速，画面中央「2倍速快进中」指示。
@@ -55,12 +59,14 @@ import { FqMenu, FqMenuItem } from '../../view/CommonMenu';
 import { FqDanmakuView } from '../../view/FqDanmakuView';
 import { FqSettingRow } from '../../view/FqSettingRow';
 import { FqStoryPanel } from '../../view/FqStoryPanel';
-import { DetailNavParams, PlayerNavParams, ListenVideoNavParams, ROUTE_DETAIL, ROUTE_LISTEN_VIDEO } from '../../model/FqNavModels';
+import { DetailNavParams, PlayerNavParams, ListenVideoNavParams, ROUTE_DETAIL, ROUTE_LISTEN_VIDEO, ROUTE_CACHED_DRAMAS } from '../../model/FqNavModels';
 import { FqBookCommentPage, FqChapter, FqDanmaku, FqDanmakuPage, FqEpisodeCommentPage, FqEpisodeSource, FqSeriesRelateBook, fqKindToTab } from '../../model/FqModels';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { fqAudioSession } from '../../core/FqAudioSession';
 import { FqVideoMedia } from '../../core/FqVideoMedia';
 import { FqWatchedStore, FqWatchedProgress } from '../../core/FqWatchedStore';
+import { FqDramaCacheStore } from '../../core/FqDramaCacheStore';
+import { fqDramaDownloader, FqDramaDownloader, FqDramaDownloadTask, DramaDownloadStatus } from '../../core/FqDramaDownloader';
 import { FqReadStatsStore } from '../../core/FqReadStatsStore';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { appState } from '../../entryability/AppState';
@@ -197,6 +203,12 @@ export struct PlayerPage {
   @Local watchedIds: Set<string> = new Set<string>();
   /** 横屏全屏右侧边栏（'episodes' 选集 / 'settings' 播放设置；'' 关闭）。 */
   @Local sidePanel: string = '';
+  /** 离线缓存选集半模态（选集胶囊行「缓存」/播放设置「离线缓存」行呼出）。 */
+  @Local cacheSheetVisible: boolean = false;
+  /** 缓存 sheet 内已勾选集 itemId（打开时默认全选未缓存集）。 */
+  @Local cacheSelectedIds: Set<string> = new Set<string>();
+  /** 缓存 sheet 内已完整缓存集 itemId（打开时从 FqDramaCacheStore 刷新）。 */
+  @Local cacheDownloadedIds: Set<string> = new Set<string>();
 
   private title: string = '';
   private tab: string = '短剧';
@@ -208,6 +220,10 @@ export struct PlayerPage {
   private sheetCloseToken: number = 0;
   /** 播放设置半模态关闭令牌。 */
   private settingsCloseToken: number = 0;
+  /** 离线缓存半模态关闭令牌。 */
+  private cacheCloseToken: number = 0;
+  /** 剧集下载引擎单例（@Trace taskList/任务进度实时驱动缓存 sheet 刷新）。 */
+  @Local dl: FqDramaDownloader = fqDramaDownloader;
   /** 剧评半模态关闭令牌。 */
   private commentCloseToken: number = 0;
   /** 集评游标（弹幕接口 cursor 不透明续拉串；切集/重开由加载器重置）。 */
@@ -922,6 +938,32 @@ export struct PlayerPage {
           FqSheetOptions((): void => {
             this.closeComments();
           }, fqCommentSheetHeightVp(), false))
+
+        // 缓存入口：并入选集行右端（评论旁），呼出离线缓存选集半模态
+        Column({ space: 1 }) {
+          SymbolGlyph($r('sys.symbol.download'))
+            .fontSize(22)
+            .fontColor([Color.White])
+            .opacity(0.9)
+          Text('缓存')
+            .fontSize(11)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('rgba(255,255,255,0.9)')
+        }
+        .width(44)
+        .height(40)
+        .margin({ left: 8 })
+        .borderRadius(8)
+        .backgroundColor('#E6222222')
+        .alignItems(HorizontalAlign.Center)
+        .justifyContent(FlexAlign.Center)
+        .onClick((): void => {
+          this.openCacheSheet();
+        })
+        .bindSheet(this.cacheSheetVisible, this.CacheSheetBuilder(),
+          FqSheetOptions((): void => {
+            this.closeCacheSheet();
+          }, fqPlayerSheetHeightVp(), false))
       }
       .width('100%')
       .padding({ left: 16, right: 16 })
@@ -1211,9 +1253,298 @@ export struct PlayerPage {
     })
   }
 
+  /**
+   * 离线缓存选集半模态（fqapp DramaDownloadSheet 语义）：头部「离线缓存 · 剧名」
+   * +「管理」（进剧集缓存管理页）、集数网格复选（已缓存置灰打勾、任务态实时
+   * 进度/排队/暂停/失败、选中橙底描边打勾、默认全选未缓存集）、全选 + 下载按钮。
+   */
+  @Builder
+  private CacheSheetBuilder() {
+    Column() {
+      Row() {
+        Text(`离线缓存 · ${this.title}`)
+          .fontSize(16)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#FF000000')
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .layoutWeight(1)
+        Text('管理')
+          .fontSize(14)
+          .fontColor(FQ_STORY_ORANGE)
+          .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+          .onClick((): void => {
+            this.closeCacheSheet();
+            NavPathUtils.push(ROUTE_CACHED_DRAMAS);
+          })
+      }
+      .width('100%')
+      .height(48)
+      .padding({ left: 20, right: 8 })
+      .alignItems(VerticalAlign.Center)
+
+      Grid() {
+        ForEach(this.episodes, (episode: FqChapter, index: number) => {
+          GridItem() {
+            this.CacheEpisodeCell(episode, index)
+          }
+        }, (episode: FqChapter) => episode.itemId)
+      }
+      .columnsTemplate('1fr 1fr 1fr 1fr')
+      .columnsGap(8)
+      .rowsGap(8)
+      .width('100%')
+      .layoutWeight(1)
+      .scrollBar(BarState.Off)
+      .padding({ left: 16, right: 16, top: 4, bottom: 8 })
+
+      Row() {
+        Text(this.cacheAllSelected() ? '取消全选' : '全选')
+          .fontSize(14)
+          .fontColor(this.cachePendingCount() === 0 ? $r('sys.color.font_tertiary') : FQ_STORY_ORANGE)
+          .padding({ left: 4, right: 4, top: 10, bottom: 10 })
+          .onClick((): void => {
+            this.toggleCacheSelectAll();
+          })
+
+        Blank()
+
+        Button(`下载 (${this.cacheSelectedIds.size})`)
+          .type(ButtonType.Capsule)
+          .height(36)
+          .fontSize(14)
+          .fontColor(Color.White)
+          .backgroundColor(this.cacheSelectedIds.size > 0 ? FQ_STORY_ORANGE : '#33000000')
+          .enabled(this.cacheSelectedIds.size > 0)
+          .onClick((): void => {
+            this.confirmCacheDownload();
+          })
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, bottom: 16 })
+      .alignItems(VerticalAlign.Center)
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  /** 缓存格：已缓存置灰打勾 / 任务态橙色（进度%/排队/暂停/失败）/ 可选集（选中橙底描边打勾）。 */
+  @Builder
+  private CacheEpisodeCell(episode: FqChapter, index: number) {
+    Row({ space: 3 }) {
+      Text(this.cacheCellLabel(episode, index))
+        .fontSize(13)
+        .fontColor(this.cacheCellTextColor(episode))
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+      if (this.cacheCellShowCheck(episode)) {
+        SymbolGlyph($r('sys.symbol.checkmark'))
+          .fontSize(13)
+          .fontColor([this.cacheCellTextColor(episode)])
+      }
+    }
+    .height(32)
+    .padding({ left: 6, right: 6 })
+    .borderRadius(8)
+    .backgroundColor(this.cacheCellBg(episode))
+    .border({ width: this.cacheCellSelected(episode) ? 1 : 0, color: FQ_STORY_ORANGE })
+    .justifyContent(FlexAlign.Center)
+    .alignItems(VerticalAlign.Center)
+    .onClick((): void => {
+      this.onCacheCellClick(episode);
+    })
+  }
+
+  /** 打开离线缓存选集半模态：刷新缓存/勾选状态（默认全选未缓存集）。 */
+  private openCacheSheet(): void {
+    if (this.episodes.length === 0) {
+      this.getUIContext().getPromptAction().showToast({ message: '剧集目录加载中', duration: 1500 });
+      return;
+    }
+    if (this.fullScreen) {
+      this.exitFullscreen();
+    }
+    this.closeSettings();
+    this.refreshCacheSheetState();
+    this.getUIContext().animateTo({ duration: 200 }, (): void => {
+      this.cacheSheetVisible = true;
+    });
+  }
+
+  /** 刷新缓存 sheet 状态：已缓存集合 + 默认全选未缓存集。 */
+  private refreshCacheSheetState(): void {
+    const cached: Set<string> = FqDramaCacheStore.cachedEpisodeIds(PlayerNavParams.contentId);
+    this.cacheDownloadedIds = cached;
+    const selected: Set<string> = new Set<string>();
+    for (const episode of this.episodes) {
+      if (!cached.has(episode.itemId)) {
+        selected.add(episode.itemId);
+      }
+    }
+    this.cacheSelectedIds = selected;
+  }
+
+  /** 关闭离线缓存半模态：延迟一拍置 isShow（面板事件内同步改 isShow 会被框架丢弃）。 */
+  private closeCacheSheet(): void {
+    const token: number = ++this.cacheCloseToken;
+    setTimeout((): void => {
+      if (token === this.cacheCloseToken) {
+        this.getUIContext().animateTo({ duration: 200 }, (): void => {
+          this.cacheSheetVisible = false;
+        });
+      }
+    }, 0);
+  }
+
+  /** 未缓存集数（全选按钮置灰判定）。 */
+  private cachePendingCount(): number {
+    let count: number = 0;
+    for (const episode of this.episodes) {
+      if (!this.cacheDownloadedIds.has(episode.itemId)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /** 全选判定（存在未缓存集且全部已勾选）。 */
+  private cacheAllSelected(): boolean {
+    if (this.cachePendingCount() === 0) {
+      return false;
+    }
+    for (const episode of this.episodes) {
+      if (!this.cacheDownloadedIds.has(episode.itemId) && !this.cacheSelectedIds.has(episode.itemId)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** 全选/取消全选未缓存集。 */
+  private toggleCacheSelectAll(): void {
+    if (this.cachePendingCount() === 0) {
+      return;
+    }
+    if (this.cacheAllSelected()) {
+      this.cacheSelectedIds = new Set<string>();
+      return;
+    }
+    const selected: Set<string> = new Set<string>();
+    for (const episode of this.episodes) {
+      if (!this.cacheDownloadedIds.has(episode.itemId)) {
+        selected.add(episode.itemId);
+      }
+    }
+    this.cacheSelectedIds = selected;
+  }
+
+  /** 缓存格点击：已缓存不响应；失败重试/暂停继续；可选集勾选切换。 */
+  private onCacheCellClick(episode: FqChapter): void {
+    if (this.cacheDownloadedIds.has(episode.itemId)) {
+      return;
+    }
+    const task: FqDramaDownloadTask | null = this.dl.taskOf(episode.itemId);
+    if (task !== null) {
+      if (task.status === DramaDownloadStatus.Failed) {
+        this.dl.retry(episode.itemId);
+      } else if (task.status === DramaDownloadStatus.Paused) {
+        this.dl.resume(episode.itemId);
+      }
+      return;
+    }
+    const next: Set<string> = new Set<string>(this.cacheSelectedIds);
+    if (next.has(episode.itemId)) {
+      next.delete(episode.itemId);
+    } else {
+      next.add(episode.itemId);
+    }
+    this.cacheSelectedIds = next;
+  }
+
+  /** 下载勾选集（已完整缓存/已在队列的 enqueue 内部跳过），完成后清空勾选。 */
+  private confirmCacheDownload(): void {
+    if (this.cacheSelectedIds.size === 0) {
+      return;
+    }
+    for (let i: number = 0; i < this.episodes.length; i++) {
+      const episode: FqChapter | undefined = this.episodes[i];
+      if (episode !== undefined && this.cacheSelectedIds.has(episode.itemId)) {
+        this.dl.enqueue(PlayerNavParams.contentId, episode.itemId, episode.title,
+          this.title, PlayerNavParams.cover, PlayerNavParams.kind, i + 1);
+      }
+    }
+    this.cacheSelectedIds = new Set<string>();
+  }
+
+  /** 缓存格是否选中（未缓存、无任务且已勾选，橙色描边判定）。 */
+  private cacheCellSelected(episode: FqChapter): boolean {
+    return !this.cacheDownloadedIds.has(episode.itemId)
+      && this.dl.taskOf(episode.itemId) === null
+      && this.cacheSelectedIds.has(episode.itemId);
+  }
+
+  /** 缓存格文案：已缓存 / 任务态（下载百分比）/ 第 N 集。 */
+  private cacheCellLabel(episode: FqChapter, index: number): string {
+    if (this.cacheDownloadedIds.has(episode.itemId)) {
+      return '已缓存';
+    }
+    const task: FqDramaDownloadTask | null = this.dl.taskOf(episode.itemId);
+    if (task !== null) {
+      if (task.status === DramaDownloadStatus.Downloading) {
+        if (task.totalBytes > 0) {
+          return `${Math.floor(task.receivedBytes / task.totalBytes * 100)}%`;
+        }
+        return '下载中';
+      }
+      if (task.status === DramaDownloadStatus.Waiting) {
+        return '排队中';
+      }
+      if (task.status === DramaDownloadStatus.Paused) {
+        return '已暂停';
+      }
+      if (task.status === DramaDownloadStatus.Failed) {
+        return '失败';
+      }
+      return '已缓存';
+    }
+    return `第 ${index + 1} 集`;
+  }
+
+  /** 缓存格文字色：已缓存灰、失败红、任务/选中橙、普通黑。 */
+  private cacheCellTextColor(episode: FqChapter): ResourceColor {
+    if (this.cacheDownloadedIds.has(episode.itemId)) {
+      return '#66000000';
+    }
+    const task: FqDramaDownloadTask | null = this.dl.taskOf(episode.itemId);
+    if (task !== null) {
+      if (task.status === DramaDownloadStatus.Failed) {
+        return '#FFD33918';
+      }
+      return FQ_STORY_ORANGE;
+    }
+    if (this.cacheSelectedIds.has(episode.itemId)) {
+      return FQ_STORY_ORANGE;
+    }
+    return '#FF000000';
+  }
+
+  /** 缓存格底色：任务/选中橙 8% 底，其余黑 6% 底。 */
+  private cacheCellBg(episode: FqChapter): ResourceColor {
+    if (!this.cacheDownloadedIds.has(episode.itemId)
+      && (this.dl.taskOf(episode.itemId) !== null || this.cacheSelectedIds.has(episode.itemId))) {
+      return '#14FA6725';
+    }
+    return '#0F000000';
+  }
+
+  /** 缓存格尾随勾：已缓存或选中。 */
+  private cacheCellShowCheck(episode: FqChapter): boolean {
+    return this.cacheDownloadedIds.has(episode.itemId) || this.cacheCellSelected(episode);
+  }
+
   /** 播放设置半模态（右上角菜单）：公共 FqSettingRow 设置行 List（与横屏侧边栏共用）——
    * 倍速（Slider 滑杆 0.5-2.0 步进 0.25，拖动实时预览、松手生效）、
-   * 离线缓存/听视频（跳转箭头，即将上线占位）、弹幕开关（Switch 开关）。 */
+   * 离线缓存/听视频（跳转箭头）、弹幕开关（Switch 开关）。 */
   @Builder
   private SettingsSheetBuilder() {
     Column() {
@@ -1300,7 +1631,7 @@ export struct PlayerPage {
                     }
                   })
               } else {
-                // 离线缓存/听视频：跳转箭头（功能即将上线占位）
+                // 离线缓存/听视频：跳转箭头
                 SymbolGlyph($r('sys.symbol.chevron_right'))
                   .fontSize(16)
                   .fontColor([dark ? '#99FFFFFF' : $r('sys.color.font_tertiary')])
@@ -1324,10 +1655,10 @@ export struct PlayerPage {
     .padding({ right: 20, left: 20 })
   }
 
-  /** 设置行点击：听视频进听剧模式页；离线缓存即将上线占位（倍速/弹幕行右侧控件自理）。 */
+  /** 设置行点击：听视频进听剧模式页；离线缓存呼出缓存选集半模态（倍速/弹幕行右侧控件自理）。 */
   private onSettingRowClick(key: string): void {
     if (key === 'cache') {
-      this.getUIContext().getPromptAction().showToast({ message: '离线缓存功能即将上线', duration: 1500 });
+      this.openCacheSheet();
     } else if (key === 'listen') {
       this.openListenMode();
     }
@@ -1985,45 +2316,68 @@ export struct PlayerPage {
       this.commentOpenToken += 1;
     }
     try {
-      await FqBackend.get().start(getContext(this));
-      this.resolveCover();
-      const source: FqEpisodeSource =
-        await FqBackend.get().episodeSource(episode.itemId, this.tab);
+      let playUrl: string = '';
+      // 离线缓存命中：直接播本地文件，跳过在线取流（无网也可看已缓存集）
+      if (FqDramaCacheStore.has(episode.itemId)) {
+        playUrl = FqDramaCacheStore.filePath(episode.itemId);
+      } else {
+        await FqBackend.get().start(getContext(this));
+        this.resolveCover();
+        const source: FqEpisodeSource =
+          await FqBackend.get().episodeSource(episode.itemId, this.tab);
+        playUrl = source.url;
+      }
       if (token !== this.loadToken) {
         return;
       }
-      this.loading = false;
-      // 播放视频即停止听书（fqAudioSession 完整关闭链路：进度持久化、
-      // 引擎释放、后台任务停止、AVSession 销毁、播控球消失）
-      if (fqAudioSession.hasSession) {
-        fqAudioSession.close();
-      }
-      this.player.open(startSec > 0
-        ? new Media(source.url, { start: startSec })
-        : new Media(source.url));
-      // 新集起播：重置「实际播放」guard（旧集残余走表不再计入）
-      this.hasDisplayed = false;
-      // AVSession/后台长时任务：会话确保 + 元数据（时长随 1s tick 补发）
-      this.mediaDurationSynced = -1;
-      this.media.ensureSession('video');
-      this.media.startBackground();
-      this.pushMediaMetadata();
-      if (wasDisplayed && switched && !keepListenProgress) {
-        // 切集：续播记录立即指向新集（位置 0；周期/暂停/退出再精化），
-        // 避免切集后立刻退出仍续播回旧集；同集重试不覆盖原位置
-        // （听视频返回切集跳过：新集起播位置由听到的位置决定，不重置为 0）
-        this.progress = new FqWatchedProgress(episode.itemId, 0, 0);
-        FqWatchedStore.saveProgress(PlayerNavParams.contentId, this.progress);
-      }
-      // 弹幕整池作废（切集），按 0 起取新集首批
-      this.resetDanmaku();
+      this.startEpisodePlayback(episode, playUrl, startSec, wasDisplayed, switched, keepListenProgress);
     } catch (error) {
       if (token !== this.loadToken) {
+        return;
+      }
+      // 在线取流失败回退离线缓存（联网失败仍可看已缓存集）
+      if (FqDramaCacheStore.has(episode.itemId)) {
+        this.startEpisodePlayback(episode, FqDramaCacheStore.filePath(episode.itemId),
+          startSec, wasDisplayed, switched, keepListenProgress);
         return;
       }
       this.loading = false;
       this.errorMsg = fqErrorMessage(error);
     }
+  }
+
+  /**
+   * 起播公共尾段（在线取流 / 离线缓存命中 / 取流失败回退缓存共用）：
+   * 关听书、mpv open（含续播 start 偏移）、AVSession/后台任务、
+   * 续播记录重置与弹幕整池作废。
+   */
+  private startEpisodePlayback(episode: FqChapter, url: string, startSec: number,
+    wasDisplayed: boolean, switched: boolean, keepListenProgress: boolean): void {
+    this.loading = false;
+    // 播放视频即停止听书（fqAudioSession 完整关闭链路：进度持久化、
+    // 引擎释放、后台任务停止、AVSession 销毁、播控球消失）
+    if (fqAudioSession.hasSession) {
+      fqAudioSession.close();
+    }
+    this.player.open(startSec > 0
+      ? new Media(url, { start: startSec })
+      : new Media(url));
+    // 新集起播：重置「实际播放」guard（旧集残余走表不再计入）
+    this.hasDisplayed = false;
+    // AVSession/后台长时任务：会话确保 + 元数据（时长随 1s tick 补发）
+    this.mediaDurationSynced = -1;
+    this.media.ensureSession('video');
+    this.media.startBackground();
+    this.pushMediaMetadata();
+    if (wasDisplayed && switched && !keepListenProgress) {
+      // 切集：续播记录立即指向新集（位置 0；周期/暂停/退出再精化），
+      // 避免切集后立刻退出仍续播回旧集；同集重试不覆盖原位置
+      // （听视频返回切集跳过：新集起播位置由听到的位置决定，不重置为 0）
+      this.progress = new FqWatchedProgress(episode.itemId, 0, 0);
+      FqWatchedStore.saveProgress(PlayerNavParams.contentId, this.progress);
+    }
+    // 弹幕整池作废（切集），按 0 起取新集首批
+    this.resetDanmaku();
   }
 
   /**

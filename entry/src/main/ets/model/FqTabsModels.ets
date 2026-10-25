@@ -33,3 +33,6 @@ export const MENU_CONFIG: MenuItem[] = [
   { icon: $r('sys.symbol.person_fill'), label: '我的' },
   { icon: $r('sys.symbol.gearshape_fill'), label: '设置' },
 ];
+
+/** 设置 Tab 下标（MENU_CONFIG 第 4 项；我的-应用设置经主 Tab 切换进入）。 */
+export const SETTINGS_TAB_INDEX: number = 3;

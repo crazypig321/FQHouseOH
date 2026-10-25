@@ -48,6 +48,9 @@ export class AppState {
   /** 切后台主动暂停回调列表（关闭后台播放时 EntryAbility onBackground 调用；
    * 播放页 aboutToAppear 注册、aboutToDisappear 注销）。 */
   public backgroundPauseHandlers: Array<() => void> = [];
+
+  /** 主 Tab 切换回调（Index 注入 tabsController.changeIndex；页面内跳转一级 Tab 用，如我的-应用设置）。 */
+  public switchMainTab: ((index: number) => void) | null = null;
 }
 
 export const appState: AppState = new AppState();

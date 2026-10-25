@@ -24,8 +24,6 @@ export const ROUTE_LISTEN: string = 'listen';
 export const ROUTE_PLAYER: string = 'player';
 /** 听视频页（ListenVideoPage，播放页「听视频」进入的听剧模式）。 */
 export const ROUTE_LISTEN_VIDEO: string = 'listenVideo';
-/** 应用设置页（我的-应用设置，占位）。 */
-export const ROUTE_SETTINGS: string = 'settings';
 /** 关于我们页（我的-关于我们，占位）。 */
 export const ROUTE_ABOUT: string = 'about';
 /** 章节缓存页（我的-章节缓存，占位）。 */

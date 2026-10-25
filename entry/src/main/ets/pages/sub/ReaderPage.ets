@@ -28,6 +28,7 @@ import { FqChapter, fqFormatCountInt, fqKindToTab } from '../../model/FqModels';
 import { FqReaderProgress, FqReaderStore } from '../../core/FqReaderStore';
 import { FqReadStatsStore } from '../../core/FqReadStatsStore';
 import { FqLocalBookStore } from '../../core/FqLocalBookStore';
+import { FqChapterCacheStore, FqCachedCatalog } from '../../core/FqChapterCacheStore';
 import { ReaderNavParams } from '../../model/FqNavModels';
 import { CommonNav, titleBarOf } from '../../view/CommonNav';
 import { CommonLoading, FQ_ACCENT } from '../../view/CommonCom';
@@ -1966,6 +1967,8 @@ export struct ReaderPage {
       }
       this.chapters = chapters;
       this.totalChapters = chapters.length;
+      // 阅读即缓存：目录加载成功后写缓存目录（离线打开缓存书/管理页展示兜底）
+      FqChapterCacheStore.saveCatalog(this.bookId, this.bookTitle, '', this.kind, chapters, false);
       this.buildChapterEstimates();
       const progress: FqReaderProgress = FqReaderStore.getProgress(this.bookId);
       let index: number = this.startChapterIndex;
@@ -1977,6 +1980,26 @@ export struct ReaderPage {
       }
       await this.openChapter(index, domPos);
     } catch (error) {
+      // 离线兜底：目录拉取失败时回退章节缓存目录（离线打开缓存书）
+      if (token === this.loadToken && this.chapters.length === 0
+        && !FqLocalBookStore.isLocalBookId(this.bookId)) {
+        const cachedCatalog: FqCachedCatalog | null = FqChapterCacheStore.catalog(this.bookId);
+        if (cachedCatalog !== null) {
+          this.chapters = cachedCatalog.chapters;
+          this.totalChapters = cachedCatalog.chapters.length;
+          this.buildChapterEstimates();
+          const progress: FqReaderProgress = FqReaderStore.getProgress(this.bookId);
+          let index: number = this.startChapterIndex;
+          let domPos: string = '';
+          if (index < 0 || index >= cachedCatalog.chapters.length) {
+            index = progress.chapterIndex >= 0 && progress.chapterIndex < cachedCatalog.chapters.length
+              ? progress.chapterIndex : 0;
+            domPos = index === progress.chapterIndex ? progress.domPos : '';
+          }
+          await this.openChapter(index, domPos);
+          return;
+        }
+      }
       if (token === this.loadToken) {
         this.errorMsg = fqErrorMessage(error);
         this.loadingState = false;
@@ -2055,7 +2078,19 @@ export struct ReaderPage {
     if (FqLocalBookStore.isLocalBookId(this.bookId)) {
       return FqLocalBookStore.chapterText(this.bookId, index);
     }
-    return FqBackend.get().chapterText(chapter.itemId, chapter.title);
+    try {
+      const text: string = await FqBackend.get().chapterText(chapter.itemId, chapter.title);
+      // 阅读即缓存：在线正文拉取成功后自动写入章节缓存
+      FqChapterCacheStore.write(this.bookId, chapter.itemId, chapter.title, text);
+      return text;
+    } catch (error) {
+      // 离线兜底：网络失败回退章节缓存（离线续读），仍无缓存再报错
+      const cached: string = FqChapterCacheStore.read(this.bookId, chapter.itemId);
+      if (cached.trim().length > 0) {
+        return cached;
+      }
+      throw new Error(fqErrorMessage(error));
+    }
   }
 
   /** 章节已读进度：当前章按页位置计百分比、读毕章节 100%、未读章节 0%。 */

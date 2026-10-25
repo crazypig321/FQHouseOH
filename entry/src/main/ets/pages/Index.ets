@@ -34,6 +34,9 @@ struct Index {
   }
 
   aboutToAppear(): void {
+    appState.switchMainTab = (index: number): void => {
+      this.tabsController.changeIndex(index);
+    };
     DialogManager.Register((): void => {
       if (DialogManager.dialogChangeKey === '阅读设置' || DialogManager.dialogChangeKey === '漫画设置') {
         this.settingsDialog.open()

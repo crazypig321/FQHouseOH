@@ -16,8 +16,8 @@ import {
   ROUTE_CACHED_BOOKS,
   ROUTE_CACHED_DRAMAS,
   ROUTE_DETAIL,
-  ROUTE_SETTINGS,
 } from '../model/FqNavModels';
+import { SETTINGS_TAB_INDEX } from '../model/FqTabsModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import { FqReadStatsStore } from '../core/FqReadStatsStore';
 import { FqBrowseItem, FqBrowseStore } from '../core/FqBrowseStore';
@@ -514,16 +514,24 @@ export struct ProfilePage {
   @Builder
   private ShortcutsRow() {
     Row({ space: 9 }) {
-      this.ShortcutTile($r('sys.symbol.book'), '#FF3B82F6', '章节缓存', ROUTE_CACHED_BOOKS)
-      this.ShortcutTile($r('sys.symbol.film'), '#FFEF5038', '剧集缓存', ROUTE_CACHED_DRAMAS)
-      this.ShortcutTile($r('sys.symbol.textformat'), '#FF10B981', '应用设置', ROUTE_SETTINGS)
-      this.ShortcutTile($r('sys.symbol.person_fill'), '#FF8B5CF6', '关于我们', ROUTE_ABOUT)
+      this.ShortcutTile($r('sys.symbol.book'), '#FF3B82F6', '章节缓存', (): void => {
+        NavPathUtils.push(ROUTE_CACHED_BOOKS);
+      })
+      this.ShortcutTile($r('sys.symbol.film'), '#FFEF5038', '剧集缓存', (): void => {
+        NavPathUtils.push(ROUTE_CACHED_DRAMAS);
+      })
+      this.ShortcutTile($r('sys.symbol.textformat'), '#FF10B981', '应用设置', (): void => {
+        this.openSettingsTab();
+      })
+      this.ShortcutTile($r('sys.symbol.person_fill'), '#FF8B5CF6', '关于我们', (): void => {
+        NavPathUtils.push(ROUTE_ABOUT);
+      })
     }
     .width('100%')
   }
 
   @Builder
-  private ShortcutTile(icon: Resource, tint: string, label: string, route: string) {
+  private ShortcutTile(icon: Resource, tint: string, label: string, onTap: () => void) {
     Column({ space: 7 }) {
       Stack() {
         SymbolGlyph(icon)
@@ -546,8 +554,16 @@ export struct ProfilePage {
     .border({ width: 0.6, color: appState.isDark ? $r('sys.color.comp_divider') : Color.Transparent })
     .layoutWeight(1)
     .onClick((): void => {
-      NavPathUtils.push(route);
+      onTap();
     })
+  }
+
+  /** 应用设置：经主 Tab index 回调切到一级设置页（tabsController.changeIndex），非 nav 二级路由。 */
+  private openSettingsTab(): void {
+    const switchMainTab = appState.switchMainTab;
+    if (switchMainTab !== null) {
+      switchMainTab(SETTINGS_TAB_INDEX);
+    }
   }
 
   @Builder

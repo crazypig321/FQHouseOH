@@ -24,6 +24,9 @@ import { fqAudioSession } from '../core/FqAudioSession';
 import { FqReadStatsStore } from '../core/FqReadStatsStore';
 import { FqLocalBookStore } from '../core/FqLocalBookStore';
 import { FqAppSettingsStore } from '../core/FqAppSettingsStore';
+import { FqChapterCacheStore } from '../core/FqChapterCacheStore';
+import { FqDramaCacheStore } from '../core/FqDramaCacheStore';
+import { fqDramaDownloader } from '../core/FqDramaDownloader';
 import { appState } from './AppState';
 import { themeUtils } from '../utils/ThemeUtils';
 
@@ -43,6 +46,10 @@ export default class EntryAbility extends UIAbility {
     FqLocalBookStore.init(this.context);
     // 应用设置（深色模式恢复 + 后台保活开关）初始化
     FqAppSettingsStore.init(this.context);
+    // 章节缓存/剧集缓存（阅读即缓存 + 离线播放）初始化
+    FqChapterCacheStore.init(this.context);
+    FqDramaCacheStore.init(this.context);
+    fqDramaDownloader.init(this.context);
     FqBackend.get().start(this.context).catch((error: Object): void => {
       hilog.error(DOMAIN, 'FqBackend', 'backend start failed: %{public}s', `${error}`);
     });

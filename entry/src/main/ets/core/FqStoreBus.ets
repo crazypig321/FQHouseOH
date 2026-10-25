@@ -9,6 +9,10 @@ export class FqStoreBus {
   @Trace shelfVersion: number = 0;
   /** 浏览历史数据版本（FqBrowseStore 每次变更 +1）。 */
   @Trace browseVersion: number = 0;
+  /** 章节缓存数据版本（FqChapterCacheStore 每次变更 +1）。 */
+  @Trace chapterCacheVersion: number = 0;
+  /** 剧集缓存数据版本（FqDramaCacheStore 每次变更 +1）。 */
+  @Trace dramaCacheVersion: number = 0;
 }
 
 export const fqStoreBus: FqStoreBus = new FqStoreBus();

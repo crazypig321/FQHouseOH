@@ -23,6 +23,8 @@ import {
 import { FqShelfStore, FqShelfItem } from '../../core/FqShelfStore';
 import { FqBrowseStore, FqBrowseItem } from '../../core/FqBrowseStore';
 import { FqDetailCacheEntry, fqDetailCacheGet, fqDetailCachePut } from '../../core/FqDetailCache';
+import { FqChapterCacheStore } from '../../core/FqChapterCacheStore';
+import { DialogManager } from '../../utils/DialogUtils';
 import { AuthorNavParams, ComicNavParams, DetailNavParams, FqTitleBarOptions, ListenNavParams, PlayerNavParams, ReaderNavParams, ROUTE_AUTHOR, ROUTE_COMIC, ROUTE_LISTEN, ROUTE_PLAYER, ROUTE_READER2 } from '../../model/FqNavModels';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { CommonNav } from '../../view/CommonNav';
@@ -801,7 +803,7 @@ export struct DetailPage {
   }
 
   /** 底部操作栏：小说"阅读"进阅读器、"听书"/听书详情"收听"进听书页、
-   *  短剧/漫剧"观看"进播放页，下载占位。 */
+   *  短剧/漫剧"观看"进播放页；小说"下载"整本缓存，其余下载占位。 */
   private onReadBarAction(key: string): void {
     if (key === '阅读' && (this.itemKind === 'book' || this.itemKind === 'manga')) {
       this.openReader(-1);
@@ -819,7 +821,48 @@ export struct DetailPage {
       this.openPlayer();
       return;
     }
+    if (key === '下载' && this.itemKind === 'book') {
+      this.confirmDownloadWholeBook();
+      return;
+    }
     this.comingSoon(key);
+  }
+
+  /** 「下载」整本缓存确认（进度 toast 节流汇报，可在"章节缓存"中管理）。 */
+  private confirmDownloadWholeBook(): void {
+    const countText: string = this.chapters.length > 0 ? `共 ${this.chapters.length} 章` : '全部';
+    DialogManager.ShowConfirm('缓存整本', `将缓存${countText}正文，可在“章节缓存”中管理。`, '缓存',
+      (): void => {
+        this.downloadWholeBook();
+      });
+  }
+
+  private downloadingBook: boolean = false;
+
+  private async downloadWholeBook(): Promise<void> {
+    if (this.downloadingBook) {
+      promptAction.showToast({ message: '正在缓存中，请稍候', duration: 1500 });
+      return;
+    }
+    this.downloadingBook = true;
+    const bookId: string = this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId;
+    let lastReport: number = 0;
+    try {
+      await FqChapterCacheStore.downloadBook(getContext(this), bookId, this.detail.title,
+        this.itemCover.length > 0 ? this.itemCover : this.detail.cover, this.itemKind,
+        fqKindToTab(this.itemKind),
+        (done: number, total: number): void => {
+          if (done - lastReport >= 10) {
+            lastReport = done;
+            promptAction.showToast({ message: `整本缓存中… ${done}/${total}`, duration: 1500 });
+          }
+        });
+      promptAction.showToast({ message: '整本缓存完成', duration: 1500 });
+    } catch (error) {
+      promptAction.showToast({ message: fqErrorMessage(error), duration: 2000 });
+    } finally {
+      this.downloadingBook = false;
+    }
   }
 
   /** 短剧/漫剧进播放页：目录预载，单集结果无目录时回退自身 id 为唯一一集；
