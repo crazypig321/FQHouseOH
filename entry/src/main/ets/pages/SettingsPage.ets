@@ -188,7 +188,7 @@ export struct SettingsPage {
     Divider()
       .strokeWidth(0.6)
       .color($r('sys.color.comp_divider'))
-      .margin({ left: FQ_ROW_DIVIDER_INSET, right: FQ_ROW_DIVIDER_INSET })
+      .margin({ left: FQ_ROW_DIVIDER_INSET, right: 12 })
   }
 
   /** 通用设置行：彩色图标块 + 标题/副标题 + 右侧文案与箭头。 */
