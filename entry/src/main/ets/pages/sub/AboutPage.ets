@@ -2,7 +2,7 @@
  * 关于页（我的-关于我们入口）：
  * - 开发者：作者；
  * - 项目地址：仓库（占位）+ 原项目仓库（浏览器打开）；
- * - 软件版本：更新日志（sheet）/ 检查更新 / 代理下载新版本（开关：仅用于下载更新软件包）；
+ * - 软件版本：更新日志（sheet）/ 检查更新（GitHub release，代理回退）/ 代理下载新版本（开关：仅用于下载更新软件包）；
  * - 开源与条款：GPL3.0 协议、免责声明（sheet）；
  * - 三方库：三方库列表（sheet）；
  * - 其他：支持作者（sheet + 爱发电）。
@@ -17,6 +17,9 @@ import { bundleManager, common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { FqAppSettingsStore } from '../../core/FqAppSettingsStore';
+import { FqReleaseAsset, FqReleaseRaw, FqUpdateChecker } from '../../core/FqUpdateChecker';
+import { DialogManager } from '../../utils/DialogUtils';
+import { fileIo as fs, picker } from '@kit.CoreFileKit';
 import { FqColorUtils } from '../../utils/FqColorUtils';
 import { appState } from '../../entryability/AppState';
 
@@ -733,9 +736,112 @@ export struct AboutPage {
     });
   }
 
-  /** 检查更新（占位：当前无更新渠道，提示已是最新）。 */
-  private checkUpdate(): void {
-    this.getUIContext().getPromptAction().showToast({ message: '当前已是最新版本', duration: 1500 });
+  /** 检查更新：拉取 GitHub 最新 release（按代理开关排序直连/代理），有新版本时确认后下载。 */
+  private async checkUpdate(): Promise<void> {
+    this.toast('正在检查更新…');
+    const release: FqReleaseRaw | null = await FqUpdateChecker.fetchLatestRelease(this.proxyDownload);
+    if (release === null) {
+      this.toast('检查更新失败，请稍后重试');
+      return;
+    }
+    const tag = release.tag_name;
+    if (tag === undefined || !FqUpdateChecker.isNewerVersion(tag, this.versionName)) {
+      this.toast('当前已是最新版本');
+      return;
+    }
+    const asset: FqReleaseAsset | null = FqUpdateChecker.pickReleaseAsset(release);
+    if (asset === null) {
+      this.toast('发布页未提供软件包，请到发布页查看');
+      return;
+    }
+    DialogManager.ShowConfirm('发现新版本', `发现新版本 ${tag}，是否下载新版本安装包？`, '下载', (): void => {
+      this.pickSaveLocationAndDownload(asset);
+    });
+  }
+
+  /** 弹出系统保存器选择存放位置，确认后下载软件包写入。 */
+  private pickSaveLocationAndDownload(asset: FqReleaseAsset): void {
+    const context: common.UIAbilityContext | null = appState.abilityContext;
+    if (context === null) {
+      this.toast('保存文件失败');
+      return;
+    }
+    try {
+      const documentPicker: picker.DocumentViewPicker = new picker.DocumentViewPicker(context);
+      const options: picker.DocumentSaveOptions = new picker.DocumentSaveOptions();
+      options.newFileNames = [asset.name];
+      documentPicker.save(options).then((uris: string[]): void => {
+        if (uris.length === 0) {
+          return;
+        }
+        this.downloadUpdate(asset, uris[0]);
+      }).catch((_error: BusinessError): void => {
+        this.toast('保存文件失败');
+      });
+    } catch (error) {
+      this.toast('无法打开文件保存器');
+    }
+  }
+
+  /** 下载软件包：直连不通时依次走国内代理，经缓存目录中转写入保存位置。 */
+  private async downloadUpdate(asset: FqReleaseAsset, destUri: string): Promise<void> {
+    const context: common.UIAbilityContext | null = appState.abilityContext;
+    if (context === null) {
+      return;
+    }
+    this.toast('正在下载新版本…');
+    const tempPath: string = `${context.cacheDir}/update_${Date.now().toString()}_${asset.name}`;
+    const urls: string[] = FqUpdateChecker.orderedUrls(asset.url, this.proxyDownload);
+    let ok: boolean = false;
+    for (const url of urls) {
+      let lastReport: number = 0;
+      ok = await FqUpdateChecker.downloadToFile(url, tempPath, (downloaded: number, total: number): void => {
+        if (downloaded - lastReport >= 4 * 1024 * 1024) {
+          lastReport = downloaded;
+          const sizeText: string = total > 0
+            ? `${(downloaded / 1048576).toFixed(1)}MB/${(total / 1048576).toFixed(1)}MB`
+            : `${(downloaded / 1048576).toFixed(1)}MB`;
+          this.toast(`正在下载新版本… ${sizeText}`);
+        }
+      });
+      if (ok) {
+        break;
+      }
+    }
+    if (!ok) {
+      this.unlinkTemp(tempPath);
+      this.toast('下载失败，请稍后重试');
+      return;
+    }
+    try {
+      const src: fs.File = fs.openSync(tempPath, fs.OpenMode.READ_ONLY);
+      const dst: fs.File = fs.openSync(destUri, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+      try {
+        fs.copyFileSync(src.fd, dst.fd);
+      } finally {
+        fs.closeSync(src);
+        fs.closeSync(dst);
+      }
+      this.toast(`新版本 ${asset.name} 已保存`);
+    } catch (error) {
+      this.toast('保存文件失败');
+    } finally {
+      this.unlinkTemp(tempPath);
+    }
+  }
+
+  /** 删除下载中转文件（不存在时忽略）。 */
+  private unlinkTemp(path: string): void {
+    try {
+      fs.unlinkSync(path);
+    } catch (error) {
+      // 忽略清理失败
+    }
+  }
+
+  /** 页面内统一 toast。 */
+  private toast(message: string): void {
+    this.getUIContext().getPromptAction().showToast({ message: message, duration: 1500 });
   }
 
   /** 用系统浏览器打开外部链接。 */
