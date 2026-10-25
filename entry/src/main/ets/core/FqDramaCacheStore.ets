@@ -168,8 +168,7 @@ export class FqDramaCacheStore {
       return false;
     }
     try {
-      fs.accessSync(FqDramaCacheStore.filePath(itemId));
-      return true;
+      return fs.accessSync(FqDramaCacheStore.filePath(itemId));
     } catch (error) {
       return false;
     }

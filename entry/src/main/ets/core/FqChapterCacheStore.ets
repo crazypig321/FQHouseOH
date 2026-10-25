@@ -10,6 +10,7 @@
  */
 
 import { common } from '@kit.AbilityKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { FqChapter } from '../model/FqModels';
@@ -89,11 +90,17 @@ export class FqChapterCacheStore {
     if (FqChapterCacheStore.filesDir.length === 0 || !FQ_SAFE_ID.test(bookId)) {
       return false;
     }
+    const dir: string = FqChapterCacheStore.bookDir(bookId);
     try {
-      fs.mkdirSync(FqChapterCacheStore.bookDir(bookId), true);
+      fs.mkdirSync(dir, true);
       return true;
     } catch (error) {
-      return false;
+      // 目录已存在（EEXIST）等场景：存在即视为成功
+      try {
+        return fs.accessSync(dir);
+      } catch (accessError) {
+        return false;
+      }
     }
   }
 
@@ -101,6 +108,8 @@ export class FqChapterCacheStore {
   public static write(bookId: string, chapterId: string, title: string, text: string): boolean {
     if (chapterId.length === 0 || text.trim().length === 0
       || !FQ_SAFE_ID.test(chapterId) || !FqChapterCacheStore.ensureBookDir(bookId)) {
+      hilog.warn(0x0001, TAG,
+        `write rejected: bookId=${bookId} chapterId=${chapterId} textLen=${text.length} filesDir=${FqChapterCacheStore.filesDir}`);
       return false;
     }
     const path: string = FqChapterCacheStore.chapterPath(bookId, chapterId);
@@ -109,9 +118,13 @@ export class FqChapterCacheStore {
       file = fs.openSync(path, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
       fs.writeSync(file.fd, text);
       fs.closeSync(file);
+      hilog.info(0x0001, TAG, `write ok: ${path} bytes=${text.length}`);
       fqStoreBus.chapterCacheVersion++;
       return true;
     } catch (error) {
+      const err = error as BusinessError;
+      hilog.error(0x0001, TAG,
+        `write failed: ${path} code=${err.code} msg=${err.message}`);
       if (file !== null) {
         try {
           fs.closeSync(file);
@@ -137,8 +150,7 @@ export class FqChapterCacheStore {
 
   public static has(bookId: string, chapterId: string): boolean {
     try {
-      fs.accessSync(FqChapterCacheStore.chapterPath(bookId, chapterId));
-      return true;
+      return fs.accessSync(FqChapterCacheStore.chapterPath(bookId, chapterId));
     } catch (error) {
       return false;
     }
@@ -171,13 +183,8 @@ export class FqChapterCacheStore {
       return;
     }
     const path: string = `${FqChapterCacheStore.bookDir(bookId)}/${FQ_CATALOG_FILE}`;
-    if (!overwrite) {
-      try {
-        fs.accessSync(path);
-        return;
-      } catch (error) {
-        // 尚无目录，继续写入
-      }
+    if (!overwrite && fs.accessSync(path)) {
+      return;
     }
     const chapterRecs: Record<string, Object>[] = [];
     for (const chapter of chapters) {
@@ -199,7 +206,10 @@ export class FqChapterCacheStore {
       file = fs.openSync(path, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
       fs.writeSync(file.fd, JSON.stringify(catalog));
       fs.closeSync(file);
+      hilog.info(0x0001, TAG, `saveCatalog ok: ${path} chapters=${chapters.length}`);
     } catch (error) {
+      const err = error as BusinessError;
+      hilog.error(0x0001, TAG, `saveCatalog failed: ${path} code=${err.code} msg=${err.message}`);
       if (file !== null) {
         try {
           fs.closeSync(file);

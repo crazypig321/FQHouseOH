@@ -1265,7 +1265,7 @@ export struct PlayerPage {
         Text(`离线缓存 · ${this.title}`)
           .fontSize(16)
           .fontWeight(FontWeight.Bold)
-          .fontColor('#FF000000')
+          .fontColor($r('sys.color.font_primary'))
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .layoutWeight(1)
@@ -1344,6 +1344,7 @@ export struct PlayerPage {
       }
     }
     .height(32)
+    .width('100%')
     .padding({ left: 6, right: 6 })
     .borderRadius(8)
     .backgroundColor(this.cacheCellBg(episode))
@@ -1355,16 +1356,17 @@ export struct PlayerPage {
     })
   }
 
-  /** 打开离线缓存选集半模态：刷新缓存/勾选状态（默认全选未缓存集）。 */
+  /** 打开离线缓存选集半模态：刷新缓存/勾选状态（默认全选未缓存集）。
+   *  全屏（横/竖屏沉浸）下原样呼出，不退出全屏；横屏侧边栏呼出时先收侧边栏。 */
   private openCacheSheet(): void {
     if (this.episodes.length === 0) {
       this.getUIContext().getPromptAction().showToast({ message: '剧集目录加载中', duration: 1500 });
       return;
     }
-    if (this.fullScreen) {
-      this.exitFullscreen();
-    }
     this.closeSettings();
+    if (this.sidePanel.length > 0) {
+      this.closeSidePanel();
+    }
     this.refreshCacheSheetState();
     this.getUIContext().animateTo({ duration: 200 }, (): void => {
       this.cacheSheetVisible = true;
@@ -1510,10 +1512,10 @@ export struct PlayerPage {
     return `第 ${index + 1} 集`;
   }
 
-  /** 缓存格文字色：已缓存灰、失败红、任务/选中橙、普通黑。 */
+  /** 缓存格文字色：已缓存系统三级、失败红、任务/选中橙、普通系统主色。 */
   private cacheCellTextColor(episode: FqChapter): ResourceColor {
     if (this.cacheDownloadedIds.has(episode.itemId)) {
-      return '#66000000';
+      return $r('sys.color.font_tertiary');
     }
     const task: FqDramaDownloadTask | null = this.dl.taskOf(episode.itemId);
     if (task !== null) {
@@ -1525,16 +1527,16 @@ export struct PlayerPage {
     if (this.cacheSelectedIds.has(episode.itemId)) {
       return FQ_STORY_ORANGE;
     }
-    return '#FF000000';
+    return $r('sys.color.font_primary');
   }
 
-  /** 缓存格底色：任务/选中橙 8% 底，其余黑 6% 底。 */
+  /** 缓存格底色：任务/选中橙 8% 底，其余系统卡片底色（自动适配深浅模式）。 */
   private cacheCellBg(episode: FqChapter): ResourceColor {
     if (!this.cacheDownloadedIds.has(episode.itemId)
       && (this.dl.taskOf(episode.itemId) !== null || this.cacheSelectedIds.has(episode.itemId))) {
       return '#14FA6725';
     }
-    return '#0F000000';
+    return $r('sys.color.comp_background_list_card');
   }
 
   /** 缓存格尾随勾：已缓存或选中。 */
