@@ -69,6 +69,23 @@ const FQ_FS_HIDE_MS: number = 3000;
 const FQ_SPEED_MIN: number = 0.5;
 const FQ_SPEED_MAX: number = 2.0;
 const FQ_SPEED_STEP: number = 0.25;
+/** 倍速滑杆断点档数（0.5-2.0 步进 0.25，共 7 档）。 */
+const FQ_SPEED_STEP_COUNT: number = 7;
+
+/** 倍速滑杆断点值（0.5 → 2.0 步进 0.25）。 */
+function fqSpeedSteps(): number[] {
+  const steps: number[] = [];
+  for (let i: number = 0; i < FQ_SPEED_STEP_COUNT; i++) {
+    steps.push(FQ_SPEED_MIN + i * FQ_SPEED_STEP);
+  }
+  return steps;
+}
+
+/** 倍速断点显示文案（去尾零，如 0.75× / 1× / 1.5×）。 */
+function fqSpeedStepLabel(step: number): string {
+  const rounded: number = Math.round(step * 100) / 100;
+  return `${rounded}×`;
+}
 /** 长按临时快进倍速（官方长按 setRate(2)）。 */
 const FQ_BOOST_SPEED: number = 2.0;
 /** 长按识别时长（ms）。 */
@@ -1118,72 +1135,87 @@ export struct PlayerPage {
   @Builder
   private SettingRows(dark: boolean) {
     List() {
-      ForEach(this.settingItems(), (item: FqSettingItem) => {
-        ListItem() {
-          FqSettingRow({
-            icon: item.icon,
-            title: item.title,
-            tintColor: dark ? Color.White : $r('sys.color.font'),
-            click: (): void => {
-              this.onSettingRowClick(item.key);
-            }
-          }) {
+      ListItemGroup(){
+        ForEach(this.settingItems(), (item: FqSettingItem) => {
+          ListItem() {
+            FqSettingRow({
+              icon: item.icon,
+              title: item.title,
+              click: (): void => {
+                this.onSettingRowClick(item.key);
+              }
+            }) {
             if (item.key === 'speed') {
-              // 倍速：滑杆切换（拖动实时预览文案，松手提交 mpv）
-              Row({ space: 10 }) {
-                Text(this.speedLabel())
-                  .fontSize(14)
-                  .fontWeight(FontWeight.Medium)
-                  .fontColor(FQ_STORY_ORANGE)
-                  .width(48)
-                Slider({
-                  value: this.player.state.speed,
-                  min: FQ_SPEED_MIN,
-                  max: FQ_SPEED_MAX,
-                  step: FQ_SPEED_STEP,
-                  style: SliderStyle.OutSet
-                })
-                  .width(150)
-                  .blockColor(FQ_STORY_ORANGE)
-                  .selectedColor('#33FA6725')
-                  .trackColor(dark ? '#33FFFFFF' : $r('sys.color.comp_background_tertiary'))
-                  .onChange((value: number, mode: SliderChangeMode): void => {
-                    if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) {
-                      this.player.setSpeed(value);
-                    } else {
-                      this.speedPreview = value;
+              // 倍速：滑杆切换（轨道分段刻度 + 断点倍速文本标识；拖动实时预览，松手提交 mpv）
+                Column({ space: 2 }) {
+                  Slider({
+                    value: this.player.state.speed,
+                    min: FQ_SPEED_MIN,
+                    max: FQ_SPEED_MAX,
+                    step: FQ_SPEED_STEP,
+                    style: SliderStyle.InSet
+                  })
+                    .width('100%')
+                    .height(30)
+                    .showSteps(true)
+                    .stepColor(dark ? '#66FFFFFF' : '#66000000')
+                    .blockColor(FQ_STORY_ORANGE)
+                    .selectedColor('#33FA6725')
+                    .trackColor(dark ? '#33FFFFFF' : $r('sys.color.comp_background_tertiary'))
+                    .onChange((value: number, mode: SliderChangeMode): void => {
+                      if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) {
+                        this.player.setSpeed(value);
+                      } else {
+                        this.speedPreview = value;
+                      }
+                    })
+
+                  // 断点倍速文本标识：第 i 档锚定在 i/(档数-1)*100% 处，与滑杆刻度两端对齐
+                  Row() {
+                    ForEach(fqSpeedSteps(), (step: number, index: number) => {
+                      Text(fqSpeedStepLabel(step))
+                        .fontSize(9)
+                        .fontWeight(this.isCurrentSpeedStep(step) ? FontWeight.Bold : FontWeight.Normal)
+                        .fontColor(this.isCurrentSpeedStep(step) ? FQ_STORY_ORANGE :
+                          (dark ? '#99FFFFFF' : $r('sys.color.font_tertiary')))
+                    }, (step: number) => `${step}`)
+                  }
+                  .justifyContent(FlexAlign.SpaceEvenly)
+                  .width('110%')
+                  .hitTestBehavior(HitTestMode.None)
+                }.layoutWeight(1)
+            } else if (item.key === 'danmaku') {
+                // 弹幕开关：Switch（同全屏控制条 toggleDanmaku，含官方 Toast 文案）
+                Toggle({ type: ToggleType.Switch, isOn: this.danmakuOn })
+                  .selectedColor(FQ_STORY_ORANGE)
+                  .onChange((isOn: boolean): void => {
+                    if (isOn !== this.danmakuOn) {
+                      this.toggleDanmaku();
                     }
                   })
+              } else {
+                // 离线缓存/听视频：跳转箭头（功能即将上线占位）
+                SymbolGlyph($r('sys.symbol.chevron_right'))
+                  .fontSize(16)
+                  .fontColor([dark ? '#99FFFFFF' : $r('sys.color.font_tertiary')])
               }
-              .alignItems(VerticalAlign.Center)
-            } else if (item.key === 'danmaku') {
-              // 弹幕开关：Switch（同全屏控制条 toggleDanmaku，含官方 Toast 文案）
-              Toggle({ type: ToggleType.Switch, isOn: this.danmakuOn })
-                .selectedColor(FQ_STORY_ORANGE)
-                .onChange((isOn: boolean): void => {
-                  if (isOn !== this.danmakuOn) {
-                    this.toggleDanmaku();
-                  }
-                })
-            } else {
-              // 离线缓存/听视频：跳转箭头（功能即将上线占位）
-              SymbolGlyph($r('sys.symbol.chevron_right'))
-                .fontSize(16)
-                .fontColor([dark ? '#99FFFFFF' : $r('sys.color.font_tertiary')])
             }
-          }
-        }
-      }, (item: FqSettingItem) => item.key)
+          }.padding(14)
+        }, (item: FqSettingItem) => item.key)
+      }
+      .borderRadius(14)
+      .backgroundColor($r('sys.color.comp_background_list_card'))
+      .divider({
+        strokeWidth: 0.5,
+        color: $r('sys.color.comp_divider'),
+        startMargin: 48,
+        endMargin: 14
+      })
     }
     .width('100%')
     .layoutWeight(1)
     .scrollBar(BarState.Off)
-    .divider({
-      strokeWidth: 0.5,
-      color: dark ? '#1FFFFFFF' : $r('sys.color.comp_divider'),
-      startMargin: 54,
-      endMargin: 16
-    })
+    .padding({ right: 20, left: 20 })
   }
 
   /** 设置行点击：离线缓存/听视频即将上线占位（倍速/弹幕行右侧控件自理）。 */
@@ -1211,6 +1243,12 @@ export struct PlayerPage {
     const value: number = this.speedPreview >= 0 ? this.speedPreview : this.player.state.speed;
     const rounded: number = Math.round(value * 100) / 100;
     return `${rounded}×`;
+  }
+
+  /** 断点倍速高亮判定（当前值取拖动预览优先；半步容差内视为命中该断点）。 */
+  private isCurrentSpeedStep(step: number): boolean {
+    const value: number = this.speedPreview >= 0 ? this.speedPreview : this.player.state.speed;
+    return Math.abs(value - step) < FQ_SPEED_STEP / 2;
   }
 
   // ---------------------------------------------------------------------------

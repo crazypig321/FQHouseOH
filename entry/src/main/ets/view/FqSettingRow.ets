@@ -19,18 +19,19 @@ export struct FqSettingRow {
 
   build() {
     Row({ space: 12 }) {
-      SymbolGlyph(this.icon)
-        .fontSize(22)
-        .fontColor([this.tintColor])
-      Text(this.title)
-        .fontSize(15)
-        .fontColor(this.tintColor)
-        .layoutWeight(1)
+      Row({ space: 12 }){
+        SymbolGlyph(this.icon)
+          .fontSize(22)
+          .fontColor([this.tintColor])
+        Text(this.title)
+          .fontSize(15)
+          .fontColor(this.tintColor)
+      }
+
       this.rightSlot()
     }
     .width('100%')
-    .height(52)
-    .padding({ left: 20, right: 16 })
+    .justifyContent(FlexAlign.SpaceBetween)
     .alignItems(VerticalAlign.Center)
     .onClick((): void => {
       this.click();
