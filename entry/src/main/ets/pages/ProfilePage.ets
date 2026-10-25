@@ -772,6 +772,7 @@ export struct ProfilePage {
         ForEach(this.rankItems.slice(0, FQ_RANK_LIMIT), (item: FqStatsEntry, index: number) => {
           if (index > 0) {
             Divider()
+              .padding({ left: 30 })
               .color($r('sys.color.comp_divider'))
           }
           this.RankRow(item, index)
