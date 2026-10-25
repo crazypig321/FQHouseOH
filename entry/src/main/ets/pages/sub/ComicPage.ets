@@ -144,6 +144,8 @@ export struct ComicPage {
   private titleBarOp: TitleBarContentOptions | undefined = undefined;
   /** 各章图片缓存（跨章翻页/上下追加复用，会话内有效）。 */
   private chapterImageCache: Map<number, string[]> = new Map();
+  /** 已读章节集合（翻过章末/下一话/上下滚动进后章时标记，目录进度用；目录跳转不标记）。 */
+  private readChapters: Set<number> = new Set();
   /** 上下滚动模式数据源与滚动控制器。 */
   private verticalSource: FqComicImageSource = new FqComicImageSource();
   private verticalScroller: Scroller = new Scroller();
@@ -614,8 +616,10 @@ export struct ComicPage {
         this.pageIndex += 1;
         this.saveProgressNow();
       } else if (this.nextImages.length > 0) {
+        this.markChapterRead(this.chapterIndex);
         this.switchToChapter(this.nextImages, this.chapterIndex + 1, 0);
       } else if (this.chapterIndex + 1 < this.totalChapters) {
+        this.markChapterRead(this.chapterIndex);
         this.openChapter(this.chapterIndex + 1, '');
       }
     } else {
@@ -724,6 +728,10 @@ export struct ComicPage {
     }
     const item: FqComicImageItem = this.verticalSource.getData(first);
     if (item.chapterIndex !== this.chapterIndex || item.imageIndex !== this.pageIndex) {
+      if (item.chapterIndex > this.chapterIndex) {
+        // 上下滚动滚进后话 = 前话已整话读过
+        this.markChapterRead(this.chapterIndex);
+      }
       this.chapterIndex = item.chapterIndex;
       this.pageIndex = item.imageIndex;
       this.saveProgressNow();
@@ -1003,6 +1011,7 @@ export struct ComicPage {
     if (!this.hasNext()) {
       return;
     }
+    this.markChapterRead(this.chapterIndex);
     this.openChapter(this.chapterIndex + 1, '');
   }
 
@@ -1085,6 +1094,7 @@ export struct ComicPage {
     const token: number = ++this.loadToken;
     this.loadingState = true;
     this.errorMsg = '';
+    this.readChapters = FqReaderStore.getReadChapters(this.bookId);
     try {
       await FqBackend.get().start(getContext(this));
       const chapters: FqChapter[] =
@@ -1230,24 +1240,26 @@ export struct ComicPage {
     FqReaderStore.saveProgress(this.bookId, this.chapterIndex, `img:${this.pageIndex}`);
   }
 
-  /** 章节已读进度：当前章按图位置计百分比、之前章节 100%、未读章节 0%。 */
+  /** 章节已读进度：当前章按图位置计百分比、读毕章节 100%、未读章节 0%。 */
   private chapterProgressText(idx: number): string {
-    if (idx < this.chapterIndex) {
-      return '100%';
+    if (idx === this.chapterIndex) {
+      const total: number = this.curImages.length;
+      if (total <= 0) {
+        return '0%';
+      }
+      const pct: number = Math.round(((this.pageIndex + 1) / total) * 100);
+      return `${Math.min(Math.max(pct, 1), 100)}%`;
     }
-    if (idx > this.chapterIndex) {
-      return '0%';
+    return this.readChapters.has(idx) ? '100%' : '0%';
+  }
+
+  /** 标记章节读毕（翻过章末/下一话/上下滚动进后章时调用；目录跳转不标记）。 */
+  private markChapterRead(index: number): void {
+    if (index < 0 || this.readChapters.has(index)) {
+      return;
     }
-    let total: number = this.curImages.length;
-    const cached: string[] | undefined = this.chapterImageCache.get(idx);
-    if (cached !== undefined && cached.length > 0) {
-      total = cached.length;
-    }
-    if (total <= 0) {
-      return '0%';
-    }
-    const pct: number = Math.round(((this.pageIndex + 1) / total) * 100);
-    return `${Math.min(Math.max(pct, 1), 100)}%`;
+    this.readChapters.add(index);
+    FqReaderStore.saveReadChapters(this.bookId, this.readChapters);
   }
 
   // ---------------------------------------------------------------------------
