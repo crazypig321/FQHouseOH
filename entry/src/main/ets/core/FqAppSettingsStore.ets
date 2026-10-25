@@ -6,7 +6,9 @@
  *   EntryAbility onCreate 初始化时恢复）；
  * - backgroundAudio：后台播放开关（开=支持后台播放：创建 AVSession（ENABLE_BACKGROUND_PLAY）
  *   + 申请 audioPlayback 长时任务；关=无法后台播放：不创建/销毁 AVSession（无胶囊/播控中心
- *   通知）+ 不申请/停掉长时任务，后台播放被系统停止）。
+ *   通知）+ 不申请/停掉长时任务，后台播放被系统停止）；
+ * - updateProxyDownload：更新包代理下载开关（关于页，仅用于下载更新软件包：
+ *   开=经代理下载更新包，关=直连）。
  */
 
 import preferences from '@ohos.data.preferences';
@@ -16,6 +18,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 const FQ_APP_SETTINGS_NAME: string = 'fq_app_settings';
 const FQ_SETTINGS_KEY_THEME: string = 'themeMode';
 const FQ_SETTINGS_KEY_BG_AUDIO: string = 'backgroundAudio';
+const FQ_SETTINGS_KEY_UPDATE_PROXY: string = 'updateProxyDownload';
 
 /** 深色模式档位：跟随系统。 */
 export const FQ_THEME_FOLLOW: number = 0;
@@ -29,6 +32,7 @@ export class FqAppSettingsStore {
   private static context: common.Context | null = null;
   private static themeMode: number = FQ_THEME_FOLLOW;
   private static backgroundAudio: boolean = true;
+  private static updateProxyDownload: boolean = false;
 
   public static init(context: common.Context): void {
     if (FqAppSettingsStore.pref !== null) {
@@ -51,6 +55,10 @@ export class FqAppSettingsStore {
       const rawBg: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_BG_AUDIO, true);
       if (typeof rawBg === 'boolean') {
         FqAppSettingsStore.backgroundAudio = rawBg;
+      }
+      const rawProxy: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_UPDATE_PROXY, false);
+      if (typeof rawProxy === 'boolean') {
+        FqAppSettingsStore.updateProxyDownload = rawProxy;
       }
     } catch (error) {
       // 损坏数据按默认值处理
@@ -94,6 +102,27 @@ export class FqAppSettingsStore {
     }
     try {
       pref.putSync(FQ_SETTINGS_KEY_BG_AUDIO, enabled);
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
+  }
+
+  /** 更新包代理下载开关（仅用于下载更新软件包：开=代理，关=直连）。 */
+  public static isUpdateProxyDownload(): boolean {
+    return FqAppSettingsStore.updateProxyDownload;
+  }
+
+  public static setUpdateProxyDownload(enabled: boolean): void {
+    FqAppSettingsStore.updateProxyDownload = enabled;
+    const pref: preferences.Preferences | null = FqAppSettingsStore.pref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.putSync(FQ_SETTINGS_KEY_UPDATE_PROXY, enabled);
       pref.flush().catch((_error: BusinessError): void => {
         // 落盘失败不阻断
       });
