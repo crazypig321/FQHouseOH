@@ -1355,6 +1355,9 @@ export struct PlayerPage {
       // loadEpisode 跳过旧集续播回写与新集 0 位置覆盖，起播位置由 Media start 对齐
       this.listenReturnSwitch = true;
       this.loadEpisode(listenIndex);
+      // 中央按钮随新集起播短暂显示暂停态，3s 自动隐藏（对齐手动点击播放）
+      this.centerBtnVisible = true;
+      this.scheduleCenterHide();
       return;
     }
     if (listenPos > 0) {
@@ -1366,6 +1369,9 @@ export struct PlayerPage {
     this.media.startBackground();
     this.pushMediaMetadata();
     this.syncMediaState(true);
+    // 中央按钮短暂显示暂停态，3s 自动隐藏（对齐手动点击播放的交互）
+    this.centerBtnVisible = true;
+    this.scheduleCenterHide();
   }
 
   /** AVSession 元数据推送（剧名/集名/时长/封面）。 */
