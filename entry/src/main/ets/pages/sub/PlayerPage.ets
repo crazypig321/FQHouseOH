@@ -51,6 +51,7 @@ import { FQ_ACCENT } from '../../view/CommonCom';
 import { CommonNav } from '../../view/CommonNav';
 import { FqSheetOptions } from '../../view/CommonSheet';
 import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/FqCommentSheet';
+import { FqMenu, FqMenuItem } from '../../view/CommonMenu';
 import { FqDanmakuView } from '../../view/FqDanmakuView';
 import { FqSettingRow } from '../../view/FqSettingRow';
 import { FqStoryPanel } from '../../view/FqStoryPanel';
@@ -107,6 +108,8 @@ const FQ_ADJUST_INIT_PERCENT: number = 50;
 const FQ_FS_SIDE_PANEL_W: number = 300;
 /** 侧边栏背景（近黑高不透明，压得住浅色画面又不糊死视频）。 */
 const FQ_FS_SIDE_BG: string = '#F0141414';
+/** 全屏底部倍速按钮锚点 id（FqMenu 档位菜单挂靠）。 */
+const PLAYER_FS_SPEED_ANCHOR_ID: string = 'player_fs_speed_anchor';
 /** 播放设置深色（横屏侧边栏）配色：半透明白卡片/分隔线/滑轨/次级文字。 */
 const FQ_DARK_CARD_BG: string = '#26FFFFFF';
 const FQ_DARK_DIVIDER: string = '#1FFFFFFF';
@@ -1029,8 +1032,9 @@ export struct PlayerPage {
           .fontSize(14)
           .fontWeight(FontWeight.Medium)
           .fontColor(Color.White)
+          .id(PLAYER_FS_SPEED_ANCHOR_ID)
           .onClick((): void => {
-            this.openSettings();
+            this.openSpeedMenu();
           })
 
         Text('选集')
@@ -1713,6 +1717,25 @@ export struct PlayerPage {
       episode.itemId, PlayerNavParams.contentId, this.episodeCommentCursor);
     this.episodeCommentCursor = page.cursor;
     return new FqBookCommentPage(page.comments, page.totalCount, 0, '', page.hasMore, 0);
+  }
+
+  /** 全屏底部倍速按钮：公共 FqMenu 档位直选（0.5-2.0 步进 0.25，
+   *  当前档尾勾标识；选中即提交 mpv，无需打开播放设置半模态）。 */
+  private openSpeedMenu(): void {
+    const items: Array<FqMenuItem> = [];
+    const steps: number[] = fqSpeedSteps();
+    for (const step of steps) {
+      const item: FqMenuItem = new FqMenuItem();
+      item.label = fqSpeedStepLabel(step);
+      if (this.isCurrentSpeedStep(step)) {
+        item.endIcon = $r('sys.symbol.checkmark_circle_fill');
+      }
+      item.onAction = (): void => {
+        this.player.setSpeed(step);
+      };
+      items.push(item);
+    }
+    FqMenu.open(this.getUIContext(), PLAYER_FS_SPEED_ANCHOR_ID, items);
   }
 
   /** 关闭集评半模态：延迟一拍置 isShow（面板事件内同步改 isShow 会被框架丢弃）。 */
