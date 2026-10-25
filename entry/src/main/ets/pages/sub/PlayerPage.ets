@@ -44,6 +44,7 @@
  */
 
 import { display, window } from '@kit.ArkUI';
+import { common } from '@kit.AbilityKit';
 import { Player, PlayerSurface, Media, PlayerConfig } from '@mpv-ohos/mpv-arkts';
 import { FQ_ACCENT } from '../../view/CommonCom';
 import { CommonNav } from '../../view/CommonNav';
@@ -56,6 +57,7 @@ import { DetailNavParams, PlayerNavParams, ListenVideoNavParams, ROUTE_DETAIL, R
 import { FqChapter, FqDanmaku, FqDanmakuPage, FqEpisodeSource, FqSeriesRelateBook, fqKindToTab } from '../../model/FqModels';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { fqAudioSession } from '../../core/FqAudioSession';
+import { FqVideoMedia } from '../../core/FqVideoMedia';
 import { FqWatchedStore, FqWatchedProgress } from '../../core/FqWatchedStore';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { appState } from '../../entryability/AppState';
@@ -258,6 +260,10 @@ export struct PlayerPage {
   /** 屏幕尺寸（vp，布局定位用）。 */
   private screenW: number = 0;
   private screenH: number = 0;
+  /** AVSession/后台播放助手（通知栏播控中心/胶囊 + 后台 audioPlayback 长时任务）。 */
+  private media: FqVideoMedia = new FqVideoMedia('FqVideo');
+  /** AVSession 元数据已同步时长（切集重置 -1；时长事件到达后补发元数据）。 */
+  private mediaDurationSynced: number = -1;
 
   aboutToAppear(): void {
     this.title = PlayerNavParams.title;
@@ -295,7 +301,50 @@ export struct PlayerPage {
     this.danmakuTimer = setInterval((): void => {
       this.danmakuTick();
       this.progressSaveTick();
+      this.mediaTick();
     }, 1000);
+    // AVSession（通知栏播控中心/胶囊）播控命令 + 后台播放长时任务
+    const mediaContext: common.UIAbilityContext | null = appState.abilityContext;
+    if (mediaContext !== null) {
+      this.media.init(mediaContext);
+    }
+    this.media.onPlay = (): void => {
+      if (this.errorMsg.length > 0) {
+        return;
+      }
+      this.player.play();
+      this.syncMediaState(true);
+    };
+    this.media.onPause = (): void => {
+      this.player.pause();
+      this.saveCurrentProgress();
+      this.syncMediaState(false);
+    };
+    this.media.onStop = (): void => {
+      this.player.pause();
+      this.saveCurrentProgress();
+      this.syncMediaState(false);
+    };
+    this.media.onPrevious = (): void => {
+      if (this.player.state.position > 3) {
+        this.player.seek(0);
+        return;
+      }
+      if (this.index > 0) {
+        this.loadEpisode(this.index - 1);
+      } else {
+        this.player.seek(0);
+      }
+    };
+    this.media.onNext = (): void => {
+      this.nextEpisode();
+    };
+    this.media.onSeek = (sec: number): void => {
+      this.player.seek(sec);
+      this.seekDanmaku(sec * 1000);
+      this.saveCurrentProgress();
+      this.syncMediaState(this.player.state.playing);
+    };
     if (this.episodes.length === 0) {
       this.loadEpisodes();
     } else {
@@ -336,6 +385,7 @@ export struct PlayerPage {
         // 恢复失败交由系统窗口销毁兜底
       });
     }
+    this.media.release();
     this.player.destroy();
   }
 
@@ -1267,6 +1317,8 @@ export struct PlayerPage {
     this.wasPlayingBeforeListen = this.player.state.playing;
     this.player.pause();
     this.saveCurrentProgress();
+    // 让路听视频页：释放本页 AVSession/后台任务（通知栏由听视频会话接管）
+    this.media.release();
     ListenVideoNavParams.contentId = PlayerNavParams.contentId;
     ListenVideoNavParams.kind = PlayerNavParams.kind;
     ListenVideoNavParams.title = this.title;
@@ -1310,7 +1362,39 @@ export struct PlayerPage {
     }
     if (this.wasPlayingBeforeListen) {
       this.player.play();
+      // openListenMode 已释放本页 AVSession/后台任务：恢复播放后重建
+      this.media.ensureSession('video');
+      this.media.startBackground();
+      this.pushMediaMetadata();
+      this.syncMediaState(true);
     }
+  }
+
+  /** AVSession 元数据推送（剧名/集名/时长/封面）。 */
+  private pushMediaMetadata(): void {
+    const episode: FqChapter | undefined = this.episodes[this.index];
+    this.media.updateMetadata(
+      `${PlayerNavParams.contentId}:${episode !== undefined ? episode.itemId : this.index}`,
+      this.title,
+      episode !== undefined ? episode.title : '',
+      this.player.state.duration,
+      PlayerNavParams.cover);
+  }
+
+  /** AVSession 播放态立即同步（播放意图优先，绕过 mpv 状态异步）。 */
+  private syncMediaState(playing: boolean): void {
+    this.media.syncPlayback(true, playing, this.player.state.speed, this.player.state.position);
+  }
+
+  /** AVSession 周期同步（1s 节流内含；时长事件到达后补发元数据）。 */
+  private mediaTick(): void {
+    const duration: number = this.player.state.duration;
+    if (duration > 0 && Math.abs(duration - this.mediaDurationSynced) > 0.5) {
+      this.mediaDurationSynced = duration;
+      this.pushMediaMetadata();
+    }
+    this.media.syncPlayback(false, this.player.state.playing, this.player.state.speed,
+      this.player.state.position);
   }
 
   /** 播放设置行描述（key 决定右侧控件：speed 滑杆 / cache、listen 箭头 / danmaku 开关）。 */
@@ -1809,6 +1893,11 @@ export struct PlayerPage {
         : new Media(source.url));
       // 新集起播：重置「实际播放」guard（旧集残余走表不再计入）
       this.hasDisplayed = false;
+      // AVSession/后台长时任务：会话确保 + 元数据（时长随 1s tick 补发）
+      this.mediaDurationSynced = -1;
+      this.media.ensureSession('video');
+      this.media.startBackground();
+      this.pushMediaMetadata();
       if (wasDisplayed && switched) {
         // 切集：续播记录立即指向新集（位置 0；周期/暂停/退出再精化），
         // 避免切集后立刻退出仍续播回旧集；同集重试不覆盖原位置
@@ -2098,6 +2187,8 @@ export struct PlayerPage {
     }
     const nowPlaying: boolean = !wasPlaying;
     this.centerBtnVisible = true;
+    // AVSession 播放态立即同步（意图优先，绕过 mpv 状态异步）
+    this.syncMediaState(nowPlaying);
     if (wasPlaying) {
       // 点击后进入暂停：按钮常驻
       this.cancelCenterHide();

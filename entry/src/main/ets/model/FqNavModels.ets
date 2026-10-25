@@ -112,6 +112,29 @@ export class ComicNavParams {
 }
 
 /**
+ * 单自定义菜单标题栏配置（FqTitleBarOptions 固定菜单组合的轻量替代）：
+ * 标题 + 右上角单个自定义图标菜单（听视频页语速菜单等）。
+ */
+export function FqTitleBarMenuOptions(mainTitle: ResourceStr, menuIcon: Resource,
+  menuLabel: string, menuAction: () => void): TitleBarContentOptions {
+  const title: HdsNavigationTitle = {
+    mainTitle: mainTitle,
+  };
+  const menus: HdsNavigationMenuItemOptions[] = [{
+    content: {
+      icon: menuIcon,
+      label: menuLabel,
+      action: menuAction,
+    },
+  }];
+  const content: TitleBarContentOptions = {
+    title: title,
+    menu: { value: menus },
+  };
+  return content;
+}
+
+/**
  * HDS 标题栏内容配置（样式统一由 view/CommonNav 的 CommonNav 提供）：
  * 标题 + 可选书架（onShelf，shelfActive 控制实心图标）/刷新（onRefresh）/
  * 搜索（showSearch）/排行（showRank）菜单 + 可选 bottomBuilder。

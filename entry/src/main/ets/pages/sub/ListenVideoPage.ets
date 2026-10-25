@@ -2,26 +2,43 @@
  * 听视频页（播放页「听视频」进入的听剧模式，对齐 fqapp listen_mode_page.dart）：
  * 独立 mpv 实例只听不看（无 PlayerSurface），视频页进页前已暂停让路；
  * 大框架与听书页（ListenPage）一致，去掉音色/试读/相关作品等书籍专属组件：
- * 封面卡（集名/剧名，整卡开目录）/ 状态行 / 动作排（语速/更多）/
- * 进度排（-15s/拖动条/+15s）/ 控制排（目录/上一集/播放/下一集）。
+ * 封面卡（集名/剧名，整卡开目录）/ 状态行 / 进度排（-15s/拖动条/+15s）/
+ * 控制排（目录/上一集/播放/下一集/定时）。
+ * 语速调节移至标题栏右上角菜单（speed_multiple 图标），sheet 样式对齐
+ * 视频页播放设置（FqSettingRow + 滑杆 0.5-2.0 步进 0.25 + 档位标签）。
+ * 定时关闭（分钟档/播完本集）页面级实现，复用 1s tick 倒计时，
+ * 「播完本集」在 onEpisodeEnd 拦截自动连播。
  * 已看与续播直接写 FqWatchedStore（与播放页同键，退出后播放页按听到的
  * 集/位置续看）；退出回传结果（ListenVideoNavParams.result*），mpv 销毁停播。
+ * AVSession（通知栏播控中心/胶囊）+ 后台 audioPlayback 长时任务由
+ * core/FqVideoMedia 承载（离页 release，通知栏让回播放页会话）。
  */
 
+import { promptAction } from '@kit.ArkUI';
+import { common } from '@kit.AbilityKit';
 import { FQ_ACCENT } from '../../view/CommonCom';
 import { CommonNav } from '../../view/CommonNav';
 import { CommonSheet, FqSheetOptions } from '../../view/CommonSheet';
 import { FqCatalogSheet } from '../../view/FqCatalogSheet';
-import { FqTitleBarOptions, ListenVideoNavParams } from '../../model/FqNavModels';
+import { FqSettingRow } from '../../view/FqSettingRow';
+import { FqTitleBarMenuOptions, ListenVideoNavParams } from '../../model/FqNavModels';
 import { FqChapter } from '../../model/FqModels';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
+import { FqVideoMedia } from '../../core/FqVideoMedia';
 import { FqWatchedStore, FqWatchedProgress } from '../../core/FqWatchedStore';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { appState } from '../../entryability/AppState';
 import { Player, Media, PlayerConfig } from '@mpv-ohos/mpv-arkts';
 
-/** 播放倍速档（mpv 0.75 ~ 2，对齐听书页档位）。 */
-const FQ_RATES: number[] = [0.75, 1, 1.25, 1.5, 1.75, 2];
+/** 定时分钟档（对齐听书页 -1/15/30/60）。 */
+const FQ_SLEEP_MINUTES: number[] = [15, 30, 60];
+
+/** 语速滑杆范围与步进（对齐视频页设置 sheet：0.5-2.0、步进 0.25）。 */
+const FQ_SPEED_MIN: number = 0.5;
+const FQ_SPEED_MAX: number = 2.0;
+const FQ_SPEED_STEP: number = 0.25;
+/** 语速滑杆断点档数（0.5-2.0 步进 0.25，共 7 档）。 */
+const FQ_SPEED_STEP_COUNT: number = 7;
 
 /** 标题栏高度（对齐听书页避让）。 */
 const FQ_LISTEN_TOP_INSET: number = 56;
@@ -31,7 +48,7 @@ enum FqListenVideoSheetKind {
   none = 0,
   catalog = 1,
   rates = 2,
-  more = 3,
+  sleep = 3,
 }
 
 /** mm:ss 播放时间。 */
@@ -44,6 +61,21 @@ function fqFormatClock(seconds: number): string {
   const minutes: number = Math.floor(total / 60);
   const rest: number = total % 60;
   return `${minutes}:${rest < 10 ? '0' : ''}${rest}`;
+}
+
+/** 语速滑杆断点值（0.5 → 2.0 步进 0.25）。 */
+function fqSpeedSteps(): number[] {
+  const steps: number[] = [];
+  for (let i: number = 0; i < FQ_SPEED_STEP_COUNT; i++) {
+    steps.push(FQ_SPEED_MIN + i * FQ_SPEED_STEP);
+  }
+  return steps;
+}
+
+/** 语速断点显示文案（去尾零，如 0.75× / 1× / 1.5×）。 */
+function fqSpeedStepLabel(step: number): string {
+  const rounded: number = Math.round(step * 100) / 100;
+  return `${rounded}×`;
 }
 
 @ComponentV2
@@ -70,6 +102,16 @@ export struct ListenVideoPage {
   @Local autoAdvance: boolean = true;
   /** 封面绝对地址（backend start 后锚定）。 */
   @Local coverUrl: string = '';
+  /** 语速滑杆拖动预览（-1 未拖动；拖动中文案实时跟随，松手提交 mpv）。 */
+  @Local speedPreview: number = -1;
+  /** 睡眠定时截止时间戳（0 未设）。 */
+  private sleepDeadline: number = 0;
+  /** 睡眠剩余秒（-1 未设）。 */
+  @Local sleepRemainingSec: number = -1;
+  /** 播完本集停止。 */
+  @Local sleepAtEpisodeEnd: boolean = false;
+  /** 定时关闭所选分钟档（0 = 未选分钟档）。 */
+  @Local sleepMinutesChoice: number = 0;
   private scroller: Scroller = new Scroller();
   /** 取流 tab（fqKindToTab：短剧/漫剧）。 */
   private tab: string = '短剧';
@@ -81,6 +123,10 @@ export struct ListenVideoPage {
   private progressTick: number = 0;
   /** 周期保存定时器（0 无任务）。 */
   private tickTimer: number = 0;
+  /** AVSession/后台播放助手（通知栏播控中心/胶囊 + 后台 audioPlayback 长时任务）。 */
+  private media: FqVideoMedia = new FqVideoMedia('FqListenVideo');
+  /** AVSession 元数据已同步时长（切集重置 -1；时长事件到达后补发元数据）。 */
+  private mediaDurationSynced: number = -1;
 
   aboutToAppear(): void {
     this.episodes = ListenVideoNavParams.chapters;
@@ -104,6 +150,49 @@ export struct ListenVideoPage {
     this.tickTimer = setInterval((): void => {
       this.progressTickFn();
     }, 1000);
+    // AVSession（通知栏播控中心/胶囊）播控命令 + 后台播放长时任务
+    const mediaContext: common.UIAbilityContext | null = appState.abilityContext;
+    if (mediaContext !== null) {
+      this.media.init(mediaContext);
+    }
+    this.media.onPlay = (): void => {
+      if (this.errorMsg.length > 0) {
+        return;
+      }
+      this.player.play();
+      this.syncMediaState(true);
+    };
+    this.media.onPause = (): void => {
+      this.player.pause();
+      this.saveCurrentProgress();
+      this.syncMediaState(false);
+    };
+    this.media.onStop = (): void => {
+      this.player.pause();
+      this.saveCurrentProgress();
+      this.syncMediaState(false);
+    };
+    this.media.onPrevious = (): void => {
+      if (this.player.state.position > 3) {
+        this.player.seek(0);
+        return;
+      }
+      if (this.index > 0) {
+        this.loadEpisode(this.index - 1, -1);
+      } else {
+        this.player.seek(0);
+      }
+    };
+    this.media.onNext = (): void => {
+      if (this.index + 1 < this.episodes.length) {
+        this.loadEpisode(this.index + 1, -1);
+      }
+    };
+    this.media.onSeek = (sec: number): void => {
+      this.player.seek(sec);
+      this.saveCurrentProgress();
+      this.syncMediaState(this.player.state.playing);
+    };
     const startSec: number = ListenVideoNavParams.startPositionSec > 0
       ? ListenVideoNavParams.startPositionSec : -1;
     this.loadEpisode(start, startSec);
@@ -120,6 +209,7 @@ export struct ListenVideoPage {
     // 退出回传：听到的集 + 位置（播放页 onShown 消费后按此续看）
     ListenVideoNavParams.resultIndex = this.index;
     ListenVideoNavParams.resultPositionSec = this.player.state.position;
+    this.media.release();
     this.player.destroy();
   }
 
@@ -140,9 +230,17 @@ export struct ListenVideoPage {
     return episode !== null ? episode.title : '';
   }
 
+  /** 定时生效中（分钟档倒计时或播完本集）。 */
+  private sleepActive(): boolean {
+    return this.sleepDeadline > 0 || this.sleepAtEpisodeEnd;
+  }
+
   build() {
     CommonNav({
-      titleBarOp: FqTitleBarOptions('听视频', false),
+      titleBarOp: FqTitleBarMenuOptions('听视频', $r('sys.symbol.speed_multiple'), 'speed',
+        (): void => {
+          this.openSheet(FqListenVideoSheetKind.rates);
+        }),
       scroller: this.scroller,
       showPlaybackBall: false,
     }) {
@@ -150,7 +248,6 @@ export struct ListenVideoPage {
         Column() {
           this.CoverCard()
           this.StatusLine()
-          this.ActionRow()
           this.ProgressRow()
           this.TransportRow()
         }
@@ -295,41 +392,6 @@ export struct ListenVideoPage {
     .padding({ top: 8, left: 20, right: 20 })
   }
 
-  /** 动作排单键。 */
-  @Builder
-  private ActionItem(icon: Resource, label: string, onTap: () => void) {
-    Column({ space: 5 }) {
-      SymbolGlyph(icon)
-        .fontSize(21)
-        .fontColor([$r('sys.color.font_primary')])
-      Text(label)
-        .fontSize(11)
-        .maxLines(1)
-        .fontColor($r('sys.color.font_secondary'))
-    }
-    .width(96)
-    .padding({ top: 8, bottom: 8 })
-    .onClick((): void => {
-      onTap();
-    })
-  }
-
-  /** 动作排：语速 / 更多。 */
-  @Builder
-  private ActionRow() {
-    Row({ space: 24 }) {
-      this.ActionItem($r('sys.symbol.timer'), '语速', (): void => {
-        this.openSheet(FqListenVideoSheetKind.rates);
-      })
-      this.ActionItem($r('sys.symbol.ellipsis_circle'), '更多', (): void => {
-        this.openSheet(FqListenVideoSheetKind.more);
-      })
-    }
-    .width('100%')
-    .justifyContent(FlexAlign.Center)
-    .padding({ top: 8 })
-  }
-
   /** 进度排：-15s / 拖动条 / +15s + 时间标签。 */
   @Builder
   private ProgressRow() {
@@ -385,12 +447,12 @@ export struct ListenVideoPage {
 
   /** 控制排单键。 */
   @Builder
-  private TransportItem(icon: Resource, label: string, enabled: boolean,
+  private TransportItem(icon: Resource, label: string, active: boolean, enabled: boolean,
     onTap: () => void) {
     Column({ space: 2 }) {
       SymbolGlyph(icon)
         .fontSize(26)
-        .fontColor([$r('sys.color.font_primary')])
+        .fontColor([active ? FQ_ACCENT : $r('sys.color.font_primary')])
     }
     .padding({ left: 16, right: 16, top: 8, bottom: 8 })
     .opacity(enabled ? 1 : 0.3)
@@ -402,14 +464,14 @@ export struct ListenVideoPage {
     .accessibilityText(label)
   }
 
-  /** 控制排：目录 / 上一集 / 播放暂停 / 下一集。 */
+  /** 控制排：目录 / 上一集 / 播放暂停 / 下一集 / 定时。 */
   @Builder
   private TransportRow() {
     Row({ space: 0 }) {
-      this.TransportItem($r('sys.symbol.list_bullet'), '目录', true, (): void => {
+      this.TransportItem($r('sys.symbol.list_bullet'), '目录', false, true, (): void => {
         this.openCatalog();
       })
-      this.TransportItem($r('sys.symbol.backward_end_fill'), '上一集', this.index > 0,
+      this.TransportItem($r('sys.symbol.backward_end_fill'), '上一集', false, this.index > 0,
         (): void => {
           this.loadEpisode(this.index - 1, -1);
         })
@@ -421,9 +483,13 @@ export struct ListenVideoPage {
           this.togglePlay();
         })
         .accessibilityText(this.player.state.playing ? '暂停' : '播放')
-      this.TransportItem($r('sys.symbol.forward_end_fill'), '下一集',
+      this.TransportItem($r('sys.symbol.forward_end_fill'), '下一集', false,
         this.index + 1 < this.episodes.length, (): void => {
           this.loadEpisode(this.index + 1, -1);
+        })
+      this.TransportItem($r('sys.symbol.stopwatch_1'), '定时', this.sleepActive(), true,
+        (): void => {
+          this.openSheet(FqListenVideoSheetKind.sleep);
         })
     }
     .width('100%')
@@ -444,7 +510,7 @@ export struct ListenVideoPage {
       currentChapterIndex: this.index,
       progressOf: (index: number): string => this.catalogProgressOf(index),
       openToken: this.catalogOpenToken,
-      contentEndExtra: 0,
+      contentEndExtra: appState.bottomRect,
       chapterClick: (index: number): void => {
         this.closeSheet();
         this.loadEpisode(index, -1);
@@ -452,25 +518,104 @@ export struct ListenVideoPage {
     })
   }
 
-  /** 播放倍速。 */
+  /**
+   * 语速调节（样式对齐视频页播放设置 sheet：公共 FqSettingRow +
+   * 滑杆 0.5-2.0 步进 0.25 + 断点档位标签；拖动实时预览，松手提交 mpv）。
+   */
   @Builder
   private RatesSheetBuilder() {
     CommonSheet({
-      sheetTitle: '播放倍速',
+      sheetTitle: '语速调节',
+      showClose: true,
+      closeClick: (): void => {
+        this.closeSheet();
+      },
+    }) {
+      Column() {
+        List() {
+          ListItemGroup() {
+            ListItem() {
+              FqSettingRow({
+                icon: $r('sys.symbol.speed_multiple'),
+                title: '倍速',
+                tintColor: $r('sys.color.font'),
+                click: (): void => {
+                },
+              }) {
+                Column({ space: 2 }) {
+                  Slider({
+                    value: this.player.state.speed,
+                    min: FQ_SPEED_MIN,
+                    max: FQ_SPEED_MAX,
+                    step: FQ_SPEED_STEP,
+                    style: SliderStyle.InSet,
+                  })
+                    .width('100%')
+                    .height(30)
+                    .showSteps(true)
+                    .stepColor($r('sys.color.comp_background_tertiary'))
+                    .blockColor(FQ_ACCENT)
+                    .selectedColor('#33FF7A3D')
+                    .trackColor($r('sys.color.comp_background_tertiary'))
+                    .onChange((value: number, mode: SliderChangeMode): void => {
+                      if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) {
+                        this.player.setSpeed(value);
+                        this.speedPreview = -1;
+                        this.syncMediaState(this.player.state.playing);
+                      } else {
+                        this.speedPreview = value;
+                      }
+                    })
+
+                  // 断点倍速文本标识：第 i 档锚定在 i/(档数-1)*100% 处，与滑杆刻度两端对齐
+                  Row() {
+                    ForEach(fqSpeedSteps(), (step: number) => {
+                      Text(fqSpeedStepLabel(step))
+                        .fontSize(7)
+                        .fontWeight(this.isCurrentSpeedStep(step) ? FontWeight.Bold : FontWeight.Normal)
+                        .fontColor(this.isCurrentSpeedStep(step) ? FQ_ACCENT
+                          : $r('sys.color.font_tertiary'))
+                    }, (step: number) => `${step}`)
+                  }
+                  .justifyContent(FlexAlign.SpaceBetween)
+                  .width('100%')
+                  .hitTestBehavior(HitTestMode.None)
+                }
+                .layoutWeight(1)
+              }
+            }
+          }
+          .borderRadius(14)
+          .backgroundColor($r('sys.color.comp_background_list_card'))
+        }
+        .width('100%')
+        .scrollBar(BarState.Off)
+        .padding({ left: 16, right: 16 })
+      }
+      .width('100%')
+      .padding({ top: 4 })
+    }
+  }
+
+  /** 定时关闭：分钟档 / 播完本集 / 关闭定时。 */
+  @Builder
+  private SleepSheetBuilder() {
+    CommonSheet({
+      sheetTitle: '定时关闭',
       showClose: true,
       closeClick: (): void => {
         this.closeSheet();
       },
     }) {
       Column({ space: 0 }) {
-        ForEach(FQ_RATES, (rate: number) => {
+        ForEach(FQ_SLEEP_MINUTES, (minutes: number) => {
           Row() {
-            Text(`${rate}x`)
+            Text(`${minutes} 分钟后`)
               .fontSize(15)
-              .fontColor(rate === this.player.state.speed ? FQ_ACCENT
+              .fontColor(this.sleepMinutesChoice === minutes ? FQ_ACCENT
                 : $r('sys.color.font_primary'))
             Blank()
-            if (rate === this.player.state.speed) {
+            if (this.sleepMinutesChoice === minutes) {
               SymbolGlyph($r('sys.symbol.checkmark'))
                 .fontSize(16)
                 .fontColor([FQ_ACCENT])
@@ -478,102 +623,66 @@ export struct ListenVideoPage {
           }
           .width('100%')
           .height(48)
-          .borderRadius(8)
           .padding({ left: 10, right: 10 })
-          .backgroundColor(rate === this.player.state.speed ? '#1AFF7A3D' : Color.Transparent)
+          .borderRadius(8)
+          .backgroundColor(this.sleepMinutesChoice === minutes
+            ? '#1AFF7A3D' : Color.Transparent)
           .onClick((): void => {
-            this.player.setSpeed(rate);
+            this.setSleepMinutes(minutes);
             this.closeSheet();
+            promptAction.showToast({ message: `将在 ${minutes} 分钟后停止播放`, duration: 1500 });
           })
-        }, (rate: number) => `rate_${rate}`)
+        }, (minutes: number) => `sleep_${minutes}`)
+        Row() {
+          Text('播完本集')
+            .fontSize(15)
+            .fontColor(this.sleepAtEpisodeEnd ? FQ_ACCENT
+              : $r('sys.color.font_primary'))
+          Blank()
+          if (this.sleepAtEpisodeEnd) {
+            SymbolGlyph($r('sys.symbol.checkmark'))
+              .fontSize(16)
+              .fontColor([FQ_ACCENT])
+          }
+        }
+        .width('100%')
+        .height(48)
+        .padding({ left: 10, right: 10 })
+        .borderRadius(8)
+        .backgroundColor(this.sleepAtEpisodeEnd ? '#1AFF7A3D' : Color.Transparent)
+        .onClick((): void => {
+          this.setSleepAtEpisodeEnd();
+          this.closeSheet();
+          promptAction.showToast({ message: '将在播完本集后停止', duration: 1500 });
+        })
+        Divider()
+          .color($r('sys.color.comp_divider'))
+          .margin({ top: 6, bottom: 6, left: 10, right: 10 })
+        Row() {
+          Text('关闭定时')
+            .fontSize(15)
+            .fontColor(!this.sleepActive() ? FQ_ACCENT
+              : $r('sys.color.font_primary'))
+          Blank()
+          if (!this.sleepActive()) {
+            SymbolGlyph($r('sys.symbol.checkmark'))
+              .fontSize(16)
+              .fontColor([FQ_ACCENT])
+          }
+        }
+        .width('100%')
+        .height(48)
+        .borderRadius(8)
+        .padding({ left: 10, right: 10 })
+        .backgroundColor(!this.sleepActive() ? '#1AFF7A3D' : Color.Transparent)
+        .onClick((): void => {
+          this.clearSleep();
+          this.closeSheet();
+          promptAction.showToast({ message: '已关闭定时', duration: 1500 });
+        })
       }
       .width('100%')
       .padding({ left: 12, right: 12 })
-    }
-  }
-
-  /** 更多（播放设置）：剧集目录 / 自动连播。 */
-  @Builder
-  private MoreSheetBuilder() {
-    CommonSheet({
-      sheetTitle: '播放设置',
-      showClose: true,
-      closeClick: (): void => {
-        this.closeSheet();
-      },
-    }) {
-      Column() {
-        Row({ space: 12 }) {
-          Column() {
-            SymbolGlyph($r('sys.symbol.list_bullet'))
-              .fontSize(20)
-              .fontColor(['#FF10B981'])
-          }
-          .width(38)
-          .height(38)
-          .borderRadius(10)
-          .backgroundColor('#1A10B981')
-          .justifyContent(FlexAlign.Center)
-          Column({ space: 2 }) {
-            Text('剧集目录')
-              .fontSize(15)
-              .fontWeight(FontWeight.Medium)
-              .fontColor($r('sys.color.font_primary'))
-            Text(`共 ${this.episodes.length} 集`)
-              .fontSize(12.5)
-              .fontColor($r('sys.color.font_secondary'))
-          }
-          .alignItems(HorizontalAlign.Start)
-          .layoutWeight(1)
-          SymbolGlyph($r('sys.symbol.chevron_right'))
-            .fontSize(18)
-            .fontColor([$r('sys.color.font_secondary')])
-        }
-        .width('100%')
-        .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-        .onClick((): void => {
-          this.openCatalog();
-        })
-
-        Divider()
-          .color($r('sys.color.comp_divider'))
-          .margin({ left: 68, right: 16 })
-
-        Row({ space: 12 }) {
-          Column() {
-            SymbolGlyph($r('sys.symbol.forward_end_fill'))
-              .fontSize(20)
-              .fontColor(['#FFF59E0B'])
-          }
-          .width(38)
-          .height(38)
-          .borderRadius(10)
-          .backgroundColor('#1AF59E0B')
-          .justifyContent(FlexAlign.Center)
-          Column({ space: 2 }) {
-            Text('自动下一集')
-              .fontSize(15)
-              .fontWeight(FontWeight.Medium)
-              .fontColor($r('sys.color.font_primary'))
-            Text('当前集播完后自动连播')
-              .fontSize(12.5)
-              .fontColor($r('sys.color.font_secondary'))
-          }
-          .alignItems(HorizontalAlign.Start)
-          .layoutWeight(1)
-          Toggle({ type: ToggleType.Switch, isOn: this.autoAdvance })
-            .onChange((isOn: boolean): void => {
-              this.autoAdvance = isOn;
-            })
-        }
-        .width('100%')
-        .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-      }
-      .width('100%')
-      .borderRadius(18)
-      .backgroundColor($r('sys.color.comp_background_secondary'))
-      .alignItems(HorizontalAlign.Start)
-      .padding({ left: 16, right: 16, top: 12, bottom: 20 })
     }
   }
 
@@ -584,8 +693,8 @@ export struct ListenVideoPage {
       this.CatalogSheetBuilder()
     } else if (this.activeSheet === FqListenVideoSheetKind.rates) {
       this.RatesSheetBuilder()
-    } else if (this.activeSheet === FqListenVideoSheetKind.more) {
-      this.MoreSheetBuilder()
+    } else if (this.activeSheet === FqListenVideoSheetKind.sleep) {
+      this.SleepSheetBuilder()
     }
   }
 
@@ -604,6 +713,9 @@ export struct ListenVideoPage {
   /** 打开半模态：切换内容并置 isShow（使旧延迟关闭失效）。 */
   private openSheet(kind: FqListenVideoSheetKind): void {
     this.sheetCloseToken += 1;
+    if (kind === FqListenVideoSheetKind.rates) {
+      this.speedPreview = -1;
+    }
     this.activeSheet = kind;
     this.sheetVisible = true;
   }
@@ -622,12 +734,18 @@ export struct ListenVideoPage {
   private sheetHeight(): SheetSize | Length {
     switch (this.activeSheet) {
       case FqListenVideoSheetKind.rates:
-        return 380;
-      case FqListenVideoSheetKind.more:
-        return 300;
+        return 320;
+      case FqListenVideoSheetKind.sleep:
+        return 420;
       default:
         return 600;
     }
+  }
+
+  /** 断点倍速高亮判定（当前值取拖动预览优先；半步容差内视为命中该断点）。 */
+  private isCurrentSpeedStep(step: number): boolean {
+    const value: number = this.speedPreview >= 0 ? this.speedPreview : this.player.state.speed;
+    return Math.abs(value - step) < FQ_SPEED_STEP / 2;
   }
 
   /** 加载并起播一集（episodeSource 取流 → mpv open；startSec > 0 偏移起播）。 */
@@ -657,6 +775,11 @@ export struct ListenVideoPage {
         : new Media(source.url));
       // 新集起播：重置「实际播放」guard
       this.hasDisplayed = false;
+      // AVSession/后台长时任务：会话确保 + 元数据（时长随 1s tick 补发）
+      this.mediaDurationSynced = -1;
+      this.media.ensureSession('audio');
+      this.media.startBackground();
+      this.pushMediaMetadata();
     } catch (error) {
       if (token !== this.loadToken) {
         return;
@@ -684,13 +807,22 @@ export struct ListenVideoPage {
     } else {
       this.player.playOrPause();
     }
+    // AVSession 播放态立即同步（意图优先，绕过 mpv 状态异步）
+    this.syncMediaState(!wasPlaying);
     if (wasPlaying) {
       this.saveCurrentProgress();
     }
   }
 
-  /** 播完回调：自动连播下一集；末集/关闭连播停在末尾并落进度。 */
+  /** 播完回调：播完本集定时拦截连播；自动连播下一集；末集/关闭连播停在末尾并落进度。 */
   private onEpisodeEnd(): void {
+    if (this.sleepAtEpisodeEnd) {
+      this.sleepAtEpisodeEnd = false;
+      this.markCurrentWatched();
+      this.saveCurrentProgress();
+      this.syncMediaState(false);
+      return;
+    }
     if (this.autoAdvance && this.index + 1 < this.episodes.length) {
       this.loadEpisode(this.index + 1, -1);
       return;
@@ -699,8 +831,20 @@ export struct ListenVideoPage {
     this.saveCurrentProgress();
   }
 
-  /** 周期保存续播进度（5s 一存，仅播放中）。 */
+  /** 周期任务：AVSession 同步 + 睡眠倒计时 + 5s 周期保存续播进度。 */
   private progressTickFn(): void {
+    this.mediaTick();
+    if (this.sleepDeadline > 0) {
+      const remainSec: number = (this.sleepDeadline - Date.now()) / 1000;
+      this.sleepRemainingSec = Math.max(0, Math.ceil(remainSec));
+      if (remainSec <= 0) {
+        this.sleepDeadline = 0;
+        this.sleepRemainingSec = -1;
+        this.player.pause();
+        this.saveCurrentProgress();
+        this.syncMediaState(false);
+      }
+    }
     this.progressTick += 1;
     if (this.progressTick < 5) {
       return;
@@ -709,6 +853,57 @@ export struct ListenVideoPage {
     if (this.player.state.playing) {
       this.saveCurrentProgress();
     }
+  }
+
+  /** AVSession 元数据推送（剧名/集名/时长/封面）。 */
+  private pushMediaMetadata(): void {
+    const episode: FqChapter | undefined = this.episodes[this.index];
+    this.media.updateMetadata(
+      `${ListenVideoNavParams.contentId}:${episode !== undefined ? episode.itemId : this.index}`,
+      ListenVideoNavParams.title,
+      episode !== undefined ? episode.title : '',
+      this.player.state.duration,
+      ListenVideoNavParams.cover);
+  }
+
+  /** AVSession 播放态立即同步（播放意图优先，绕过 mpv 状态异步）。 */
+  private syncMediaState(playing: boolean): void {
+    this.media.syncPlayback(true, playing, this.player.state.speed, this.player.state.position);
+  }
+
+  /** AVSession 周期同步（1s 节流内含；时长事件到达后补发元数据）。 */
+  private mediaTick(): void {
+    const duration: number = this.player.state.duration;
+    if (duration > 0 && Math.abs(duration - this.mediaDurationSynced) > 0.5) {
+      this.mediaDurationSynced = duration;
+      this.pushMediaMetadata();
+    }
+    this.media.syncPlayback(false, this.player.state.playing, this.player.state.speed,
+      this.player.state.position);
+  }
+
+  /** 定时分钟档（覆盖既有定时）。 */
+  private setSleepMinutes(minutes: number): void {
+    this.sleepAtEpisodeEnd = false;
+    this.sleepMinutesChoice = minutes;
+    this.sleepDeadline = Date.now() + minutes * 60000;
+    this.sleepRemainingSec = minutes * 60;
+  }
+
+  /** 播完本集停止。 */
+  private setSleepAtEpisodeEnd(): void {
+    this.sleepAtEpisodeEnd = true;
+    this.sleepMinutesChoice = 0;
+    this.sleepDeadline = 0;
+    this.sleepRemainingSec = -1;
+  }
+
+  /** 关闭定时。 */
+  private clearSleep(): void {
+    this.sleepDeadline = 0;
+    this.sleepRemainingSec = -1;
+    this.sleepAtEpisodeEnd = false;
+    this.sleepMinutesChoice = 0;
   }
 
   /** 标记当前集已看（实际播放过才标，对齐播放页 markCurrentWatched）。 */

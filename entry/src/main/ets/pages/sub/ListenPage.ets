@@ -814,7 +814,7 @@ export struct ListenPage {
       currentChapterIndex: fqAudioSession.index,
       progressOf: (index: number): string => this.catalogProgressOf(index),
       openToken: this.catalogOpenToken,
-      contentEndExtra: 0,
+      contentEndExtra: appState.bottomRect,
       chapterClick: (index: number): void => {
         this.closeSheet();
         fqAudioSession.openChapter(index,
