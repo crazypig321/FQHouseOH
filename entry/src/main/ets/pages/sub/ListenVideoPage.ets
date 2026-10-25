@@ -26,6 +26,7 @@ import { FqChapter } from '../../model/FqModels';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { FqVideoMedia } from '../../core/FqVideoMedia';
 import { FqWatchedStore, FqWatchedProgress } from '../../core/FqWatchedStore';
+import { FqReadStatsStore } from '../../core/FqReadStatsStore';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { appState } from '../../entryability/AppState';
 import { Player, Media, PlayerConfig } from '@mpv-ohos/mpv-arkts';
@@ -127,6 +128,8 @@ export struct ListenVideoPage {
   private media: FqVideoMedia = new FqVideoMedia('FqListenVideo');
   /** AVSession 元数据已同步时长（切集重置 -1；时长事件到达后补发元数据）。 */
   private mediaDurationSynced: number = -1;
+  /** 视听统计累计秒（播放中每满 15s 落一次按书统计）。 */
+  private statsSec: number = 0;
 
   aboutToAppear(): void {
     this.episodes = ListenVideoNavParams.chapters;
@@ -844,6 +847,16 @@ export struct ListenVideoPage {
     ListenVideoNavParams.resultIndex = this.index;
     ListenVideoNavParams.resultPositionSec = this.player.state.position;
     this.mediaTick();
+    // 播放中累计视听统计（每 15s 落一次按书+全局）
+    if (this.player.state.playing) {
+      this.statsSec += 1;
+      if (this.statsSec >= 15) {
+        this.statsSec = 0;
+        FqReadStatsStore.addBookSeconds(ListenVideoNavParams.contentId, 15);
+      }
+    } else {
+      this.statsSec = 0;
+    }
     if (this.sleepDeadline > 0) {
       const remainSec: number = (this.sleepDeadline - Date.now()) / 1000;
       this.sleepRemainingSec = Math.max(0, Math.ceil(remainSec));
@@ -873,7 +886,7 @@ export struct ListenVideoPage {
       ListenVideoNavParams.title,
       episode !== undefined ? episode.title : '',
       this.player.state.duration,
-      ListenVideoNavParams.cover);
+      this.coverUrl);
   }
 
   /** AVSession 播放态立即同步（播放意图优先，绕过 mpv 状态异步）。 */

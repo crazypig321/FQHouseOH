@@ -26,6 +26,9 @@ export class FqVideoMedia {
   onNext: () => void = (): void => {};
   onSeek: (sec: number) => void = (_sec: number): void => {};
   onStop: () => void = (): void => {};
+  /** 快进/快退（播控中心 video 模板 ±15s 按钮；sec 为秒，未带时长时默认 15）。 */
+  onFastForward: (sec: number) => void = (_sec: number): void => {};
+  onRewind: (sec: number) => void = (_sec: number): void => {};
 
   private readonly sessionTag: string;
   private context: common.UIAbilityContext | null = null;
@@ -73,6 +76,12 @@ export class FqVideoMedia {
         });
         session.on('seek', (time: number): void => {
           this.onSeek(time / 1000);
+        });
+        session.on('fastForward', (time?: number): void => {
+          this.onFastForward(time !== undefined ? time / 1000 : 15);
+        });
+        session.on('rewind', (time?: number): void => {
+          this.onRewind(time !== undefined ? time / 1000 : 15);
         });
         this.sessionValue = session;
         if (this.lastMeta !== null) {

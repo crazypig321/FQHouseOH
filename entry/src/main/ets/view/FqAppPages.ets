@@ -4,11 +4,11 @@
  * - PageMapBuilder：二级路由页（Navigation.navDestination 单 builder 页表）
  */
 
-import { ROUTE_DETAIL, ROUTE_RANK, ROUTE_READER2, ROUTE_SEARCH, ROUTE_AUTHOR, ROUTE_LISTEN, ROUTE_PLAYER, ROUTE_COMIC, ROUTE_LISTEN_VIDEO } from '../model/FqNavModels';
+import { ROUTE_DETAIL, ROUTE_RANK, ROUTE_READER2, ROUTE_SEARCH, ROUTE_AUTHOR, ROUTE_LISTEN, ROUTE_PLAYER, ROUTE_COMIC, ROUTE_LISTEN_VIDEO, ROUTE_SETTINGS, ROUTE_ABOUT, ROUTE_CACHED_BOOKS, ROUTE_CACHED_DRAMAS } from '../model/FqNavModels';
 import { MENU_CONFIG, MenuItem, tabBarSymbolOf } from '../model/FqTabsModels';
 import { HomePage } from '../pages/HomePage';
 import { ShelfPage } from '../pages/ShelfPage';
-import { ProfilePlaceholderPage } from '../pages/ProfilePage';
+import { ProfilePage } from '../pages/ProfilePage';
 import { SearchPage } from '../pages/sub/SearchPage';
 import { DetailPage } from '../pages/sub/DetailPage';
 import { RankPage } from '../pages/sub/RankPage';
@@ -18,6 +18,10 @@ import { ComicPage } from '../pages/sub/ComicPage';
 import { ListenPage } from '../pages/sub/ListenPage';
 import { ListenVideoPage } from '../pages/sub/ListenVideoPage';
 import { PlayerPage } from '../pages/sub/PlayerPage';
+import { SettingsPage } from '../pages/sub/SettingsPage';
+import { AboutPage } from '../pages/sub/AboutPage';
+import { CachedBooksPage } from '../pages/sub/CachedBooksPage';
+import { CachedDramasPage } from '../pages/sub/CachedDramasPage';
 
 const TAB_ACCENT: string = '#FF7A3D';
 
@@ -37,7 +41,7 @@ export function MainTabPagesBuilder() {
       } else if (i === 1) {
         ShelfPage()
       } else {
-        ProfilePlaceholderPage()
+        ProfilePage()
       }
     }
     .tabBar(tabBarOf(item))
@@ -66,5 +70,13 @@ export function PageMapBuilder(name: string) {
     PlayerPage()
   } else if (name === ROUTE_LISTEN_VIDEO) {
     ListenVideoPage()
+  } else if (name === ROUTE_SETTINGS) {
+    SettingsPage()
+  } else if (name === ROUTE_ABOUT) {
+    AboutPage()
+  } else if (name === ROUTE_CACHED_BOOKS) {
+    CachedBooksPage()
+  } else if (name === ROUTE_CACHED_DRAMAS) {
+    CachedDramasPage()
   }
 }

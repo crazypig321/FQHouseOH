@@ -186,8 +186,8 @@ export struct ComicPage {
     this.refreshFooterStatus();
     this.clockTimer = setInterval((): void => {
       this.refreshFooterStatus();
-      // 阅读页驻留累计今日已读时长（30s 心跳）
-      FqReadStatsStore.addSeconds(30);
+      // 阅读页驻留累计今日已读时长（30s 心跳，按书+全局双层）
+      FqReadStatsStore.addBookSeconds(this.bookId, 30);
     }, 30000);
     this.applySystemBar(false);
     this.attachSettingsBus();

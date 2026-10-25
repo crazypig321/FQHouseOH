@@ -828,7 +828,7 @@ export class FqAudioSession {
       this.statPlayingTicks += 1;
       if (this.statPlayingTicks >= 10) {
         this.statPlayingTicks = 0;
-        FqReadStatsStore.addSeconds(5);
+        FqReadStatsStore.addBookSeconds(this.bookId, 5);
       }
     } else {
       this.statPlayingTicks = 0;

@@ -59,6 +59,7 @@ import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { fqAudioSession } from '../../core/FqAudioSession';
 import { FqVideoMedia } from '../../core/FqVideoMedia';
 import { FqWatchedStore, FqWatchedProgress } from '../../core/FqWatchedStore';
+import { FqReadStatsStore } from '../../core/FqReadStatsStore';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { appState } from '../../entryability/AppState';
 
@@ -264,6 +265,8 @@ export struct PlayerPage {
   private media: FqVideoMedia = new FqVideoMedia('FqVideo');
   /** AVSession 元数据已同步时长（切集重置 -1；时长事件到达后补发元数据）。 */
   private mediaDurationSynced: number = -1;
+  /** 视听统计累计秒（播放中每满 15s 落一次按书统计）。 */
+  private statsSec: number = 0;
 
   aboutToAppear(): void {
     this.title = PlayerNavParams.title;
@@ -344,6 +347,12 @@ export struct PlayerPage {
       this.seekDanmaku(sec * 1000);
       this.saveCurrentProgress();
       this.syncMediaState(this.player.state.playing);
+    };
+    this.media.onFastForward = (sec: number): void => {
+      this.skipPosition(sec, true);
+    };
+    this.media.onRewind = (sec: number): void => {
+      this.skipPosition(sec, false);
     };
     if (this.episodes.length === 0) {
       this.loadEpisodes();
@@ -1382,7 +1391,7 @@ export struct PlayerPage {
       this.title,
       episode !== undefined ? episode.title : '',
       this.player.state.duration,
-      PlayerNavParams.cover);
+      this.coverUrl);
   }
 
   /** AVSession 播放态立即同步（播放意图优先，绕过 mpv 状态异步）。 */
@@ -1390,7 +1399,18 @@ export struct PlayerPage {
     this.media.syncPlayback(true, playing, this.player.state.speed, this.player.state.position);
   }
 
-  /** AVSession 周期同步（1s 节流内含；时长事件到达后补发元数据）。 */
+  /** 播控中心快进/快退 ±sec 秒（夹在 [0, 时长]；同步弹幕、续播进度与播放态）。 */
+  private skipPosition(sec: number, forward: boolean): void {
+    const target: number = forward
+      ? Math.min(this.player.state.position + sec, this.player.state.duration)
+      : Math.max(this.player.state.position - sec, 0);
+    this.player.seek(target);
+    this.seekDanmaku(target * 1000);
+    this.saveCurrentProgress();
+    this.syncMediaState(this.player.state.playing);
+  }
+
+  /** AVSession 周期同步（1s 节流内含；时长事件到达后补发元数据）+ 视听统计累计。 */
   private mediaTick(): void {
     const duration: number = this.player.state.duration;
     if (duration > 0 && Math.abs(duration - this.mediaDurationSynced) > 0.5) {
@@ -1399,6 +1419,16 @@ export struct PlayerPage {
     }
     this.media.syncPlayback(false, this.player.state.playing, this.player.state.speed,
       this.player.state.position);
+    // 播放中累计视听统计（每 15s 落一次按书+全局）
+    if (this.player.state.playing) {
+      this.statsSec += 1;
+      if (this.statsSec >= 15) {
+        this.statsSec = 0;
+        FqReadStatsStore.addBookSeconds(PlayerNavParams.contentId, 15);
+      }
+    } else {
+      this.statsSec = 0;
+    }
   }
 
   /** 播放设置行描述（key 决定右侧控件：speed 滑杆 / cache、listen 箭头 / danmaku 开关）。 */
