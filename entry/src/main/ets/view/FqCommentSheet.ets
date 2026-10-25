@@ -6,6 +6,8 @@
  * - FqCommentSheet：评论半模态内容（CommonSheet 壳 + 首拉 Loading / 错误重试 /
  *   空态 / LazyForEach 触底续拉），aboutToAppear 自动拉第一页；
  *   chapterItemId 非空走章评配方（章末聚合桶 + cursor 分页），空走书评；
+ *   cursorLoader 非空走自定义页加载器（播放页集评：弹幕接口 cursor 分页，
+ *   加载器自理 cursor，refresh=true 重拉首页）。
  * - fqCommentSheetHeightVp：统一 Sheet 高度（屏高 82%）。
  */
 
@@ -233,6 +235,9 @@ export struct FqCommentSheet {
   @Param chapterItemId: string = '';
   /** 章评模式：当前章节内容版本（章评接口必传）。 */
   @Param chapterVersion: string = '';
+  /** 自定义页加载器（集评等 cursor 分页场景）：非空时优先于内置书评/章评配方，
+   *  refresh=true 重置拉首页、false 触底续拉，cursor 由加载器自理。 */
+  @Param cursorLoader: ((refresh: boolean) => Promise<FqBookCommentPage>) | undefined = undefined;
   /** 打开令牌：宿主每次打开 +1，组件据此重置分页并重拉（兼容内容重建/复用两种挂载）。 */
   @Param openToken: number = 0;
   @Local loading: boolean = false;
@@ -280,7 +285,8 @@ export struct FqCommentSheet {
   }
 
   /** 拉取评论一页：refresh 重置分页（首开/重试），否则触底续拉；
-   *  章评模式（chapterItemId 非空）走章末聚合桶配方，无章评桶时落空态。 */
+   *  cursorLoader 非空走自定义页加载器，章评模式（chapterItemId 非空）走章末聚合桶
+   *  配方（无章评桶时落空态），其余走书评配方。 */
   private async loadComments(refresh: boolean): Promise<void> {
     if (this.bookId.length === 0) {
       return;
@@ -334,7 +340,10 @@ export struct FqCommentSheet {
     const offset: number = refresh ? 0 : this.nextOffset;
     try {
       let page: FqBookCommentPage;
-      if (chapterMode) {
+      const loader: ((refresh: boolean) => Promise<FqBookCommentPage>) | undefined = this.cursorLoader;
+      if (loader !== undefined) {
+        page = await loader(refresh);
+      } else if (chapterMode) {
         page = await FqBackend.get().chapterComments(this.bookId, this.chapterItemId,
           this.chapterVersion, this.resolvedParaIndex, 20, refresh ? '' : `${offset}`);
       } else {

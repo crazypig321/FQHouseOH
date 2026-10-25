@@ -29,6 +29,7 @@ import {
   FqChapter,
   FqDanmaku,
   FqDanmakuPage,
+  FqEpisodeCommentPage,
   FqEpisodeSource,
   FqEpisodeVariant,
   FqHomePage,
@@ -1663,6 +1664,62 @@ export function fqParseDanmaku(payload: Record<string, Object>): FqDanmakuPage {
     info['has_more'] === true,
     fqStr(info, 'cursor'),
     fqAsInt(extra['next_query_danmaku_list_time'], 0),
+  );
+}
+
+/**
+ * 解析 /api/v1/videos/{vid}/danmaku 载荷为集评一页（同一弹幕接口的全量列表形态，
+ * start_offset_time=0 + cursor 续拉；官方每集评论区即弹幕流）：
+ * data.data_list[i].comment 嵌套（common.content / common.user_info.base_info /
+ * comment.stat），common_list_info.total/has_more/cursor（cursor 为不透明续拉串）。
+ */
+export function fqParseEpisodeComments(payload: Record<string, Object>): FqEpisodeCommentPage {
+  const data: Record<string, Object> | null = fqResolveCommentData(payload);
+  if (data === null) {
+    return new FqEpisodeCommentPage([], 0, false, '');
+  }
+  const comments: FqBookComment[] = [];
+  const rawList: Object[] | null = fqAsArray(data['data_list']);
+  if (rawList !== null) {
+    for (const entry of rawList) {
+      const entryRec: Record<string, Object> | null = fqAsRecord(entry);
+      if (entryRec === null) {
+        continue;
+      }
+      const commentRec: Record<string, Object> = fqAsRecord(entryRec['comment']) ?? fqEmptyRecord();
+      const common: Record<string, Object> = fqAsRecord(commentRec['common']) ?? fqEmptyRecord();
+      const content: Record<string, Object> = fqAsRecord(common['content']) ?? fqEmptyRecord();
+      const text: string = fqStr(content, 'text');
+      const imageList: Record<string, Object> | null = fqAsRecord(content['image_data_list']);
+      const imageUrls: string[] = imageList !== null
+        ? fqCommentImageUrls(imageList['image_data']) : [];
+      if (text.length === 0 && imageUrls.length === 0) {
+        continue;
+      }
+      const userInfo: Record<string, Object> = fqAsRecord(common['user_info']) ?? fqEmptyRecord();
+      const baseInfo: Record<string, Object> = fqAsRecord(userInfo['base_info']) ?? fqEmptyRecord();
+      const stat: Record<string, Object> = fqAsRecord(commentRec['stat']) ?? fqEmptyRecord();
+      comments.push(new FqBookComment(
+        fqStr(commentRec, 'comment_id'),
+        text,
+        imageUrls,
+        0,
+        fqAsInt(stat['digg_count'], 0),
+        fqAsInt(stat['reply_count'], 0),
+        0,
+        fqCommentTimestampMs(common['create_timestamp']),
+        fqStr(baseInfo, 'user_name'),
+        fqStr(baseInfo, 'user_avatar'),
+        false,
+      ));
+    }
+  }
+  const info: Record<string, Object> = fqAsRecord(data['common_list_info']) ?? fqEmptyRecord();
+  return new FqEpisodeCommentPage(
+    comments,
+    fqAsInt(info['total'], 0),
+    info['has_more'] === true,
+    fqStr(info, 'cursor'),
   );
 }
 

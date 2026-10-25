@@ -14,7 +14,7 @@ import fq, { FqBridgeResponse } from 'libfqapi_napi.so';
 import { FqDeployer } from './FqDeployer';
 import { FqKeyStore } from './FqKeyStore';
 import {   fqParseAuthorProfile, fqParseBookComments, fqParseBookDetail, fqParseChapterCommentPage, fqParseChapterIdeaCounts, fqParseChapterIdeaMeta, fqParseChapterSummaries,
-  fqParseDanmaku, fqParseDirectory, fqParseEpisodeSource, fqParseHomepage, fqParseParagraphComments, fqParseRankBoard, fqParseRankCatalog,
+  fqParseDanmaku, fqParseDirectory, fqParseEpisodeComments, fqParseEpisodeSource, fqParseHomepage, fqParseParagraphComments, fqParseRankBoard, fqParseRankCatalog,
   fqParseSearchTabs, fqParseSeriesFeed, fqParseSeriesRelateBook, fqLegacyChapterText, fqNormalizeChapterText, fqParseNovelChapter,
   fqIsValidMediaId, fqParseMediaIdResult,
   fqParseChapterImages } from './FqParser';
@@ -35,6 +35,7 @@ import {
   FqChapter,
   FqChapterIdeaMeta,
   FqDanmakuPage,
+  FqEpisodeCommentPage,
   FqEpisodeSource,
   FqEpisodeVariant,
   FqHomePage,
@@ -348,6 +349,21 @@ export class FqBackend {
     const payload: Record<string, Object> =
       await this.getJson(`/api/v1/videos/${encodeURIComponent(vid)}/danmaku`, query);
     return fqParseDanmaku(payload);
+  }
+
+  /**
+   * 短剧当前集评论一页（/api/v1/videos/{vid}/danmaku 全量列表形态：
+   * start_offset_time=0 + cursor 续拉，官方每集评论区即弹幕流）；
+   * vid 为当前集 id（group_id），seriesId 进 series_id，cursor 为不透明续拉串。
+   */
+  public async episodeComments(vid: string, seriesId: string,
+    cursor: string): Promise<FqEpisodeCommentPage> {
+    const query: string = `series_id=${encodeURIComponent(seriesId)}`
+      + '&start_offset_time=0&playlet_item_duration=0'
+      + (cursor.length > 0 ? `&cursor=${encodeURIComponent(cursor)}` : '');
+    const payload: Record<string, Object> =
+      await this.getJson(`/api/v1/videos/${encodeURIComponent(vid)}/danmaku`, query);
+    return fqParseEpisodeComments(payload);
   }
 
   /**

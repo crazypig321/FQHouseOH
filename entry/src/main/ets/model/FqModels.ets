@@ -707,6 +707,25 @@ export class FqBookCommentPage {
   }
 }
 
+/**
+ * 集评一页（/api/v1/videos/{vid}/danmaku 全量列表形态：官方每集评论区即弹幕流，
+ * start_offset_time=0 + cursor 续拉；对齐 fqapp playletDanmaku）。
+ * cursor 为不透明续拉串（不能用数字 offset 表达）。
+ */
+export class FqEpisodeCommentPage {
+  readonly comments: FqBookComment[];
+  readonly totalCount: number;
+  readonly hasMore: boolean;
+  readonly cursor: string;
+
+  constructor(comments: FqBookComment[], totalCount: number, hasMore: boolean, cursor: string) {
+    this.comments = comments;
+    this.totalCount = totalCount;
+    this.hasMore = hasMore;
+    this.cursor = cursor;
+  }
+}
+
 /** 章末章评聚合信息（/api/v1/chapters/{itemId}/reviews 的最大段键桶，官方章评入口）。 */
 export class FqChapterIdeaMeta {
   /** 章末章评段键（ideas data.data 最大键，如 10000；-1 无章评）。 */
