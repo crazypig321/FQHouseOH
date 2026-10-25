@@ -246,12 +246,15 @@ export struct ListenVideoPage {
     }) {
       Scroll(this.scroller) {
         Column() {
-          this.CoverCard()
-          this.StatusLine()
+          Column(){
+            this.CoverCard()
+            this.StatusLine()
+          }.padding({ bottom: '10%' })
+          Blank()
           this.ProgressRow()
           this.TransportRow()
         }
-        .constraintSize({ maxWidth: 560 })
+        .justifyContent(FlexAlign.Start)
         .width('100%')
         .padding({
           top: appState.topRect + FQ_LISTEN_TOP_INSET,
@@ -279,7 +282,7 @@ export struct ListenVideoPage {
       Stack({ alignContent: Alignment.Bottom }) {
         Image(this.coverUrl)
           .width('100%')
-          .height('100%')
+          .aspectRatio(1)
           .objectFit(ImageFit.Cover)
           .autoResize(true)
           .backgroundColor($r('sys.color.comp_background_secondary'))
@@ -328,7 +331,7 @@ export struct ListenVideoPage {
         .alignItems(HorizontalAlign.Start)
       }
       .width('100%')
-      .aspectRatio(0.75)
+      .aspectRatio(1)
       .constraintSize({ maxWidth: 293 })
       .borderRadius(10)
       .clip(true)
@@ -759,6 +762,10 @@ export struct ListenVideoPage {
     this.saveCurrentProgress();
     const token: number = ++this.loadToken;
     this.index = index;
+    // 退出回传实时同步：pop 转场中本页 aboutToDisappear 晚于播放页 onShown 消费，
+    // 静态参数须持续保持最新（集,位置），切集即时写、位置由 1s tick 每秒刷新
+    ListenVideoNavParams.resultIndex = this.index;
+    ListenVideoNavParams.resultPositionSec = startSec > 0 ? startSec : 0;
     this.loading = true;
     this.errorMsg = '';
     this.seekPreview = -1;
@@ -831,8 +838,11 @@ export struct ListenVideoPage {
     this.saveCurrentProgress();
   }
 
-  /** 周期任务：AVSession 同步 + 睡眠倒计时 + 5s 周期保存续播进度。 */
+  /** 周期任务：退出回传刷新 + AVSession 同步 + 睡眠倒计时 + 5s 周期保存续播进度。 */
   private progressTickFn(): void {
+    // 退出回传（集,位置）每秒刷新：播放页 onShown 在本页销毁前即消费
+    ListenVideoNavParams.resultIndex = this.index;
+    ListenVideoNavParams.resultPositionSec = this.player.state.position;
     this.mediaTick();
     if (this.sleepDeadline > 0) {
       const remainSec: number = (this.sleepDeadline - Date.now()) / 1000;

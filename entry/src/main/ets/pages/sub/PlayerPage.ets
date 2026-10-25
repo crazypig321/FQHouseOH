@@ -255,8 +255,8 @@ export struct PlayerPage {
   private danmakuTimer: number = 0;
   /** 听视频页返回待消费（onShown 时按听到的集/位置续看）。 */
   private listenReturnPending: boolean = false;
-  /** 进听视频页时的播放态（返回后恢复播放）。 */
-  private wasPlayingBeforeListen: boolean = false;
+  /** 听视频返回切集标记：听视频页已持久化最新（集,位置），loadEpisode 跳过旧集续播回写与新集 0 位置覆盖。 */
+  private listenReturnSwitch: boolean = false;
   /** 屏幕尺寸（vp，布局定位用）。 */
   private screenW: number = 0;
   private screenH: number = 0;
@@ -1314,7 +1314,6 @@ export struct PlayerPage {
     if (this.sidePanel.length > 0) {
       this.closeSidePanel();
     }
-    this.wasPlayingBeforeListen = this.player.state.playing;
     this.player.pause();
     this.saveCurrentProgress();
     // 让路听视频页：释放本页 AVSession/后台任务（通知栏由听视频会话接管）
@@ -1334,8 +1333,9 @@ export struct PlayerPage {
 
   /**
    * NavDestination 显示回调（含从听视频页返回）：按听到的集/位置续看
-   * （fqapp sync_progress_strategy_listen_mode）——跨集走切集链路偏移起播，
-   * 同集 seek 到听到位置，进页时的播放态恢复播放。
+   * （fqapp sync_progress_strategy_listen_mode）并自动续播——
+   * 跨集走切集链路偏移起播（open 自动播），同集 seek 到听到位置后 play；
+   * 续播记录由听视频页退出时写入，这里跳过 loadEpisode 的旧集回写。
    */
   private onNavShown(): void {
     if (!this.listenReturnPending) {
@@ -1351,23 +1351,21 @@ export struct PlayerPage {
     }
     if (listenIndex !== this.index && listenIndex < this.episodes.length) {
       this.pendingResumeSec = listenPos > 0 ? listenPos : -1;
+      // 听视频页已把（新集,听到位置）写入 FqWatchedStore：
+      // loadEpisode 跳过旧集续播回写与新集 0 位置覆盖，起播位置由 Media start 对齐
+      this.listenReturnSwitch = true;
       this.loadEpisode(listenIndex);
-      if (this.wasPlayingBeforeListen) {
-        this.player.play();
-      }
       return;
     }
     if (listenPos > 0) {
       this.player.seek(listenPos);
     }
-    if (this.wasPlayingBeforeListen) {
-      this.player.play();
-      // openListenMode 已释放本页 AVSession/后台任务：恢复播放后重建
-      this.media.ensureSession('video');
-      this.media.startBackground();
-      this.pushMediaMetadata();
-      this.syncMediaState(true);
-    }
+    // 退出听视频自动续播 + 重建 openListenMode 让路的 AVSession/后台任务
+    this.player.play();
+    this.media.ensureSession('video');
+    this.media.startBackground();
+    this.pushMediaMetadata();
+    this.syncMediaState(true);
   }
 
   /** AVSession 元数据推送（剧名/集名/时长/封面）。 */
@@ -1858,11 +1856,17 @@ export struct PlayerPage {
     if (episode === undefined) {
       return;
     }
-    // 离开的旧集：实际播放过才标已看/存续播进度（this.index 尚未切换）
+    // 离开的旧集：实际播放过才标已看/存续播进度（this.index 尚未切换）；
+    // 听视频返回切集例外——续播记录以听视频页写入的（新集,听到位置）为准，
+    // 跳过旧集回写，避免用进听视频前的旧位置覆盖
     const wasDisplayed: boolean = this.hasDisplayed;
     const switched: boolean = index !== this.index;
+    const keepListenProgress: boolean = this.listenReturnSwitch;
+    this.listenReturnSwitch = false;
     this.markCurrentWatched();
-    this.saveCurrentProgress();
+    if (!keepListenProgress) {
+      this.saveCurrentProgress();
+    }
     const token: number = ++this.loadToken;
     // 续播位置（仅进页首开那一次）：Media start 偏移起播
     let startSec: number = -1;
@@ -1898,9 +1902,10 @@ export struct PlayerPage {
       this.media.ensureSession('video');
       this.media.startBackground();
       this.pushMediaMetadata();
-      if (wasDisplayed && switched) {
+      if (wasDisplayed && switched && !keepListenProgress) {
         // 切集：续播记录立即指向新集（位置 0；周期/暂停/退出再精化），
         // 避免切集后立刻退出仍续播回旧集；同集重试不覆盖原位置
+        // （听视频返回切集跳过：新集起播位置由听到的位置决定，不重置为 0）
         this.progress = new FqWatchedProgress(episode.itemId, 0, 0);
         FqWatchedStore.saveProgress(PlayerNavParams.contentId, this.progress);
       }
