@@ -4,8 +4,9 @@
  * 引擎渲染（FqPagination）：
  * - 分页：章节段落（fqNormalizeChapterText 产物）+ measure 断行 → 页片段/行，
  *   逐行独立 Text 渲染（断行零分歧）；
- * - 翻页：FqReaderFlip 三层 Stack（覆盖模式 = 仿真翻页过渡实现 / 平移横滑），
- *   拖动跟手 + 松手阈值判定，邻章预载后跨章无缝衔接；
+ * - 翻页：0 仿真 / 1 横滑（FqReaderFlip 三层 Stack，拖动跟手 + 松手阈值判定，
+ *   邻章预载后跨章无缝衔接）/ 2 上下滚动（整章段落连续纵向滚动，眉页/眉脚
+ *   固定不随滚，滚到章尾自动追加下一章段落）；
  * - 段评：段尾气泡（引擎装页时记录命中区，翻页容器触区代理点击）→ 段评半模态
  *   （气泡计数 /api/v1/chapters/{itemId}/reviews；评论体 /api/v1/books/{bookId}/reviews
  *   段评配方 server_channel=38，item_version 取目录 version）；
@@ -17,7 +18,7 @@
  */
 
 import { common, ConfigurationConstant } from '@kit.AbilityKit';
-import { curves, display, window } from '@kit.ArkUI';
+import { curves, display, promptAction, window } from '@kit.ArkUI';
 import { fileIo } from '@kit.CoreFileKit';
 import { batteryInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -51,6 +52,7 @@ import {
 } from '../../reader/ReaderTypes';
 import { FqPageCanvas } from '../../reader/FqPageCanvas';
 import { FqReaderFlip } from '../../reader/FqReaderFlip';
+import { drawing } from '@kit.ArkGraphics2D';
 import { FqMeasureFn, FqPaginationEngine, fqPageIndexForPosition } from '../../reader/FqPagination';
 
 /** 眉页「第N章」前缀匹配（N 支持数字与中文数字，量词：章节回卷集话篇）。 */
@@ -61,6 +63,74 @@ const FQ_HEADER_PREFIX_STRIP_RE: RegExp =
   new RegExp('^第[0-9零一二三四五六七八九十百千万]+[章节回卷集话篇]\\s*');
 
 /** 目录懒加载数据源与目录 Sheet UI 已抽至 view/FqCatalogSheet.ets（与详情页共用）。 */
+
+/** 上下滚动模式单段条目（所属章下标 + 章内段下标 + 章分页结果）。 */
+export class FqVerticalTextItem {
+  readonly chapterIndex: number;
+  readonly paraIndex: number;
+  readonly layout: FqChapterLayout;
+
+  constructor(chapterIndex: number, paraIndex: number, layout: FqChapterLayout) {
+    this.chapterIndex = chapterIndex;
+    this.paraIndex = paraIndex;
+    this.layout = layout;
+  }
+}
+
+/** 上下滚动模式懒加载数据源（List + LazyForEach；追加逐项通知、重置整体通知）。 */
+export class FqVerticalPageSource implements IDataSource {
+  private items: FqVerticalTextItem[] = [];
+  private listeners: DataChangeListener[] = [];
+
+  totalCount(): number {
+    return this.items.length;
+  }
+
+  getData(index: number): FqVerticalTextItem {
+    return this.items[index];
+  }
+
+  /** 定位（章,段）在源中的下标（-1 未命中；边听边读跟读定位用）。 */
+  indexOf(chapterIndex: number, paraIndex: number): number {
+    for (let index: number = 0; index < this.items.length; index++) {
+      const item: FqVerticalTextItem = this.items[index];
+      if (item.chapterIndex === chapterIndex && item.paraIndex === paraIndex) {
+        return index;
+      }
+    }
+    return -1;
+  }
+
+  registerDataChangeListener(listener: DataChangeListener): void {
+    if (this.listeners.indexOf(listener) === -1) {
+      this.listeners.push(listener);
+    }
+  }
+
+  unregisterDataChangeListener(listener: DataChangeListener): void {
+    const index: number = this.listeners.indexOf(listener);
+    if (index >= 0) {
+      this.listeners.splice(index, 1);
+    }
+  }
+
+  /** 追加单条（onDataAdd 逐项通知，滚动位置稳定）。 */
+  append(item: FqVerticalTextItem): void {
+    this.items.push(item);
+    const index: number = this.items.length - 1;
+    for (const listener of this.listeners) {
+      listener.onDataAdd(index);
+    }
+  }
+
+  /** 清空重建（onDataReloaded 整体通知）。 */
+  reset(): void {
+    this.items = [];
+    for (const listener of this.listeners) {
+      listener.onDataReloaded();
+    }
+  }
+}
 
 @ComponentV2
 export struct ReaderPage {
@@ -128,6 +198,16 @@ export struct ReaderPage {
   private chapterEstimate: Map<number, number> = new Map();
   /** 已读章节集合（翻过章末/下一章时标记读毕，目录进度用；目录跳转不标记）。 */
   private readChapters: Set<number> = new Set();
+  /** 上下滚动模式：章尾追加中。 */
+  @Local verticalAppending: boolean = false;
+  private verticalSource: FqVerticalPageSource = new FqVerticalPageSource();
+  private verticalScroller: Scroller = new Scroller();
+  /** 上下滚动已到最后一章提示去重。 */
+  private verticalEndedToastOnce: boolean = false;
+  /** 上下滚动定位中（源重建到 scrollToIndex 生效前忽略滚动回调，防进度被首屏覆写）。 */
+  private verticalPositioning: boolean = false;
+  /** 上下滚动首可见段（章内段下标，重排保位用）。 */
+  private verticalCurPara: number = 0;
 
   aboutToAppear(): void {
     this.bookId = ReaderNavParams.id;
@@ -207,32 +287,41 @@ export struct ReaderPage {
       backPressed: (): boolean => this.handleBackPressed(),
     }) {
       Stack() {
-        FqReaderFlip({
-          flipMode: this.flipIndex,
-          hasPrev: this.flipHasPrev(),
-          hasNext: this.flipHasNext(),
-          headerZoneVp: this.cachedMetrics.headerZoneVp,
-          footerZoneVp: this.cachedMetrics.footerZoneVp,
-          pageBgColor: this.theme().background,
-          pageRenderer: (slot: number): void => {
-            this.pageOf(slot);
-          },
-          headerRenderer: (slot: number): void => {
-            this.slotHeader(slot);
-          },
-          footerRenderer: (slot: number): void => {
-            this.slotFooter(slot);
-          },
-          onTurn: (isNext: boolean): void => {
-            this.onFlipTurn(isNext);
-          },
-          onMenuTap: (): void => {
-            this.toggleMenu();
-          },
-        })
-        .bindSheet(this.commentSheetVisible, this.CommentSheet(), FqSheetOptions((): void => {
-          this.onCommentSheetClose();
-        }, fqCommentSheetHeightVp()))
+        if (this.flipIndex === 2) {
+          this.VerticalBody()
+        } else {
+          FqReaderFlip({
+            flipMode: this.flipIndex,
+            hasPrev: this.flipHasPrev(),
+            hasNext: this.flipHasNext(),
+            headerZoneVp: this.cachedMetrics.headerZoneVp,
+            footerZoneVp: this.cachedMetrics.footerZoneVp,
+            pageBgColor: this.theme().background,
+            pageRenderer: (slot: number): void => {
+              this.pageOf(slot);
+            },
+            headerRenderer: (slot: number): void => {
+              this.slotHeader(slot);
+            },
+            footerRenderer: (slot: number): void => {
+              this.slotFooter(slot);
+            },
+            onTurn: (isNext: boolean): void => {
+              this.onFlipTurn(isNext);
+            },
+            onMenuTap: (): void => {
+              this.toggleMenu();
+            },
+          })
+        }
+
+        // 章评半模态宿主（0 尺寸稳定节点，与翻页模式无关）
+        Column()
+          .width(0)
+          .height(0)
+          .bindSheet(this.commentSheetVisible, this.CommentSheet(), FqSheetOptions((): void => {
+            this.onCommentSheetClose();
+          }, fqCommentSheetHeightVp()))
 
         // 段评半模态宿主（0 尺寸稳定节点）
         Column()
@@ -508,6 +597,238 @@ export struct ReaderPage {
     FqReaderStore.saveProgress(this.bookId, this.chapterIndex, `p2:${page.startPara}:${page.startChar}`);
   }
 
+  // ---------------------------------------------------------------------------
+  // 上下滚动模式（整章段落连续纵向滚动，眉页/眉脚固定不随滚）
+  // ---------------------------------------------------------------------------
+
+  /** 上下滚动模式正文：整章段落连续纵向滚动；眉页/眉脚固定上下两端的条目渲染对齐 FqPageCanvas 段落样式）。 */
+  @Builder
+  private VerticalBody() {
+    Column() {
+      Column() {
+        this.slotHeader(0)
+      }
+      .width('100%')
+      .height(this.cachedMetrics.headerZoneVp)
+      .padding({ bottom: 10 })
+      .justifyContent(FlexAlign.End)
+
+      List({ scroller: this.verticalScroller }) {
+        LazyForEach(this.verticalSource, (item: FqVerticalTextItem) => {
+          ListItem() {
+            Column() {
+              Text() {
+                Span(item.layout.paragraphs[item.paraIndex])
+                if (this.verticalBubbleCount(item) > 0) {
+                  ImageSpan($r('app.media.ellipsis_message'))
+                    .width(this.cachedMetrics.bubbleIconFp)
+                    .height(this.cachedMetrics.bubbleIconFp)
+                    .supportSvg2(true)
+                    .colorFilter(drawing.ColorFilter.createBlendModeColorFilter(
+                      drawing.Tool.makeColorFromResourceColor($r('sys.color.icon_tertiary')),
+                      drawing.BlendMode.SRC_IN))
+                    .onClick(() => {
+                      this.openParaSheet(item.paraIndex);
+                    })
+                  Span(` ${this.verticalBubbleCount(item)}`)
+                    .fontSize(this.cachedMetrics.bubbleTextFp)
+                    .fontColor($r('sys.color.icon_tertiary'))
+                    .fontFamily(this.readerFontFamily)
+                }
+              }
+              .fontSize(item.paraIndex === 0 ? this.cachedMetrics.titleFontFp
+                : this.cachedMetrics.fontSizeFp)
+              .fontWeight(item.paraIndex === 0 ? FontWeight.Bold : FontWeight.Normal)
+              .lineHeight(item.paraIndex === 0 ? this.cachedMetrics.titleLineFp
+                : this.cachedMetrics.lineHeightFp)
+              .fontColor(this.theme().fontColor)
+              .fontFamily(this.readerFontFamily)
+              .textAlign(TextAlign.JUSTIFY)
+              .width('100%')
+              .margin({
+                top: item.paraIndex === 0 ? this.cachedMetrics.titleTopVp
+                  : this.cachedMetrics.paraGapVp,
+                bottom: item.paraIndex === 0 ? this.cachedMetrics.titleBottomVp : 0,
+              })
+            }
+            .width('100%')
+            .padding({
+              left: this.cachedMetrics.sidePaddingVp,
+              right: this.cachedMetrics.sidePaddingVp,
+            })
+            .backgroundColor(this.verticalParaHighlighted(item)
+              ? (this.theme().night ? '#33FF7A3D' : '#1AFF7A3D') : 'transparent')
+            .borderRadius(this.verticalParaHighlighted(item) ? 6 : 0)
+          }
+        }, (item: FqVerticalTextItem): string => `${item.chapterIndex}_${item.paraIndex}`)
+      }
+      .width('100%')
+      .layoutWeight(1)
+      .scrollBar(BarState.Off)
+      .cachedCount(8)
+      .onScrollIndex((first: number, last: number): void => {
+        this.onVerticalScrollIndex(first);
+      })
+      .onReachEnd((): void => {
+        this.onVerticalReachEnd();
+      })
+      .onClick((): void => {
+        this.toggleMenu();
+      })
+
+      if (this.verticalAppending) {
+        Row({ space: 8 }) {
+          CommonLoading({ sizeValue: 18, loadColor: this.theme().fontColor })
+          Text('正在加载下一章')
+            .fontSize(12)
+            .fontColor(this.theme().fontColor)
+            .opacity(0.6)
+        }
+        .width('100%')
+        .height(44)
+        .justifyContent(FlexAlign.Center)
+      }
+
+      Column() {
+        this.slotFooter(0)
+      }
+      .width('100%')
+      .height(this.cachedMetrics.footerZoneVp)
+      .padding({ top: 10 })
+      .justifyContent(FlexAlign.Start)
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor(this.theme().background)
+  }
+
+  /** 上下滚动段评气泡计数（本地书全 0）。 */
+  private verticalBubbleCount(item: FqVerticalTextItem): number {
+    if (item.paraIndex < item.layout.commentCounts.length) {
+      return item.layout.commentCounts[item.paraIndex];
+    }
+    return 0;
+  }
+
+  /** 上下滚动跟读段落高亮（仅当前章生效，邻章不串高亮）。 */
+  private verticalParaHighlighted(item: FqVerticalTextItem): boolean {
+    return this.listenAlong && this.highlightParaIndex >= 0
+      && item.chapterIndex === this.chapterIndex && item.paraIndex === this.highlightParaIndex;
+  }
+
+  /** 上下滚动定位段：'p2:段:字符' 优先（段级精确回原），回退当前页首段。 */
+  private verticalStartPara(domPos: string): number {
+    const layout: FqChapterLayout | null = this.curLayout;
+    if (layout !== null && domPos.startsWith('p2:')) {
+      const parts: string[] = domPos.substring(3).split(':');
+      if (parts.length === 2) {
+        const para: number = parseInt(parts[0], 10);
+        if (!Number.isNaN(para) && para >= 0 && para < layout.paragraphs.length) {
+          return para;
+        }
+      }
+    }
+    if (layout !== null) {
+      const page: FqReaderPageData | undefined = layout.pages[this.pageIndex];
+      if (page !== undefined && page.startPara >= 0) {
+        return page.startPara;
+      }
+    }
+    return 0;
+  }
+
+  /** 上下滚动模式重建：当前章段落入源并定位（startPara 章内段下标）。 */
+  private buildVertical(startPara: number): void {
+    const layout: FqChapterLayout | null = this.curLayout;
+    this.verticalSource.reset();
+    this.verticalEndedToastOnce = false;
+    if (layout === null || layout.paragraphs.length === 0) {
+      return;
+    }
+    this.verticalPositioning = true;
+    for (let i: number = 0; i < layout.paragraphs.length; i++) {
+      this.verticalSource.append(new FqVerticalTextItem(layout.chapterIndex, i, layout));
+    }
+    const target: number = Math.min(Math.max(0, startPara), layout.paragraphs.length - 1);
+    this.verticalCurPara = target;
+    setTimeout((): void => {
+      this.verticalPositioning = false;
+      if (this.verticalSource.totalCount() > target) {
+        this.verticalScroller.scrollToIndex(target, false);
+      }
+    }, 50);
+  }
+
+  /** 滚动位置 → 阅读进度（首可见段所属章/段，驱动目录定位与进度持久化）。 */
+  private onVerticalScrollIndex(first: number): void {
+    if (this.verticalPositioning || first < 0 || first >= this.verticalSource.totalCount()) {
+      return;
+    }
+    const item: FqVerticalTextItem = this.verticalSource.getData(first);
+    if (item.chapterIndex !== this.chapterIndex) {
+      if (item.chapterIndex > this.chapterIndex) {
+        // 滚进后章 = 前章已读毕
+        this.markChapterRead(this.chapterIndex);
+      }
+      this.curLayout = item.layout;
+      this.chapterIndex = item.chapterIndex;
+      this.prevLayout = null;
+      this.nextLayout = null;
+      this.resetListenState();
+    }
+    this.verticalCurPara = item.paraIndex;
+    const pageIdx: number = fqPageIndexForPosition(item.layout.pages, item.paraIndex, 0);
+    if (pageIdx !== this.pageIndex) {
+      this.pageIndex = pageIdx;
+      this.afterPageShown();
+    }
+    // 段级精确进度（覆盖页级保存）
+    FqReaderStore.saveProgress(this.bookId, this.chapterIndex, `p2:${item.paraIndex}:0`);
+  }
+
+  /** 滚到章尾：追加下一章分页；无下章提示一次。 */
+  private onVerticalReachEnd(): void {
+    if (this.verticalAppending || this.loadingState) {
+      return;
+    }
+    const nextIndex: number = this.chapterIndex + 1;
+    if (nextIndex >= this.totalChapters) {
+      if (!this.verticalEndedToastOnce) {
+        this.verticalEndedToastOnce = true;
+        promptAction.showToast({ message: '已经是最后一章了', duration: 1500 });
+      }
+      return;
+    }
+    this.appendVerticalChapter(nextIndex);
+  }
+
+  private async appendVerticalChapter(index: number): Promise<void> {
+    const token: number = this.loadToken;
+    this.verticalAppending = true;
+    try {
+      const text: string = await this.fetchChapterText(index);
+      if (token !== this.loadToken || text.trim().length === 0) {
+        return;
+      }
+      const paragraphs: string[] = this.buildParagraphs(text);
+      const counts: number[] = await this.fetchIdeaCounts(index, paragraphs.length);
+      if (token !== this.loadToken) {
+        return;
+      }
+      const layout: FqChapterLayout = this.layoutChapter(index, paragraphs, counts);
+      for (let i: number = 0; i < layout.paragraphs.length; i++) {
+        this.verticalSource.append(new FqVerticalTextItem(index, i, layout));
+      }
+      this.chapterPages.set(index, layout.pages.length);
+      FqReaderStore.saveChapterPages(this.bookId, this.chapterPages);
+      this.refreshChapterEstimate(index);
+    } catch (error) {
+      promptAction.showToast({ message: fqErrorMessage(error), duration: 1500 });
+    } finally {
+      this.verticalAppending = false;
+    }
+  }
+
   /** 排版几何（装页 px = 实际渲染 px：vp 元素 × densityPixels，fp 文本 × scaledDensity）。 */
   private buildMetrics(): FqReaderLayoutMetrics {
     const displayData: display.Display = display.getDefaultDisplaySync();
@@ -718,8 +1039,11 @@ export struct ReaderPage {
     return 0;
   }
 
-  /** 邻章预载（后台，token 保护；先 next 后 prev）。 */
+  /** 邻章预载（后台，token 保护；先 next 后 prev；上下滚动模式按需追加不预载）。 */
   private async preloadNeighbors(token: number): Promise<void> {
+    if (this.flipIndex === 2) {
+      return;
+    }
     const nextIndex: number = this.chapterIndex + 1;
     if (nextIndex < this.totalChapters) {
       try {
@@ -780,6 +1104,10 @@ export struct ReaderPage {
     this.prevLayout = null;
     this.nextLayout = null;
     this.saveProgressNow();
+    if (this.flipIndex === 2) {
+      this.buildVertical(this.verticalCurPara);
+      return;
+    }
     this.preloadNeighbors(this.loadToken);
   }
 
@@ -946,6 +1274,12 @@ export struct ReaderPage {
     if (pageIdx !== this.pageIndex) {
       this.pageIndex = pageIdx;
       this.shownPageOffset = pageIdx;
+      if (this.flipIndex === 2) {
+        const target: number = this.verticalSource.indexOf(this.chapterIndex, para);
+        if (target >= 0) {
+          this.verticalScroller.scrollToIndex(target, true);
+        }
+      }
       this.afterPageShown();
     }
   }
@@ -1517,11 +1851,28 @@ export struct ReaderPage {
         fqReaderSettingsBus.fontIndex = this.fontIndex;
       },
       changeFlip: (index: number): void => {
-        this.flipIndex = index;
-        this.applySettingChange(false);
+        this.changeFlip(index);
         fqReaderSettingsBus.flipIndex = this.flipIndex;
       },
     };
+  }
+
+  /** 切换翻页方式：0 仿真 / 1 横滑 / 2 上下滚动（进出上下滚动时迁移阅读位置）。 */
+  private changeFlip(index: number): void {
+    if (index === this.flipIndex || index < 0 || index > 2) {
+      return;
+    }
+    const prevMode: number = this.flipIndex;
+    this.flipIndex = index;
+    this.applySettingChange(false);
+    if (index === 2) {
+      // 仿真/横滑 → 上下：当前章段落入源并定位
+      this.buildVertical(this.verticalStartPara(''));
+    } else if (prevMode === 2) {
+      // 上下 → 仿真/横滑：当前章/页已由滚动回调同步，还原邻章预载分页态
+      this.shownPageOffset = this.pageIndex;
+      this.preloadNeighbors(this.loadToken);
+    }
   }
 
   private changeFontSize(delta: number): void {
@@ -1682,6 +2033,9 @@ export struct ReaderPage {
       this.resetListenState();
       if (this.listenAlong) {
         this.syncListenHighlight();
+      }
+      if (this.flipIndex === 2) {
+        this.buildVertical(this.verticalStartPara(domPos));
       }
       this.preloadNeighbors(token);
     } catch (error) {

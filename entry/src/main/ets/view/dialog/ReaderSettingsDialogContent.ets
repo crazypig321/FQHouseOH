@@ -25,7 +25,7 @@ export const FQ_READER_THEMES: FqReaderTheme[] = [
 ];
 
 /** 翻页模式标签（下标与 flipIndex 对应）。 */
-export const FQ_READER_FLIP_LABELS: string[] = ['仿真', '横滑'];
+export const FQ_READER_FLIP_LABELS: string[] = ['仿真', '横滑', '上下'];
 
 /** 生效阅读主题（-1 跟随系统：深色→夜间，浅色→纸白；供弹窗宿主计算跟随色卡预览）。 */
 export function fqEffectiveReaderTheme(themeIndex: number, systemDark: boolean): FqReaderTheme {

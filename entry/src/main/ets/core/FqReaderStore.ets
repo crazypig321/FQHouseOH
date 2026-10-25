@@ -32,7 +32,7 @@ export class FqReaderSettings {
   lineHeight: number = 1.9;
   /** -1 跟随系统深浅色 / 0 纸白 / 1 米黄 / 2 夜间。 */
   themeIndex: number = -1;
-  /** 0 仿真翻页 / 1 横滑翻页。 */
+  /** 0 仿真翻页 / 1 横滑翻页 / 2 上下滚动。 */
   flipIndex: number = 0;
   /** 漫画翻页方式：0 仿真 / 1 覆盖 / 2 上下滚动。 */
   comicFlipIndex: number = 0;
@@ -99,7 +99,7 @@ export class FqReaderStore {
       }
       const flipIndex: Object | undefined = rec['flipIndex'];
       if (typeof flipIndex === 'number') {
-        FqReaderStore.settings.flipIndex = Math.min(1, Math.max(0, Math.trunc(flipIndex)));
+        FqReaderStore.settings.flipIndex = Math.min(2, Math.max(0, Math.trunc(flipIndex)));
       }
       const comicFlipIndex: Object | undefined = rec['comicFlipIndex'];
       if (typeof comicFlipIndex === 'number') {
@@ -128,7 +128,7 @@ export class FqReaderStore {
     FqReaderStore.settings.fontSize = fqClampFontSize(fontSize);
     FqReaderStore.settings.lineHeight = fqClampLineHeight(lineHeight);
     FqReaderStore.settings.themeIndex = Math.min(2, Math.max(-1, Math.trunc(themeIndex)));
-    FqReaderStore.settings.flipIndex = Math.min(1, Math.max(0, Math.trunc(flipIndex)));
+    FqReaderStore.settings.flipIndex = Math.min(2, Math.max(0, Math.trunc(flipIndex)));
     FqReaderStore.settings.fontIndex = Math.max(0, Math.trunc(fontIndex));
     FqReaderStore.persistSettings();
   }
