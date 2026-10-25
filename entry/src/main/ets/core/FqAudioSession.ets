@@ -486,6 +486,9 @@ export class FqAudioSession {
     }
     this.completed = options.completed;
     this.loading = true;
+    // 切章先停旧音频：取流/装载期间旧章立即静下来，新章就绪后起播
+    await this.engine.pause().catch((): void => {
+    });
     this.errorMessage = '';
     this.excerpt = '';
     this.subtitleTrack = fqEmptySubtitleTrack();

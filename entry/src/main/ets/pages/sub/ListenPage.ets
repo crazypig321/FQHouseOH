@@ -91,8 +91,17 @@ export struct ListenPage {
 
   aboutToAppear(): void {
     FqShelfStore.init(getContext(this));
+    // 详情目录点击定位章节（-1 跟随会话/历史）：会话就绪后跳播对应章并复位参数
+    const startChapter: number = ListenNavParams.chapterIndex;
     fqAudioSession.open(ListenNavParams.bookId, ListenNavParams.tab,
-      ListenNavParams.title, ListenNavParams.cover, ListenNavParams.chapters);
+      ListenNavParams.title, ListenNavParams.cover, ListenNavParams.chapters)
+      .then((): void => {
+        ListenNavParams.chapterIndex = -1;
+        if (startChapter >= 0 && startChapter < fqAudioSession.chapters.length) {
+          fqAudioSession.openChapter(startChapter,
+            new FqChapterOpenOptions(fqAudioSession.toneId, 0, true, false));
+        }
+      });
   }
 
   /** 当前书是否在书架（依赖 bookId 与刷新令牌）。 */

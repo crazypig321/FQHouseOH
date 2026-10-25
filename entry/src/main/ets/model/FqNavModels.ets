@@ -59,6 +59,8 @@ export class ListenNavParams {
   static cover: string = '';
   /** 详情页预载章节（小说传其自身章节，TTS 按章生成音频；为空则听书页自行拉目录）。 */
   static chapters: FqChapter[] = [];
+  /** 定位章节下标（详情页目录点击进页播对应章）；-1 跟随会话/历史（消费后由听书页复位）。 */
+  static chapterIndex: number = -1;
 }
 
 /** 播放页跳转参数（短剧/漫剧，mpv 播放器）。 */
@@ -71,8 +73,8 @@ export class PlayerNavParams {
   static cover: string = '';
   /** 详情页预载剧集目录；为空则播放页自行拉目录。 */
   static chapters: FqChapter[] = [];
-  /** 起播集下标。 */
-  static startIndex: number = 0;
+  /** 起播集下标；-1 未指定（走续播/从头），>=0 显式起播集（详情目录点击，跳过续播）。 */
+  static startIndex: number = -1;
   /** 剧集状态（FqBookDetail.creationStatus：0 完结 / 1 连载中；-1 未知）。 */
   static creationStatus: number = -1;
   /** 剧简介（FqBookDetail.abstractText，选集面板头部小字展示）。 */

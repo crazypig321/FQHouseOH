@@ -527,7 +527,7 @@ export struct DetailPage {
           .width('100%')
           .alignItems(HorizontalAlign.Start)
           .padding(14)
-          .onClick(() => this.openReader(index))
+          .onClick(() => this.openCatalogChapter(index))
         }
       }, (chapter: FqChapter): string => chapter.itemId)
       if (this.previewChapters().length === 0) {
@@ -635,7 +635,7 @@ export struct DetailPage {
     return '书评';
   }
 
-  /** 目录半模态：公共 FqCatalogSheet（无阅读位置，点击章节直接进阅读页对应章）。 */
+  /** 目录半模态：公共 FqCatalogSheet（无阅读位置，点击章节按类型分流进对应页）。 */
   @Builder
   private CatalogSheetBuilder() {
     FqCatalogSheet({
@@ -645,9 +645,23 @@ export struct DetailPage {
       openToken: this.catalogOpenToken,
       chapterClick: (index: number): void => {
         this.catalogSheetVisible = false;
-        this.openReader(index);
+        this.openCatalogChapter(index);
       },
     })
+  }
+
+  /** 目录点击按类型分流：小说/漫画 → 阅读页对应章；短剧/漫剧 → 播放页播对应集；
+   *  听书 → 听书页播对应章。 */
+  private openCatalogChapter(index: number): void {
+    if (this.itemKind === 'video' || this.itemKind === 'manju') {
+      this.openPlayer(index);
+      return;
+    }
+    if (this.itemKind === 'audio') {
+      this.openListen(index);
+      return;
+    }
+    this.openReader(index);
   }
 
   private openCatalogSheet(): void {
@@ -807,8 +821,9 @@ export struct DetailPage {
     this.comingSoon(key);
   }
 
-  /** 短剧/漫剧进播放页：目录预载，单集结果无目录时回退自身 id 为唯一一集。 */
-  private openPlayer(): void {
+  /** 短剧/漫剧进播放页：目录预载，单集结果无目录时回退自身 id 为唯一一集；
+   *  chapterIndex 显式起播集（目录点击播对应集），-1 未指定走续播。 */
+  private openPlayer(chapterIndex: number = -1): void {
     let episodes: FqChapter[] = this.chapters;
     if (episodes.length === 0) {
       episodes = [new FqChapter(this.itemId, this.detail.title, '')];
@@ -818,18 +833,20 @@ export struct DetailPage {
     PlayerNavParams.title = this.detail.title;
     PlayerNavParams.cover = this.itemCover.length > 0 ? this.itemCover : this.detail.cover;
     PlayerNavParams.chapters = episodes;
-    PlayerNavParams.startIndex = 0;
+    PlayerNavParams.startIndex = chapterIndex;
     PlayerNavParams.creationStatus = this.detail.creationStatus;
     PlayerNavParams.intro = this.detail.abstractText;
     NavPathUtils.push(ROUTE_PLAYER);
   }
 
-  private openListen(): void {
+  /** 听书页跳转；chapterIndex 显式定位章节（目录点击播对应章），-1 跟随会话/历史。 */
+  private openListen(chapterIndex: number = -1): void {
     ListenNavParams.bookId = this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId;
     ListenNavParams.tab = fqKindToTab(this.itemKind);
     ListenNavParams.title = this.detail.title;
     ListenNavParams.cover = this.itemCover.length > 0 ? this.itemCover : this.detail.cover;
     ListenNavParams.chapters = this.chapters;
+    ListenNavParams.chapterIndex = chapterIndex;
     NavPathUtils.push(ROUTE_LISTEN);
   }
 
