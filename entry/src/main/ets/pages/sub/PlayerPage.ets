@@ -26,6 +26,10 @@
  * - 播完自动连播；aboutToDisappear 销毁 mpv 实例并恢复沉浸前的系统 UI。
  * - 长按屏幕右侧 2 倍速快进（官方 jq3 长按带外分支 / fqapp _startBoost）：
  *   按住期间 2x、松开恢复原倍速，画面中央「2倍速快进中」指示。
+ * - 全屏半屏竖滑调节：左半屏上下滑调窗口亮度（setWindowBrightness 0-100%，
+ *   离页恢复跟随系统）、右半屏上下滑调播放音量（mpv 软音量 0-100，
+ *   无需权限；系统 AudioManager.setVolume 已废弃不走）；滑动中中央
+ *   浮层显示档位图标与百分比，松手后短驻自隐。
  * - 全屏防误触锁（官方 fullscreen/d.K6）：横屏片源左侧竖直居中（圆形
  *   半透明黑底），竖屏片源最底部左边（无底色）；锁定后上下工具不可呼出、
  *   画面操作与返回手势全吞（禁止手势退出全屏），仅锁按钮可唤出
@@ -68,6 +72,12 @@ const FQ_BOOST_SPEED: number = 2.0;
 const FQ_LONG_PRESS_MS: number = 500;
 /** 锁定按钮自动隐藏延时（官方 d.G6() 5s）。 */
 const FQ_LOCK_HIDE_MS: number = 5000;
+/** 全屏半屏竖滑调节浮层松手后驻留时长（ms）。 */
+const FQ_ADJUST_HIDE_MS: number = 600;
+/** 全屏竖滑灵敏度：滑过 1.2 倍屏高走完全量程（0-100）。 */
+const FQ_ADJUST_FULL_SWIPE: number = 1.2;
+/** 首次调节亮度起始百分比（窗口亮度只写不读，无从取当前值）。 */
+const FQ_ADJUST_INIT_PERCENT: number = 50;
 /** 横屏全屏右侧边栏宽（选集/播放设置共用）。 */
 const FQ_FS_SIDE_PANEL_W: number = 300;
 /** 侧边栏背景（近黑高不透明，压得住浅色画面又不糊死视频）。 */
@@ -174,6 +184,18 @@ export struct PlayerPage {
   @Local lockVisible: boolean = false;
   /** 锁定按钮自动隐藏定时器（0 无任务）。 */
   private lockHideTimer: number = 0;
+  /** 全屏手势调节目标（'' 无 | 'brightness' 亮度 | 'volume' 音量）。 */
+  @Local gestureAdjust: string = '';
+  /** 手势调节当前百分比（0-100，浮层显示）。 */
+  @Local gestureAdjustPercent: number = 0;
+  /** 手势调节起始值（0-100）。 */
+  private adjustStartValue: number = 0;
+  /** 手势调节起始纵坐标（vp，globalY）。 */
+  private adjustStartY: number = 0;
+  /** 手势调节浮层隐藏定时器（0 无任务）。 */
+  private adjustHideTimer: number = 0;
+  /** 窗口亮度百分比（-1 未手动调过；首次滑动从 50 起，离页恢复跟随系统）。 */
+  private brightnessPercent: number = -1;
   /** 侧边栏选集滚动器（打开时滚到当前集竖直居中）。 */
   private sideScroller: Scroller = new Scroller();
   /** 侧边栏选集定位定时器（0 无任务）。 */
@@ -246,6 +268,7 @@ export struct PlayerPage {
     this.cancelFsHide();
     this.cancelCenterHide();
     this.cancelLockHide();
+    this.cancelAdjustHide();
     this.cancelSideLocate();
     if (this.danmakuTimer !== 0) {
       clearInterval(this.danmakuTimer);
@@ -253,6 +276,15 @@ export struct PlayerPage {
     }
     if (this.fullScreen) {
       this.applyImmersive(false);
+    }
+    // 手动调过窗口亮度则恢复跟随系统（-1），避免亮度残留影响其他页面
+    if (this.brightnessPercent >= 0) {
+      this.brightnessPercent = -1;
+      window.getLastWindow(getContext(this)).then((win: window.Window): void => {
+        win.setWindowBrightness(-1);
+      }).catch((): void => {
+        // 恢复失败交由系统窗口销毁兜底
+      });
     }
     this.player.destroy();
   }
@@ -306,6 +338,24 @@ export struct PlayerPage {
               .backgroundColor('rgba(0,0,0,0.55)')
           }
 
+          // 全屏半屏竖滑调节浮层（左亮度/右音量：档位图标 + 百分比，松手短驻自隐；
+          // 固定宽度，避免 0%→100% 文字变长时背景宽度跳动）
+          if (this.gestureAdjust.length > 0) {
+            Column({ space: 6 }) {
+              SymbolGlyph(this.adjustIconRes())
+                .fontSize(26)
+                .fontColor([Color.White])
+              Text(`${Math.round(this.gestureAdjustPercent)}%`)
+                .fontSize(16)
+                .fontColor(Color.White)
+            }
+            .width(84)
+            .alignItems(HorizontalAlign.Center)
+            .padding({ top: 14, bottom: 14 })
+            .borderRadius(18)
+            .backgroundColor('rgba(0,0,0,0.55)')
+          }
+
           if (this.errorMsg.length > 0) {
             this.ErrorOverlay()
           }
@@ -316,6 +366,7 @@ export struct PlayerPage {
         .backgroundColor(Color.Black)
         // 全屏：单击切控件显隐、双击切播放/暂停（互斥识别，双击优先）；
         // 长按屏幕右侧 2 倍速快进（锁定态全部吞掉，只唤出锁按钮）；
+        // 全屏竖滑：左半屏调亮度、右半屏调音量（滑过 1.2 倍屏高走完全量程）；
         // 非全屏：单击切播放（保持原样）
         .gesture(
           GestureGroup(GestureMode.Exclusive,
@@ -342,6 +393,19 @@ export struct PlayerPage {
               })
               .onActionCancel((): void => {
                 this.endSpeedBoost();
+              }),
+            PanGesture({ fingers: 1, direction: PanDirection.Vertical })
+              .onActionStart((event?: GestureEvent): void => {
+                this.onAdjustPanStart(event);
+              })
+              .onActionUpdate((event?: GestureEvent): void => {
+                this.onAdjustPanUpdate(event);
+              })
+              .onActionEnd((): void => {
+                this.onAdjustPanEnd();
+              })
+              .onActionCancel((): void => {
+                this.onAdjustPanEnd();
               })
           )
         )
@@ -1696,6 +1760,106 @@ export struct PlayerPage {
     this.speedBoost = false;
     this.player.setSpeed(this.boostRestoreSpeed > 0 ? this.boostRestoreSpeed : 1.0);
     this.boostRestoreSpeed = -1;
+  }
+
+  /**
+   * 全屏半屏竖滑调节起始：左半屏 → 窗口亮度（-1 未调过从 50 起）、
+   * 右半屏 → 播放器软音量（mpv state.volume，钳制 0-100）；
+   * 锁定态只唤出锁按钮；半模态/侧边栏打开时不响应；非全屏不响应。
+   */
+  private onAdjustPanStart(event?: GestureEvent): void {
+    if (this.fsLocked) {
+      this.refreshLockVisibility();
+      return;
+    }
+    if (!this.fullScreen || this.sheetVisible || this.settingsVisible || this.commentSheetVisible ||
+      this.sidePanel.length > 0 || event === undefined || event.fingerList.length === 0) {
+      return;
+    }
+    this.cancelAdjustHide();
+    // 左右半屏判定（globalX 与 display 宽同取当前方向、统一换算 vp，同长按快进）
+    const displayData: display.Display = display.getDefaultDisplaySync();
+    const density: number = displayData.densityPixels > 0 ? displayData.densityPixels : 1;
+    const widthVp: number = displayData.width / density;
+    if (event.fingerList[0].globalX < widthVp / 2) {
+      this.gestureAdjust = 'brightness';
+      this.adjustStartValue = this.brightnessPercent >= 0 ? this.brightnessPercent : FQ_ADJUST_INIT_PERCENT;
+    } else {
+      this.gestureAdjust = 'volume';
+      const current: number = this.player.state.volume;
+      this.adjustStartValue = current > 100 ? 100 : (current < 0 ? 0 : current);
+    }
+    this.adjustStartY = event.fingerList[0].globalY;
+    this.gestureAdjustPercent = this.adjustStartValue;
+  }
+
+  /**
+   * 竖滑过程：上滑增大、下滑减小（滑过 FQ_ADJUST_FULL_SWIPE 倍屏高走完全量程）；
+   * 亮度即时写窗口 setWindowBrightness（最小 0.01 防全黑），音量即时写 mpv setVolume。
+   */
+  private onAdjustPanUpdate(event?: GestureEvent): void {
+    if (this.gestureAdjust.length === 0 || event === undefined || event.fingerList.length === 0) {
+      return;
+    }
+    const displayData: display.Display = display.getDefaultDisplaySync();
+    const density: number = displayData.densityPixels > 0 ? displayData.densityPixels : 1;
+    const heightVp: number = displayData.height / density;
+    const dy: number = this.adjustStartY - event.fingerList[0].globalY;
+    const delta: number = heightVp > 0 ? dy / (heightVp * FQ_ADJUST_FULL_SWIPE) * 100 : 0;
+    let value: number = this.adjustStartValue + delta;
+    if (value < 0) {
+      value = 0;
+    }
+    if (value > 100) {
+      value = 100;
+    }
+    this.gestureAdjustPercent = value;
+    if (this.gestureAdjust === 'brightness') {
+      this.brightnessPercent = value;
+      window.getLastWindow(getContext(this)).then((win: window.Window): void => {
+        win.setWindowBrightness(Math.max(0.01, value / 100));
+      }).catch((): void => {
+        // 亮度设置失败保持当前亮度，不影响调节浮层展示
+      });
+    } else {
+      this.player.setVolume(value);
+    }
+  }
+
+  /** 竖滑结束/取消：浮层短驻后自隐（连续滑动重新开始则保持显示）。 */
+  private onAdjustPanEnd(): void {
+    if (this.gestureAdjust.length === 0) {
+      return;
+    }
+    this.cancelAdjustHide();
+    this.adjustHideTimer = setTimeout((): void => {
+      this.adjustHideTimer = 0;
+      this.gestureAdjust = '';
+    }, FQ_ADJUST_HIDE_MS);
+  }
+
+  private cancelAdjustHide(): void {
+    if (this.adjustHideTimer !== 0) {
+      clearTimeout(this.adjustHideTimer);
+      this.adjustHideTimer = 0;
+    }
+  }
+
+  /** 调节浮层图标：亮度按高低切太阳档位、音量按档位切喇叭波纹（0 静音斜杠）。 */
+  private adjustIconRes(): Resource {
+    if (this.gestureAdjust === 'brightness') {
+      return this.gestureAdjustPercent < 25 ? $r('sys.symbol.sun_min') : $r('sys.symbol.sun_max');
+    }
+    if (this.gestureAdjustPercent <= 0) {
+      return $r('sys.symbol.speaker_slash_fill');
+    }
+    if (this.gestureAdjustPercent < 34) {
+      return $r('sys.symbol.speaker_wave_1_fill');
+    }
+    if (this.gestureAdjustPercent < 67) {
+      return $r('sys.symbol.speaker_wave_2_fill');
+    }
+    return $r('sys.symbol.speaker_wave_3_fill');
   }
 
   /** 锁定态任意触摸：唤出锁按钮并重新计 5s 自隐（官方 d.G6()）。 */
