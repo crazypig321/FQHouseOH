@@ -44,6 +44,10 @@ export class AppState {
 
   /** 主 Ability 上下文（EntryAbility 注入：退出应用 terminateSelf 用）。 */
   public abilityContext: common.UIAbilityContext | null = null;
+
+  /** 切后台主动暂停回调列表（关闭后台播放时 EntryAbility onBackground 调用；
+   * 播放页 aboutToAppear 注册、aboutToDisappear 注销）。 */
+  public backgroundPauseHandlers: Array<() => void> = [];
 }
 
 export const appState: AppState = new AppState();

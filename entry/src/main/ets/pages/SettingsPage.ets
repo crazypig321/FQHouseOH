@@ -1,7 +1,7 @@
 /**
  * 应用设置页（主 Tab 第四页 + 我的-应用设置入口共用，@Param isTab 区分）：
  * - 外观：深色模式（跟随系统/浅色/深色，FqMenu 档位直选，即时生效）；
- * - 播放：后台播放保活开关（听书/看视频息屏续播总闸）；
+ * - 播放：开启后台播放开关（开=支持后台播放，关=无法后台播放）；
  * - 数据：章节缓存/剧集缓存入口、清空历史（确认弹窗，清浏览+收听+观看+统计）；
  * - 服务：本地后端地址展示；
  * - 关于：关于我们入口。
@@ -278,7 +278,7 @@ export struct SettingsPage {
     })
   }
 
-  /** 后台播放保活行（Toggle 开关）。 */
+  /** 开启后台播放行（Toggle 开关：开=支持后台播放，关=无法后台播放）。 */
   @Builder
   private BackgroundAudioRow() {
     Row({ space: 12 }) {
@@ -293,11 +293,11 @@ export struct SettingsPage {
       .backgroundColor(FqColorUtils.withOpacity('#FF10B981', 0.12))
 
       Column({ space: 3 }) {
-        Text('后台播放保活')
+        Text('开启后台播放')
           .fontSize(14.5)
           .fontWeight(FontWeight.Medium)
           .fontColor($r('sys.color.font_primary'))
-        Text('息屏或切后台时继续听书、播放')
+        Text('开启后支持后台播放，支持播控中心和实况窗显示')
           .fontSize(11.5)
           .fontColor($r('sys.color.font_secondary'))
       }

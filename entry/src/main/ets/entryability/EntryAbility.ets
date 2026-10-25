@@ -178,5 +178,13 @@ export default class EntryAbility extends UIAbility {
   onBackground(): void {
     // Ability has back to background
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onBackground');
+    // 关闭后台播放时：切后台主动暂停全部播放（状态/图标一致，回前台一键续播）
+    if (!FqAppSettingsStore.isBackgroundAudio()) {
+      fqAudioSession.pause();
+      const handlers: Array<() => void> = appState.backgroundPauseHandlers.slice();
+      for (const handler of handlers) {
+        handler();
+      }
+    }
   }
 }

@@ -128,6 +128,8 @@ export struct ListenVideoPage {
   private media: FqVideoMedia = new FqVideoMedia('FqListenVideo');
   /** AVSession 元数据已同步时长（切集重置 -1；时长事件到达后补发元数据）。 */
   private mediaDurationSynced: number = -1;
+  /** 切后台主动暂停回调（关闭后台播放时 EntryAbility onBackground 调用）。 */
+  private backgroundPause: () => void = (): void => {};
   /** 视听统计累计秒（播放中每满 15s 落一次按书统计）。 */
   private statsSec: number = 0;
 
@@ -196,12 +198,23 @@ export struct ListenVideoPage {
       this.saveCurrentProgress();
       this.syncMediaState(this.player.state.playing);
     };
+    // 关闭后台播放：切后台主动暂停（图标/状态一致，回前台一键续播）
+    this.backgroundPause = (): void => {
+      this.player.pause();
+      this.saveCurrentProgress();
+      this.syncMediaState(false);
+    };
+    appState.backgroundPauseHandlers.push(this.backgroundPause);
     const startSec: number = ListenVideoNavParams.startPositionSec > 0
       ? ListenVideoNavParams.startPositionSec : -1;
     this.loadEpisode(start, startSec);
   }
 
   aboutToDisappear(): void {
+    const bgHandlerIdx: number = appState.backgroundPauseHandlers.indexOf(this.backgroundPause);
+    if (bgHandlerIdx >= 0) {
+      appState.backgroundPauseHandlers.splice(bgHandlerIdx, 1);
+    }
     this.loadToken += 1;
     if (this.tickTimer !== 0) {
       clearInterval(this.tickTimer);

@@ -113,6 +113,8 @@ export class FqAudioSession {
   private statPlayingTicks: number = 0;
   private avSessionValue: avSession.AVSession | null = null;
   private bgStarted: boolean = false;
+  /** AVSession 后台播放模式最近一次已应用值（undefined=未应用，会话新建后重设）。 */
+  private bgPlayModeApplied: boolean | undefined = undefined;
   private coverPixel: image.PixelMap | null = null;
   private coverPixelUrl: string = '';
 
@@ -276,14 +278,7 @@ export class FqAudioSession {
     this.engine.release().catch((): void => {
     });
     this.stopBackgroundTask();
-    const session: avSession.AVSession | null = this.avSessionValue;
-    this.avSessionValue = null;
-    if (session !== null) {
-      session.deactivate().then((): Promise<void> => session.destroy()).catch((): void => {
-      });
-    }
-    this.coverPixel = null;
-    this.coverPixelUrl = '';
+    this.teardownAvSession();
   }
 
   // ---------------------------------------------------------------------------
@@ -800,6 +795,16 @@ export class FqAudioSession {
     if (!this.hasSession) {
       return;
     }
+    // 设置开关：后台播放关闭时停长时任务 + 销毁 AVSession（无法后台播放，无胶囊/播控中心通知）
+    if (!FqAppSettingsStore.isBackgroundAudio()) {
+      if (this.bgStarted) {
+        this.stopBackgroundTask();
+      }
+      this.teardownAvSession();
+    } else {
+      this.ensureAvSession();
+      this.syncBackgroundPlayMode();
+    }
     const now: number = Date.now();
     if (this.engine.isPlaying) {
       this.positionSec = this.engine.positionSec;
@@ -915,6 +920,10 @@ export class FqAudioSession {
     if (this.avSessionValue !== null || this.context === null) {
       return;
     }
+    // 设置开关：后台播放关闭时不创建 AVSession（无胶囊/播控中心通知）
+    if (!FqAppSettingsStore.isBackgroundAudio()) {
+      return;
+    }
     const context: common.UIAbilityContext = this.context;
     avSession.createAVSession(context, 'FqListen', 'audio')
       .then((session: avSession.AVSession): Promise<void> => {
@@ -939,11 +948,26 @@ export class FqAudioSession {
         this.avSessionValue = session;
         this.syncAvMetadata();
         this.syncAvPlaybackState(true);
+        this.bgPlayModeApplied = undefined;
+        this.syncBackgroundPlayMode();
         return session.activate();
       })
       .catch((error: BusinessError): void => {
         hilog.warn(0x0001, TAG, `AVSession create failed: ${error.message}`);
       });
+  }
+
+  /** 销毁 AVSession（关闭后台播放/close：无胶囊/播控中心通知）。 */
+  private teardownAvSession(): void {
+    const session: avSession.AVSession | null = this.avSessionValue;
+    this.avSessionValue = null;
+    this.bgPlayModeApplied = undefined;
+    if (session !== null) {
+      session.deactivate().then((): Promise<void> => session.destroy()).catch((): void => {
+      });
+    }
+    this.coverPixel = null;
+    this.coverPixelUrl = '';
   }
 
   private syncAvMetadata(): void {
@@ -1030,8 +1054,25 @@ export class FqAudioSession {
       });
   }
 
+  /** AVSession 后台播放模式随设置开关：开=允许后台播放，关=禁止（后台被系统停止）。 */
+  private syncBackgroundPlayMode(): void {
+    const session: avSession.AVSession | null = this.avSessionValue;
+    if (session === null) {
+      return;
+    }
+    const enabled: boolean = FqAppSettingsStore.isBackgroundAudio();
+    if (this.bgPlayModeApplied === enabled) {
+      return;
+    }
+    this.bgPlayModeApplied = enabled;
+    session.setBackgroundPlayMode(enabled
+      ? avSession.BackgroundPlayMode.ENABLE_BACKGROUND_PLAY
+      : avSession.BackgroundPlayMode.DISABLE_BACKGROUND_PLAY).catch((): void => {
+      });
+  }
+
   private startBackgroundTask(): void {
-    // 设置总闸：关闭后台播放保活后不再申请长时任务
+    // 设置开关：关闭后台播放后不再申请长时任务（无法后台播放）
     if (!FqAppSettingsStore.isBackgroundAudio()) {
       return;
     }
