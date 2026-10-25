@@ -50,6 +50,7 @@ import { CommonNav } from '../../view/CommonNav';
 import { FqSheetOptions } from '../../view/CommonSheet';
 import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/FqCommentSheet';
 import { FqDanmakuView } from '../../view/FqDanmakuView';
+import { FqSettingRow } from '../../view/FqSettingRow';
 import { FqStoryPanel } from '../../view/FqStoryPanel';
 import { DetailNavParams, PlayerNavParams, ROUTE_DETAIL } from '../../model/FqNavModels';
 import { FqChapter, FqDanmaku, FqDanmakuPage, FqEpisodeSource, FqSeriesRelateBook, fqKindToTab } from '../../model/FqModels';
@@ -64,8 +65,10 @@ const FQ_STORY_BOTTOM_INSET: number = 163;
 const FQ_STORY_ORANGE: string = '#FFFA6725';
 /** 全屏控件自动隐藏延时（官方横屏 3s，_scheduleHide）。 */
 const FQ_FS_HIDE_MS: number = 3000;
-/** 倍速档位（官方 speed 菜单）。 */
-const FQ_SPEEDS: number[] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+/** 播放设置倍速滑杆范围与步进（0.5-2.0、步进 0.25）。 */
+const FQ_SPEED_MIN: number = 0.5;
+const FQ_SPEED_MAX: number = 2.0;
+const FQ_SPEED_STEP: number = 0.25;
 /** 长按临时快进倍速（官方长按 setRate(2)）。 */
 const FQ_BOOST_SPEED: number = 2.0;
 /** 长按识别时长（ms）。 */
@@ -82,6 +85,19 @@ const FQ_ADJUST_INIT_PERCENT: number = 50;
 const FQ_FS_SIDE_PANEL_W: number = 300;
 /** 侧边栏背景（近黑高不透明，压得住浅色画面又不糊死视频）。 */
 const FQ_FS_SIDE_BG: string = '#F0141414';
+
+/** 播放设置行描述（key 决定右侧控件：speed 滑杆 / cache、listen 箭头 / danmaku 开关）。 */
+class FqSettingItem {
+  readonly key: string;
+  readonly title: string;
+  readonly icon: Resource;
+
+  constructor(key: string, title: string, icon: Resource) {
+    this.key = key;
+    this.title = title;
+    this.icon = icon;
+  }
+}
 
 /** mm:ss 播放时间。 */
 function fqFormatClock(seconds: number): string {
@@ -121,8 +137,10 @@ export struct PlayerPage {
   @Local errorMsg: string = '';
   /** 选集半模态（打开时视频区撑满全屏、chrome 隐藏）。 */
   @Local sheetVisible: boolean = false;
-  /** 播放设置半模态（右上角菜单呼出：倍速档位；公共框架、不触发前景模糊）。 */
+  /** 播放设置半模态（右上角菜单呼出：倍速滑杆/离线缓存/听视频/弹幕开关，公共 FqSettingRow）。 */
   @Local settingsVisible: boolean = false;
+  /** 倍速滑杆拖动预览值（-1 未拖动；拖动中文案实时跟随，松手提交 mpv）。 */
+  @Local speedPreview: number = -1;
   /** 剧评半模态（评论按钮呼出：公共 FqCommentSheet，同详情页全部评论）。 */
   @Local commentSheetVisible: boolean = false;
   /** 全屏沉浸态（「全屏观看」进入；横屏片源锁横屏 + 隐藏系统栏）。 */
@@ -523,7 +541,7 @@ export struct PlayerPage {
           .padding({ left: 4 })
 
         Row() {
-          SymbolGlyph($r('sys.symbol.ellipsis_circle'))
+          SymbolGlyph($r('sys.symbol.dot_grid_2x2'))
             .fontSize(22)
             .fontColor([Color.White])
         }
@@ -830,7 +848,7 @@ export struct PlayerPage {
           .padding({ left: 6, right: 4 })
 
         Row() {
-          SymbolGlyph($r('sys.symbol.ellipsis_circle'))
+          SymbolGlyph($r('sys.symbol.dot_grid_2x2'))
             .fontSize(22)
             .fontColor([Color.White])
         }
@@ -1071,7 +1089,9 @@ export struct PlayerPage {
     })
   }
 
-  /** 播放设置半模态（右上角菜单）：白底面板，倍速档位 3×2 格子，当前档位橙底高亮。 */
+  /** 播放设置半模态（右上角菜单）：公共 FqSettingRow 设置行 List（与横屏侧边栏共用）——
+   * 倍速（Slider 滑杆 0.5-2.0 步进 0.25，拖动实时预览、松手生效）、
+   * 离线缓存/听视频（跳转箭头，即将上线占位）、弹幕开关（Switch 开关）。 */
   @Builder
   private SettingsSheetBuilder() {
     Column() {
@@ -1087,48 +1107,110 @@ export struct PlayerPage {
       .padding({ left: 20, right: 16 })
       .alignItems(VerticalAlign.Center)
 
-      Row() {
-        Text('倍速')
-          .fontSize(14)
-          .fontWeight(FontWeight.Bold)
-      }
-      .width('100%')
-      .height(36)
-      .padding({ left: 20 })
-      .alignItems(VerticalAlign.Center)
-
-      Grid() {
-        ForEach(FQ_SPEEDS, (speed: number) => {
-          GridItem() {
-            Column() {
-              Text(`${speed}×`)
-                .fontSize(15)
-                .fontWeight(this.isCurrentSpeed(speed) ? FontWeight.Bold : FontWeight.Normal)
-                .fontColor(this.isCurrentSpeed(speed) ? '#FFFA6725' : $r('sys.color.font'))
-            }
-            .width('100%')
-            .height('100%')
-            .justifyContent(FlexAlign.Center)
-            .alignItems(HorizontalAlign.Center)
-            .borderRadius(8)
-            .backgroundColor(this.isCurrentSpeed(speed) ? '#1AFA6725' : $r('sys.color.comp_background_list_card'))
-            .onClick((): void => {
-              this.player.setSpeed(speed);
-              this.closeSettings();
-            })
-          }
-        }, (speed: number) => `${speed}`)
-      }
-      .columnsTemplate('1fr 1fr 1fr')
-      .rowsTemplate('1fr 1fr')
-      .columnsGap(8)
-      .rowsGap(8)
-      .padding({ left: 16, right: 16, top: 4, bottom: 16 + appState.bottomRect })
-      .width('100%')
-      .layoutWeight(1)
+      this.SettingRows(false)
     }
     .width('100%')
     .height('100%')
+  }
+
+  /** 播放设置行 List（半模态浅色/横屏侧边栏深色共用，dark 控制前景与分隔线配色）：
+   * ForEach 渲染公共 FqSettingRow——倍速（滑杆）/离线缓存、听视频（箭头占位）/弹幕开关。 */
+  @Builder
+  private SettingRows(dark: boolean) {
+    List() {
+      ForEach(this.settingItems(), (item: FqSettingItem) => {
+        ListItem() {
+          FqSettingRow({
+            icon: item.icon,
+            title: item.title,
+            tintColor: dark ? Color.White : $r('sys.color.font'),
+            click: (): void => {
+              this.onSettingRowClick(item.key);
+            }
+          }) {
+            if (item.key === 'speed') {
+              // 倍速：滑杆切换（拖动实时预览文案，松手提交 mpv）
+              Row({ space: 10 }) {
+                Text(this.speedLabel())
+                  .fontSize(14)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(FQ_STORY_ORANGE)
+                  .width(48)
+                Slider({
+                  value: this.player.state.speed,
+                  min: FQ_SPEED_MIN,
+                  max: FQ_SPEED_MAX,
+                  step: FQ_SPEED_STEP,
+                  style: SliderStyle.OutSet
+                })
+                  .width(150)
+                  .blockColor(FQ_STORY_ORANGE)
+                  .selectedColor('#33FA6725')
+                  .trackColor(dark ? '#33FFFFFF' : $r('sys.color.comp_background_tertiary'))
+                  .onChange((value: number, mode: SliderChangeMode): void => {
+                    if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) {
+                      this.player.setSpeed(value);
+                    } else {
+                      this.speedPreview = value;
+                    }
+                  })
+              }
+              .alignItems(VerticalAlign.Center)
+            } else if (item.key === 'danmaku') {
+              // 弹幕开关：Switch（同全屏控制条 toggleDanmaku，含官方 Toast 文案）
+              Toggle({ type: ToggleType.Switch, isOn: this.danmakuOn })
+                .selectedColor(FQ_STORY_ORANGE)
+                .onChange((isOn: boolean): void => {
+                  if (isOn !== this.danmakuOn) {
+                    this.toggleDanmaku();
+                  }
+                })
+            } else {
+              // 离线缓存/听视频：跳转箭头（功能即将上线占位）
+              SymbolGlyph($r('sys.symbol.chevron_right'))
+                .fontSize(16)
+                .fontColor([dark ? '#99FFFFFF' : $r('sys.color.font_tertiary')])
+            }
+          }
+        }
+      }, (item: FqSettingItem) => item.key)
+    }
+    .width('100%')
+    .layoutWeight(1)
+    .scrollBar(BarState.Off)
+    .divider({
+      strokeWidth: 0.5,
+      color: dark ? '#1FFFFFFF' : $r('sys.color.comp_divider'),
+      startMargin: 54,
+      endMargin: 16
+    })
+  }
+
+  /** 设置行点击：离线缓存/听视频即将上线占位（倍速/弹幕行右侧控件自理）。 */
+  private onSettingRowClick(key: string): void {
+    if (key === 'cache') {
+      this.getUIContext().getPromptAction().showToast({ message: '离线缓存功能即将上线', duration: 1500 });
+    } else if (key === 'listen') {
+      this.getUIContext().getPromptAction().showToast({ message: '听视频功能即将上线', duration: 1500 });
+    }
+  }
+
+  /** 播放设置行描述（key 决定右侧控件：speed 滑杆 / cache、listen 箭头 / danmaku 开关）。 */
+  private settingItems(): FqSettingItem[] {
+    const items: FqSettingItem[] = [
+      new FqSettingItem('speed', '倍速', $r('sys.symbol.speed_multiple')),
+      new FqSettingItem('cache', '离线缓存', $r('sys.symbol.download')),
+      new FqSettingItem('listen', '听视频', $r('sys.symbol.waveform_tv')),
+      new FqSettingItem('danmaku', '弹幕开关', $r('sys.symbol.ellipsis_bubble'))
+    ];
+    return items;
+  }
+
+  /** 倍速显示文案（拖动中取预览值；最多两位小数去尾零，如 0.75× / 1× / 1.5×）。 */
+  private speedLabel(): string {
+    const value: number = this.speedPreview >= 0 ? this.speedPreview : this.player.state.speed;
+    const rounded: number = Math.round(value * 100) / 100;
+    return `${rounded}×`;
   }
 
   // ---------------------------------------------------------------------------
@@ -1209,50 +1291,13 @@ export struct PlayerPage {
     .height('100%')
   }
 
-  /** 侧边栏·播放设置：倍速档位 3 列格子（当前档橙底高亮），点选生效并收起。 */
+  /** 侧边栏·播放设置：公共设置行 List（同半模态结构，深色配色）。 */
   @Builder
   private SideSettings() {
     Column() {
       this.SidePanelHeader('播放设置')
 
-      Row() {
-        Text('倍速')
-          .fontSize(14)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(Color.White)
-      }
-      .width('100%')
-      .height(36)
-      .padding({ left: 16 })
-      .alignItems(VerticalAlign.Center)
-
-      Grid() {
-        ForEach(FQ_SPEEDS, (speed: number) => {
-          GridItem() {
-            Column() {
-              Text(`${speed}×`)
-                .fontSize(15)
-                .fontWeight(this.isCurrentSpeed(speed) ? FontWeight.Bold : FontWeight.Normal)
-                .fontColor(this.isCurrentSpeed(speed) ? FQ_STORY_ORANGE : Color.White)
-            }
-            .width('100%')
-            .aspectRatio(2.2)
-            .justifyContent(FlexAlign.Center)
-            .alignItems(HorizontalAlign.Center)
-            .borderRadius(8)
-            .backgroundColor(this.isCurrentSpeed(speed) ? '#1AFA6725' : '#26FFFFFF')
-            .onClick((): void => {
-              this.player.setSpeed(speed);
-              this.closeSidePanel();
-            })
-          }
-        }, (speed: number) => `${speed}`)
-      }
-      .columnsTemplate('1fr 1fr 1fr')
-      .columnsGap(8)
-      .rowsGap(8)
-      .padding({ left: 12, right: 12, top: 4 })
-      .width('100%')
+      this.SettingRows(true)
     }
     .width('100%')
     .height('100%')
@@ -1377,13 +1422,9 @@ export struct PlayerPage {
     return dw > 0 && dh > 0 && dw > dh;
   }
 
-  /** 当前倍速档位判定（浮点容差比较）。 */
-  private isCurrentSpeed(speed: number): boolean {
-    return Math.abs(this.player.state.speed - speed) < 0.01;
-  }
-
   /** 打开播放设置（横屏全屏走右侧边栏，其余右上角菜单半模态）。 */
   private openSettings(): void {
+    this.speedPreview = -1;
     if (this.fullScreen && this.isLandscapeVideo()) {
       this.openSidePanel('settings');
       return;
@@ -1414,6 +1455,7 @@ export struct PlayerPage {
 
   /** 关闭播放设置半模态：延迟一拍置 isShow（面板事件内同步改 isShow 会被框架丢弃）。 */
   private closeSettings(): void {
+    this.speedPreview = -1;
     const token: number = ++this.settingsCloseToken;
     setTimeout((): void => {
       if (token === this.settingsCloseToken) {
