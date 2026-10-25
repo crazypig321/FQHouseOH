@@ -21,6 +21,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { FqAudioEngine } from './FqAudioEngine';
 import { FqAudioHistory, FqListenRecord } from './FqAudioHistory';
 import { FqReadStatsStore } from './FqReadStatsStore';
+import { FqAppSettingsStore } from './FqAppSettingsStore';
 import { FqBackend, fqErrorMessage } from './FqBackend';
 import { FqChapter } from '../model/FqModels';
 import {
@@ -1030,6 +1031,10 @@ export class FqAudioSession {
   }
 
   private startBackgroundTask(): void {
+    // 设置总闸：关闭后台播放保活后不再申请长时任务
+    if (!FqAppSettingsStore.isBackgroundAudio()) {
+      return;
+    }
     if (this.bgStarted || this.context === null) {
       return;
     }

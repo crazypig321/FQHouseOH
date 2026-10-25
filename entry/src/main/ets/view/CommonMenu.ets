@@ -46,7 +46,7 @@ export function fqMenuBuilder(params: FqMenuParams) {
     }, (item: FqMenuItem) => item.label)
   }
   .menuItemDivider({
-    strokeWidth: LengthMetrics.vp(1),
+    strokeWidth: LengthMetrics.vp(0.6),
     color: $r('sys.color.comp_divider'),
     startMargin: LengthMetrics.vp(12),
     endMargin: LengthMetrics.vp(12)

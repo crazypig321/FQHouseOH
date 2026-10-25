@@ -23,6 +23,7 @@ import { FqBackend } from '../core/FqBackend';
 import { fqAudioSession } from '../core/FqAudioSession';
 import { FqReadStatsStore } from '../core/FqReadStatsStore';
 import { FqLocalBookStore } from '../core/FqLocalBookStore';
+import { FqAppSettingsStore } from '../core/FqAppSettingsStore';
 import { appState } from './AppState';
 import { themeUtils } from '../utils/ThemeUtils';
 
@@ -40,6 +41,8 @@ export default class EntryAbility extends UIAbility {
     fqAudioSession.init(this.context);
     FqReadStatsStore.init(this.context);
     FqLocalBookStore.init(this.context);
+    // 应用设置（深色模式恢复 + 后台保活开关）初始化
+    FqAppSettingsStore.init(this.context);
     FqBackend.get().start(this.context).catch((error: Object): void => {
       hilog.error(DOMAIN, 'FqBackend', 'backend start failed: %{public}s', `${error}`);
     });

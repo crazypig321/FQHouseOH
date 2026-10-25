@@ -102,6 +102,13 @@ export class FqReadStatsStore {
     return FqReadStatsStore.books;
   }
 
+  /** 清空全部阅读统计（设置-清空历史）。 */
+  public static clear(): void {
+    FqReadStatsStore.days.clear();
+    FqReadStatsStore.books.clear();
+    FqReadStatsStore.persist();
+  }
+
   /** 加载按书日累计（books key：bookId → JSON 字符串 { 日期: 秒 }）。 */
   private static loadBooks(): void {
     const pref: preferences.Preferences | null = FqReadStatsStore.pref;

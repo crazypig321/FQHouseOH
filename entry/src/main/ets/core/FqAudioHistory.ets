@@ -109,6 +109,12 @@ export class FqAudioHistory {
     FqAudioHistory.persist();
   }
 
+  /** 清空全部收听历史（设置-清空历史）。 */
+  public static clear(): void {
+    FqAudioHistory.records.clear();
+    FqAudioHistory.persist();
+  }
+
   private static persist(): void {
     const pref: preferences.Preferences | null = FqAudioHistory.pref;
     if (pref === null) {

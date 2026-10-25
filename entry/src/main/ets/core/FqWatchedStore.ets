@@ -113,9 +113,25 @@ export class FqWatchedStore {
     return true;
   }
 
+  /** 清空全部已看记录与续播进度（设置-清空历史；本文件独立，整文件清空安全）。 */
+  public static clear(): void {
+    FqWatchedStore.cache.clear();
+    const pref: preferences.Preferences | null = FqWatchedStore.pref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.clearSync();
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
+  }
+
   /** 读取某剧续播进度（无记录返回 null）。 */
-  public static progress(seriesId: string): FqWatchedProgress | null {
-    if (seriesId.length === 0) {
+  public static progress(seriesId: string): FqWatchedProgress | null {    if (seriesId.length === 0) {
       return null;
     }
     const pref: preferences.Preferences | null = FqWatchedStore.pref;

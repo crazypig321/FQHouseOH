@@ -15,6 +15,7 @@ import { common, wantAgent, WantAgent } from '@kit.AbilityKit';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { FqAppSettingsStore } from './FqAppSettingsStore';
 
 const TAG: string = 'FqVideoMedia';
 
@@ -149,6 +150,10 @@ export class FqVideoMedia {
 
   /** 后台长时任务（audioPlayback：首次播放申请，release 释放）。 */
   public startBackground(): void {
+    // 设置总闸：关闭后台播放保活后不再申请长时任务
+    if (!FqAppSettingsStore.isBackgroundAudio()) {
+      return;
+    }
     if (this.bgStarted || this.context === null) {
       return;
     }

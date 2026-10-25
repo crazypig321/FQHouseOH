@@ -1,6 +1,6 @@
 ﻿/**
  * 公共页面装配（对齐 musicfreeOH AppPages 模式）：
- * - MainTabPagesBuilder：主 TabContent（首页/书架/我的）
+ * - MainTabPagesBuilder：主 TabContent（首页/书架/我的/设置）
  * - PageMapBuilder：二级路由页（Navigation.navDestination 单 builder 页表）
  */
 
@@ -18,7 +18,7 @@ import { ComicPage } from '../pages/sub/ComicPage';
 import { ListenPage } from '../pages/sub/ListenPage';
 import { ListenVideoPage } from '../pages/sub/ListenVideoPage';
 import { PlayerPage } from '../pages/sub/PlayerPage';
-import { SettingsPage } from '../pages/sub/SettingsPage';
+import { SettingsPage } from '../pages/SettingsPage';
 import { AboutPage } from '../pages/sub/AboutPage';
 import { CachedBooksPage } from '../pages/sub/CachedBooksPage';
 import { CachedDramasPage } from '../pages/sub/CachedDramasPage';
@@ -40,8 +40,10 @@ export function MainTabPagesBuilder() {
         HomePage()
       } else if (i === 1) {
         ShelfPage()
-      } else {
+      } else if (i === 2) {
         ProfilePage()
+      } else {
+        SettingsPage({ isTab: true })
       }
     }
     .tabBar(tabBarOf(item))
