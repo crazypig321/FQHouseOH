@@ -88,13 +88,22 @@ export class FqComicCanvasController extends NodeController {
 
   private mountRenderNode(): void {
     const root: FrameNode | null = this.rootNode;
-    if (root === null) {
+    const ui: UIContext | null = this.ui;
+    if (root === null || ui === null) {
       return;
     }
     const renderNode = root.getRenderNode();
     if (renderNode !== null) {
       renderNode.clearChildren();
-      renderNode.appendChild(new FqComicCanvasRenderNode(this));
+      const node: FqComicCanvasRenderNode = new FqComicCanvasRenderNode(this);
+      // 渲染节点须显式设 frame（vp）：0 尺寸节点被裁剪不绘制（黑屏根因）
+      node.frame = {
+        x: 0,
+        y: 0,
+        width: ui.px2vp(this.widthPx),
+        height: ui.px2vp(this.heightPx),
+      };
+      renderNode.appendChild(node);
     }
   }
 }
