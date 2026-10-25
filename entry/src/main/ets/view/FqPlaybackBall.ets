@@ -72,7 +72,7 @@ export struct FqPlaybackBall {
             SymbolGlyph(fqAudioSession.wantPlay && !fqAudioSession.completed
               ? $r('sys.symbol.pause_fill')
               : $r('sys.symbol.play_fill'))
-              .fontSize(20)
+              .fontSize(28)
               .fontColor([$r('sys.color.icon_primary')])
           }
           .width(44)
@@ -97,7 +97,7 @@ export struct FqPlaybackBall {
               this.armAutoCollapse();
             }
           })
-          this.PanelButton($r('sys.symbol.stop_circle_fill'), (): void => {
+          this.PanelButton($r('sys.symbol.stop_circle'), (): void => {
             fqAudioSession.close();
             this.collapse();
           }, true, '#FFE84026')
