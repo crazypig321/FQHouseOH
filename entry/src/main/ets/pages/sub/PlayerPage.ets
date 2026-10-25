@@ -52,9 +52,10 @@ import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/FqCommentShee
 import { FqDanmakuView } from '../../view/FqDanmakuView';
 import { FqSettingRow } from '../../view/FqSettingRow';
 import { FqStoryPanel } from '../../view/FqStoryPanel';
-import { DetailNavParams, PlayerNavParams, ROUTE_DETAIL } from '../../model/FqNavModels';
+import { DetailNavParams, PlayerNavParams, ListenVideoNavParams, ROUTE_DETAIL, ROUTE_LISTEN_VIDEO } from '../../model/FqNavModels';
 import { FqChapter, FqDanmaku, FqDanmakuPage, FqEpisodeSource, FqSeriesRelateBook, fqKindToTab } from '../../model/FqModels';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
+import { fqAudioSession } from '../../core/FqAudioSession';
 import { FqWatchedStore, FqWatchedProgress } from '../../core/FqWatchedStore';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { appState } from '../../entryability/AppState';
@@ -250,6 +251,10 @@ export struct PlayerPage {
   private danmakuLoadedToMs: number = 0;
   /** 弹幕进度心跳定时器（0 无任务）。 */
   private danmakuTimer: number = 0;
+  /** 听视频页返回待消费（onShown 时按听到的集/位置续看）。 */
+  private listenReturnPending: boolean = false;
+  /** 进听视频页时的播放态（返回后恢复播放）。 */
+  private wasPlayingBeforeListen: boolean = false;
   /** 屏幕尺寸（vp，布局定位用）。 */
   private screenW: number = 0;
   private screenH: number = 0;
@@ -340,6 +345,9 @@ export struct PlayerPage {
       showBrandGradient: false,
       pageBackgroundColor: Color.Black,
       showPlaybackBall: false,
+      onShown: (): void => {
+        this.onNavShown();
+      },
       backPressed: (): boolean => {
         // 全屏沉浸态先退全屏（官方返回语义），再返回上一页；
         // 防误触锁开启时吞掉返回手势：禁止手势退出全屏，只唤出锁按钮
@@ -1230,12 +1238,78 @@ export struct PlayerPage {
     .padding({ right: 20, left: 20 })
   }
 
-  /** 设置行点击：离线缓存/听视频即将上线占位（倍速/弹幕行右侧控件自理）。 */
+  /** 设置行点击：听视频进听剧模式页；离线缓存即将上线占位（倍速/弹幕行右侧控件自理）。 */
   private onSettingRowClick(key: string): void {
     if (key === 'cache') {
       this.getUIContext().getPromptAction().showToast({ message: '离线缓存功能即将上线', duration: 1500 });
     } else if (key === 'listen') {
-      this.getUIContext().getPromptAction().showToast({ message: '听视频功能即将上线', duration: 1500 });
+      this.openListenMode();
+    }
+  }
+
+  /**
+   * 听视频（fqapp listen_mode_page 语义）：暂停视频页播放，推入听视频页
+   * （独立 mpv 只听不看）；全屏沉浸先退全屏。已看/续播由听视频页写入同键
+   * FqWatchedStore，退出回传结果由 onNavShown 消费续看。
+   */
+  private openListenMode(): void {
+    if (this.episodes.length === 0) {
+      this.getUIContext().getPromptAction().showToast({ message: '剧集目录加载中', duration: 1500 });
+      return;
+    }
+    if (this.fullScreen) {
+      this.exitFullscreen();
+    }
+    this.closeSettings();
+    if (this.sidePanel.length > 0) {
+      this.closeSidePanel();
+    }
+    this.wasPlayingBeforeListen = this.player.state.playing;
+    this.player.pause();
+    this.saveCurrentProgress();
+    ListenVideoNavParams.contentId = PlayerNavParams.contentId;
+    ListenVideoNavParams.kind = PlayerNavParams.kind;
+    ListenVideoNavParams.title = this.title;
+    ListenVideoNavParams.cover = PlayerNavParams.cover;
+    ListenVideoNavParams.chapters = this.episodes;
+    ListenVideoNavParams.startIndex = this.index;
+    ListenVideoNavParams.startPositionSec = this.player.state.position;
+    ListenVideoNavParams.resultIndex = -1;
+    ListenVideoNavParams.resultPositionSec = 0;
+    this.listenReturnPending = true;
+    NavPathUtils.push(ROUTE_LISTEN_VIDEO);
+  }
+
+  /**
+   * NavDestination 显示回调（含从听视频页返回）：按听到的集/位置续看
+   * （fqapp sync_progress_strategy_listen_mode）——跨集走切集链路偏移起播，
+   * 同集 seek 到听到位置，进页时的播放态恢复播放。
+   */
+  private onNavShown(): void {
+    if (!this.listenReturnPending) {
+      return;
+    }
+    this.listenReturnPending = false;
+    const listenIndex: number = ListenVideoNavParams.resultIndex;
+    const listenPos: number = ListenVideoNavParams.resultPositionSec;
+    ListenVideoNavParams.resultIndex = -1;
+    ListenVideoNavParams.resultPositionSec = 0;
+    if (listenIndex < 0) {
+      return;
+    }
+    if (listenIndex !== this.index && listenIndex < this.episodes.length) {
+      this.pendingResumeSec = listenPos > 0 ? listenPos : -1;
+      this.loadEpisode(listenIndex);
+      if (this.wasPlayingBeforeListen) {
+        this.player.play();
+      }
+      return;
+    }
+    if (listenPos > 0) {
+      this.player.seek(listenPos);
+    }
+    if (this.wasPlayingBeforeListen) {
+      this.player.play();
     }
   }
 
@@ -1725,6 +1799,11 @@ export struct PlayerPage {
         return;
       }
       this.loading = false;
+      // 播放视频即停止听书（fqAudioSession 完整关闭链路：进度持久化、
+      // 引擎释放、后台任务停止、AVSession 销毁、播控球消失）
+      if (fqAudioSession.hasSession) {
+        fqAudioSession.close();
+      }
       this.player.open(startSec > 0
         ? new Media(source.url, { start: startSec })
         : new Media(source.url));

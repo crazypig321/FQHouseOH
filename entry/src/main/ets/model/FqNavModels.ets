@@ -22,6 +22,8 @@ export const ROUTE_COMIC: string = 'comic';
 export const ROUTE_LISTEN: string = 'listen';
 /** 视频播放页（PlayerPage，mpv 全屏播放器）。 */
 export const ROUTE_PLAYER: string = 'player';
+/** 听视频页（ListenVideoPage，播放页「听视频」进入的听剧模式）。 */
+export const ROUTE_LISTEN_VIDEO: string = 'listenVideo';
 
 /** 详情页跳转参数（push 前由来源页赋值，详情页 aboutToAppear 读取）。 */
 export class DetailNavParams {
@@ -79,6 +81,26 @@ export class PlayerNavParams {
   static creationStatus: number = -1;
   /** 剧简介（FqBookDetail.abstractText，选集面板头部小字展示）。 */
   static intro: string = '';
+}
+
+/** 听视频页跳转参数（播放页「听视频」进入；退出结果由播放页 onShown 消费）。 */
+export class ListenVideoNavParams {
+  /** 剧集内容 id（已看/续播持久化键，与播放页同键）。 */
+  static contentId: string = '';
+  /** 内容类型（video/manju），决定 fqKindToTab 的取流 tab。 */
+  static kind: string = 'video';
+  static title: string = '';
+  static cover: string = '';
+  /** 预载剧集目录（播放页 episodes）。 */
+  static chapters: FqChapter[] = [];
+  /** 起听集下标。 */
+  static startIndex: number = 0;
+  /** 起听位置（秒；播放页当前视频位置续听）。 */
+  static startPositionSec: number = 0;
+  /** 退出回传：听到的集下标（-1 未听）。 */
+  static resultIndex: number = -1;
+  /** 退出回传：听到位置（秒）。 */
+  static resultPositionSec: number = 0;
 }
 
 /** 漫画页跳转参数。 */
