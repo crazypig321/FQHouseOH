@@ -212,6 +212,8 @@ export struct PlayerPage {
   private progress: FqWatchedProgress | null = null;
   /** 进页待恢复的续播位置（秒；仅首开命中的那一次消费）。 */
   private pendingResumeSec: number = -1;
+  /** 显式起播集下标（详情目录点击进页播对应集）；-1 未指定走续播/从头。 */
+  private explicitStartIndex: number = -1;
   /** 周期保存计数（5s 一存，仅播放中）。 */
   private progressTick: number = 0;
   /** 长按右侧 2 倍速快进中（松开恢复原倍速）。 */
@@ -257,6 +259,9 @@ export struct PlayerPage {
     this.tab = fqKindToTab(PlayerNavParams.kind);
     this.creationStatus = PlayerNavParams.creationStatus;
     this.episodes = PlayerNavParams.chapters;
+    if (PlayerNavParams.startIndex >= 0) {
+      this.explicitStartIndex = PlayerNavParams.startIndex;
+    }
     let start: number = PlayerNavParams.startIndex;
     if (start < 0 || start >= this.episodes.length) {
       start = 0;
@@ -289,8 +294,8 @@ export struct PlayerPage {
     if (this.episodes.length === 0) {
       this.loadEpisodes();
     } else {
-      // 续播（fqapp resumeEpisodeIndex）：有进度记录则覆盖起播集并挂恢复位置
-      const resumeIndex: number = this.resumeStartIndex();
+      // 显式起播集（详情目录点击进页）优先；否则续播（fqapp resumeEpisodeIndex）
+      const resumeIndex: number = this.explicitStartIndex >= 0 ? -1 : this.resumeStartIndex();
       if (resumeIndex >= 0) {
         this.index = resumeIndex;
       }
@@ -1672,9 +1677,13 @@ export struct PlayerPage {
         return;
       }
       this.episodes = episodes;
-      // 续播（fqapp resumeEpisodeIndex）：有进度记录则起播上次看到的集
-      const resumeIndex: number = this.resumeStartIndex();
-      this.loadEpisode(resumeIndex >= 0 ? resumeIndex : 0);
+      // 显式起播集（详情目录点击进页）优先；否则续播（fqapp resumeEpisodeIndex）
+      const resumeIndex: number = this.explicitStartIndex >= 0 ? -1 : this.resumeStartIndex();
+      let target: number = resumeIndex >= 0 ? resumeIndex : 0;
+      if (this.explicitStartIndex >= 0) {
+        target = this.explicitStartIndex < episodes.length ? this.explicitStartIndex : 0;
+      }
+      this.loadEpisode(target);
     } catch (error) {
       if (token !== this.loadToken) {
         return;
