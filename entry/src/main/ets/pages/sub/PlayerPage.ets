@@ -102,6 +102,11 @@ const FQ_ADJUST_INIT_PERCENT: number = 50;
 const FQ_FS_SIDE_PANEL_W: number = 300;
 /** 侧边栏背景（近黑高不透明，压得住浅色画面又不糊死视频）。 */
 const FQ_FS_SIDE_BG: string = '#F0141414';
+/** 播放设置深色（横屏侧边栏）配色：半透明白卡片/分隔线/滑轨/次级文字。 */
+const FQ_DARK_CARD_BG: string = '#26FFFFFF';
+const FQ_DARK_DIVIDER: string = '#1FFFFFFF';
+const FQ_DARK_TRACK: string = '#33FFFFFF';
+const FQ_DARK_TERTIARY_TEXT: string = '#99FFFFFF';
 
 /** 播放设置行描述（key 决定右侧控件：speed 滑杆 / cache、listen 箭头 / danmaku 开关）。 */
 class FqSettingItem {
@@ -1141,6 +1146,7 @@ export struct PlayerPage {
             FqSettingRow({
               icon: item.icon,
               title: item.title,
+              tintColor: dark ? Color.White : $r('sys.color.font'),
               click: (): void => {
                 this.onSettingRowClick(item.key);
               }
@@ -1158,10 +1164,10 @@ export struct PlayerPage {
                     .width('100%')
                     .height(30)
                     .showSteps(true)
-                    .stepColor(dark ? '#66FFFFFF' : '#66000000')
+                    .stepColor(dark ? FQ_DARK_TRACK : $r('sys.color.comp_background_tertiary'))
                     .blockColor(FQ_STORY_ORANGE)
                     .selectedColor('#33FA6725')
-                    .trackColor(dark ? '#33FFFFFF' : $r('sys.color.comp_background_tertiary'))
+                    .trackColor(dark ? FQ_DARK_TRACK : $r('sys.color.comp_background_tertiary'))
                     .onChange((value: number, mode: SliderChangeMode): void => {
                       if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) {
                         this.player.setSpeed(value);
@@ -1174,14 +1180,14 @@ export struct PlayerPage {
                   Row() {
                     ForEach(fqSpeedSteps(), (step: number, index: number) => {
                       Text(fqSpeedStepLabel(step))
-                        .fontSize(9)
+                        .fontSize(7)
                         .fontWeight(this.isCurrentSpeedStep(step) ? FontWeight.Bold : FontWeight.Normal)
                         .fontColor(this.isCurrentSpeedStep(step) ? FQ_STORY_ORANGE :
-                          (dark ? '#99FFFFFF' : $r('sys.color.font_tertiary')))
+                          (dark ? FQ_DARK_TERTIARY_TEXT : $r('sys.color.font_tertiary')))
                     }, (step: number) => `${step}`)
                   }
-                  .justifyContent(FlexAlign.SpaceEvenly)
-                  .width('110%')
+                  .justifyContent(FlexAlign.SpaceBetween)
+                  .width('100%')
                   .hitTestBehavior(HitTestMode.None)
                 }.layoutWeight(1)
             } else if (item.key === 'danmaku') {
@@ -1200,14 +1206,14 @@ export struct PlayerPage {
                   .fontColor([dark ? '#99FFFFFF' : $r('sys.color.font_tertiary')])
               }
             }
-          }.padding(14)
+          }
         }, (item: FqSettingItem) => item.key)
       }
       .borderRadius(14)
-      .backgroundColor($r('sys.color.comp_background_list_card'))
+      .backgroundColor(dark ? FQ_DARK_CARD_BG : $r('sys.color.comp_background_list_card'))
       .divider({
         strokeWidth: 0.5,
-        color: $r('sys.color.comp_divider'),
+        color: dark ? FQ_DARK_DIVIDER : $r('sys.color.comp_divider'),
         startMargin: 48,
         endMargin: 14
       })

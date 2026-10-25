@@ -36,6 +36,7 @@ export struct FqSettingRow {
     .onClick((): void => {
       this.click();
     })
+    .padding(14)
   }
 }
 
