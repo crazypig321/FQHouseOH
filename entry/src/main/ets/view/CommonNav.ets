@@ -14,7 +14,8 @@ import { BlurStrategy,
   HideMode,
   HdsTabs,
   HdsTabsController,
-  HdsNavDestinationTitleMode} from '@kit.UIDesignKit';
+  HdsNavDestinationTitleMode,
+  HdsAnimationMode} from '@kit.UIDesignKit';
 import { appState } from '../entryability/AppState';
 import { LengthMetrics } from '@kit.ArkUI';
 import { themeUtils } from '../utils/ThemeUtils';
@@ -114,6 +115,15 @@ export struct CommonNav {
       this.lastTitleTapTime = now;
     }
   }
+
+  @Monitor('isShowBarController')
+  showTabBar(){
+    if (this.isShowBarController) {
+      this.tabsController.applyShowAnimation(HdsAnimationMode.CLICK_ANIMATION)
+    }else{
+      this.tabsController.applyHideAnimation(HdsAnimationMode.CLICK_ANIMATION)
+    }
+  }
   
   build() {
     HdsNavDestination() {
@@ -129,7 +139,8 @@ export struct CommonNav {
         .scrollable(false)
         .barPosition(BarPosition.End)
         .barHeight(this.isShowBarController ? 56 : 0)
-        .animation({duration: 300})
+        .animationDuration(300)
+        .barFloatingStyle({ barOpacity: this.isShowBarController ? 1 : 0 })
         .barFloatingStyle({
           barWidth: { smallWidth: 330, mediumWidth: 480, largeWidth: 560 },
           barBottomMargin: 28,

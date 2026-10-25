@@ -62,9 +62,10 @@ export struct FqReaderFlip {
   /** 覆盖模式：覆盖方向（-1 = 下一页自右滑入 / 1 = 上一页自左滑入 / 0 = 未定）。 */
   @Local coverDir: number = 0;
   @Local animating: boolean = false;
-  /** 物理层旋转基（0/1/2）：提交翻页时轮换层身份——已显示目标页的层成为当前层，
-   *  可见层提交帧永不换图源（Image 换源渲染滞后是提交帧闪旧页的根因）。 */
-  @Local layerBase: number = 0;
+  /** 槽位↔物理层固定绑定（L0≡当前页 / L1≡下一页 / L2≡上一页）。
+   *  不做层轮换：@Builder 参数按值捕获，层轮换无法带动画布换绑（run3 实证：
+   *  内容冻结在挂载初值而属性随轮换走，导致 lb→1 显邻页）；
+   *  提交翻页时三槽位画布本就全量换页，属性随槽位静止即内容与位置恒一致。 */
   /** 仿真折叠层显隐 / 当前页槽位隐藏（截图顶替）。 */
   @Local simNodeShow: boolean = false;
   @Local simCurHidden: boolean = false;
@@ -141,64 +142,54 @@ export struct FqReaderFlip {
   /** 槽位横移（vp）。 */
   private slotX(slot: number): number {
     const w: number = this.pageWidthVp();
+    let result: number = 0;
     if (this.flipMode === 1) {
       // 平移：三页联动
-      return this.dragVp + slot * w;
-    }
-    if (this.flipMode === 2) {
+      result = this.dragVp + slot * w;
+    } else if (this.flipMode === 2) {
       // 覆盖：当前页恒静止，覆盖页单向滑入，另一邻页常驻屏外
       if (slot === 0) {
-        return 0;
+        result = 0;
+      } else if (slot === 1) {
+        result = this.coverDir === -1 ? w + this.dragVp : w;
+      } else {
+        result = this.coverDir === 1 ? -w + this.dragVp : -w;
       }
-      if (slot === 1) {
-        return this.coverDir === -1 ? w + this.dragVp : w;
-      }
-      return this.coverDir === 1 ? -w + this.dragVp : -w;
+    } else {
+      // 仿真：prev 常驻屏外左侧（截图源），cur/next 静止
+      result = slot === -1 ? -w : 0;
     }
-    // 仿真：prev 常驻屏外左侧（截图源），cur/next 静止
-    return slot === -1 ? -w : 0;
+    return result;
   }
 
   /** 槽位层级。 */
   private slotZ(slot: number): number {
+    let result: number = 1;
     if (this.flipMode === 1) {
-      return 1;
-    }
-    if (this.flipMode === 2) {
+      result = 1;
+    } else if (this.flipMode === 2) {
       // 覆盖层最上，当前页次之，屏外邻页垫底
       if (slot === 0) {
-        return 2;
+        result = 2;
+      } else if (this.coverDir === -1) {
+        result = slot === 1 ? 3 : 1;
+      } else {
+        result = slot === -1 ? 3 : 1;
       }
-      if (this.coverDir === -1) {
-        return slot === 1 ? 3 : 1;
-      }
-      return slot === -1 ? 3 : 1;
+    } else {
+      result = slot === 1 ? 1 : (slot === 0 ? 2 : 3);
     }
-    return slot === 1 ? 1 : (slot === 0 ? 2 : 3);
+    return result;
   }
 
-  /** 物理层 → 逻辑槽位（随 layerBase 旋转，结果 ∈ {-1,0,1}）。 */
-  private logicalSlotOf(layer: number): number {
-    const v: number = ((layer - this.layerBase) % 3 + 3) % 3;
-    return v === 2 ? -1 : v;
-  }
-
-  /** 逻辑槽位 → 物理层。 */
+  /** 逻辑槽位 → 物理层（固定绑定：-1→2 / 0→0 / 1→1）。 */
   private physicalLayerOf(slot: number): number {
-    return ((slot + this.layerBase) % 3 + 3) % 3;
+    return slot === -1 ? 2 : slot;
   }
 
-  /** 物理层快照 id（固定随层，提交轮换后 id 不变，快照调用侧动态解析）。 */
+  /** 物理层快照 id（固定随层）。 */
   private layerIdOf(layer: number): string {
     return `${this.snapshotPrefix}_l${layer}`;
-  }
-
-  /** 提交翻页：层身份轮换（isNext=true 后翻）。
-   *  轮换后：原显示目标页的层 → 新当前层（内容不变，零换源）；
-   *  原当前层 → 反向邻页（其内容随 pageIndex 平移后恰为原图，零换源）；
-   *  仅被释放的远端层加载新邻页（屏外/被盖，换源不可见）。 */
-  private rotateLayers(isNext: boolean): void {
-    this.layerBase = (this.layerBase + (isNext ? 1 : 2)) % 3;
   }
 
   /** 整页点击分发：左/右三分之一翻页（按 x 定折点），中区呼出菜单。
@@ -329,22 +320,22 @@ export struct FqReaderFlip {
     this.clearSimTimer();
     const dir: FqFlipDir = this.sim.dir;
     const cancelled: boolean = this.simCancelled;
-    this.simNodeShow = false;
-    this.simCurHidden = false;
     this.sim.reset();
     this.simDrawing = false;
     this.panStarted = false;
     this.simCancelled = false;
     if (cancelled) {
+      this.simNodeShow = false;
+      this.simCurHidden = false;
       return;
     }
-    // 层身份轮换与拖拽/覆盖归位同帧：折叠层收起瞬间，已显示目标页的层原位顶替当前层
-    this.rotateLayers(dir === FqFlipDir.BACKWARD);
     if (dir === FqFlipDir.BACKWARD) {
       this.onTurn(true);
     } else if (dir === FqFlipDir.FORWARD) {
       this.onTurn(false);
     }
+    this.simCurHidden = false;
+    this.simNodeShow = false;
   }
 
   /** '#RRGGBB' / '#AARRGGBB' → RGB 数值（解析失败返回 -1）。 */
@@ -527,10 +518,10 @@ export struct FqReaderFlip {
       curve: Curve.Friction,
       onFinish: (): void => {
         this.animating = false;
-        // 与父级同帧完成：dragVp 归零 + 层身份轮换 + 父切换页数据，视觉上旧“下一页”原位成为当前页
-        this.dragVp = 0;
-        this.rotateLayers(isNext);
+        // 先切页数据（pageIndex 变 → FqPageCanvas 渲染新页）再偏移归零：
+        // 偏移归零帧三槽位画布同步换页，与槽位↔层固定绑定一致，无中间帧
         this.onTurn(isNext);
+        this.dragVp = 0;
       },
     }, (): void => {
       this.dragVp = target;
@@ -587,11 +578,9 @@ export struct FqReaderFlip {
       curve: Curve.Friction,
       onFinish: (): void => {
         this.animating = false;
-        // 覆盖层已滑入到位：dragVp/coverDir 归零 + 层身份轮换同帧——覆盖层原位转正当前层，零换源
+        this.onTurn(isNext);
         this.dragVp = 0;
         this.coverDir = 0;
-        this.rotateLayers(isNext);
-        this.onTurn(isNext);
       },
     }, (): void => {
       this.dragVp = target;
@@ -622,26 +611,26 @@ export struct FqReaderFlip {
   }
 
   /** 槽位三区：眉页 / 正文 / 眉脚（仿真截图随页卷曲）。
-   *  参数为恒定物理层号（@Builder 按值传参，参数变化不触发重渲染）；
-   *  逻辑槽位在体内经 logicalSlotOf 读取 layerBase——层身份轮换时这里被跟踪刷新。 */
+   *  参数为恒定槽位号（@Builder 按值传参，参数捕获后不换绑）；
+   *  槽位↔物理层固定绑定，槽位页数据变化时画布经 @Monitor 全量刷新。 */
   @Builder
-  private slotContent(layer: number) {
+  private slotContent(slot: number) {
     Column() {
       Column() {
-        this.headerRenderer(this.logicalSlotOf(layer))
+        this.headerRenderer(slot)
       }
       .width('100%')
       .height(this.headerZoneVp)
       .justifyContent(FlexAlign.End)
 
       Column() {
-        this.pageRenderer(this.logicalSlotOf(layer))
+        this.pageRenderer(slot)
       }
       .width('100%')
       .layoutWeight(1)
 
       Column() {
-        this.footerRenderer(this.logicalSlotOf(layer))
+        this.footerRenderer(slot)
       }
       .width('100%')
       .height(this.footerZoneVp)
@@ -654,16 +643,16 @@ export struct FqReaderFlip {
 
   build() {
     Stack() {
-      // 三个物理层（0/1/2）：内容经 slotContent(layer) 体内解析逻辑槽位（层身份轮换可跟踪），
-      // 位置/层级/显隐/快照 id 按层静态固定
+      // 三个槽位层固定绑定物理层（L0≡当前页 / L1≡下一页 / L2≡上一页）：
+      // @Builder 参数按值捕获，画布不随层轮换换绑——固定绑定使内容与位置恒一致
       Column() {
         this.slotContent(0)
       }
       .width('100%')
       .height('100%')
-      .translate({ x: this.slotX(this.logicalSlotOf(0)) })
-      .zIndex(this.slotZ(this.logicalSlotOf(0)))
-      .visibility(this.flipMode === 0 && this.simCurHidden && this.logicalSlotOf(0) === 0
+      .translate({ x: this.slotX(0) })
+      .zIndex(this.slotZ(0))
+      .visibility(this.flipMode === 0 && this.simCurHidden
         ? Visibility.None : Visibility.Visible)
       .id(this.layerIdOf(0))
 
@@ -672,21 +661,17 @@ export struct FqReaderFlip {
       }
       .width('100%')
       .height('100%')
-      .translate({ x: this.slotX(this.logicalSlotOf(1)) })
-      .zIndex(this.slotZ(this.logicalSlotOf(1)))
-      .visibility(this.flipMode === 0 && this.simCurHidden && this.logicalSlotOf(1) === 0
-        ? Visibility.None : Visibility.Visible)
+      .translate({ x: this.slotX(1) })
+      .zIndex(this.slotZ(1))
       .id(this.layerIdOf(1))
 
       Column() {
-        this.slotContent(2)
+        this.slotContent(-1)
       }
       .width('100%')
       .height('100%')
-      .translate({ x: this.slotX(this.logicalSlotOf(2)) })
-      .zIndex(this.slotZ(this.logicalSlotOf(2)))
-      .visibility(this.flipMode === 0 && this.simCurHidden && this.logicalSlotOf(2) === 0
-        ? Visibility.None : Visibility.Visible)
+      .translate({ x: this.slotX(-1) })
+      .zIndex(this.slotZ(-1))
       .id(this.layerIdOf(2))
 
       if (this.flipMode === 0) {

@@ -1,5 +1,4 @@
 import { FqPageFragment, FqReaderLayoutMetrics, FqReaderPageData } from './ReaderTypes';
-import { hilog } from '@kit.PerformanceAnalysisKit';
 import { drawing } from '@kit.ArkGraphics2D';
 
 @ComponentV2
@@ -64,10 +63,6 @@ export struct FqPageCanvas {
             .textAlign(TextAlign.JUSTIFY)
             .width('100%')
             .margin({ top: this.topMarginVp(frag), bottom: frag.isTitle ? this.metrics.titleBottomVp : 0 })
-            .onAreaChange((_old: Area, newArea: Area) => {
-              const h: number = typeof newArea.height === 'number' ? newArea.height : 0;
-              hilog.info(0x0001, 'FqC', `frag=${frag.paraIndex} textH=${h}`);
-            })
           }
           .alignItems(HorizontalAlign.Center)
           .width('100%')

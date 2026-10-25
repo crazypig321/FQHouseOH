@@ -17,7 +17,7 @@
  */
 
 import { common, ConfigurationConstant } from '@kit.AbilityKit';
-import { display, window } from '@kit.ArkUI';
+import { curves, display, window } from '@kit.ArkUI';
 import { fileIo } from '@kit.CoreFileKit';
 import { batteryInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -80,6 +80,8 @@ export struct ReaderPage {
   @Local paraError: string = '';
   /** 眉页/眉脚字体族（随阅读字体档位注册；空串回退系统默认）。 */
   @Local readerFontFamily: string = '';
+  /** 阅读时手势条避让高（menuVisible=false 时记录，避免工具栏呼出/关闭导致眉脚跳高）。 */
+  @Local readingBottomRect: number = 0;
   @Local chapterIndex: number = 0;
   @Local totalChapters: number = 0;
   @Local fontSize: number = 19;
@@ -443,6 +445,7 @@ export struct ReaderPage {
       } else if (this.chapterIndex + 1 < this.totalChapters) {
         this.openChapter(this.chapterIndex + 1, '');
       }
+      hilog.info(0x0001, 'FqFlip', `onFlipTurn isNext=${isNext} pageIndex=${this.pageIndex}`);
     } else {
       if (this.pageIndex - 1 >= 0) {
         this.pageIndex -= 1;
@@ -453,6 +456,7 @@ export struct ReaderPage {
       } else if (this.chapterIndex > 0) {
         this.openChapter(this.chapterIndex - 1, '');
       }
+      hilog.info(0x0001, 'FqFlip', `onFlipTurn isNext=${isNext} pageIndex=${this.pageIndex}`);
     }
   }
 
@@ -515,9 +519,9 @@ export struct ReaderPage {
     // 眉页/眉脚移入翻页容器槽位三区：眉页区 = 状态栏避让 + 22，眉脚区 = 手势条避让 + 40；
     // 正文上下内边距收紧为 10/10，正文紧贴眉页与眉脚。
     const headerZoneVp: number = Math.max(appState.maxTopRect, 32) + 22;
-    const footerZoneVp: number = appState.bottomRect + 40;
+    const footerZoneVp: number = this.readingBottomRect + 40;
     const contentTopVp: number = 10;
-    const contentBottomVp: number = 0;
+    const contentBottomVp: number = 10;
     metrics.sidePaddingVp = sideVp;
     metrics.contentTopVp = contentTopVp;
     metrics.contentBottomVp = contentBottomVp;
@@ -821,9 +825,12 @@ export struct ReaderPage {
     this.relayoutKeepPosition();
   }
 
-  /** 避让区变化（状态栏/手势条显隐）：更新几何（眉脚高度跟随），不重排避免页码跳动。 */
+  /** 避让区变化（状态栏/手势条显隐）：记录阅读时避让高（工具栏关闭态），更新几何不重排。 */
   @Monitor('avoidBottom', 'avoidTop')
   onAvoidAreaChange(): void {
+    if (!this.menuVisible) {
+      this.readingBottomRect = appState.bottomRect;
+    }
     this.cachedMetrics = this.buildMetrics();
   }
 
@@ -1010,7 +1017,9 @@ export struct ReaderPage {
       return true;
     }
     if (this.menuVisible) {
-      this.menuVisible = false;
+      this.getUIContext().animateTo({ duration: 300 }, ()=>{
+        this.menuVisible = false;
+      })
       return true;
     }
     // 返回放行前先恢复系统状态栏：让状态栏在转场开始时即就位（随页面滑动出现），
@@ -1272,9 +1281,9 @@ export struct ReaderPage {
       this.onSheetClose();
       return;
     }
-    this.getUIContext().animateTo({ duration: 300 }, ()=>{
+   // this.getUIContext().animateTo({ duration: 300 }, ()=>{
       this.menuVisible = !this.menuVisible;
-    })
+   // })
   }
 
   /** 打开书评半模态（数据加载由公共 FqCommentSheet 自理）。 */

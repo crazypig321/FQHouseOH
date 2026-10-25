@@ -15,7 +15,6 @@
 
 import { FqChapterLayout, FqPageBubble, FqPageFragment, FqReaderLayoutMetrics,
   FqReaderPageData } from './ReaderTypes';
-import { hilog } from '@kit.PerformanceAnalysisKit';
 
 /** 文本宽度测量回调：(文本, 字号fp, 字重) → 宽度 px（UIContext.getMeasureUtils().measureText 包装）。 */
 export type FqMeasureFn = (text: string, fontSizeFp: number, fontWeight: string) => number;
@@ -144,7 +143,6 @@ export class FqPaginationEngine {
         const need: number = blockTop + lineH;
         if (page.fragments.length > 0 && used + need > contentH) {
           // 收页：页片段已满，开新页继续装当前段剩余行
-          hilog.info(0x0001, 'FqPag', `page used=${used} contentH=${contentH} ratio=${(used / contentH).toFixed(3)}`);
           pages.push(page);
           page = new FqReaderPageData();
           used = 0;
@@ -170,10 +168,17 @@ export class FqPaginationEngine {
       if (isTitle) {
         used += metrics.titleBottomPx;
       } else if (commentCounts.length > para && commentCounts[para] > 0) {
-        // 段尾独立气泡行（渲染端整段 Text 两端对齐，气泡独立行跟在段尾）
+        // 段评气泡行内渲染在段尾 Text 内（FqPageCanvas：ImageSpan+计数 Span 拼在末行后）：
+        // 末行剩余宽度放得下 → 0 额外行高；放不下气泡随 Text 换行 → 计一行行高；
+        // 连该行也放不下 → 收页，气泡独立片段开新页（同计一行行高）。
+        // bubbleWidthPx 为胶囊全宽估算（略大于实际行内渲染宽），判inline偏保守：
+        // 宁可多计一行（页底略空）也不少计（页底溢出裁切）。
         const count: number = commentCounts[para];
         const bubbleW: number = this.bubbleWidthPx(metrics, count);
-        if (page.fragments.length > 0 && used + metrics.bubbleRowPx > contentH) {
+        const lastLineW: number = this.measureFn(lines[lines.length - 1], fontFp, weight);
+        const inline: boolean = lastLineW + bubbleW <= metrics.contentWidthPx;
+        const charge: number = inline ? 0 : lineH;
+        if (!inline && page.fragments.length > 0 && used + charge > contentH) {
           pages.push(page);
           page = new FqReaderPageData();
           used = 0;
@@ -186,19 +191,23 @@ export class FqPaginationEngine {
           page.startPara = para;
           page.startChar = text.length;
           frag = bubbleFrag;
+          page.bubbles.push(new FqPageBubble(para,
+            metrics.headerZoneVp + metrics.contentTopVp,
+            metrics.bubbleRowPx / metrics.density,
+            metrics.sidePaddingVp,
+            bubbleW / metrics.density));
         } else if (frag !== null) {
           frag.showBubble = true;
+          page.bubbles.push(new FqPageBubble(para,
+            metrics.headerZoneVp + metrics.contentTopVp + (used - (inline ? lineH : 0)) / metrics.density,
+            metrics.bubbleRowPx / metrics.density,
+            metrics.sidePaddingVp,
+            bubbleW / metrics.density));
         }
-        page.bubbles.push(new FqPageBubble(para,
-          metrics.headerZoneVp + metrics.contentTopVp + used / metrics.density,
-          metrics.bubbleRowPx / metrics.density,
-          metrics.sidePaddingVp,
-          bubbleW / metrics.density));
-        used += metrics.bubbleRowPx;
+        used += charge;
       }
     }
     if (page.fragments.length > 0) {
-      hilog.info(0x0001, 'FqPag', `last page used=${used} contentH=${contentH} ratio=${(used / contentH).toFixed(3)}`);
       pages.push(page);
     }
     result.pages = pages;
