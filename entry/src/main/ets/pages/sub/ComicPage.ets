@@ -219,6 +219,8 @@ export struct ComicPage {
       isShowBar: true,
       isShowBarController: this.menuVisible,
       readBarKind: 'reader',
+      // 纯黑底：标题栏/底部工具条前景固定白色，不随深浅模式（sheet 内仍走系统色）
+      barForegroundColor: Color.White,
       readerBarClick: (key: string): void => {
         this.onReadBarAction(key);
       },

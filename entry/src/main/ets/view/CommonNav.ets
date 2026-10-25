@@ -56,6 +56,9 @@ export struct CommonNav {
   @Param isShowBarController: boolean = true
   /** 底部栏内容类型：book 显示听书/下载，其余仅主按钮；主按钮文案/图标按类型区分 */
   @Param readBarKind: string = 'book'
+
+  /** 工具栏强制前景色（漫画页纯黑底固定白色，不随深浅模式；不传走系统色）。 */
+  @Param barForegroundColor: ResourceColor | undefined = undefined
   /** 双击标题栏区域时列表回滚到顶部 */
   @Param doubleTapToTop: boolean = false
   @Param scrollToTopYOffset: number = 0
@@ -163,14 +166,18 @@ export struct CommonNav {
         originalStyle: {
           backgroundStyle: { maskExtraHeight: 0, blurRadius: this.navBlurRadius },
           contentStyle: {
-            // 深浅模式切换时由 themeUtils 触发重渲染（HDS 不会自动刷新系统色）
-            titleStyle: { mainTitleColor: themeUtils.textColor, subTitleColor: themeUtils.terTextColor },
-            backIconStyle: { iconColor: themeUtils.textColor },
+            // 深浅模式切换时由 themeUtils 触发重渲染（HDS 不会自动刷新系统色）；
+            // barForegroundColor 固定前景色（漫画页黑底白字）优先
+            titleStyle: {
+              mainTitleColor: this.barForegroundColor ?? themeUtils.textColor,
+              subTitleColor: themeUtils.terTextColor
+            },
+            backIconStyle: { iconColor: this.barForegroundColor ?? themeUtils.textColor },
             menuStyle: {
-              iconColor: themeUtils.textColor
+              iconColor: this.barForegroundColor ?? themeUtils.textColor
             },
             subIconStyle: {
-              iconColor: themeUtils.textColor
+              iconColor: this.barForegroundColor ?? themeUtils.textColor
             }
           },
         },
@@ -314,10 +321,10 @@ export struct CommonNav {
     Column({ space: 3 }) {
       SymbolGlyph(icon)
         .fontSize(19)
-        .fontColor([$r('sys.color.icon_primary')])
+        .fontColor([this.barForegroundColor ?? $r('sys.color.icon_primary')])
       Text(label)
         .fontSize(10.5)
-        .fontColor($r('sys.color.font_primary'))
+        .fontColor(this.barForegroundColor ?? $r('sys.color.font_primary'))
     }
     .alignItems(HorizontalAlign.Center)
     .layoutWeight(1)
@@ -333,7 +340,8 @@ export struct CommonNav {
       .vertical(true)
       .strokeWidth(0.5)
       .height(22)
-      .color($r('sys.color.comp_divider'))
+      .color(this.barForegroundColor !== undefined
+        ? '#33FFFFFF' : $r('sys.color.comp_divider'))
   }
 
   /** 主按钮文案：观看 / 收听 / 阅读（对齐 fqapp _readLabel）。 */
