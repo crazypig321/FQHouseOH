@@ -127,6 +127,7 @@ export struct ListenPage {
     CommonNav({
       titleBarOp: FqTitleBarOptions('听书', false),
       scroller: this.scroller,
+      showPlaybackBall: false,
     }) {
       Scroll(this.scroller) {
         Column() {

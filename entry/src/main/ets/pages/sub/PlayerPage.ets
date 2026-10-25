@@ -339,6 +339,7 @@ export struct PlayerPage {
       hideTitleBar: true,
       showBrandGradient: false,
       pageBackgroundColor: Color.Black,
+      showPlaybackBall: false,
       backPressed: (): boolean => {
         // 全屏沉浸态先退全屏（官方返回语义），再返回上一页；
         // 防误触锁开启时吞掉返回手势：禁止手势退出全屏，只唤出锁按钮

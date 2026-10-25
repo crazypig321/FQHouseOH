@@ -73,6 +73,9 @@ export struct CommonNav {
   @Param navBlurRadius: number = 30
   /** tab遮罩高度 */
   @Param tabMaskHeight: number = 56
+  /** 播控球声明（球体已上移 Index 全局层）：播放器/听书等自身页面传 false，
+   *  CommonNav onShown 时写入 appState.hidePlaybackBall 供 Index 显隐球体。 */
+  @Param showPlaybackBall: boolean = true
 
   /** 返回 true 拦截系统返回 */
   @Event backPressed: () => boolean = (): boolean => false
@@ -215,6 +218,8 @@ export struct CommonNav {
       return this.backPressed()
     })
     .onShown(() => {
+      // 向全局播控球（Index 层）声明本页是否隐藏球体
+      appState.hidePlaybackBall = !this.showPlaybackBall;
       this.onShown()
     })
     .dynamicHideTitleBar({

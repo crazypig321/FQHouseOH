@@ -14,6 +14,7 @@ import { FqReaderSettingsHandler, fqReaderSettingsBus } from '../core/FqReaderSe
 import { fqEffectiveReaderTheme, ReaderSettingsDialogContent } from '../view/dialog/ReaderSettingsDialogContent';
 import { FqComicSettingsHandler, fqComicSettingsBus } from '../core/FqComicSettingsBus';
 import { ComicSettingsDialogContent } from '../view/dialog/ComicSettingsDialogContent';
+import { FqPlaybackBall } from '../view/FqPlaybackBall';
 
 @Entry
 @ComponentV2
@@ -50,40 +51,53 @@ struct Index {
     })
   }
 
+  /** 全局播控球显隐：播放器/听书页经 CommonNav onShown 置 hidePlaybackBall。 */
+  @Computed
+  get showPlaybackBall(): boolean {
+    return !appState.hidePlaybackBall;
+  }
+
   build() {
-    HdsNavigation(appState.pageInfos) {
-      HdsTabs({ controller: this.tabsController }) {
-        MainTabPagesBuilder()
+    Stack() {
+      HdsNavigation(appState.pageInfos) {
+        HdsTabs({ controller: this.tabsController }) {
+          MainTabPagesBuilder()
+        }
+        .barOverlap(true)
+        .vertical(false)
+        .scrollable(false)
+        .barPosition(BarPosition.End)
+        // 批量多选模式下隐藏 tab 栏（对齐 musicfreeOH Index）
+        .barHeight(56)
+        .animationDuration(500)
+        .barFloatingStyle({
+          barBottomMargin: 28,
+          systemMaterialEffect: {
+            materialType: appState.materialType,
+            materialLevel: appState.materialLevel
+          },
+          // 智感握姿：随设置开关 handedness 适配
+          adaptToHandedness: appState.smartReachEnabled,
+        })
+        .onSelected((index: number) => {
+          appState.currTabsIndex = index
+        })
       }
-      .barOverlap(true)
-      .vertical(false)
-      .scrollable(false)
-      .barPosition(BarPosition.End)
-      // 批量多选模式下隐藏 tab 栏（对齐 musicfreeOH Index）
-      .barHeight(56)
-      .animationDuration(500)
-      .barFloatingStyle({
-        barBottomMargin: 28,
-        systemMaterialEffect: {
-          materialType: appState.materialType,
-          materialLevel: appState.materialLevel
-        },
-        // 智感握姿：随设置开关 handedness 适配
-        adaptToHandedness: appState.smartReachEnabled,
-      })
-      .onSelected((index: number) => {
-        appState.currTabsIndex = index
-      })
+      .titleMode(HdsNavigationTitleMode.MINI)
+      .mode(NavigationMode.Stack)
+      .hideBackButton(true)
+      .hideTitleBar(true)
+      .navDestination(this.pageMap)
+      .width('100%')
+      .height('100%')
+      .foregroundBlurStyle(appState.isForegroundBlur ? BlurStyle.Thin : BlurStyle.NONE,
+        { colorMode: ThemeColorMode.SYSTEM, adaptiveColor: AdaptiveColor.DEFAULT, scale: 0.3 })
+      if (this.showPlaybackBall) {
+        FqPlaybackBall()
+      }
     }
-    .titleMode(HdsNavigationTitleMode.MINI)
-    .mode(NavigationMode.Stack)
-    .hideBackButton(true)
-    .hideTitleBar(true)
-    .navDestination(this.pageMap)
     .width('100%')
     .height('100%')
-    .foregroundBlurStyle(appState.isForegroundBlur ? BlurStyle.Thin : BlurStyle.NONE,
-      { colorMode: ThemeColorMode.SYSTEM, adaptiveColor: AdaptiveColor.DEFAULT, scale: 0.3 })
   }
 
   /** 返回手势（导航栈空时到达，二级页出栈由 Navigation 处理，参考 musicfreeOH Index.onBackPress）：
