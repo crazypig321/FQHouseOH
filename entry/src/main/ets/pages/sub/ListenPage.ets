@@ -24,6 +24,7 @@ import {
 } from '../../model/FqNavModels';
 import { fqAudioSession, FqChapterOpenOptions } from '../../core/FqAudioSession';
 import { FqAudioTone, FqRelatedWork } from '../../model/FqAudioModels';
+import { FqChapter } from '../../model/FqModels';
 import { FqShelfItem, FqShelfStore } from '../../core/FqShelfStore';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { appState } from '../../entryability/AppState';
@@ -80,6 +81,8 @@ export struct ListenPage {
   /** 关闭令牌：新开/新关使旧的延迟关闭失效。 */
   private sheetCloseToken: number = 0;
   @Local catalogOpenToken: number = 0;
+  /** 章评打开令牌：每次打开 +1（公共 FqCommentSheet 据此重拉当前章章评）。 */
+  @Local commentsOpenToken: number = 0;
   /** 书架态刷新令牌（toggle 后驱动 @Computed 重算）。 */
   @Local shelfRefresh: number = 0;
   private scroller: Scroller = new Scroller();
@@ -352,6 +355,7 @@ export struct ListenPage {
         promptAction.showToast({ message: '下载功能即将上线', duration: 1500 });
       })
       this.ActionItem($r('sys.symbol.message'), '章评', false, (): void => {
+        this.commentsOpenToken += 1;
         this.openSheet(FqListenSheetKind.comments);
       })
       this.ActionItem($r('sys.symbol.ellipsis_circle'), '更多', false, (): void => {
@@ -1087,14 +1091,29 @@ export struct ListenPage {
     }
   }
 
-  /** 章评（书评组件复用）。 */
+  /** 章评：公共 FqCommentSheet（当前章章末聚合桶）。 */
   @Builder
   private CommentsSheetBuilder() {
     FqCommentSheet({
       bookId: fqAudioSession.bookId,
       fontColor: $r('sys.color.font_primary'),
       commentLabel: '章评',
+      chapterItemId: this.currentChapterItemId(),
+      chapterVersion: this.currentChapterVersion(),
+      openToken: this.commentsOpenToken,
     })
+  }
+
+  /** 当前播章 itemId（章评入口；无章节时空串回退书评）。 */
+  private currentChapterItemId(): string {
+    const chapter: FqChapter | null = fqAudioSession.chapter;
+    return chapter !== null ? chapter.itemId : '';
+  }
+
+  /** 当前播章内容版本（章评接口必传）。 */
+  private currentChapterVersion(): string {
+    const chapter: FqChapter | null = fqAudioSession.chapter;
+    return chapter !== null ? chapter.version : '';
   }
 
   /** 单 bindSheet：按 activeSheet 切换半模态内容。 */

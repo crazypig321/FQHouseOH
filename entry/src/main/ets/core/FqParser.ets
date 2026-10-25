@@ -42,6 +42,7 @@ import {
   FqSeriesRelateBook,
   fqEmptyRankCatalog,
   fqFormatCounter,
+  FqChapterIdeaMeta,
 } from '../model/FqModels';
 import { FqParagraphComment } from '../reader/ReaderTypes';
 
@@ -1078,6 +1079,38 @@ export function fqParseChapterIdeaCounts(payload: Record<string, Object>, paragr
   return counts;
 }
 
+/**
+ * 章末章评聚合（/api/v1/chapters/{itemId}/reviews：data.data 最大段键桶即章评，
+ * 官方端从该桶进章末章评；业务码非 0/200（103001 参数非法 / 1301008 无数据）按无章评）。
+ */
+export function fqParseChapterIdeaMeta(payload: Record<string, Object>): FqChapterIdeaMeta {
+  const code: number = fqAsInt(payload['code'], 0);
+  if (code !== 0 && code !== 200) {
+    return new FqChapterIdeaMeta(-1, 0);
+  }
+  const dataRec: Record<string, Object> | null = fqAsRecord(payload['data']);
+  const buckets: Record<string, Object> | null =
+    dataRec !== null ? fqAsRecord(dataRec['data']) : null;
+  if (buckets !== null) {
+    let endParaIndex: number = -1;
+    let endCount: number = 0;
+    for (const key of fqKeys(buckets)) {
+      const paraIndex: number = Number.parseInt(key, 10);
+      if (Number.isNaN(paraIndex) || paraIndex < 0 || paraIndex <= endParaIndex) {
+        continue;
+      }
+      const bucket: Record<string, Object> | null = fqAsRecord(buckets[key]);
+      if (bucket === null) {
+        continue;
+      }
+      endParaIndex = paraIndex;
+      endCount = fqAsInt(bucket['count'], 0);
+    }
+    return new FqChapterIdeaMeta(endParaIndex, endCount);
+  }
+  return new FqChapterIdeaMeta(-1, 0);
+}
+
 /** 某段段评列表（/api/v1/books/{bookId}/reviews 段评配方：data.data_list[i].comment 嵌套，
  *  计数藏于 comment.stat；业务码非 0/200 返回空）。 */
 export function fqParseParagraphComments(payload: Record<string, Object>): FqParagraphComment[] {
@@ -1124,6 +1157,87 @@ export function fqParseParagraphComments(payload: Record<string, Object>): FqPar
     comments.push(comment);
   }
   return comments;
+}
+
+/**
+ * 章评一页（/api/v1/books/{bookId}/reviews 段评配方 + 章末聚合段键 para_index，
+ * 对齐 fqapp parseParagraphComments → BookCommentPage 归一）：
+ * data.data_list[i].comment 嵌套（common.content / comment.stat）、
+ * 页级 common_list_info.total/has_more/cursor（数字串或 {"offset":N}）。
+ */
+export function fqParseChapterCommentPage(payload: Record<string, Object>): FqBookCommentPage {
+  const code: number = fqAsInt(payload['code'], 0);
+  if (code !== 0 && code !== 200) {
+    return new FqBookCommentPage([], 0, 0, '', false, 0);
+  }
+  const dataRec: Record<string, Object> | null = fqAsRecord(payload['data']);
+  if (dataRec === null) {
+    return new FqBookCommentPage([], 0, 0, '', false, 0);
+  }
+  const comments: FqBookComment[] = [];
+  const rawList: Object[] | null = fqAsArray(dataRec['data_list']);
+  if (rawList !== null) {
+    for (const entry of rawList) {
+      const entryRec: Record<string, Object> | null = fqAsRecord(entry);
+      if (entryRec === null) {
+        continue;
+      }
+      const commentRec: Record<string, Object> = fqAsRecord(entryRec['comment']) ?? fqEmptyRecord();
+      const common: Record<string, Object> = fqAsRecord(commentRec['common']) ?? fqEmptyRecord();
+      const content: Record<string, Object> = fqAsRecord(common['content']) ?? fqEmptyRecord();
+      const text: string = fqStr(content, 'text');
+      const imageList: Record<string, Object> | null = fqAsRecord(content['image_data_list']);
+      const imageUrls: string[] = imageList !== null
+        ? fqCommentImageUrls(imageList['image_data']) : [];
+      if (text.length === 0 && imageUrls.length === 0) {
+        continue;
+      }
+      const userInfo: Record<string, Object> = fqAsRecord(common['user_info']) ?? fqEmptyRecord();
+      const baseInfo: Record<string, Object> = fqAsRecord(userInfo['base_info']) ?? fqEmptyRecord();
+      const userTag: Record<string, Object> = fqAsRecord(userInfo['user_tag']) ?? fqEmptyRecord();
+      const stat: Record<string, Object> = fqAsRecord(commentRec['stat']) ?? fqEmptyRecord();
+      comments.push(new FqBookComment(
+        fqStr(commentRec, 'comment_id'),
+        text,
+        imageUrls,
+        0,
+        fqAsInt(stat['digg_count'], 0),
+        fqAsInt(stat['reply_count'], 0),
+        fqAsInt(stat['read_duration'], 0),
+        fqCommentTimestampMs(common['create_timestamp']),
+        fqStr(baseInfo, 'user_name'),
+        fqStr(baseInfo, 'user_avatar'),
+        userTag['is_author'] === true,
+      ));
+    }
+  }
+  const info: Record<string, Object> = fqAsRecord(dataRec['common_list_info']) ?? fqEmptyRecord();
+  return new FqBookCommentPage(
+    comments,
+    fqAsInt(info['total'], 0),
+    0,
+    '',
+    info['has_more'] === true,
+    fqCursorOffset(fqStr(info, 'cursor')),
+  );
+}
+
+/** 评论列表 cursor 偏移：数字串或 {"offset":N} JSON 串，非法返回 0。 */
+function fqCursorOffset(cursor: string): number {
+  const trimmed: string = cursor.trim();
+  if (trimmed.length === 0) {
+    return 0;
+  }
+  const direct: number = Number.parseInt(trimmed, 10);
+  if (!Number.isNaN(direct)) {
+    return direct;
+  }
+  const match: RegExpMatchArray | null = trimmed.match(new RegExp('"offset"\\s*:\\s*(\\d+)'));
+  if (match !== null) {
+    const value: number = Number.parseInt(match[1], 10);
+    return Number.isNaN(value) ? 0 : value;
+  }
+  return 0;
 }
 
 const FQ_PREVIEW_MARKER_RE: RegExp = new RegExp('\\{!--[\\s\\S]*?--\\}|<!--[\\s\\S]*?-->|\\{!--[\\s\\S]*$|<!--[\\s\\S]*$', 'g');

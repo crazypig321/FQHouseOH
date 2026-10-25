@@ -707,6 +707,19 @@ export class FqBookCommentPage {
   }
 }
 
+/** 章末章评聚合信息（/api/v1/chapters/{itemId}/reviews 的最大段键桶，官方章评入口）。 */
+export class FqChapterIdeaMeta {
+  /** 章末章评段键（ideas data.data 最大键，如 10000；-1 无章评）。 */
+  readonly endParaIndex: number;
+  /** 章末章评数。 */
+  readonly endCount: number;
+
+  constructor(endParaIndex: number, endCount: number) {
+    this.endParaIndex = endParaIndex;
+    this.endCount = endCount;
+  }
+}
+
 /** 数字计数 79528 -> 7.9万（对齐 fqapp formatCount，用于点赞/回复数）。 */
 export function fqFormatCountInt(value: number): string {
   if (value < 10000) {

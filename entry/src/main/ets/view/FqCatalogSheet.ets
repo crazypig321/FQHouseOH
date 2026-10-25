@@ -141,6 +141,22 @@ export struct FqCatalogSheet {
     return this.chapters.length > 0 ? `目录 · ${this.chapters.length}` : '目录';
   }
 
+  /** 进度列颜色：当前章强调色、已读 100% 系统三级色、其余宿主字体色。 */
+  private progressColorAt(index: number, text: string): ResourceColor {
+    if (index === this.currentChapterIndex) {
+      return FQ_ACCENT;
+    }
+    return text === '100%' ? $r('sys.color.font_tertiary') : this.fontColor;
+  }
+
+  /** 进度列透明度：当前章与已读 100% 为 1，其余 0.45。 */
+  private progressOpacityAt(index: number, text: string): number {
+    if (index === this.currentChapterIndex || text === '100%') {
+      return 1;
+    }
+    return 0.45;
+  }
+
   build() {
     CommonSheet({
       sheetTitle: this.sheetTitle(),
@@ -193,9 +209,10 @@ export struct FqCatalogSheet {
                 if (this.progressOf(this.chapters.indexOf(chapter)).length > 0) {
                   Text(this.progressOf(this.chapters.indexOf(chapter)))
                     .fontSize(12)
-                    .fontColor(this.chapters.indexOf(chapter) === this.currentChapterIndex
-                      ? FQ_ACCENT : this.fontColor)
-                    .opacity(this.chapters.indexOf(chapter) === this.currentChapterIndex ? 1 : 0.45)
+                    .fontColor(this.progressColorAt(this.chapters.indexOf(chapter),
+                      this.progressOf(this.chapters.indexOf(chapter))))
+                    .opacity(this.progressOpacityAt(this.chapters.indexOf(chapter),
+                      this.progressOf(this.chapters.indexOf(chapter))))
                     .maxLines(1)
                 }
               }

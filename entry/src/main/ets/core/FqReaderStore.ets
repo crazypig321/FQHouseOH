@@ -13,6 +13,7 @@ const FQ_READER_STORE_NAME: string = 'fq_reader';
 const FQ_READER_KEY_SETTINGS: string = 'settings';
 const FQ_READER_KEY_PROGRESS: string = 'progress_';
 const FQ_READER_KEY_PAGES: string = 'pages_';
+const FQ_READER_KEY_READ: string = 'read_';
 
 /** 单书阅读进度。 */
 export class FqReaderProgress {
@@ -271,4 +272,91 @@ export class FqReaderStore {
       // 忽略写入失败
     }
   }
+
+  /** 读取单书已读章节集合（读毕章节，目录进度用；"a-b,c" 区间串持久化）。 */
+  public static getReadChapters(bookId: string): Set<number> {
+    const result: Set<number> = new Set();
+    const pref: preferences.Preferences | null = FqReaderStore.pref;
+    if (pref === null || bookId.length === 0) {
+      return result;
+    }
+    let text: string = '';
+    try {
+      const raw: preferences.ValueType = pref.getSync(`${FQ_READER_KEY_READ}${bookId}`, '');
+      if (typeof raw === 'string') {
+        text = raw;
+      }
+    } catch (error) {
+      return result;
+    }
+    return fqDecodeReadRanges(text);
+  }
+
+  public static saveReadChapters(bookId: string, chapters: Set<number>): void {
+    const pref: preferences.Preferences | null = FqReaderStore.pref;
+    if (pref === null || bookId.length === 0) {
+      return;
+    }
+    try {
+      pref.putSync(`${FQ_READER_KEY_READ}${bookId}`, fqEncodeReadRanges(chapters));
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
+  }
+}
+
+/** 已读章节区间串编码：连续下标合并为 "a-b"，单值 "a"，逗号连接。 */
+function fqEncodeReadRanges(chapters: Set<number>): string {
+  const indices: number[] = [];
+  chapters.forEach((value: number): void => {
+    if (value >= 0) {
+      indices.push(value);
+    }
+  });
+  indices.sort((a: number, b: number): number => a - b);
+  const parts: string[] = [];
+  let index: number = 0;
+  while (index < indices.length) {
+    let end: number = index;
+    while (end + 1 < indices.length && indices[end + 1] === indices[end] + 1) {
+      end++;
+    }
+    parts.push(end === index ? `${indices[index]}` : `${indices[index]}-${indices[end]}`);
+    index = end + 1;
+  }
+  return parts.join(',');
+}
+
+/** 已读章节区间串解码："a-b,c" → 下标集合；越界/非法片段跳过。 */
+function fqDecodeReadRanges(text: string): Set<number> {
+  const result: Set<number> = new Set();
+  if (text.trim().length === 0) {
+    return result;
+  }
+  const parts: string[] = text.split(',');
+  for (const part of parts) {
+    if (part.length === 0) {
+      continue;
+    }
+    const dash: number = part.indexOf('-');
+    if (dash < 0) {
+      const value: number = Number.parseInt(part, 10);
+      if (!Number.isNaN(value) && value >= 0) {
+        result.add(value);
+      }
+      continue;
+    }
+    const start: number = Number.parseInt(part.substring(0, dash), 10);
+    const end: number = Number.parseInt(part.substring(dash + 1), 10);
+    if (Number.isNaN(start) || Number.isNaN(end) || start < 0 || end < start) {
+      continue;
+    }
+    for (let value: number = start; value <= end; value++) {
+      result.add(value);
+    }
+  }
+  return result;
 }

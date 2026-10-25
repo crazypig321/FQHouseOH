@@ -13,7 +13,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import fq, { FqBridgeResponse } from 'libfqapi_napi.so';
 import { FqDeployer } from './FqDeployer';
 import { FqKeyStore } from './FqKeyStore';
-import {   fqParseAuthorProfile, fqParseBookComments, fqParseBookDetail, fqParseChapterIdeaCounts, fqParseChapterSummaries,
+import {   fqParseAuthorProfile, fqParseBookComments, fqParseBookDetail, fqParseChapterCommentPage, fqParseChapterIdeaCounts, fqParseChapterIdeaMeta, fqParseChapterSummaries,
   fqParseDanmaku, fqParseDirectory, fqParseEpisodeSource, fqParseHomepage, fqParseParagraphComments, fqParseRankBoard, fqParseRankCatalog,
   fqParseSearchTabs, fqParseSeriesFeed, fqParseSeriesRelateBook, fqLegacyChapterText, fqNormalizeChapterText, fqParseNovelChapter,
   fqParseChapterImages } from './FqParser';
@@ -32,6 +32,7 @@ import {
   FqBookCommentPage,
   FqBookDetail,
   FqChapter,
+  FqChapterIdeaMeta,
   FqDanmakuPage,
   FqEpisodeSource,
   FqEpisodeVariant,
@@ -362,6 +363,40 @@ export class FqBackend {
     } catch (error) {
       return [];
     }
+  }
+
+  /**
+   * 章末章评聚合信息（/api/v1/chapters/{itemId}/reviews?comment_source=3 的
+   * 最大段键桶，官方端章评入口；业务码非 0/200 视为无章评，传输错误抛出由调用方处理）。
+   */
+  public async chapterIdeaMeta(itemId: string): Promise<FqChapterIdeaMeta> {
+    const payload: Record<string, Object> = await this.getJson(
+      `/api/v1/chapters/${encodeURIComponent(itemId)}/reviews`, 'comment_source=3');
+    return fqParseChapterIdeaMeta(payload);
+  }
+
+  /**
+   * 章评一页（/api/v1/books/{bookId}/reviews 段评配方 + 章末聚合段键 para_index）：
+   * group_id=章节 itemId、group_type=15、comment_source=2、comment_type=1、
+   * server_channel=38、item_version 必传；cursor 为上页 common_list_info.cursor 数字串。
+   */
+  public async chapterComments(bookId: string, itemId: string, itemVersion: string,
+    paraIndex: number, count: number, cursor: string): Promise<FqBookCommentPage> {
+    let query: string = `book_id=${encodeURIComponent(bookId)}`
+      + `&group_id=${encodeURIComponent(itemId)}`
+      + `&group_type=15&comment_source=2&comment_type=1&server_channel=38`
+      + `&para_index=${paraIndex}`
+      + `&item_version=${encodeURIComponent(itemVersion)}`
+      + `&count=${count < 1 ? 20 : count}`;
+    if (cursor.length > 0) {
+      query += `&cursor=${encodeURIComponent(cursor)}`;
+    }
+    const payload: Record<string, Object> =
+      await this.getJson(`/api/v1/books/${encodeURIComponent(bookId)}/reviews`, query);
+    const page: FqBookCommentPage = fqParseChapterCommentPage(payload);
+    hilog.info(0x0001, 'FqBackend',
+      `chapterComments ver=${itemVersion} para=${paraIndex} code=${payload['code']} n=${page.comments.length} total=${page.totalCount}`);
+    return page;
   }
 
   /**

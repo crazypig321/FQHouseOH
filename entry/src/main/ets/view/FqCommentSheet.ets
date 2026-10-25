@@ -1,16 +1,17 @@
 /**
- * 书评公共组件（阅读页书评半模态与详情页书评预览共用）：
- * - FqCommentSource：书评懒加载数据源（续拉按 comment_id 去重）；
- * - FqCommentTile：单条书评（头像/名字/星级/时间 + 正文 + 图片 + 点赞回复计数），
+ * 评论公共组件（阅读页/听书页章评半模态与详情页书评预览共用）：
+ * - FqCommentSource：评论懒加载数据源（续拉按 comment_id 去重）；
+ * - FqCommentTile：单条评论（头像/名字/星级/时间 + 正文 + 图片 + 点赞回复计数），
  *   字体色随宿主主题注入（阅读页传阅读主题墨色，详情页传系统色），正文可限行；
- * - FqCommentSheet：书评半模态内容（CommonSheet 壳 + 首拉 Loading / 错误重试 /
+ * - FqCommentSheet：评论半模态内容（CommonSheet 壳 + 首拉 Loading / 错误重试 /
  *   空态 / LazyForEach 触底续拉），aboutToAppear 自动拉第一页；
+ *   chapterItemId 非空走章评配方（章末聚合桶 + cursor 分页），空走书评；
  * - fqCommentSheetHeightVp：统一 Sheet 高度（屏高 82%）。
  */
 
 import { display } from '@kit.ArkUI';
 import { FqBackend, fqErrorMessage } from '../core/FqBackend';
-import { FqBookComment, FqBookCommentPage, fqFormatCountInt } from '../model/FqModels';
+import { FqBookComment, FqBookCommentPage, FqChapterIdeaMeta, fqFormatCountInt } from '../model/FqModels';
 import { CommonLoading, FQ_ACCENT } from './CommonCom';
 import { CommonSheet } from './CommonSheet';
 import { appState } from '../entryability/AppState';
@@ -137,10 +138,12 @@ export struct FqCommentTile {
           }
           .width('100%')
           Row({ space: 8 }) {
-            Rating({
-              rating: this.comment.stars,
-              indicator: true,
-            })
+            if (this.comment.score > 0) {
+              Rating({
+                rating: this.comment.stars,
+                indicator: true,
+              })
+            }
             if (this.comment.relativeTime().length > 0) {
               Text(this.comment.relativeTime())
                 .fontSize(11)
@@ -218,14 +221,20 @@ export struct FqCommentTile {
   }
 }
 
-/** 书评半模态内容：公共 sheet 承载懒加载列表，aboutToAppear 自动拉第一页。 */
+/** 书评/章评半模态内容：公共 sheet 承载懒加载列表，aboutToAppear 自动拉第一页。 */
 @ComponentV2
 export struct FqCommentSheet {
   @Param bookId: string = '';
   /** 字体色随宿主主题（阅读页墨色 / 详情页系统色）。 */
   @Param fontColor: ResourceColor = $r('sys.color.font_primary');
-  /** 评论类型文案（书评 / 剧评 / 漫评等，随作品类型）。 */
+  /** 评论类型文案（书评 / 章评等，随入口）。 */
   @Param commentLabel: string = '书评';
+  /** 章评模式：当前章节 itemId（非空启用章评配方；空走书评）。 */
+  @Param chapterItemId: string = '';
+  /** 章评模式：当前章节内容版本（章评接口必传）。 */
+  @Param chapterVersion: string = '';
+  /** 打开令牌：宿主每次打开 +1，组件据此重置分页并重拉（兼容内容重建/复用两种挂载）。 */
+  @Param openToken: number = 0;
   @Local loading: boolean = false;
   @Local errorMsg: string = '';
   @Local count: number = 0;
@@ -236,21 +245,47 @@ export struct FqCommentSheet {
   private source: FqCommentSource = new FqCommentSource();
   private scroller: Scroller = new Scroller();
   private nextOffset: number = 0;
+  /** 章评模式：已解析的章末聚合段键（-1 未解析）。 */
+  private resolvedParaIndex: number = -1;
+  /** 加载代际：重开重载递增，作废在途请求的迟到写入。 */
+  private loadGen: number = 0;
 
   aboutToAppear(): void {
     this.loadComments(true);
   }
 
-  /** Sheet 标题：总数就绪后带计数（书评 · 123）。 */
+  @Monitor('openToken')
+  onOpenTokenChange(): void {
+    this.resetForReload();
+  }
+
+  /** 重开重载：清列表与分页状态后重拉首页（章评模式同时重解析章末段键）。 */
+  private resetForReload(): void {
+    this.loadGen += 1;
+    this.source.setItems([]);
+    this.count = 0;
+    this.total = 0;
+    this.hasMore = false;
+    this.moreFailed = false;
+    this.loadingMore = false;
+    this.loading = false;
+    this.nextOffset = 0;
+    this.resolvedParaIndex = -1;
+    this.loadComments(true);
+  }
+
+  /** Sheet 标题：总数就绪后带计数（章评 · 123）。 */
   private sheetTitle(): string {
     return this.total > 0 ? `${this.commentLabel} · ${this.total}` : this.commentLabel;
   }
 
-  /** 拉取书评一页：refresh 重置分页（首开/重试），否则触底续拉。 */
+  /** 拉取评论一页：refresh 重置分页（首开/重试），否则触底续拉；
+   *  章评模式（chapterItemId 非空）走章末聚合桶配方，无章评桶时落空态。 */
   private async loadComments(refresh: boolean): Promise<void> {
     if (this.bookId.length === 0) {
       return;
     }
+    const chapterMode: boolean = this.chapterItemId.length > 0;
     if (refresh) {
       if (this.loading) {
         return;
@@ -264,9 +299,50 @@ export struct FqCommentSheet {
       this.loadingMore = true;
       this.moreFailed = false;
     }
+    const gen: number = this.loadGen;
+    if (chapterMode && this.resolvedParaIndex < 0) {
+      let meta: FqChapterIdeaMeta;
+      try {
+        meta = await FqBackend.get().chapterIdeaMeta(this.chapterItemId);
+      } catch (error) {
+        if (gen !== this.loadGen) {
+          return;
+        }
+        if (refresh) {
+          this.errorMsg = fqErrorMessage(error);
+          this.loading = false;
+        } else {
+          this.loadingMore = false;
+          this.moreFailed = true;
+        }
+        return;
+      }
+      if (gen !== this.loadGen) {
+        return;
+      }
+      this.resolvedParaIndex = meta.endParaIndex;
+      if (this.resolvedParaIndex < 0) {
+        // 无章评数据：空态（不请求评论列表）
+        if (refresh) {
+          this.loading = false;
+        } else {
+          this.loadingMore = false;
+        }
+        return;
+      }
+    }
     const offset: number = refresh ? 0 : this.nextOffset;
     try {
-      const page: FqBookCommentPage = await FqBackend.get().bookComments(this.bookId, 20, offset);
+      let page: FqBookCommentPage;
+      if (chapterMode) {
+        page = await FqBackend.get().chapterComments(this.bookId, this.chapterItemId,
+          this.chapterVersion, this.resolvedParaIndex, 20, refresh ? '' : `${offset}`);
+      } else {
+        page = await FqBackend.get().bookComments(this.bookId, 20, offset);
+      }
+      if (gen !== this.loadGen) {
+        return;
+      }
       if (refresh) {
         this.source.setItems(page.comments);
         this.nextOffset = page.nextOffset > 0 ? page.nextOffset : page.comments.length;
@@ -282,6 +358,9 @@ export struct FqCommentSheet {
       this.total = page.totalCount;
       this.count = this.source.totalCount();
     } catch (error) {
+      if (gen !== this.loadGen) {
+        return;
+      }
       if (refresh) {
         this.errorMsg = fqErrorMessage(error);
         this.loading = false;

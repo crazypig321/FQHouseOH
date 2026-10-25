@@ -70,8 +70,10 @@ export struct ReaderPage {
   @Local sheetVisible: boolean = false;
   /** 目录打开令牌：每次打开 +1（公共 FqCatalogSheet 据此重置搜索/排序并定位当前章）。 */
   @Local sheetOpenToken: number = 0;
-  /** 书评半模态（标题栏书评键呼出；内容为公共 FqCommentSheet）。 */
+  /** 章评半模态（标题栏评论键呼出；当前章章评，内容为公共 FqCommentSheet）。 */
   @Local commentSheetVisible: boolean = false;
+  /** 章评打开令牌：每次打开 +1（公共 FqCommentSheet 据此重拉当前章章评）。 */
+  @Local commentOpenToken: number = 0;
   /** 段评半模态（段尾气泡呼出）。 */
   @Local paraSheetVisible: boolean = false;
   @Local paraSheetParaIndex: number = -1;
@@ -124,6 +126,8 @@ export struct ReaderPage {
   /** 各章实测页数与冻结估算（整书页码，对齐 ReaderPage 行为）。 */
   private chapterPages: Map<number, number> = new Map();
   private chapterEstimate: Map<number, number> = new Map();
+  /** 已读章节集合（翻过章末/下一章时标记读毕，目录进度用；目录跳转不标记）。 */
+  private readChapters: Set<number> = new Set();
 
   aboutToAppear(): void {
     this.bookId = ReaderNavParams.id;
@@ -441,8 +445,10 @@ export struct ReaderPage {
         this.pageIndex += 1;
         this.afterPageShown();
       } else if (this.nextLayout !== null) {
+        this.markChapterRead(this.chapterIndex);
         this.switchToNeighbor(this.nextLayout, 0);
       } else if (this.chapterIndex + 1 < this.totalChapters) {
+        this.markChapterRead(this.chapterIndex);
         this.openChapter(this.chapterIndex + 1, '');
       }
       hilog.info(0x0001, 'FqFlip', `onFlipTurn isNext=${isNext} pageIndex=${this.pageIndex}`);
@@ -1286,8 +1292,9 @@ export struct ReaderPage {
    // })
   }
 
-  /** 打开书评半模态（数据加载由公共 FqCommentSheet 自理）。 */
+  /** 打开章评半模态（当前章章末聚合桶，数据加载由公共 FqCommentSheet 自理）。 */
   private openCommentSheet(): void {
+    this.commentOpenToken += 1;
     this.commentSheetVisible = true;
   }
 
@@ -1568,6 +1575,7 @@ export struct ReaderPage {
     const token: number = ++this.loadToken;
     this.loadingState = true;
     this.errorMsg = '';
+    this.readChapters = FqReaderStore.getReadChapters(this.bookId);
     try {
       // 本地导入书籍：目录/正文均来自本地文件，不请求后端
       if (FqLocalBookStore.isLocalBookId(this.bookId)) {
@@ -1696,20 +1704,30 @@ export struct ReaderPage {
     return FqBackend.get().chapterText(chapter.itemId, chapter.title);
   }
 
-  /** 章节已读进度：当前章按页位置计百分比、之前章节 100%、未读章节 0%。 */
+  /** 章节已读进度：当前章按页位置计百分比、读毕章节 100%、未读章节 0%。 */
   private chapterProgressText(idx: number): string {
-    if (idx < this.chapterIndex) {
-      return '100%';
+    if (idx === this.chapterIndex) {
+      const layout: FqChapterLayout | null = this.curLayout;
+      if (layout === null) {
+        return '0%';
+      }
+      const total: number = layout.pages.length;
+      if (total <= 0) {
+        return '0%';
+      }
+      const pct: number = Math.round(((this.pageIndex + 1) / total) * 100);
+      return `${Math.min(Math.max(pct, 1), 100)}%`;
     }
-    if (idx > this.chapterIndex || this.curLayout === null) {
-      return '0%';
+    return this.readChapters.has(idx) ? '100%' : '0%';
+  }
+
+  /** 标记章节读毕（翻过章末/下一章进入后章时调用；目录跳转不标记）。 */
+  private markChapterRead(index: number): void {
+    if (index < 0 || this.readChapters.has(index)) {
+      return;
     }
-    const total: number = this.curLayout.pages.length;
-    if (total <= 0) {
-      return '0%';
-    }
-    const pct: number = Math.round(((this.pageIndex + 1) / total) * 100);
-    return `${Math.min(Math.max(pct, 1), 100)}%`;
+    this.readChapters.add(index);
+    FqReaderStore.saveReadChapters(this.bookId, this.readChapters);
   }
 
   private openPrev(): void {
@@ -1723,6 +1741,7 @@ export struct ReaderPage {
     if (!this.hasNext()) {
       return;
     }
+    this.markChapterRead(this.chapterIndex);
     this.openChapter(this.chapterIndex + 1, '');
   }
 
@@ -1762,13 +1781,29 @@ export struct ReaderPage {
     })
   }
 
-  /** 书评半模态：公共 FqCommentSheet（首拉 Loading / 错误重试 / 空态 / 分页列表）。 */
+  /** 章评半模态：公共 FqCommentSheet（当前章章末聚合桶；首拉 Loading / 错误重试 / 空态 / 分页列表）。 */
   @Builder
   private CommentSheet() {
     FqCommentSheet({
       bookId: this.bookId,
       fontColor: this.theme().fontColor,
+      commentLabel: '章评',
+      chapterItemId: this.currentChapterItemId(),
+      chapterVersion: this.currentChapterVersion(),
+      openToken: this.commentOpenToken,
     })
+  }
+
+  /** 当前章 itemId（章评入口；无章节时空串回退书评）。 */
+  private currentChapterItemId(): string {
+    const chapter: FqChapter | undefined = this.chapters[this.chapterIndex];
+    return chapter !== undefined ? chapter.itemId : '';
+  }
+
+  /** 当前章内容版本（章评接口必传）。 */
+  private currentChapterVersion(): string {
+    const chapter: FqChapter | undefined = this.chapters[this.chapterIndex];
+    return chapter !== undefined ? chapter.version : '';
   }
 
   /** 段评半模态：所评段落原文 + 段评列表（Loading / 错误重试 / 空态）。 */
