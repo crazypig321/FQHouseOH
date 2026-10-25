@@ -222,6 +222,13 @@ export struct CommonNav {
       appState.hidePlaybackBall = !this.showPlaybackBall;
       this.onShown()
     })
+    .onHidden(() => {
+      // 隐藏球体的页面（播放器/听书）离开时复位全局标记：
+      // 返回 Navigation 首页（主 Tab 非 NavDestination，无 onShown）也能恢复球体
+      if (!this.showPlaybackBall) {
+        appState.hidePlaybackBall = false;
+      }
+    })
     .dynamicHideTitleBar({
       hideBottomBuilder: this.isSearchBarScroller,
       mode: HideMode.SCROLL_UP_TO

@@ -128,46 +128,52 @@ export struct FqPlaybackBall {
     .clip(true)
     .backdropBlur(45, { grayscale: [0,1] })
     .backgroundColor(this.expanded ? '#12ffffff' : Color.Transparent)
-    .border({ width: 0.8, color: this.expanded ? FqColorUtils.withOpacity($r('sys.color.comp_background_list_card'), 0.8)
-      : Color.Transparent })
+    .border({ width: 1, color: $r('sys.color.comp_background_list_card') })
     .shadow({ radius: 12, color: '#40000000', offsetY: 2 })
     .margin(this.ballMargin())
   }
 
-  /** 封面 + 外缘环形进度（圆/展开态共用）；尺寸直接读状态，参数传递不随状态刷新。 */
+  /** 封面 + 外缘环形进度（圆/展开态共用）：
+   * 进度环与封面固定尺寸，展开/收回仅做 scale 视觉缩放（纯渲染变换不触发组件重测），
+   * 避免 width/height 动画引起 Ring 进度弧重播（展开/收回时进度条跳一下）。 */
   @Builder
   private CoverWithProgress() {
     Stack() {
-      Progress({
-        value: this.progressValue(),
-        total: this.progressTotal(),
-        type: ProgressType.Ring,
-      })
-        .style({ strokeWidth: this.expanded ? 4 : 6 })
-        .color(FQ_ACCENT)
-        .backgroundColor(Color.Transparent)
-        .width(this.ballCoverSize() - 1)
-        .height(this.ballCoverSize() - 1)
-      if (fqAudioSession.cover.length > 0) {
-        Image(fqAudioSession.cover)
-          .width(this.ballCoverSize() - 12)
-          .height(this.ballCoverSize() - 12)
-          .borderRadius((this.ballCoverSize() - 12) / 2)
-          .objectFit(ImageFit.Cover)
-      } else {
-        Stack() {
-          SymbolGlyph($r('sys.symbol.headphones'))
-            .fontSize(24)
-            .fontColor([$r('sys.color.icon_primary')])
+      Stack() {
+        Progress({
+          value: this.progressValue(),
+          total: this.progressTotal(),
+          type: ProgressType.Ring,
+        })
+          .style({ strokeWidth: this.expanded ? 4 : 6 })
+          .color(FQ_ACCENT)
+          .backgroundColor(Color.Transparent)
+          .width(FQ_BALL_SIZE - 1)
+          .height(FQ_BALL_SIZE - 1)
+        if (fqAudioSession.cover.length > 0) {
+          Image(fqAudioSession.cover)
+            .width(FQ_BALL_SIZE - 12)
+            .height(FQ_BALL_SIZE - 12)
+            .borderRadius((FQ_BALL_SIZE - 12) / 2)
+            .objectFit(ImageFit.Cover)
+        } else {
+          Stack() {
+            SymbolGlyph($r('sys.symbol.headphones'))
+              .fontSize(24)
+              .fontColor([$r('sys.color.icon_primary')])
+          }
+          .width(FQ_BALL_SIZE - 12)
+          .height(FQ_BALL_SIZE - 12)
+          .borderRadius((FQ_BALL_SIZE - 12) / 2)
+          .backgroundColor($r('sys.color.comp_background_tertiary'))
         }
-        .width(this.ballCoverSize() - 12)
-        .height(this.ballCoverSize() - 12)
-        .borderRadius((this.ballCoverSize() - 12) / 2)
-        .backgroundColor($r('sys.color.comp_background_tertiary'))
       }
+      .width(FQ_BALL_SIZE)
+      .height(FQ_BALL_SIZE)
+      .scale({ x: this.coverScale(), y: this.coverScale() })
     }
     .width(this.ballCoverSize())
-    .height(this.ballCoverSize())
+    .height(FQ_BALL_SIZE)
   }
 
   /** 控制排圆钮；enabled false 置灰不可点（末章隐藏下一章入口）。 */
@@ -241,6 +247,11 @@ export struct FqPlaybackBall {
   /** 封面环径：圆态铺满球体，展开态缩小为 48。 */
   private ballCoverSize(): number {
     return this.expanded ? FQ_PANEL_COVER_SIZE : FQ_BALL_SIZE;
+  }
+
+  /** 封面视觉缩放比：展开 48/64=0.75，圆态 1（scale 渲染变换，进度环不重测不重播）。 */
+  private coverScale(): number {
+    return this.ballCoverSize() / FQ_BALL_SIZE;
   }
 
   /** 封面右距：圆态贴边 0，展开态缩进 4。 */

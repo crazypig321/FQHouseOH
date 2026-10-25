@@ -21,7 +21,7 @@ import { appState } from '../../entryability/AppState';
 import { textImmersiveModifier } from '../../utils/ModifierUtils';
 
 /** 标题栏 bottomBuilder 插槽高：药丸条 46 + 分类条 38 + 间距 8 + 上下 padding 12 */
-const FQ_RANK_BOTTOM_HEIGHT_BOTH: number = 104;
+const FQ_RANK_BOTTOM_HEIGHT_BOTH: number = 84;
 
 /** 仅药丸条时插槽高（短剧/漫剧榜隐藏分类条）。 */
 const FQ_RANK_BOTTOM_HEIGHT_PILLS: number = 58;
@@ -217,14 +217,12 @@ export struct RankPage {
   /** 标题栏 bottomBuilder：榜单药丸条 + 分类文本条（短剧/漫剧榜隐藏分类）。 */
   @Builder
   private RankTopBuilder() {
-    Column({ space: 8 }) {
+    Stack() {
       this.RankPills()
       if (this.showCategoryStrip()) {
         this.CategoryStrip()
       }
-    }
-    .width('100%')
-    .padding({ top: 2, bottom: 10 })
+    }.width('100%').alignContent(Alignment.Top).height('100%')
   }
 
   /** 分类条显隐：非短剧/漫剧榜且目录含分类。 */
@@ -260,8 +258,9 @@ export struct RankPage {
     .scrollable(ScrollDirection.Horizontal)
     .scrollBar(BarState.Off)
     .width('100%')
-    .height(46)
-    .align(Alignment.Center)
+    .padding({top: 10})
+    .height(60)
+    .align(Alignment.Top)
   }
 
   /** 分类文本条（短剧/漫剧榜隐藏）。 */
@@ -283,7 +282,7 @@ export struct RankPage {
     .scrollable(ScrollDirection.Horizontal)
     .scrollBar(BarState.Off)
     .width('100%')
-    .height(38)
+    .padding({ top: 50, bottom: 10})
     .align(Alignment.Center)
   }
 

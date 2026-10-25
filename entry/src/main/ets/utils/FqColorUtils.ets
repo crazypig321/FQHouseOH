@@ -3,6 +3,10 @@
  * 叠加 0-1 透明度，统一输出 '#AARRGGBB' 字符串颜色。
  * - $r 资源经 appState.abilityContext.resourceManager.getColorSync 同步取值；
  *   上下文未就绪或解析失败时原样返回，不打断调用方。
+ * - 深浅模式自适应：函数内读取 appState.isDark（@Trace）建立依赖，
+ *   在 build 属性表达式中调用时，模式切换会触发表达式重新求值、
+ *   按新模式重解析资源色，避免字符串冻结首次解析值。
+ *   注意：仅在 build 表达式内使用才有此响应；存入普通变量不跟随刷新。
  * 用法：FqColorUtils.withOpacity(FQ_ACCENT, 0.4)
  */
 
@@ -23,14 +27,17 @@ export class FqColorUtils {
       }
       return color;
     }
-    // Resource（$r）：同步解析 color 资源数值
+    // Resource（$r）：同步解析 color 资源数值；
+    // 读取 isDark（@Trace）建立依赖——深浅模式切换时 build 中的调用表达式
+    // 重新求值，getColorSync 按新配置重解析出新模式颜色（两支取值一致）
     const context = appState.abilityContext;
     if (context === null) {
       return color;
     }
     try {
       const value: number = context.resourceManager.getColorSync(color.id);
-      return FqColorUtils.toArgbString(alpha, value & 0xFFFFFF);
+      const rgb: number = appState.isDark ? (value & 0xFFFFFF) : (value & 0xFFFFFF);
+      return FqColorUtils.toArgbString(alpha, rgb);
     } catch (error) {
       return color;
     }
