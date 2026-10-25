@@ -22,6 +22,7 @@ import {
 } from '../../model/FqModels';
 import { FqShelfStore, FqShelfItem } from '../../core/FqShelfStore';
 import { FqBrowseStore, FqBrowseItem } from '../../core/FqBrowseStore';
+import { FqDetailCacheEntry, fqDetailCacheGet, fqDetailCachePut } from '../../core/FqDetailCache';
 import { AuthorNavParams, ComicNavParams, DetailNavParams, FqTitleBarOptions, ListenNavParams, PlayerNavParams, ReaderNavParams, ROUTE_AUTHOR, ROUTE_COMIC, ROUTE_LISTEN, ROUTE_PLAYER, ROUTE_READER2 } from '../../model/FqNavModels';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { CommonNav } from '../../view/CommonNav';
@@ -87,7 +88,7 @@ export struct DetailPage {
   build() {
     CommonNav({
       titleBarOp: FqTitleBarOptions(this.headerTitle, false, undefined, (): void => {
-        this.load();
+        this.load(true);
       }, false, (): void => {
         this.toggleShelf();
       }, this.inShelf),
@@ -866,11 +867,28 @@ export struct DetailPage {
     NavPathUtils.push(ROUTE_READER2);
   }
 
-  private async load(): Promise<void> {
+  private async load(force: boolean = false): Promise<void> {
     if (this.itemId.length === 0) {
       this.errorMsg = '无效的作品';
       this.loadingState = false;
       return;
+    }
+    // 详情缓存命中：五块状态直接回填秒开（标题栏刷新按钮 force 绕过）
+    if (!force) {
+      const cached: FqDetailCacheEntry | null = fqDetailCacheGet(this.itemKind, this.itemId);
+      if (cached !== null) {
+        this.detail = cached.detail;
+        this.chapters = cached.chapters;
+        this.previews = cached.previews;
+        this.previewComments = cached.previewComments;
+        this.commentTotal = cached.commentTotal;
+        this.errorMsg = '';
+        this.loadingState = false;
+        this.refreshShelfState();
+        FqBrowseStore.record(new FqBrowseItem(this.shelfId(), this.itemKind,
+          cached.detail.title, cached.detail.cover, Date.now()));
+        return;
+      }
     }
     const token: number = ++this.loadToken;
     this.loadingState = true;
@@ -923,6 +941,9 @@ export struct DetailPage {
         this.previewComments = [];
         this.commentTotal = 0;
       }
+      // 回写详情缓存：下次复进秒开
+      fqDetailCachePut(this.itemKind, this.itemId, new FqDetailCacheEntry(
+        this.detail, this.chapters, this.previews, this.previewComments, this.commentTotal));
     } catch (error) {
       if (token !== this.loadToken) {
         return;

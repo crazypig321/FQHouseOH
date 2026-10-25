@@ -1981,3 +1981,101 @@ export function fqParseChapterImages(payload: Record<string, Object>): string[] 
   }
   return fqExtractImgSrcs(fqDecodeBase64Text(html));
 }
+
+// ---------------------------------------------------------------------------
+// 作品 ID 精确查找（fqapp lib/models/media_id.dart）
+// ---------------------------------------------------------------------------
+
+/** 有效作品 ID：1~20 位数字且含非零位。 */
+export function fqIsValidMediaId(id: string): boolean {
+  return /^[0-9]{1,20}$/.test(id) && /[1-9]/.test(id);
+}
+
+/**
+ * 搜索词中识别作品 ID（mediaIdFromSearch）：
+ * `id:`/`id：` 前缀显式指定（允许较短 ID）；否则仅 15~20 位纯数字视作 ID，
+ * 短数字书名（如 1984）仍走关键词搜索。返回 null 表示关键词搜索。
+ */
+export function fqMediaIdFromSearch(query: string): string | null {
+  const value: string = query.trim();
+  const stripped: string = value.replace(/^id\s*[:：]\s*/i, '');
+  if (stripped !== value) {
+    return stripped.trim();
+  }
+  return /^[0-9]{15,20}$/.test(value) ? value : null;
+}
+
+/** 标题字段存在性：字符串非空，或 {text: 非空} 映射。 */
+function fqMediaIdHasTitle(rec: Record<string, Object>): boolean {
+  const keys: string[] = ['title', 'book_name', 'name', 'raw_book_name'];
+  for (const key of keys) {
+    const raw: Object | undefined = rec[key];
+    if (raw === undefined || raw === null) {
+      continue;
+    }
+    if (typeof raw === 'string' && raw.trim().length > 0) {
+      return true;
+    }
+    const sub: Record<string, Object> | null = fqAsRecord(raw);
+    if (sub !== null) {
+      const text: Object | undefined = sub['text'];
+      if (typeof text === 'string' && text.trim().length > 0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** parseMediaIdResult 递归节点：穿过 metadata 包装（book_info/book_data/data，深度≤5）。 */
+function fqVisitMediaIdNode(value: Object | undefined, depth: number, id: string): FqMediaItem | null {
+  if (depth > 5 || value === undefined || value === null) {
+    return null;
+  }
+  const arr: Object[] | null = fqAsArray(value);
+  if (arr !== null) {
+    for (const entry of arr) {
+      const found: FqMediaItem | null = fqVisitMediaIdNode(entry, depth + 1, id);
+      if (found !== null) {
+        return found;
+      }
+    }
+    return null;
+  }
+  const rec: Record<string, Object> | null = fqAsRecord(value);
+  if (rec === null) {
+    return null;
+  }
+  const codeRaw: Object | undefined = rec['code'];
+  if (codeRaw !== undefined && codeRaw !== null) {
+    const code: number = Number(codeRaw);
+    if (code !== 0 && code !== 200) {
+      return null;
+    }
+  }
+  if (rec['success'] === false) {
+    return null;
+  }
+  if (fqMediaIdHasTitle(rec)) {
+    const item: FqMediaItem = fqItemFromRaw(rec, '');
+    if (item.id === id) {
+      return item;
+    }
+  }
+  const wrapKeys: string[] = ['book_info', 'book_data', 'data'];
+  for (const key of wrapKeys) {
+    const found: FqMediaItem | null = fqVisitMediaIdNode(rec[key], depth + 1, id);
+    if (found !== null) {
+      return found;
+    }
+  }
+  return null;
+}
+
+/**
+ * ID 查找结果解析（parseMediaIdResult）：只有带真实标题且 id 精确相等的
+ * 整部作品身份才算命中；遍历 metadata 包装，不取推荐位或单个目录章节。
+ */
+export function fqParseMediaIdResult(payload: Record<string, Object>, id: string): FqMediaItem | null {
+  return fqVisitMediaIdNode(payload, 0, id);
+}

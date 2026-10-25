@@ -16,6 +16,7 @@ import { FqKeyStore } from './FqKeyStore';
 import {   fqParseAuthorProfile, fqParseBookComments, fqParseBookDetail, fqParseChapterCommentPage, fqParseChapterIdeaCounts, fqParseChapterIdeaMeta, fqParseChapterSummaries,
   fqParseDanmaku, fqParseDirectory, fqParseEpisodeSource, fqParseHomepage, fqParseParagraphComments, fqParseRankBoard, fqParseRankCatalog,
   fqParseSearchTabs, fqParseSeriesFeed, fqParseSeriesRelateBook, fqLegacyChapterText, fqNormalizeChapterText, fqParseNovelChapter,
+  fqIsValidMediaId, fqParseMediaIdResult,
   fqParseChapterImages } from './FqParser';
 import {
   fqParseAudioToneSet,
@@ -37,6 +38,7 @@ import {
   FqEpisodeSource,
   FqEpisodeVariant,
   FqHomePage,
+  FqMediaItem,
   FqRankBoard,
   FqRankCatalog,
   FqSearchTab,
@@ -265,6 +267,41 @@ export class FqBackend {
       + `&offset=${offset < 0 ? 0 : offset}&count=10`;
     const payload: Record<string, Object> = await this.getJson('/api/v1/search', encoded);
     return fqParseSearchTabs(payload, tabType);
+  }
+
+  /**
+   * 作品 ID 精确查找（fqapp ApiClient.lookupMediaById）：
+   * /api/v1/books/{id}/detail 未命中再试 directory；404 继续，其余错误记住并在
+   * 两端点都未命中后抛出（源不可用可重试，不能误报「无结果」）。
+   */
+  public async lookupMediaById(input: string): Promise<FqMediaItem | null> {
+    const id: string = input.trim();
+    if (!fqIsValidMediaId(id)) {
+      throw new FqRequestError('作品 ID 需为 1 至 20 位数字，且不能全为 0', 400);
+    }
+    let failure: Error | null = null;
+    const endpoints: string[] = ['detail', 'directory'];
+    for (const endpoint of endpoints) {
+      try {
+        const payload: Record<string, Object> =
+          await this.getJson(`/api/v1/books/${id}/${endpoint}`, '');
+        const item: FqMediaItem | null = fqParseMediaIdResult(payload, id);
+        if (item !== null) {
+          return item;
+        }
+      } catch (error) {
+        if (error instanceof FqRequestError && error.statusCode === 404) {
+          continue;
+        }
+        if (failure === null) {
+          failure = error instanceof Error ? error : new Error(fqErrorMessage(error));
+        }
+      }
+    }
+    if (failure !== null) {
+      throw failure;
+    }
+    return null;
   }
 
   /** 旧版搜索（/api/search，页码分页：offset=(page-1)*9）。 */

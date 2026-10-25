@@ -9,6 +9,7 @@ import { preferences } from '@kit.ArkData';
 import { TitleBarContentOptions } from '@kit.UIDesignKit';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { FqMediaItem, FqSearchTab } from '../../model/FqModels';
+import { fqMediaIdFromSearch } from '../../core/FqParser';
 import { FqMediaDataSource } from '../../core/FqMediaDataSource';
 import { FqItemCard } from '../../view/FqItemCard';
 import { DetailNavParams, FqTitleBarOptions, ROUTE_DETAIL } from '../../model/FqNavModels';
@@ -53,7 +54,11 @@ export struct SearchPage {
   @Local loadingMore: boolean = false;
   @Local errorMsg: string = '';
   @Local historyChips: string[] = [];
+  /** ID 精确查找模式（fqapp _idQuery）：非空表示按作品 ID 查找。 */
+  @Local idQuery: string = '';
   private dataSource: FqMediaDataSource = new FqMediaDataSource();
+  /** ID 模式查得的单条结果（切分类时本地过滤，不重新请求）。 */
+  private idItem: FqMediaItem | null = null;
   private hasMore: boolean = false;
   private nextOffset: number = 0;
   private seen: Set<string> = new Set<string>();
@@ -80,6 +85,23 @@ export struct SearchPage {
       isSearchBarScroller: false,
     }) {
       List({ space: 0, scroller: this.scroller }) {
+        if (this.idQuery.length > 0 && this.submittedQuery.length > 0) {
+          ListItem() {
+            Row() {
+              Text('按作品 ID 查找')
+                .fontSize(13)
+                .fontColor($r('sys.color.font_secondary'))
+              Blank()
+              Text('按关键词搜索')
+                .fontSize(13)
+                .fontColor(FQ_ACCENT)
+                .onClick(() => this.searchAsKeyword())
+            }
+            .width('100%')
+            .padding({ left: 16, right: 16, top: 10, bottom: 4 })
+            .alignItems(VerticalAlign.Center)
+          }
+        }
         if (this.submittedQuery.length === 0) {
           ListItem() {
             this.HistoryView()
@@ -112,7 +134,7 @@ export struct SearchPage {
         } else if (this.itemCount === 0 && !this.loadingState) {
           ListItem() {
             Column() {
-              Text('没有找到相关内容')
+              Text(this.idQuery.length > 0 ? '未找到该 ID 对应的作品' : '没有找到相关内容')
                 .fontSize(14)
                 .fontColor($r('sys.color.font_secondary'))
             }
@@ -280,6 +302,10 @@ export struct SearchPage {
     }
     this.categoryIndex = index;
     this.resetFeed();
+    if (this.idQuery.length > 0) {
+      this.applyIdItem();
+      return;
+    }
     this.load();
   }
 
@@ -299,13 +325,80 @@ export struct SearchPage {
       return;
     }
     this.submittedQuery = query;
+    // ID 识别（fqapp mediaIdFromSearch）：`id:` 前缀显式或 15~20 位纯数字
+    const mediaId: string | null = fqMediaIdFromSearch(query);
+    this.idQuery = mediaId !== null ? mediaId : '';
+    this.idItem = null;
     this.resetFeed();
-    this.load();
+    if (this.idQuery.length > 0) {
+      this.loadId();
+    } else {
+      this.load();
+    }
     this.recordHistory(query);
   }
 
+  /** ID 模式切回关键词搜索（fqapp asKeyword）。 */
+  private searchAsKeyword(): void {
+    this.idQuery = '';
+    this.idItem = null;
+    this.resetFeed();
+    this.load();
+  }
+
+  /** ID 精确查找（fqapp _loadId/lookupMediaById）：单条结果，无分页。 */
+  private async loadId(): Promise<void> {
+    const id: string = this.idQuery;
+    if (id.length === 0) {
+      return;
+    }
+    const token: number = ++this.loadToken;
+    const category: FqSearchCategoryDef = FQ_SEARCH_CATEGORIES[this.categoryIndex];
+    this.loadingState = true;
+    this.loadingMore = false;
+    this.errorMsg = '';
+    try {
+      await FqBackend.get().start(getContext(this));
+      const item: FqMediaItem | null = await FqBackend.get().lookupMediaById(id);
+      if (token !== this.loadToken) {
+        return;
+      }
+      this.idItem = item;
+      const fresh: FqMediaItem[] = [];
+      if (item !== null && item.id.length > 0
+        && (category.kind.length === 0 || item.kind === category.kind)) {
+        fresh.push(item);
+      }
+      this.dataSource.append(fresh);
+      this.itemCount = this.dataSource.totalCount();
+      this.hasMore = false;
+    } catch (error) {
+      if (token !== this.loadToken) {
+        return;
+      }
+      this.errorMsg = fqErrorMessage(error);
+    } finally {
+      if (token === this.loadToken) {
+        this.loadingState = false;
+        this.loadingMore = false;
+      }
+    }
+  }
+
+  /** ID 模式切分类：仅按类型过滤已查得的单条结果（不重新请求）。 */
+  private applyIdItem(): void {
+    const category: FqSearchCategoryDef = FQ_SEARCH_CATEGORIES[this.categoryIndex];
+    const item: FqMediaItem | null = this.idItem;
+    const fresh: FqMediaItem[] = [];
+    if (item !== null && (category.kind.length === 0 || item.kind === category.kind)) {
+      fresh.push(item);
+    }
+    this.dataSource.append(fresh);
+    this.itemCount = this.dataSource.totalCount();
+  }
+
   private loadMore(): void {
-    if (!this.hasMore || this.loadingMore || this.loadingState) {
+    if (this.idQuery.length > 0 || !this.hasMore || this.loadingMore || this.loadingState) {
       return;
     }
     this.load();
