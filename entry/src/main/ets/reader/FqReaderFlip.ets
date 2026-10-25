@@ -445,6 +445,11 @@ export struct FqReaderFlip {
       if (!forward && !this.hasNext) {
         return;
       }
+      // 开折前校验目标页就绪：未就绪不开折（canTurn 内部触发预载），
+      // 就绪后本次拖拽继续开折——避免卷曲下露出未解码黑页闪帧。
+      if (!this.canTurn(!forward)) {
+        return;
+      }
       this.beginSimFlip(forward);
       if (!this.simDrawing) {
         return;
@@ -739,12 +744,17 @@ export struct FqReaderFlip {
               return;
             }
             const w2: number = this.pageWidthVp();
-            // 首次位移定覆盖方向（单向锁定），其后 dragVp 按方向 clamp
+            // 首次位移定覆盖方向（单向锁定），锁定前校验目标页就绪
+            // （canTurn 内部触发预载，未就绪不露页，就绪后本次拖拽继续滑入）。
             if (this.coverDir === 0) {
               if (event.offsetX < 0 && this.hasNext) {
-                this.coverDir = -1;
+                if (this.canTurn(true)) {
+                  this.coverDir = -1;
+                }
               } else if (event.offsetX > 0 && this.hasPrev) {
-                this.coverDir = 1;
+                if (this.canTurn(false)) {
+                  this.coverDir = 1;
+                }
               }
             }
             if (this.coverDir === -1) {

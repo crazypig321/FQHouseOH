@@ -1,8 +1,8 @@
 /**
  * 漫画阅读页（ComicPage，CommonNav 框架，复用 ReaderPage 阅读体验）：
- * - 正文：整页图片（objectFit Contain，纯黑底，显式定高不随菜单呼出的容器
- *   resize 缩放），一页一张图；邻图预解码为 PixelMap（翻页提交同帧渲染，
- *   杜绝旧图残留闪帧；未就绪回退 URL 异步加载兜底）；
+ * - 正文：整页图片（Contain，纯黑底，显式定高不随菜单呼出的容器
+ *   resize 缩放），一页一张图；邻图预解码为 PixelMap 经 FqComicCanvas 同帧绘制
+ *   （提交翻页换源即换绘，无 Image 跨实例换源上传闪帧；未就绪回退 URL 异步加载兜底）；
  * - 翻页方式：0 仿真 / 1 覆盖（FqReaderFlip flipMode=0/2）/ 2 上下滚动
  *   （webtoon：List + LazyForEach 整章图片连续纵向滚动，滚到章尾自动追加下一话）；
  * - 眉页（章节名）/眉脚（时钟/电量/章内图序），目录半模态、漫评半模态、
@@ -31,6 +31,7 @@ import { FqCatalogSheet } from '../../view/FqCatalogSheet';
 import { appState } from '../../entryability/AppState';
 import { DialogManager } from '../../utils/DialogUtils';
 import { FqReaderFlip } from '../../reader/FqReaderFlip';
+import { FqComicCanvas } from '../../reader/FqComicCanvas';
 import { fqComicSettingsBus } from '../../core/FqComicSettingsBus';
 
 /** 漫画正文底色（纯黑）。 */
@@ -326,15 +327,15 @@ export struct ComicPage {
 
   /** 仿真/覆盖模式槽位图（slot：-1 / 0 / +1，章内邻图优先，越界取预载邻章）：
    *  显式定高（窗口高 - 眉页/眉脚区），菜单呼出容器 resize 不缩放图片（治“弹一下”）；
-   *  图源优先预解码 PixelMap（翻页提交同帧渲染，治“闪一下”），未就绪回退 URL。 */
+   *  图源经 FqComicCanvas：预解码 PixelMap 同帧 Contain 绘制（提交翻页换源即换绘，
+   *  无 Image 跨实例换源上传，治“闪一下”），未就绪回退 URL 异步加载兜底。 */
   @Builder
   private imageSlot(slot: number) {
     if (this.imageForSlot(slot).length > 0) {
-      Image(this.slotSources[slot + 1])
-        .width('100%')
-        .height(this.pagedImageHeightVp)
-        .objectFit(ImageFit.Contain)
-        .draggable(false)
+      FqComicCanvas({
+        source: this.slotSources[slot + 1],
+        heightVp: this.pagedImageHeightVp,
+      })
     }
   }
 
@@ -447,9 +448,10 @@ export struct ComicPage {
     }
   }
 
-  /** LRU 淘汰超限条目（当前三槽位在用条目跳过；上限 6 张约 30-40MB 解码内存）。 */
+  /** LRU 淘汰超限条目（当前三槽位在用条目跳过；上限 12 张约 60-80MB 解码内存，
+   *  减少快翻场景邻图淘汰后的回退重解码）。 */
   private trimPixelCache(): void {
-    const cap: number = 6;
+    const cap: number = 12;
     while (this.pixelOrder.length > cap) {
       let evicted: boolean = false;
       for (let index: number = 0; index < this.pixelOrder.length; index++) {
