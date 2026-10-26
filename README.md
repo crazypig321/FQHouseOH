@@ -14,7 +14,7 @@
 
 ---
 
-**FQHouseOH** 是番茄免费小说 / 短剧第三方客户端 [fqapp](https://github.com/ch6vip/fqapp)（作者：ch6vip）的 **HarmonyOS（鸿蒙）移植版**，使用 ArkTS / ArkUI 原生开发，不依赖 Flutter 运行时。
+**FQHouseOH** 是番茄免费小说 / 短剧第三方客户端 [fqapp](https://github.com/ch6vip/fqapp)（作者：ch6vip）的 **HarmonyOS（鸿蒙）移植版**，使用 ArkTS / ArkUI 原生开发，重构UI，符合鸿蒙特性，支持沉浸光感，不依赖 Flutter 运行时。
 
 > 🙏 本项目移植于 ch6vip 的 fqapp，感谢原项目提供的优秀设计与 Rust 后端核心。
 > 🔗 原项目仓库：<https://github.com/ch6vip/fqapp>
