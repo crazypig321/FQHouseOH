@@ -376,8 +376,9 @@ export class FqBackend {
   }
 
   /**
-   * 短剧当前集评论一页（/api/v1/videos/{vid}/danmaku 全量列表形态：
-   * start_offset_time=0 + cursor 续拉，官方每集评论区即弹幕流）；
+   * 短剧当前集弹幕窗口一页（/api/v1/videos/{vid}/danmaku，官方 DanmakuRequestHelper）：
+   * 上游按 30s 窗口实时分页（playlet_item_duration=0 只吐 [0,30s) 窗口且逐次采样），
+   * 仅适合浮层随播放位置轮询，不能当评论全量列表用；
    * vid 为当前集 id（group_id），seriesId 进 series_id，cursor 为不透明续拉串。
    */
   public async episodeComments(vid: string, seriesId: string,
@@ -387,6 +388,19 @@ export class FqBackend {
       + (cursor.length > 0 ? `&cursor=${encodeURIComponent(cursor)}` : '');
     const payload: Record<string, Object> =
       await this.getJson(`/api/v1/videos/${encodeURIComponent(vid)}/danmaku`, query);
+    return fqParseEpisodeComments(payload);
+  }
+
+  /**
+   * 短剧剧评一页（/api/v1/series/{id}/comments，官方 gx1/m.java:168-181：
+   * 播放页评论区即整部剧的评论列表）：sort=1 官方「全部」排序，
+   * cursor 续拉（不透明串）；响应与弹幕列表同形（data_list + common_list_info）。
+   */
+  public async seriesComments(seriesId: string, cursor: string): Promise<FqEpisodeCommentPage> {
+    const query: string = 'sort=1&count=20'
+      + (cursor.length > 0 ? `&cursor=${encodeURIComponent(cursor)}` : '');
+    const payload: Record<string, Object> =
+      await this.getJson(`/api/v1/series/${encodeURIComponent(seriesId)}/comments`, query);
     return fqParseEpisodeComments(payload);
   }
 

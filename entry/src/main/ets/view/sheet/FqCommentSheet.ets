@@ -6,8 +6,8 @@
  * - FqCommentSheet：评论半模态内容（CommonSheet 壳 + 首拉 Loading / 错误重试 /
  *   空态 / LazyForEach 触底续拉），aboutToAppear 自动拉第一页；
  *   chapterItemId 非空走章评配方（章末聚合桶 + cursor 分页），空走书评；
- *   cursorLoader 非空走自定义页加载器（播放页集评：弹幕接口 cursor 分页，
- *   加载器自理 cursor，refresh=true 重拉首页）。
+ *   cursorLoader 非空走自定义页加载器（播放页剧评：/api/v1/series/{id}/comments
+ *   cursor 分页，加载器自理 cursor，refresh=true 重拉首页）。
  * - fqCommentSheetHeightVp：统一 Sheet 高度（屏高 82%）。
  */
 

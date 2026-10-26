@@ -22,8 +22,9 @@
  *   列向上生长（官方 informationTop 上移），全屏药丸钳制让位（官方 maximumTop）。
  * - 半模态均走公共框架 FqSheetOptions，只是不触发前景光感模糊；
  *   右上角菜单呼出「播放设置」半模态（倍速档位）；
- *   评论按钮呼出「集评」半模态（公共 FqCommentSheet + 弹幕接口加载器：
- *   当前播放集的评论而非整部剧剧评，切集面板开着自动重载）。
+ *   评论按钮呼出「剧评」半模态（公共 FqCommentSheet + 剧评接口加载器：
+ *   /api/v1/series/{id}/comments 整部剧评论列表，sort=1 cursor 分页，
+ *   对齐官方播放页评论区；弹幕接口按 30s 窗口实时分页，只适合浮层轮播）。
  * - 离线缓存（fqapp DramaDownloadSheet 语义）：选集胶囊行「缓存」入口 /
  *   播放设置「离线缓存」行呼出缓存选集半模态（已缓存集置灰打勾、任务态
  *   实时进度、默认全选未缓存集、头部「管理」进剧集缓存管理页）；
@@ -50,6 +51,7 @@
 
 import { display, window } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Player, PlayerSurface, Media, PlayerConfig } from '@mpv-ohos/mpv-arkts';
 import { FQ_ACCENT } from '../../view/CommonCom';
 import { CommonNav } from '../../view/CommonNav';
@@ -182,9 +184,9 @@ export struct PlayerPage {
   @Local settingsVisible: boolean = false;
   /** 倍速滑杆拖动预览值（-1 未拖动；拖动中文案实时跟随，松手提交 mpv）。 */
   @Local speedPreview: number = -1;
-  /** 集评半模态（评论按钮呼出：公共 FqCommentSheet，当前播放集的评论）。 */
+  /** 剧评半模态（评论按钮呼出：公共 FqCommentSheet，整部剧的评论列表）。 */
   @Local commentSheetVisible: boolean = false;
-  /** 集评打开令牌（每次打开/开着时切集 +1，FqCommentSheet 据此重置重载当前集）。 */
+  /** 剧评打开令牌（每次打开 +1，FqCommentSheet 据此重置重载）。 */
   @Local commentOpenToken: number = 0;
   /** 全屏沉浸态（「全屏观看」进入；横屏片源锁横屏 + 隐藏系统栏）。 */
   @Local fullScreen: boolean = false;
@@ -245,10 +247,8 @@ export struct PlayerPage {
   @Local dl: FqDramaDownloader = fqDramaDownloader;
   /** 剧评半模态关闭令牌。 */
   private commentCloseToken: number = 0;
-  /** 集评游标（弹幕接口 cursor 不透明续拉串；切集/重开由加载器重置）。 */
-  private episodeCommentCursor: string = '';
-  /** 集评游标所属集 itemId（换集时作废旧游标）。 */
-  private episodeCommentVid: string = '';
+  /** 剧评游标（/api/v1/series/{id}/comments 不透明续拉串；重开由加载器重置）。 */
+  private seriesCommentCursor: string = '';
   /** 全屏控件自动隐藏定时器（0 无任务）。 */
   private fsHideTimer: number = 0;
   /** 中央播放按钮 3s 自动隐藏定时器（0 无任务）。 */
@@ -947,7 +947,7 @@ export struct PlayerPage {
           this.openCatalog();
         })
 
-        // 评论入口：并入选集行右端，呼出集评半模态（公共 FqCommentSheet）
+        // 评论入口：并入选集行右端，呼出剧评半模态（公共 FqCommentSheet）
         Column({ space: 1 }) {
           SymbolGlyph($r('sys.symbol.message'))
             .fontSize(22)
@@ -1279,15 +1279,15 @@ export struct PlayerPage {
     })
   }
 
-  /** 集评半模态：公共 FqCommentSheet + 弹幕接口集评加载器
-   *  （首拉 Loading / 错误重试 / 空态 / cursor 分页列表，评论为当前播放集的）。 */
+  /** 剧评半模态：公共 FqCommentSheet + 剧评接口加载器
+   *  （首拉 Loading / 错误重试 / 空态 / cursor 分页列表，评论为整部剧的）。 */
   @Builder
   private CommentsSheetBuilder() {
     FqCommentSheet({
       bookId: PlayerNavParams.contentId,
       fontColor: $r('sys.color.font_primary'),
-      commentLabel: '集评',
-      cursorLoader: (refresh: boolean): Promise<FqBookCommentPage> => this.loadEpisodeComments(refresh),
+      commentLabel: '剧评',
+      cursorLoader: (refresh: boolean): Promise<FqBookCommentPage> => this.loadSeriesComments(refresh),
       openToken: this.commentOpenToken,
     })
   }
@@ -2264,7 +2264,7 @@ export struct PlayerPage {
     }
   }
 
-  /** 打开集评半模态：bump 打开令牌（重置重载当前集评论），数据由 FqCommentSheet 自理。 */
+  /** 打开剧评半模态：bump 打开令牌（重置重载剧评列表），数据由 FqCommentSheet 自理。 */
   private openComments(): void {
     this.commentCloseToken += 1;
     this.commentOpenToken += 1;
@@ -2272,21 +2272,25 @@ export struct PlayerPage {
   }
 
   /**
-   * 集评页加载器（弹幕接口全量列表形态：当前播放集的评论一页，cursor 续拉）：
-   * 换集/refresh 自动作废旧游标从首页重取；失败向上抛由 FqCommentSheet 落错误态。
+   * 剧评页加载器（/api/v1/series/{id}/comments，官方 gx1/m.java：整部剧评论列表，
+   * sort=1 最热 + cursor 续拉）：refresh 自动作废旧游标从首页重取；
+   * 失败向上抛由 FqCommentSheet 落错误态。
    */
-  private async loadEpisodeComments(refresh: boolean): Promise<FqBookCommentPage> {
-    const episode: FqChapter | undefined = this.episodes[this.index];
-    if (episode === undefined || episode.itemId.length === 0) {
+  private async loadSeriesComments(refresh: boolean): Promise<FqBookCommentPage> {
+    if (PlayerNavParams.contentId.length === 0) {
       return new FqBookCommentPage([], 0, 0, '', false, 0);
     }
-    if (refresh || this.episodeCommentVid !== episode.itemId) {
-      this.episodeCommentCursor = '';
-      this.episodeCommentVid = episode.itemId;
+    if (refresh) {
+      this.seriesCommentCursor = '';
     }
-    const page: FqEpisodeCommentPage = await FqBackend.get().episodeComments(
-      episode.itemId, PlayerNavParams.contentId, this.episodeCommentCursor);
-    this.episodeCommentCursor = page.cursor;
+    const cursorIn: string = this.seriesCommentCursor;
+    const page: FqEpisodeCommentPage = await FqBackend.get().seriesComments(
+      PlayerNavParams.contentId, cursorIn);
+    this.seriesCommentCursor = page.cursor;
+    hilog.info(0x0001, 'FqSeriesComments',
+      `series=${PlayerNavParams.contentId} refresh=${refresh}` +
+      ` cursorIn=${cursorIn} count=${page.comments.length} total=${page.totalCount}` +
+      ` hasMore=${page.hasMore} hasCursorOut=${page.cursor.length > 0}`);
     return new FqBookCommentPage(page.comments, page.totalCount, 0, '', page.hasMore, 0);
   }
 
@@ -2364,7 +2368,7 @@ export struct PlayerPage {
     this.loadEpisode(this.index);
   }
 
-  /** 关闭集评半模态：延迟一拍置 isShow（面板事件内同步改 isShow 会被框架丢弃）。 */
+  /** 关闭剧评半模态：延迟一拍置 isShow（面板事件内同步改 isShow 会被框架丢弃）。 */
   private closeComments(): void {
     const token: number = ++this.commentCloseToken;
     setTimeout((): void => {
@@ -2595,7 +2599,7 @@ export struct PlayerPage {
     this.loading = true;
     this.errorMsg = '';
     this.seekPreview = -1;
-    // 切集且集评面板开着：bump 打开令牌让面板重置重载新集评论
+    // 切集且剧评面板开着：bump 打开令牌让面板重置重载（顺带刷新最新评论）
     if (switched && this.commentSheetVisible) {
       this.commentOpenToken += 1;
     }
