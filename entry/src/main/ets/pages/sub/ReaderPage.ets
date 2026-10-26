@@ -26,6 +26,7 @@ import { HdsAnimationMode, HdsTabsController, TitleBarContentOptions } from '@ki
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { FqChapter, fqFormatCountInt, fqKindToTab } from '../../model/FqModels';
 import { FqReaderProgress, FqReaderStore } from '../../core/FqReaderStore';
+import { FqAppSettingsStore, FQ_THEME_DARK, FQ_THEME_LIGHT } from '../../core/FqAppSettingsStore';
 import { FqReadStatsStore } from '../../core/FqReadStatsStore';
 import { FqLocalBookStore } from '../../core/FqLocalBookStore';
 import { FqChapterCacheStore, FqCachedCatalog } from '../../core/FqChapterCacheStore';
@@ -1388,7 +1389,8 @@ export struct ReaderPage {
     });
   }
 
-  /** 实际生效的主题下标：-1 跟随系统（深色 → 夜间，浅色 → 纸白）。 */
+  /** 实际生效的主题下标：-1 跟随应用深浅模式（深 → 夜间，浅 → 纸白；
+   *  应用档位跟随系统时随系统）。 */
   private effectiveThemeIndex(): number {
     return this.themeIndex === -1 ? (this.systemDark ? 2 : 0) : this.themeIndex;
   }
@@ -1400,15 +1402,27 @@ export struct ReaderPage {
   /** 上次已锁定的应用色彩模式（去重，避免重复 setColorMode/刷新）。 */
   private appliedColorMode: ConfigurationConstant.ColorMode | null = null;
 
+  /** 应用深浅模式档位（设置页）→ 色彩模式（与 FqAppSettingsStore.applyTheme 一致）。 */
+  private appColorMode(): ConfigurationConstant.ColorMode {
+    const mode: number = FqAppSettingsStore.getThemeMode();
+    if (mode === FQ_THEME_DARK) {
+      return ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
+    }
+    if (mode === FQ_THEME_LIGHT) {
+      return ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT;
+    }
+    return ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET;
+  }
+
   /**
    * 将应用色彩模式锁定为与生效阅读主题一致：阅读页内系统色 chrome（标题栏/工具栏/
    * 设置弹窗卡片/半模态）随阅读主题渲染，避免系统深色 + 浅色主题时白字不可读
-   * （或系统浅色 + 夜间主题时黑字不可读）。「跟随系统」主题不锁定（此时生效主题
-   * 与系统模式天然一致，保留系统切换的实时响应）。
+   * （或系统浅色 + 夜间主题时黑字不可读）。「跟随」主题不锁定，沿用设置页深浅模式
+   * （应用强制深/浅时随应用，跟随系统时随系统），保证跟随档与全局设置一致。
    */
   private syncReaderColorMode(): void {
     const mode: ConfigurationConstant.ColorMode = this.themeIndex === -1
-      ? ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET
+      ? this.appColorMode()
       : (this.theme().night ? ConfigurationConstant.ColorMode.COLOR_MODE_DARK
         : ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT);
     if (this.appliedColorMode === mode) {
@@ -1427,13 +1441,13 @@ export struct ReaderPage {
     }
   }
 
-  /** 退出阅读页：恢复应用色彩模式跟随系统，并刷新全局系统色绑定。 */
+  /** 退出阅读页：恢复设置页深浅模式档位（跟随系统/浅色/深色），并刷新全局系统色绑定。 */
   private restoreSystemColorMode(): void {
     this.appliedColorMode = null;
     try {
       const context: common.UIAbilityContext =
         this.getUIContext().getHostContext() as common.UIAbilityContext;
-      context.getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
+      context.getApplicationContext().setColorMode(this.appColorMode());
       themeUtils.colorModeChange(appState.isDark
         ? ConfigurationConstant.ColorMode.COLOR_MODE_DARK
         : ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT);
