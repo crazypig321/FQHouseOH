@@ -244,7 +244,7 @@ export struct AboutPage {
   private buildSections(): void {
     const sections: FqAboutSection[] = [];
     const authorItem: FqAboutItem =
-      new FqAboutItem($r('sys.symbol.person_fill'), '#FF8B5CF6', '作者', '', 'crazypig321', true,
+      new FqAboutItem($r('sys.symbol.person_fill'), '#FF8B5CF6', 'crazypig321', '', '', true,
         (): void => {
           this.openExternal(FQ_AUTHOR_URL);
         });

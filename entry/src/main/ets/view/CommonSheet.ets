@@ -70,6 +70,8 @@ export struct CommonSheet {
   @Param showClose: boolean = false;
   /** 标题栏右侧是否显示管理按钮（关闭钮之前）。 */
   @Param showManage: boolean = false;
+  /** 隐藏 HDS 标题栏（内容区自绘头部：返回/关闭等 HDS 标题栏放不下的控件）。 */
+  @Param hideTitleBar: boolean = false;
   @Event searchToggle: () => void = (): void => {};
   @Event searchChange: (value: string) => void = (_value: string): void => {};
   @Event searchSubmit: (value: string) => void = (_value: string): void => {};
@@ -86,7 +88,7 @@ export struct CommonSheet {
       }
       .width('100%')
       .height('100%')
-      .padding({ top: 66 })
+      .padding({ top: this.hideTitleBar ? 8 : 66 })
     }
     .titleBar({
       content: this.titleBarContent(),
@@ -115,6 +117,7 @@ export struct CommonSheet {
       },
       avoidLayoutSafeArea: false,
     })
+    .hideTitleBar(this.hideTitleBar, true)
     .hideBackButton(true)
     .titleMode(HdsNavDestinationTitleMode.MODAL)
     // 内容层透明：sheet 材质（blurStyle/systemMaterial）即唯一可见层，

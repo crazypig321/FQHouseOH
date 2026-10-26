@@ -121,6 +121,8 @@ const FQ_DARK_CARD_BG: string = '#26FFFFFF';
 const FQ_DARK_DIVIDER: string = '#1FFFFFFF';
 const FQ_DARK_TRACK: string = '#33FFFFFF';
 const FQ_DARK_TERTIARY_TEXT: string = '#99FFFFFF';
+/** 离线缓存 sheet/侧边栏分页条粒度（与选集面板 FqStoryPanel 一致 30/段）。 */
+const FQ_CACHE_PAGE_SIZE: number = 30;
 
 /** 播放设置行描述（key 决定右侧控件：speed 滑杆 / cache、listen 箭头 / danmaku 开关）。 */
 class FqSettingItem {
@@ -209,6 +211,18 @@ export struct PlayerPage {
   @Local cacheSelectedIds: Set<string> = new Set<string>();
   /** 缓存 sheet 内已完整缓存集 itemId（打开时从 FqDramaCacheStore 刷新）。 */
   @Local cacheDownloadedIds: Set<string> = new Set<string>();
+  /** 缓存 sheet 是否自播放设置打开（标题栏返回键回到设置 sheet）。 */
+  @Local cacheFromSettings: boolean = false;
+  /** 竖屏缓存 sheet 分页条当前段。 */
+  @Local cacheSheetPage: number = 0;
+  /** 竖屏缓存 sheet 网格滚动器（分页条直达 + 定位当前集）。 */
+  private cacheSheetScroller: Scroller = new Scroller();
+  /** 侧边栏缓存分页条当前段。 */
+  @Local sideCachePage: number = 0;
+  /** 侧边栏缓存网格滚动器。 */
+  private sideCacheScroller: Scroller = new Scroller();
+  /** 缓存面板打开后定位当前集的定时器（sheet/侧边栏共用，0 无任务）。 */
+  private cacheLocateTimer: number = 0;
 
   private title: string = '';
   private tab: string = '短剧';
@@ -971,7 +985,7 @@ export struct PlayerPage {
         .alignItems(HorizontalAlign.Center)
         .justifyContent(FlexAlign.Center)
         .onClick((): void => {
-          this.openCacheSheet();
+          this.openCacheSheet(false);
         })
       }
       .width('100%')
@@ -1263,27 +1277,68 @@ export struct PlayerPage {
   }
 
   /**
-   * 离线缓存选集半模态（fqapp DramaDownloadSheet 语义，走 CommonSheet 公共框架）：
-   * 标题栏「离线缓存 · 剧名」+ 管理钮（circle_and_arrow_down，进剧集缓存管理页）+ 关闭钮；
+   * 离线缓存选集半模态（fqapp DramaDownloadSheet 语义，走 CommonSheet 公共框架，
+   * hideTitleBar 自绘头部：HDS 标题栏放不下左侧返回键）：
+   * 头部返回（左侧，自播放设置打开则回设置 sheet）+「离线缓存 · 剧名」+ 关闭钮；
+   * 「管理」行在头部下方（进剧集缓存管理页）；>30 集分页条横向滚动直达；
    * 集数网格复选（已缓存置灰打勾、任务态实时进度/排队/暂停/失败、
    * 选中橙底描边打勾、默认全选未缓存集）、全选 + 下载按钮。
    */
   @Builder
   private CacheSheetBuilder() {
     CommonSheet({
-      sheetTitle: `离线缓存 · ${this.title}`,
-      showClose: true,
-      closeClick: (): void => {
-        this.closeCacheSheet();
-      },
-      showManage: true,
-      manageClick: (): void => {
-        this.closeCacheSheet();
-        NavPathUtils.push(ROUTE_CACHED_DRAMAS);
-      },
+      hideTitleBar: true,
     }) {
       Column() {
-        Grid() {
+        Row() {
+          SymbolGlyph($r('sys.symbol.chevron_left'))
+            .fontSize(20)
+            .fontColor([$r('sys.color.font_primary')])
+            .padding({ left: 8, right: 2, top: 10, bottom: 10 })
+            .onClick((): void => {
+              this.backFromCacheSheet();
+            })
+
+          Text(`离线缓存 · ${this.title}`)
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('sys.color.font_primary'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+
+          SymbolGlyph($r('sys.symbol.xmark'))
+            .fontSize(16)
+            .fontColor([$r('sys.color.font_primary')])
+            .padding(10)
+            .onClick((): void => {
+              this.closeCacheSheet();
+            })
+        }
+        .width('100%')
+        .height(44)
+        .padding({ left: 6, right: 6 })
+        .alignItems(VerticalAlign.Center)
+
+        Row() {
+          Text('管理')
+            .fontSize(14)
+            .fontColor(FQ_STORY_ORANGE)
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .onClick((): void => {
+              this.closeCacheSheet();
+              NavPathUtils.push(ROUTE_CACHED_DRAMAS);
+            })
+        }
+        .width('100%')
+        .padding({ left: 8 })
+        .alignItems(VerticalAlign.Center)
+
+        if (this.episodes.length > FQ_CACHE_PAGE_SIZE) {
+          this.CacheSheetPagingStrip()
+        }
+
+        Grid(this.cacheSheetScroller) {
           ForEach(this.episodes, (episode: FqChapter, index: number) => {
             GridItem() {
               this.CacheEpisodeCell(episode, index, false)
@@ -1297,6 +1352,12 @@ export struct PlayerPage {
         .layoutWeight(1)
         .scrollBar(BarState.Off)
         .padding({ left: 16, right: 16, top: 4, bottom: 8 })
+        .onScrollIndex((first: number, last: number): void => {
+          const page: number = Math.floor(first / FQ_CACHE_PAGE_SIZE);
+          if (page !== this.cacheSheetPage && page >= 0 && page <= this.cacheLastPage()) {
+            this.cacheSheetPage = page;
+          }
+        })
 
         Row() {
           Text(this.cacheAllSelected() ? '取消全选' : '全选')
@@ -1329,6 +1390,31 @@ export struct PlayerPage {
     }
   }
 
+  /** 竖屏缓存 sheet >30 集分页条（横向滚动「1-30/31-60/…」，点击直达，滚动联动）。 */
+  @Builder
+  private CacheSheetPagingStrip() {
+    Scroll() {
+      Row({ space: 20 }) {
+        ForEach(this.cachePageLabels(), (label: string, page: number) => {
+          Text(label)
+            .fontSize(14)
+            .fontWeight(page === this.cacheSheetPage ? FontWeight.Bold : FontWeight.Normal)
+            .fontColor(page === this.cacheSheetPage ?
+              $r('sys.color.font_secondary') : $r('sys.color.font_tertiary'))
+            .onClick((): void => {
+              this.cacheSheetPage = page;
+              this.cacheSheetScroller.scrollToIndex(page * FQ_CACHE_PAGE_SIZE, false, ScrollAlign.START);
+            })
+        }, (label: string) => label)
+      }
+      .padding({ left: 16, right: 16 })
+    }
+    .width('100%')
+    .height(32)
+    .scrollable(ScrollDirection.Horizontal)
+    .scrollBar(BarState.Off)
+  }
+
   /** 缓存格：已缓存置灰打勾 / 任务态橙色（进度%/排队/暂停/失败）/ 可选集（选中橙底描边打勾）。 */
   @Builder
   private CacheEpisodeCell(episode: FqChapter, index: number, dark: boolean) {
@@ -1359,15 +1445,18 @@ export struct PlayerPage {
 
   /** 打开离线缓存选集半模态：刷新缓存/勾选状态（默认全选未缓存集）。
    *  横屏沉浸全屏：改走右侧边栏（与切集/播放设置同款 UI，不退全屏）；
-   *  其余形态（竖屏全屏/非全屏）原样呼出底部 sheet。 */
-  private openCacheSheet(): void {
+   *  其余形态（竖屏全屏/非全屏）原样呼出底部 sheet；
+   *  fromSettings：是否自播放设置打开（决定标题栏返回键去向）。 */
+  private openCacheSheet(fromSettings: boolean): void {
     if (this.episodes.length === 0) {
       this.getUIContext().getPromptAction().showToast({ message: '剧集目录加载中', duration: 1500 });
       return;
     }
     this.closeSettings();
+    this.cacheFromSettings = fromSettings;
     if (this.fullScreen && this.isLandscapeVideo()) {
       this.refreshCacheSheetState();
+      this.locateCacheToCurrent(true);
       this.openSidePanel('cache');
       return;
     }
@@ -1375,9 +1464,62 @@ export struct PlayerPage {
       this.closeSidePanel();
     }
     this.refreshCacheSheetState();
+    this.locateCacheToCurrent(false);
     this.getUIContext().animateTo({ duration: 200 }, (): void => {
       this.cacheSheetVisible = true;
     });
+  }
+
+  /** 缓存 sheet 标题栏返回：自播放设置打开则回到设置 sheet，否则仅收起。 */
+  private backFromCacheSheet(): void {
+    this.closeCacheSheet();
+    if (this.cacheFromSettings) {
+      this.cacheFromSettings = false;
+      this.openSettings();
+    }
+  }
+
+  /** 缓存面板打开后定位当前集（分页条选中段跟随；side 侧边栏/其余底部半模态）。 */
+  private locateCacheToCurrent(side: boolean): void {
+    this.cancelCacheLocate();
+    const page: number = Math.floor(this.index / FQ_CACHE_PAGE_SIZE);
+    if (side) {
+      this.sideCachePage = page;
+    } else {
+      this.cacheSheetPage = page;
+    }
+    this.cacheLocateTimer = setTimeout((): void => {
+      this.cacheLocateTimer = 0;
+      if (side) {
+        this.sideCacheScroller.scrollToIndex(this.index, false, ScrollAlign.CENTER);
+      } else {
+        this.cacheSheetScroller.scrollToIndex(this.index, false, ScrollAlign.CENTER);
+      }
+    }, side ? 120 : 150);
+  }
+
+  private cancelCacheLocate(): void {
+    if (this.cacheLocateTimer !== 0) {
+      clearTimeout(this.cacheLocateTimer);
+      this.cacheLocateTimer = 0;
+    }
+  }
+
+  /** 缓存分页条尾段下标。 */
+  private cacheLastPage(): number {
+    return Math.max(0, Math.ceil(this.episodes.length / FQ_CACHE_PAGE_SIZE) - 1);
+  }
+
+  /** 缓存分页条标签（「1-30」「31-60」…）。 */
+  private cachePageLabels(): string[] {
+    const labels: string[] = [];
+    const pages: number = this.cacheLastPage() + 1;
+    for (let page: number = 0; page < pages; page++) {
+      const start: number = page * FQ_CACHE_PAGE_SIZE + 1;
+      const end: number = Math.min((page + 1) * FQ_CACHE_PAGE_SIZE, this.episodes.length);
+      labels.push(`${start}-${end}`);
+    }
+    return labels;
   }
 
   /** 刷新缓存 sheet 状态：已缓存集合 + 默认全选未缓存集。 */
@@ -1667,7 +1809,7 @@ export struct PlayerPage {
   /** 设置行点击：听视频进听剧模式页；离线缓存呼出缓存选集半模态（倍速/弹幕行右侧控件自理）。 */
   private onSettingRowClick(key: string): void {
     if (key === 'cache') {
-      this.openCacheSheet();
+      this.openCacheSheet(true);
     } else if (key === 'listen') {
       this.openListenMode();
     }
@@ -1912,19 +2054,19 @@ export struct PlayerPage {
     .height('100%')
   }
 
-  /** 侧边栏·离线缓存（横屏全屏形态）：头部左侧「管理」（进剧集缓存管理页）+
-   *  标题 + 右上关闭；集数网格复选/全选/下载行与底部半模态同款逻辑。 */
+  /** 侧边栏·离线缓存（横屏全屏形态）：头部左侧返回（回播放设置侧边栏）+ 标题 +
+   *  右上关闭；「管理」行在头部下方（进剧集缓存管理页）；>30 集分页条横向滚动直达；
+   *  集数网格 3 列复选（4 列勾选态文字超出单格宽度）/全选/下载行与底部半模态同款逻辑。 */
   @Builder
   private SideCache() {
     Column() {
       Row() {
-        Text('管理')
-          .fontSize(14)
-          .fontColor(FQ_STORY_ORANGE)
-          .padding({ left: 12, right: 4, top: 12, bottom: 12 })
+        SymbolGlyph($r('sys.symbol.chevron_left'))
+          .fontSize(20)
+          .fontColor([Color.White])
+          .padding({ left: 8, right: 2, top: 10, bottom: 10 })
           .onClick((): void => {
-            this.closeSidePanel();
-            NavPathUtils.push(ROUTE_CACHED_DRAMAS);
+            this.openSidePanel('settings');
           })
 
         Text(`离线缓存 · ${this.title}`)
@@ -1945,23 +2087,47 @@ export struct PlayerPage {
       }
       .width('100%')
       .height(48)
-      .padding({ left: 4, right: 6 })
+      .padding({ left: 6, right: 6 })
       .alignItems(VerticalAlign.Center)
 
-      Grid() {
+      Row() {
+        Text('管理')
+          .fontSize(14)
+          .fontColor(FQ_STORY_ORANGE)
+          .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+          .onClick((): void => {
+            this.closeSidePanel();
+            NavPathUtils.push(ROUTE_CACHED_DRAMAS);
+          })
+      }
+      .width('100%')
+      .padding({ left: 8 })
+      .alignItems(VerticalAlign.Center)
+
+      if (this.episodes.length > FQ_CACHE_PAGE_SIZE) {
+        this.SideCachePagingStrip()
+      }
+
+      Grid(this.sideCacheScroller) {
         ForEach(this.episodes, (episode: FqChapter, index: number) => {
           GridItem() {
             this.CacheEpisodeCell(episode, index, true)
           }
         }, (episode: FqChapter) => episode.itemId)
       }
-      .columnsTemplate('1fr 1fr 1fr 1fr')
+      .columnsTemplate('1fr 1fr 1fr')
       .columnsGap(8)
       .rowsGap(8)
       .width('100%')
       .layoutWeight(1)
       .scrollBar(BarState.Off)
       .padding({ left: 12, right: 12, top: 4, bottom: 8 })
+      .onScrollIndex((first: number, last: number): void => {
+        const page: number = Math.floor(first / FQ_CACHE_PAGE_SIZE);
+        if (page !== this.sideCachePage && page >= 0 && page <= this.cacheLastPage()) {
+          this.sideCachePage = page;
+        }
+      })
 
       Row() {
         Text(this.cacheAllSelected() ? '取消全选' : '全选')
@@ -1986,11 +2152,35 @@ export struct PlayerPage {
           })
       }
       .width('100%')
-      .padding({ left: 16, right: 16, bottom: 16 })
+      .padding({ left: 16, right: 16, bottom: 16, top: 12 })
       .alignItems(VerticalAlign.Center)
     }
     .width('100%')
     .height('100%')
+  }
+
+  /** 侧边栏缓存 >30 集分页条（深色配色，横向滚动直达 + 滚动联动）。 */
+  @Builder
+  private SideCachePagingStrip() {
+    Scroll() {
+      Row({ space: 20 }) {
+        ForEach(this.cachePageLabels(), (label: string, page: number) => {
+          Text(label)
+            .fontSize(14)
+            .fontWeight(page === this.sideCachePage ? FontWeight.Bold : FontWeight.Normal)
+            .fontColor(page === this.sideCachePage ? Color.White : FQ_DARK_TERTIARY_TEXT)
+            .onClick((): void => {
+              this.sideCachePage = page;
+              this.sideCacheScroller.scrollToIndex(page * FQ_CACHE_PAGE_SIZE, false, ScrollAlign.START);
+            })
+        }, (label: string) => label)
+      }
+      .padding({ left: 16, right: 16 })
+    }
+    .width('100%')
+    .height(32)
+    .scrollable(ScrollDirection.Horizontal)
+    .scrollBar(BarState.Off)
   }
 
   /** 侧边栏选集格文字色：当前集橙、已看（按集 itemId 记录）灰、普通白。 */

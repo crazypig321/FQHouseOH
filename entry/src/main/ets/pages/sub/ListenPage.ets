@@ -1069,7 +1069,7 @@ export struct ListenPage {
       }
       .width('100%')
       .borderRadius(18)
-      .backgroundColor($r('sys.color.comp_background_secondary'))
+      .backgroundColor($r('sys.color.comp_background_list_card'))
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
