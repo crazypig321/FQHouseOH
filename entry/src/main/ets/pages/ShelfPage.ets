@@ -683,6 +683,7 @@ export struct ShelfPage {
       ReaderNavParams.id = row.id;
       ReaderNavParams.kind = 'book';
       ReaderNavParams.title = row.title;
+      ReaderNavParams.cover = row.cover;
       ReaderNavParams.chapterIndex = -1;
       ReaderNavParams.listenAlong = false;
       NavPathUtils.push(ROUTE_READER2);

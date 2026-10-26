@@ -48,6 +48,8 @@ export class ReaderNavParams {
   static id: string = '';
   static kind: string = 'book';
   static title: string = '';
+  /** 封面（阅读页→听书页透传，听书页封面显示用）。 */
+  static cover: string = '';
   /** 定位章节下标；-1 表示跟随上次阅读进度。 */
   static chapterIndex: number = -1;
   /** 边听边读模式：跟随 fqAudioSession 高亮朗读段落（消费后由阅读页复位）。 */
@@ -73,6 +75,8 @@ export class ListenNavParams {
   static chapters: FqChapter[] = [];
   /** 定位章节下标（详情页目录点击进页播对应章）；-1 跟随会话/历史（消费后由听书页复位）。 */
   static chapterIndex: number = -1;
+  /** 阅读页带入的当前段原文：听书页拉章节字幕后匹配定位起播秒（消费后由听书页复位）。 */
+  static startCueText: string = '';
 }
 
 /** 播放页跳转参数（短剧/漫剧，mpv 播放器）。 */

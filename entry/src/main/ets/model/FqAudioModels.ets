@@ -190,3 +190,21 @@ export class FqSubtitleTrack {
 export function fqEmptySubtitleTrack(): FqSubtitleTrack {
   return new FqSubtitleTrack([]);
 }
+
+/** 起播段落原文 → 字幕行起始秒（去空白双向包含，首个命中；无命中回退 0 章首）。 */
+export function fqSubtitleStartSec(track: FqSubtitleTrack, paragraph: string): number {
+  const target: string = paragraph.replace(/\s+/g, '');
+  if (target.length === 0 || track.isEmpty) {
+    return 0;
+  }
+  for (const cue of track.cues) {
+    const norm: string = cue.text.replace(/\s+/g, '');
+    if (norm.length === 0) {
+      continue;
+    }
+    if (norm.indexOf(target) >= 0 || target.indexOf(norm) >= 0) {
+      return cue.startMs / 1000;
+    }
+  }
+  return 0;
+}

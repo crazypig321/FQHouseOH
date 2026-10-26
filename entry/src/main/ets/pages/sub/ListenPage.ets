@@ -23,8 +23,9 @@ import {
   ROUTE_READER2,
   ROUTE_CACHED_AUDIO,
 } from '../../model/FqNavModels';
+import { FqBackend } from '../../core/FqBackend';
 import { fqAudioSession, FqChapterOpenOptions } from '../../core/FqAudioSession';
-import { FqAudioTone, FqRelatedWork } from '../../model/FqAudioModels';
+import { FqAudioTone, FqRelatedWork, FqSubtitleTrack, fqSubtitleStartSec } from '../../model/FqAudioModels';
 import { FqChapter, FqCacheTaskView } from '../../model/FqModels';
 import { FqShelfItem, FqShelfStore } from '../../core/FqShelfStore';
 import { FqAudioCacheStore } from '../../core/FqAudioCacheStore';
@@ -109,15 +110,28 @@ export struct ListenPage {
 
   aboutToAppear(): void {
     FqShelfStore.init(getContext(this));
-    // 详情目录点击定位章节（-1 跟随会话/历史）：会话就绪后跳播对应章并复位参数
+    // 详情/阅读目录点击定位章节（-1 跟随会话/历史）：会话就绪后跳播对应章并复位参数
     const startChapter: number = ListenNavParams.chapterIndex;
+    // 阅读页带入的当前段原文：拉章节字幕匹配起播秒（失败/无命中回退章首）
+    const startCueText: string = ListenNavParams.startCueText;
+    ListenNavParams.startCueText = '';
     fqAudioSession.open(ListenNavParams.bookId, ListenNavParams.tab,
       ListenNavParams.title, ListenNavParams.cover, ListenNavParams.chapters)
-      .then((): void => {
+      .then(async (): Promise<void> => {
         ListenNavParams.chapterIndex = -1;
         if (startChapter >= 0 && startChapter < fqAudioSession.chapters.length) {
+          let positionSec: number = 0;
+          if (startCueText.trim().length > 0) {
+            try {
+              const track: FqSubtitleTrack = await FqBackend.get().chapterTimeline(
+                fqAudioSession.chapters[startChapter].itemId, fqAudioSession.toneId);
+              positionSec = fqSubtitleStartSec(track, startCueText);
+            } catch (error) {
+              // 字幕拉取失败：回退章首起播
+            }
+          }
           fqAudioSession.openChapter(startChapter,
-            new FqChapterOpenOptions(fqAudioSession.toneId, 0, true, false));
+            new FqChapterOpenOptions(fqAudioSession.toneId, positionSec, true, false));
         }
       });
   }
@@ -1346,6 +1360,7 @@ export struct ListenPage {
     ReaderNavParams.id = fqAudioSession.bookId;
     ReaderNavParams.kind = fqAudioSession.tab === '小说' ? 'book' : 'audio';
     ReaderNavParams.title = fqAudioSession.title;
+    ReaderNavParams.cover = fqAudioSession.cover;
     ReaderNavParams.chapterIndex = fqAudioSession.index;
     ReaderNavParams.listenAlong = true;
     NavPathUtils.push(ROUTE_READER2);

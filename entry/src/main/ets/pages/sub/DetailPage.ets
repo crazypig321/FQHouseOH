@@ -892,6 +892,7 @@ export struct DetailPage {
     ListenNavParams.cover = this.itemCover.length > 0 ? this.itemCover : this.detail.cover;
     ListenNavParams.chapters = this.chapters;
     ListenNavParams.chapterIndex = chapterIndex;
+    ListenNavParams.startCueText = '';
     NavPathUtils.push(ROUTE_LISTEN);
   }
 
@@ -907,6 +908,7 @@ export struct DetailPage {
     ReaderNavParams.id = this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId;
     ReaderNavParams.kind = this.itemKind;
     ReaderNavParams.title = this.detail.title;
+    ReaderNavParams.cover = this.detail.cover;
     ReaderNavParams.chapterIndex = chapterIndex;
     NavPathUtils.push(ROUTE_READER2);
   }

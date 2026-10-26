@@ -257,6 +257,7 @@ export struct CachedBooksPage {
     ReaderNavParams.id = row.summary.bookId;
     ReaderNavParams.kind = row.summary.kind.length > 0 ? row.summary.kind : 'book';
     ReaderNavParams.title = row.summary.title;
+    ReaderNavParams.cover = row.summary.cover;
     ReaderNavParams.chapterIndex = -1;
     ReaderNavParams.listenAlong = false;
     NavPathUtils.push(ROUTE_READER2);

@@ -280,11 +280,14 @@ export struct ReaderPage {
   private verticalPositioning: boolean = false;
   /** 上下滚动首可见段（章内段下标，重排保位用）。 */
   private verticalCurPara: number = 0;
+  /** 封面（跳转参数透传，阅读页→听书页显示用）。 */
+  private readerCover: string = '';
 
   aboutToAppear(): void {
     this.bookId = ReaderNavParams.id;
     this.kind = ReaderNavParams.kind;
     this.bookTitle = ReaderNavParams.title;
+    this.readerCover = ReaderNavParams.cover;
     // 本地导入书籍无后端数据：隐藏段评入口
     const isLocalBook: boolean = FqLocalBookStore.isLocalBookId(this.bookId);
     if (isLocalBook) {
@@ -352,7 +355,7 @@ export struct ReaderPage {
     }
   }
 
-  /** 标题栏听书：携当前章进入听书页，从当前正在看的章节开始听。 */
+  /** 标题栏听书：携当前章进入听书页，从当前正在看的段落开始听（字幕定位失败回退章首）。 */
   private openListenFromReader(): void {
     if (this.chapters.length === 0) {
       promptAction.showToast({ message: '目录加载中，请稍后再试', duration: 1500 });
@@ -361,10 +364,30 @@ export struct ReaderPage {
     ListenNavParams.bookId = this.bookId;
     ListenNavParams.tab = fqKindToTab(this.kind);
     ListenNavParams.title = this.bookTitle;
-    ListenNavParams.cover = '';
+    ListenNavParams.cover = this.readerCover;
     ListenNavParams.chapters = this.chapters;
     ListenNavParams.chapterIndex = this.chapterIndex;
+    ListenNavParams.startCueText = this.currentReadingParaText();
     NavPathUtils.push(ROUTE_LISTEN);
+  }
+
+  /** 当前阅读位置段落原文（翻页取页首段、上下滚动取首可见段），供听书页字幕定位起播点。 */
+  private currentReadingParaText(): string {
+    const layout: FqChapterLayout | null = this.curLayout;
+    if (layout === null) {
+      return '';
+    }
+    let para: number = -1;
+    if (this.flipIndex === 2) {
+      para = this.verticalCurPara;
+    } else {
+      const page: FqReaderPageData | undefined = layout.pages[this.pageIndex];
+      para = page !== undefined && page.startPara >= 0 ? page.startPara : -1;
+    }
+    if (para >= 0 && para < layout.paragraphs.length) {
+      return layout.paragraphs[para];
+    }
+    return '';
   }
 
   build() {
