@@ -218,6 +218,8 @@ export struct PlayerPage {
   @Local cacheOpenToken: number = 0;
   /** 侧边栏缓存分页条当前段。 */
   @Local sideCachePage: number = 0;
+  /** 侧边栏选集分页条当前段。 */
+  @Local sideEpisodePage: number = 0;
   /** 当前集清晰度档列表（/api/content data.variants；空 = 上游仅一路流）。 */
   @Local qualityVariants: FqEpisodeVariant[] = [];
   /** 当前播放清晰度档下标（-1 = 默认流 source.url）。 */
@@ -1903,7 +1905,7 @@ export struct PlayerPage {
     .alignItems(VerticalAlign.Center)
   }
 
-  /** 侧边栏·选集：4 列序号格（当前集橙、已看灰、普通白），点选切集并收起。 */
+  /** 侧边栏·选集：>30 集分页条横向直达 + 4 列序号格（当前集橙、已看灰、普通白），点选切集并收起。 */
   @Builder
   private SideEpisodes() {
     Column() {
@@ -1919,6 +1921,9 @@ export struct PlayerPage {
         .layoutWeight(1)
         .justifyContent(FlexAlign.Center)
       } else {
+        if (this.episodes.length > FQ_CACHE_PAGE_SIZE) {
+          this.SideEpisodePagingStrip()
+        }
         Grid(this.sideScroller) {
           ForEach(this.episodes, (episode: FqChapter, index: number) => {
             GridItem() {
@@ -1948,10 +1953,40 @@ export struct PlayerPage {
         .padding({ left: 12, right: 12, top: 4, bottom: 16 })
         .width('100%')
         .layoutWeight(1)
+        .onScrollIndex((first: number, last: number): void => {
+          const page: number = Math.floor(first / FQ_CACHE_PAGE_SIZE);
+          if (page !== this.sideEpisodePage && page >= 0 && page <= this.cacheLastPage()) {
+            this.sideEpisodePage = page;
+          }
+        })
       }
     }
     .width('100%')
     .height('100%')
+  }
+
+  /** 侧边栏选集 >30 集分页条（深色，横向滚动直达 + 滚动联动；对齐非全屏选集面板分段条）。 */
+  @Builder
+  private SideEpisodePagingStrip() {
+    Scroll() {
+      Row({ space: 20 }) {
+        ForEach(this.cachePageLabels(), (label: string, page: number) => {
+          Text(label)
+            .fontSize(14)
+            .fontWeight(page === this.sideEpisodePage ? FontWeight.Bold : FontWeight.Normal)
+            .fontColor(page === this.sideEpisodePage ? Color.White : FQ_DARK_TERTIARY_TEXT)
+            .onClick((): void => {
+              this.sideEpisodePage = page;
+              this.sideScroller.scrollToIndex(page * FQ_CACHE_PAGE_SIZE, false, ScrollAlign.START);
+            })
+        }, (label: string) => label)
+      }
+      .padding({ left: 16, right: 16 })
+    }
+    .width('100%')
+    .height(32)
+    .scrollable(ScrollDirection.Horizontal)
+    .scrollBar(BarState.Off)
   }
 
   /** 侧边栏·播放设置：公共设置行 List（同半模态结构，深色配色）。 */
@@ -3089,6 +3124,7 @@ export struct PlayerPage {
     });
     if (kind === 'episodes' && this.episodes.length > 0) {
       this.cancelSideLocate();
+      this.sideEpisodePage = Math.floor(this.index / FQ_CACHE_PAGE_SIZE);
       this.sideLocateTimer = setTimeout((): void => {
         this.sideLocateTimer = 0;
         this.sideScroller.scrollToIndex(this.index, false, ScrollAlign.CENTER);

@@ -376,7 +376,7 @@ export struct FqCacheSheet {
       && (this.taskViewOf(item.itemId) !== null || this.selectedIds.has(item.itemId))) {
       return '#14FA6725';
     }
-    return '#0F000000';
+    return $r('sys.color.comp_background_list_card');
   }
 
   /** 缓存格尾随勾：已缓存或选中。 */
