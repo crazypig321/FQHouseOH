@@ -323,11 +323,14 @@ export class FqEpisodeSource {
   readonly keyHex: string;
   /** 全部清晰度档（官方面板高→低）；上游只给一路时为空。 */
   readonly variants: FqEpisodeVariant[];
+  /** 实际起播的清晰度档名（后端命中请求档时回显；空 = 默认最高档）。 */
+  readonly quality: string;
 
-  constructor(url: string, keyHex: string = '', variants: FqEpisodeVariant[] = []) {
+  constructor(url: string, keyHex: string = '', variants: FqEpisodeVariant[] = [], quality: string = '') {
     this.url = url;
     this.keyHex = keyHex;
     this.variants = variants;
+    this.quality = quality;
   }
 }
 

@@ -53,15 +53,15 @@ import { common } from '@kit.AbilityKit';
 import { Player, PlayerSurface, Media, PlayerConfig } from '@mpv-ohos/mpv-arkts';
 import { FQ_ACCENT } from '../../view/CommonCom';
 import { CommonNav } from '../../view/CommonNav';
-import { CommonSheet, FqSheetOptions } from '../../view/CommonSheet';
-import { FqCacheSheet } from '../../view/FqCacheSheet';
-import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/FqCommentSheet';
+import { CommonSheet, FqSheetOptions } from '../../view/sheet/CommonSheet';
+import { FqCacheSheet } from '../../view/sheet/FqCacheSheet';
+import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/sheet/FqCommentSheet';
 import { FqMenu, FqMenuItem } from '../../view/CommonMenu';
 import { FqDanmakuView } from '../../view/FqDanmakuView';
 import { FqSettingRow } from '../../view/FqSettingRow';
 import { FqStoryPanel } from '../../view/FqStoryPanel';
 import { DetailNavParams, PlayerNavParams, ListenVideoNavParams, ROUTE_DETAIL, ROUTE_LISTEN_VIDEO, ROUTE_CACHED_DRAMAS } from '../../model/FqNavModels';
-import { FqBookCommentPage, FqChapter, FqDanmaku, FqDanmakuPage, FqEpisodeCommentPage, FqEpisodeSource, FqSeriesRelateBook, fqKindToTab, FqCacheTaskView } from '../../model/FqModels';
+import { FqBookCommentPage, FqChapter, FqDanmaku, FqDanmakuPage, FqEpisodeCommentPage, FqEpisodeSource, FqEpisodeVariant, FqSeriesRelateBook, fqKindToTab, FqCacheTaskView } from '../../model/FqModels';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { fqAudioSession } from '../../core/FqAudioSession';
 import { FqVideoMedia } from '../../core/FqVideoMedia';
@@ -117,6 +117,8 @@ const FQ_FS_SIDE_PANEL_W: number = 300;
 const FQ_FS_SIDE_BG: string = '#F0141414';
 /** 全屏底部倍速按钮锚点 id（FqMenu 档位菜单挂靠）。 */
 const PLAYER_FS_SPEED_ANCHOR_ID: string = 'player_fs_speed_anchor';
+/** 全屏底部清晰度按钮锚点 id（FqMenu 档位菜单挂靠）。 */
+const PLAYER_FS_QUALITY_ANCHOR_ID: string = 'player_fs_quality_anchor';
 /** 播放设置深色（横屏侧边栏）配色：半透明白卡片/分隔线/滑轨/次级文字。 */
 const FQ_DARK_CARD_BG: string = '#26FFFFFF';
 const FQ_DARK_DIVIDER: string = '#1FFFFFFF';
@@ -216,6 +218,10 @@ export struct PlayerPage {
   @Local cacheOpenToken: number = 0;
   /** 侧边栏缓存分页条当前段。 */
   @Local sideCachePage: number = 0;
+  /** 当前集清晰度档列表（/api/content data.variants；空 = 上游仅一路流）。 */
+  @Local qualityVariants: FqEpisodeVariant[] = [];
+  /** 当前播放清晰度档下标（-1 = 默认流 source.url）。 */
+  @Local qualityIndex: number = -1;
   /** 侧边栏缓存网格滚动器。 */
   private sideCacheScroller: Scroller = new Scroller();
   /** 侧边栏缓存面板打开后定位当前集的定时器（0 无任务）。 */
@@ -249,6 +255,8 @@ export struct PlayerPage {
   private danmakuLoadToken: number = 0;
   /** 当前集已实际播放（position > 0；切集重置，已看标记 guard）。 */
   private hasDisplayed: boolean = false;
+  /** 用户选定的清晰度档名（跨集记忆；空 = 跟默认最高档）。 */
+  private qualityPreference: string = '';
   /** 本剧续播进度（进页恢复；暂停/切集/周期/退出保存）。 */
   private progress: FqWatchedProgress | null = null;
   /** 进页待恢复的续播位置（秒；仅首开命中的那一次消费）。 */
@@ -1110,6 +1118,15 @@ export struct PlayerPage {
           .id(PLAYER_FS_SPEED_ANCHOR_ID)
           .onClick((): void => {
             this.openSpeedMenu();
+          })
+
+        Text(this.qualityLabel())
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(Color.White)
+          .id(PLAYER_FS_QUALITY_ANCHOR_ID)
+          .onClick((): void => {
+            this.openQualityMenu();
           })
 
         Text('选集')
@@ -2257,6 +2274,61 @@ export struct PlayerPage {
     FqMenu.open(this.getUIContext(), PLAYER_FS_SPEED_ANCHOR_ID, items);
   }
 
+  /** 当前清晰度按钮文案：选中档显示档名；默认流显示「清晰度」。 */
+  private qualityLabel(): string {
+    if (this.qualityIndex >= 0 && this.qualityIndex < this.qualityVariants.length) {
+      return this.qualityVariants[this.qualityIndex].name;
+    }
+    return '清晰度';
+  }
+
+  /** 全屏底部清晰度按钮：公共 FqMenu 档位直选（默认流 + variants 档位，
+   *  当前档尾勾标识；选中即切流，mpv 按当前位置续播）。 */
+  private openQualityMenu(): void {
+    const items: Array<FqMenuItem> = [];
+    const defaultItem: FqMenuItem = new FqMenuItem();
+    defaultItem.label = '默认';
+    if (this.qualityIndex < 0) {
+      defaultItem.endIcon = $r('sys.symbol.checkmark_circle_fill');
+    }
+    defaultItem.onAction = (): void => {
+      this.switchQuality(-1);
+    };
+    items.push(defaultItem);
+    for (let i: number = 0; i < this.qualityVariants.length; i++) {
+      const variant: FqEpisodeVariant = this.qualityVariants[i];
+      const item: FqMenuItem = new FqMenuItem();
+      item.label = variant.name;
+      if (this.qualityIndex === i) {
+        item.endIcon = $r('sys.symbol.checkmark_circle_fill');
+      }
+      item.onAction = (): void => {
+        this.switchQuality(i);
+      };
+      items.push(item);
+    }
+    FqMenu.open(this.getUIContext(), PLAYER_FS_QUALITY_ANCHOR_ID, items);
+  }
+
+  /**
+   * 切换清晰度档：后端按档重新取流下载解密（loopback /src/ 明文供 mpv），
+   * 原位置续播；档名跨集记忆（后续集上游仍有该档则沿用）。
+   * 下载模式 variant url 为上游密文流，mpv 无法直连，必须走重取流链路。
+   */
+  private switchQuality(index: number): void {
+    if (this.loading || index === this.qualityIndex) {
+      return;
+    }
+    const name: string = index >= 0 && index < this.qualityVariants.length
+      ? this.qualityVariants[index].name : '';
+    const position: number = this.player.state.position;
+    this.qualityPreference = name;
+    if (position > 0) {
+      this.pendingResumeSec = position;
+    }
+    this.loadEpisode(this.index);
+  }
+
   /** 关闭集评半模态：延迟一拍置 isShow（面板事件内同步改 isShow 会被框架丢弃）。 */
   private closeComments(): void {
     const token: number = ++this.commentCloseToken;
@@ -2475,6 +2547,8 @@ export struct PlayerPage {
     if (!keepListenProgress) {
       this.saveCurrentProgress();
     }
+    // 选集/切集立即停掉旧集播放（旧集声音即刻消失），不等新集取流完成
+    this.player.stop();
     const token: number = ++this.loadToken;
     // 续播位置（仅进页首开那一次）：Media start 偏移起播
     let startSec: number = -1;
@@ -2492,15 +2566,29 @@ export struct PlayerPage {
     }
     try {
       let playUrl: string = '';
+      // 清晰度档重置（离线缓存/取流失败回退均按默认流处理）
+      this.qualityVariants = [];
+      this.qualityIndex = -1;
       // 离线缓存命中：直接播本地文件，跳过在线取流（无网也可看已缓存集）
       if (FqDramaCacheStore.has(episode.itemId)) {
         playUrl = FqDramaCacheStore.filePath(episode.itemId);
       } else {
         await FqBackend.get().start(getContext(this));
         this.resolveCover();
+        // quality 携带用户选定档：后端命中 variants 档时按该档取流，
+        // 并以 quality 回显实际起播档（未命中为空 → 默认）
         const source: FqEpisodeSource =
-          await FqBackend.get().episodeSource(episode.itemId, this.tab);
+          await FqBackend.get().episodeSource(episode.itemId, this.tab, this.qualityPreference);
         playUrl = source.url;
+        this.qualityVariants = source.variants;
+        if (source.quality.length > 0) {
+          for (let i: number = 0; i < source.variants.length; i++) {
+            if (source.variants[i].name === source.quality) {
+              this.qualityIndex = i;
+              break;
+            }
+          }
+        }
       }
       if (token !== this.loadToken) {
         return;

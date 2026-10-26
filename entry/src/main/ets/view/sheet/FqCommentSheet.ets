@@ -12,11 +12,11 @@
  */
 
 import { display } from '@kit.ArkUI';
-import { FqBackend, fqErrorMessage } from '../core/FqBackend';
-import { FqBookComment, FqBookCommentPage, FqChapterIdeaMeta, fqFormatCountInt } from '../model/FqModels';
-import { CommonLoading, FQ_ACCENT } from './CommonCom';
+import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
+import { FqBookComment, FqBookCommentPage, FqChapterIdeaMeta, fqFormatCountInt } from '../../model/FqModels';
+import { CommonLoading, FQ_ACCENT } from '../CommonCom';
 import { CommonSheet } from './CommonSheet';
-import { appState } from '../entryability/AppState';
+import { appState } from '../../entryability/AppState';
 
 /** 书评懒加载数据源：持已加载书评，续拉按 comment_id 去重后通知 LazyForEach 刷新。 */
 class FqCommentSource implements IDataSource {

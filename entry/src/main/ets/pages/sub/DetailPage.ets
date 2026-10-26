@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 详情页（NavDestination）：按原版小说详情布局复刻。
  *
  * 对齐 fqapp lib/pages/detail_page.dart 与 widgets/detail/*（M1 子集）：
@@ -29,9 +29,9 @@ import { AuthorNavParams, ComicNavParams, DetailNavParams, FqTitleBarOptions, Li
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { CommonNav } from '../../view/CommonNav';
 import { CommonLoading, FQ_ACCENT } from '../../view/CommonCom';
-import { FqSheetOptions } from '../../view/CommonSheet';
-import { FqCommentSheet, FqCommentTile, fqCommentSheetHeightVp } from '../../view/FqCommentSheet';
-import { FqCatalogSheet } from '../../view/FqCatalogSheet';
+import { FqSheetOptions } from '../../view/sheet/CommonSheet';
+import { FqCommentSheet, FqCommentTile, fqCommentSheetHeightVp } from '../../view/sheet/FqCommentSheet';
+import { FqCatalogSheet } from '../../view/sheet/FqCatalogSheet';
 import { appState } from '../../entryability/AppState';
 
 /** 目录预览行数（对齐 fqapp _previewChapterCount）。 */

@@ -11,10 +11,10 @@ import {
   HdsNavDestination,
   HdsNavDestinationTitleMode,
   HdsNavigationMenuItemOptions, TitleBarContentOptions } from '@kit.UIDesignKit';
-import { appState } from '../entryability/AppState';
-import { themeUtils } from '../utils/ThemeUtils';
-import { CommonSearch } from './CommonCom';
-import { CommonNav } from './CommonNav';
+import { appState } from '../../entryability/AppState';
+import { themeUtils } from '../../utils/ThemeUtils';
+import { CommonSearch } from '../CommonCom';
+import { CommonNav } from '../CommonNav';
 import { uiMaterial } from '@kit.ArkUI';
 
 /** 通用 bindSheet 参数：拖拽条 + 关闭回调 + 可选高度（默认 600）；前景光感模糊可选关闭。 */

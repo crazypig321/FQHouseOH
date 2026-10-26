@@ -15,8 +15,8 @@ import { fqEffectiveReaderTheme, ReaderSettingsDialogContent } from '../view/dia
 import { FqComicSettingsHandler, fqComicSettingsBus } from '../core/FqComicSettingsBus';
 import { ComicSettingsDialogContent } from '../view/dialog/ComicSettingsDialogContent';
 import { FqPlaybackBall } from '../view/FqPlaybackBall';
-import { FqSheetOptions } from '../view/CommonSheet';
-import { FqChangelogSheet } from '../view/FqChangelogSheet';
+import { FqSheetOptions } from '../view/sheet/CommonSheet';
+import { FqChangelogSheet } from '../view/sheet/FqChangelogSheet';
 import { FqAppSettingsStore } from '../core/FqAppSettingsStore';
 
 @Entry

@@ -71,6 +71,9 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
         }
 
         let stream_mode = params.get_str("mode") == "stream";
+        // 客户端选定的清晰度档（如 720P）：命中 variants 档时该档优先选流，
+        // 下载缓存按档分文件；未传或未命中按最高可用档（原行为不变）。
+        let quality = sanitize_quality(&params.get_str("quality"));
         // 短剧 stream 仍以 shortplay 模型选流，但清晰度列表要合并两条接口：
         // 顶档（1080p）只出现在 phoenix 模型的 `fallback_api` 列表里，而两条
         // 接口的编码分布并不相同——shortplay 各档是 h265，phoenix 的低档是解不
@@ -106,7 +109,7 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
             (fetch_phoenix_video_model(ctx, &video_id).await?, None)
         };
 
-        let (video_url, content_key) = match resolve_video_source(ctx, &raw).await {
+        let (mut video_url, mut content_key) = match resolve_video_source(ctx, &raw).await {
             VideoSourceResolution::Found(url, key) => (url, key),
             VideoSourceResolution::CodecRejected => {
                 return Err(ApiError::Internal("该视频暂不支持播放".to_string()));
@@ -118,21 +121,53 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
             }
         };
 
+        let variants = extract_stream_variants(ctx, &raw, phoenix_raw.as_deref()).await;
+        // 请求档命中：直接改用该档流（url + 内容密钥）；未命中保持最高档，
+        // 响应 quality 为空，客户端据此回显「默认」。
+        let mut served_quality = String::new();
+        let mut cache_suffix = String::new();
+        if !quality.is_empty() {
+            let hit = variants
+                .iter()
+                .find(|row| row.get("name").and_then(Value::as_str) == Some(quality.as_str()));
+            if let Some(row) = hit {
+                let url = row.get("url").and_then(Value::as_str).unwrap_or("");
+                let key_hex = row.get("key_hex").and_then(Value::as_str).unwrap_or("");
+                if !url.is_empty() {
+                    if let Ok(decoded) = hex::decode(key_hex) {
+                        video_url = url.to_string();
+                        content_key = decoded;
+                        served_quality = quality.clone();
+                        cache_suffix = quality;
+                    }
+                }
+            }
+        }
+
         let source = json!({
             "video_url": video_url,
             "key_hex": hex::encode(&content_key),
             "video_id": video_id,
+            "quality": served_quality.clone(),
             // 全量兼容档（高→低）。官方面板按该列表渲染清晰度行；空数组
             // 表示单流，客户端隐藏清晰度入口。
-            "variants": extract_stream_variants(ctx, &raw, phoenix_raw.as_deref()).await,
+            "variants": variants,
         });
         if stream_mode {
             return Ok(source);
         }
 
+        // 按档分缓存文件：默认档沿用 {video_id}（存量缓存兼容），选定档用
+        // {video_id}_{quality}，切档互不覆盖、回切命中各自缓存。
+        let cache_id = if cache_suffix.is_empty() {
+            video_id.clone()
+        } else {
+            format!("{video_id}_{cache_suffix}")
+        };
+
         match download_and_save(
             ctx,
-            &video_id,
+            &cache_id,
             &video_url,
             &content_key,
             DownloadKind::Video,
@@ -144,6 +179,8 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
                 Ok(json!({
                     "video_url": local_path,
                     "video_id": video_id,
+                    "quality": served_quality,
+                    "variants": source["variants"].clone(),
                     "video_info": {
                         "data": {
                             "video_list": {
@@ -158,6 +195,20 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
             Err(_) => Ok(source),
         }
     })
+}
+
+/// `quality` 参数白名单：仅字母数字、长度 <= 8（720P/1080P/2K/4K…），
+/// 防止拼接进缓存文件名时注入路径分隔符。
+fn sanitize_quality(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if !trimmed.is_empty()
+        && trimmed.len() <= 8
+        && trimmed.chars().all(|c| c.is_ascii_alphanumeric())
+    {
+        trimmed.to_string()
+    } else {
+        String::new()
+    }
 }
 
 /// Queries the phoenix multi_video_model endpoint.

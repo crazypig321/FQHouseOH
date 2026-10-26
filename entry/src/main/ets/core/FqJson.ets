@@ -122,6 +122,18 @@ export function fqParseObject(text: string): Record<string, Object> | null {
   }
 }
 
+/**
+ * 本书作者评论判定：评论者 user_id 与内容作者 creator_id 字符串相等才亮「作者」。
+ * user_tag.is_author 仅代表评论者本人是平台作家，并非本书作者，会大面积误标。
+ */
+export function fqIsCreatorComment(userIdRaw: Object | undefined, creatorIdRaw: Object | undefined): boolean {
+  const userId: string = typeof userIdRaw === 'number' ? userIdRaw.toString()
+    : (typeof userIdRaw === 'string' ? userIdRaw : '');
+  const creatorId: string = typeof creatorIdRaw === 'number' ? creatorIdRaw.toString()
+    : (typeof creatorIdRaw === 'string' ? creatorIdRaw : '');
+  return userId.length > 0 && userId === creatorId;
+}
+
 /** 浅合并 override 到 target（override 优先），用于摊平嵌套卡片字段。 */
 export function fqShallowMergeInto(target: Record<string, Object>, source: Record<string, Object>): void {
   const keys: string[] = Object.keys(source);

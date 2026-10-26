@@ -33,9 +33,9 @@ import { FqChapterCacheStore, FqCachedCatalog } from '../../core/FqChapterCacheS
 import { ReaderNavParams, ListenNavParams, ROUTE_LISTEN } from '../../model/FqNavModels';
 import { CommonNav, titleBarOf } from '../../view/CommonNav';
 import { CommonLoading, FQ_ACCENT } from '../../view/CommonCom';
-import { CommonSheet, FqSheetOptions } from '../../view/CommonSheet';
-import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/FqCommentSheet';
-import { FqCatalogSheet } from '../../view/FqCatalogSheet';
+import { CommonSheet, FqSheetOptions } from '../../view/sheet/CommonSheet';
+import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/sheet/FqCommentSheet';
+import { FqCatalogSheet } from '../../view/sheet/FqCatalogSheet';
 import { FQ_FONT_OPTIONS, FqFontOption } from '../../core/FqOnlineParser';
 import { fqAudioSession } from '../../core/FqAudioSession';
 import { FqSubtitleCue, FqSubtitleTrack } from '../../model/FqAudioModels';

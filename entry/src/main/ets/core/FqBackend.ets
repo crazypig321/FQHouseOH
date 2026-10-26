@@ -528,11 +528,16 @@ export class FqBackend {
   /**
    * 剧集可播放流（/api/content，ohos 不带 mode → 后端 c1 整集下载解密后
    * loopback /src/ Range 供流，mpv 拉明文无需 key_hex 解密）。
+   * quality 为用户选定的清晰度档名（空 = 默认最高档）：后端命中 variants
+   * 档时按该档取流，并以 quality 回显实际起播档。
    * 相对路径由 resourceUrl 锚定；锚定后仍非 http(s) 视为失败。
    */
-  public async episodeSource(itemId: string, tab: string): Promise<FqEpisodeSource> {
-    const query: string = `source=${encodeURIComponent('番茄')}&item_id=${encodeURIComponent(itemId)}`
+  public async episodeSource(itemId: string, tab: string, quality: string = ''): Promise<FqEpisodeSource> {
+    let query: string = `source=${encodeURIComponent('番茄')}&item_id=${encodeURIComponent(itemId)}`
       + `&tab=${encodeURIComponent(tab)}`;
+    if (quality.length > 0) {
+      query = `${query}&quality=${encodeURIComponent(quality)}`;
+    }
     const payload: Record<string, Object> = await this.getJson('/api/content', query);
     const source: FqEpisodeSource = fqParseEpisodeSource(payload);
     const url: string = this.resourceUrl(source.url);
@@ -546,7 +551,7 @@ export class FqBackend {
         variants.push(new FqEpisodeVariant(variant.name, variantUrl, variant.keyHex, variant.height));
       }
     }
-    return new FqEpisodeSource(url, source.keyHex, variants);
+    return new FqEpisodeSource(url, source.keyHex, variants, source.quality);
   }
 
   /** 章节试读（/api/v1/books/{id}/chapters/summary）；装饰性数据，失败返回空 Map。 */

@@ -8,10 +8,10 @@
  *   （兼容 bindSheet 内容重建/复用两种挂载方式，首建由 aboutToAppear 兜底）。
  */
 
-import { FqChapter } from '../model/FqModels';
-import { CommonSearch, FQ_ACCENT } from './CommonCom';
+import { FqChapter } from '../../model/FqModels';
+import { CommonSearch, FQ_ACCENT } from '../CommonCom';
 import { CommonSheet } from './CommonSheet';
-import { appState } from '../entryability/AppState';
+import { appState } from '../../entryability/AppState';
 
 /** 目录懒加载数据源：持过滤后章节，变更时通知 LazyForEach 刷新。 */
 class FqCatalogSource implements IDataSource {

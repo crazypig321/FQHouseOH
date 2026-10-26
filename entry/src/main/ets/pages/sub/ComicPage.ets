@@ -27,10 +27,10 @@ import { ComicNavParams, ROUTE_CACHED_COMICS } from '../../model/FqNavModels';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { CommonNav, titleBarOf } from '../../view/CommonNav';
 import { CommonLoading, FQ_ACCENT } from '../../view/CommonCom';
-import { FqSheetOptions } from '../../view/CommonSheet';
-import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/FqCommentSheet';
-import { FqCatalogSheet } from '../../view/FqCatalogSheet';
-import { FqCacheSheet } from '../../view/FqCacheSheet';
+import { FqSheetOptions } from '../../view/sheet/CommonSheet';
+import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/sheet/FqCommentSheet';
+import { FqCatalogSheet } from '../../view/sheet/FqCatalogSheet';
+import { FqCacheSheet } from '../../view/sheet/FqCacheSheet';
 import { FqComicCacheStore } from '../../core/FqComicCacheStore';
 import {
   fqComicDownloader,

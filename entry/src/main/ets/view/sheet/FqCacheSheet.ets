@@ -10,7 +10,7 @@
  * - openToken：宿主每次打开 +1，组件据此重置勾选并定位当前项居中。
  */
 
-import { appState } from '../entryability/AppState';
+import { appState } from '../../entryability/AppState';
 import { CommonSheet } from './CommonSheet';
 import {
   FqCacheTaskView,
@@ -19,7 +19,7 @@ import {
   FQ_CACHE_TASK_FAILED,
   FQ_CACHE_TASK_PAUSED,
   FQ_CACHE_TASK_WAITING,
-} from '../model/FqModels';
+} from '../../model/FqModels';
 
 /** 缓存分页条粒度（与选集面板 FqStoryPanel 一致 30/段）。 */
 const FQ_CACHE_PAGE_SIZE: number = 30;

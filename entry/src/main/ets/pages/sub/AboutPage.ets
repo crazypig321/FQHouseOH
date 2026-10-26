@@ -10,7 +10,7 @@
  */
 
 import { CommonNav } from '../../view/CommonNav';
-import { CommonSheet, FqSheetOptions } from '../../view/CommonSheet';
+import { CommonSheet, FqSheetOptions } from '../../view/sheet/CommonSheet';
 import { FQ_ACCENT } from '../../view/CommonCom';
 import { FqTitleBarOptions } from '../../model/FqNavModels';
 import { bundleManager, common } from '@kit.AbilityKit';
@@ -22,7 +22,7 @@ import { DialogManager } from '../../utils/DialogUtils';
 import { fileIo as fs, picker } from '@kit.CoreFileKit';
 import { FqColorUtils } from '../../utils/FqColorUtils';
 import { appState } from '../../entryability/AppState';
-import { FqChangelogSheet } from '../../view/FqChangelogSheet';
+import { FqChangelogSheet } from '../../view/sheet/FqChangelogSheet';
 
 const FQ_ABOUT_TAG: string = 'FqAboutPage';
 const FQ_ABOUT_TOP_INSET: number = 56;

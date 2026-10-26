@@ -11,9 +11,9 @@
 import { promptAction, display } from '@kit.ArkUI';
 import { FQ_ACCENT } from '../../view/CommonCom';
 import { CommonNav } from '../../view/CommonNav';
-import { CommonSheet, FqSheetOptions } from '../../view/CommonSheet';
-import { FqCatalogSheet } from '../../view/FqCatalogSheet';
-import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/FqCommentSheet';
+import { CommonSheet, FqSheetOptions } from '../../view/sheet/CommonSheet';
+import { FqCatalogSheet } from '../../view/sheet/FqCatalogSheet';
+import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/sheet/FqCommentSheet';
 import {
   DetailNavParams,
   FqTitleBarOptions,
@@ -34,7 +34,7 @@ import {
   FqAudioDownloadTask,
   AudioDownloadStatus,
 } from '../../core/FqAudioDownloader';
-import { FqCacheSheet } from '../../view/FqCacheSheet';
+import { FqCacheSheet } from '../../view/sheet/FqCacheSheet';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { appState } from '../../entryability/AppState';
 

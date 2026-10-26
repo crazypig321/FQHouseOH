@@ -399,12 +399,17 @@ async fn handle_web_content(server: &Server, q: &Params) -> Response {
         // series 7686494169098898456 首集在 video 端点 200 返回 url+key）。
         // 漫剧此前落进下方图文 content 分支，响应没有 video_url，客户端
         // 报「获取播放地址失败」，feed 内嵌播放器无法播放任何漫剧。
+        // quality（清晰度档名）原样透传：命中 variants 档时该档优先选流。
         "短剧" | "漫剧" => {
             let mut p = Params::new();
             p.set("video_id", item_id.clone());
             p.set("item_ids", item_id.clone());
             if !mode.is_empty() {
                 p.set("mode", mode.clone());
+            }
+            let quality = q.get_str("quality");
+            if !quality.is_empty() {
+                p.set("quality", quality);
             }
             call_endpoint(server, "video", &p).await
         }

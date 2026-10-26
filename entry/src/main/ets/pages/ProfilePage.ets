@@ -7,7 +7,7 @@
  */
 
 import { CommonNav } from '../view/CommonNav';
-import { CommonSheet, FqSheetOptions } from '../view/CommonSheet';
+import { CommonSheet, FqSheetOptions } from '../view/sheet/CommonSheet';
 import { FQ_ACCENT, RefreshOverlay } from '../view/CommonCom';
 import {
   DetailNavParams,
