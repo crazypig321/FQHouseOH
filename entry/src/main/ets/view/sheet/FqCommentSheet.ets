@@ -364,7 +364,10 @@ export struct FqCommentSheet {
         this.hasMore = page.hasMore && page.comments.length > 0 && advanced > offset;
         this.loadingMore = false;
       }
-      this.total = page.totalCount;
+      // 仅首页带 total（续拉页恒为 0），非零才覆盖，避免标题计数被冲掉
+      if (page.totalCount > 0) {
+        this.total = page.totalCount;
+      }
       this.count = this.source.totalCount();
     } catch (error) {
       if (gen !== this.loadGen) {
