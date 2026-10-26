@@ -176,6 +176,7 @@ export struct ShelfPage {
               } else {
                 FqMediaCard({
                   item: this.rowToMediaItem(row),
+                  chipText: FqLocalBookStore.isLocalBookId(row.id) ? '本地书籍' : '',
                   onItemClick: (clicked: FqMediaItem): void => {
                     this.onRowTap(row);
                   },
@@ -297,7 +298,7 @@ export struct ShelfPage {
       for (const entry of FqShelfStore.all()) {
         if (keyword.length === 0 || entry.title.includes(keyword)) {
           rows.push(new ShelfRow(entry.id, entry.kind, entry.title, entry.cover,
-            fqKindLabel(entry.kind)));
+            FqLocalBookStore.isLocalBookId(entry.id) ? '本地书籍' : fqKindLabel(entry.kind)));
         }
       }
     } else {

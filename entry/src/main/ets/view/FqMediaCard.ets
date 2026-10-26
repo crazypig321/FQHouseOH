@@ -15,6 +15,8 @@ export struct FqMediaCard {
   /** 多选模式：封面左上角显示勾选圈、隐藏角标。 */
   @Param batchMode: boolean = false;
   @Param selected: boolean = false;
+  /** 角标文案覆盖（非空时替代 kind 标签，如本地书"本地书籍"）。 */
+  @Param chipText: string = '';
 
   build() {
     Column({ space: 6 }) {
@@ -50,8 +52,8 @@ export struct FqMediaCard {
             .margin(6)
             .transition(TransitionEffect.OPACITY)
         }
-        if (!this.batchMode && this.item.kind.length > 0) {
-          Text(fqKindLabel(this.item.kind))
+        if (!this.batchMode && (this.item.kind.length > 0 || this.chipText.length > 0)) {
+          Text(this.chipText.length > 0 ? this.chipText : fqKindLabel(this.item.kind))
             .fontSize(9)
             .fontColor(Color.White)
             .padding({ left: 5, right: 5, top: 2, bottom: 2 })
@@ -123,6 +125,9 @@ export struct FqMediaCard {
   }
 
   private subLabel(): string {
+    if (this.chipText.length > 0) {
+      return this.chipText;
+    }
     if (this.item.author.length > 0) {
       return this.item.author;
     }
