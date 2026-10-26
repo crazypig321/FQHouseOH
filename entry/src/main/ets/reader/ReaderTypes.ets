@@ -69,6 +69,18 @@ export class FqReaderPageData {
   startChar: number = 0;
 }
 
+/** 章节正文归一化结果：text 为 '\n' 连接的段落行（无空行），
+ *  paraIdx[i] 为第 i 行对应的上游段 id（<p idx="N">；无标记 -1，如缓存/本地书）。 */
+export class FqNormalizedChapter {
+  readonly text: string;
+  readonly paraIdx: number[];
+
+  constructor(text: string, paraIdx: number[]) {
+    this.text = text;
+    this.paraIdx = paraIdx;
+  }
+}
+
 /** 一章的分页结果。 */
 export class FqChapterLayout {
   chapterIndex: number = 0;
@@ -76,6 +88,8 @@ export class FqChapterLayout {
   paragraphs: string[] = [];
   /** 每段段评数（气泡计数）。 */
   commentCounts: number[] = [];
+  /** 每段对应的上游段 id（段评 para_index 用；-1 无标记）。 */
+  paraIdx: number[] = [];
   /** 分页结果。 */
   pages: FqReaderPageData[] = [];
 

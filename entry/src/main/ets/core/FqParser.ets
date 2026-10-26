@@ -46,7 +46,7 @@ import {
   fqFormatCounter,
   FqChapterIdeaMeta,
 } from '../model/FqModels';
-import { FqParagraphComment, FqParagraphCommentPage } from '../reader/ReaderTypes';
+import { FqNormalizedChapter, FqParagraphComment, FqParagraphCommentPage } from '../reader/ReaderTypes';
 
 const VIDEO_RE: RegExp = /短剧|短片|剧集|video|drama/i;
 const MANGA_RE: RegExp = /漫画|轻漫|条漫|comic|manga/i;
@@ -1048,11 +1048,12 @@ function fqDirectoryVersions(root: Object | undefined, depth: number = 0): Map<s
   return versions;
 }
 
-/** 章段评计数（/api/v1/chapters/{itemId}/reviews：data.data 按段索引为键的 map，
- *  每项 count；业务码非 0/200（103001 参数非法 / 1301008 无数据）按无段评处理）。 */
-export function fqParseChapterIdeaCounts(payload: Record<string, Object>, paragraphCount: number): number[] {
+/** 章段评计数（/api/v1/chapters/{itemId}/reviews：data.data 以上游段 id（<p idx>）为键的 map，
+ *  每项 count；paraIdx[i] 为第 i 个展示段对应的上游段 id，-1 表示无标记恒 0；
+ *  业务码非 0/200（103001 参数非法 / 1301008 无数据）按无段评处理）。 */
+export function fqParseChapterIdeaCounts(payload: Record<string, Object>, paraIdx: number[]): number[] {
   const counts: number[] = [];
-  for (let index: number = 0; index < paragraphCount; index++) {
+  for (let index: number = 0; index < paraIdx.length; index++) {
     counts.push(0);
   }
   const code: number = fqAsInt(payload['code'], 0);
@@ -1067,16 +1068,27 @@ export function fqParseChapterIdeaCounts(payload: Record<string, Object>, paragr
   if (buckets === null) {
     return counts;
   }
+  const bucketCounts: Map<number, number> = new Map();
   for (const key of fqKeys(buckets)) {
-    const paraIndex: number = Number.parseInt(key, 10);
-    if (Number.isNaN(paraIndex) || paraIndex < 0 || paraIndex >= paragraphCount) {
+    const bucketIdx: number = Number.parseInt(key, 10);
+    if (Number.isNaN(bucketIdx) || bucketIdx < 0) {
       continue;
     }
     const bucket: Record<string, Object> | null = fqAsRecord(buckets[key]);
     if (bucket === null) {
       continue;
     }
-    counts[paraIndex] = fqAsInt(bucket['count'], 0);
+    bucketCounts.set(bucketIdx, fqAsInt(bucket['count'], 0));
+  }
+  for (let index: number = 0; index < paraIdx.length; index++) {
+    const idx: number = paraIdx[index];
+    if (idx < 0) {
+      continue;
+    }
+    const bucketCount: number | undefined = bucketCounts.get(idx);
+    if (bucketCount !== undefined) {
+      counts[index] = bucketCount;
+    }
   }
   return counts;
 }
@@ -1889,6 +1901,104 @@ export function fqNormalizeChapterText(raw: string, chapterTitle: string): strin
     }
   }
   return paragraphs.join('\n');
+}
+
+/** 块级 token：<br>/<hr> 开标签、块级闭标签、<p ...> 开标签（可能带 idx 属性）。 */
+const FQ_BLOCK_TOKEN_RE: RegExp =
+  /<(br|hr)\b[^>]*>|<\/(?:p|div|h[1-6]|li|tr|dt|dd|blockquote|pre|section|article|ul|ol|dl|table|figure|figcaption|header|footer|aside|main|address)\s*>|<p\b[^>]*>/gi;
+/** <p ...> 开标签内的上游段 id 属性。 */
+const FQ_P_IDX_ATTR_RE: RegExp = /\bidx\s*=\s*["']?(\d+)/i;
+
+/**
+ * 清洗单个上游段缓冲为若干展示行（fqapp parseChapterContent 语义）：
+ * 内联标签 → 实体 → 行归一化 → 按 '\n' 拆行 → 修剪去空；
+ * 首个非空行携带 idx（一个上游 <p> 可拆多个展示行，id 属于第一行），
+ * 其余行 -1。返回产出非空行数（0 = 空段，调用方据此保留 activeIdx）。
+ */
+function fqPushNormalizedLines(buf: string, idx: number, paragraphs: string[], paraIdx: number[]): number {
+  let text: string = buf;
+  text = text.replace(FQ_TAG_RE, '');
+  text = text.replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, '\'').replace(/&apos;/g, '\'')
+    .replace(/&ldquo;/g, '\u201C').replace(/&rdquo;/g, '\u201D')
+    .replace(/&mdash;/g, '\u2014').replace(/&hellip;/g, '\u2026')
+    .replace(/&amp;/g, '&');
+  text = text.replace(/\u00A0/g, ' ');
+  text = text.replace(FQ_LINE_BREAK_RE, '\n');
+  const pieces: string[] = text.split('\n');
+  let emitted: number = 0;
+  for (let i = 0; i < pieces.length; i++) {
+    const trimmed: string = pieces[i].trim().replace(FQ_EDGE_MARKER_RE, '').trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    paragraphs.push(trimmed);
+    paraIdx.push(emitted === 0 ? idx : -1);
+    emitted++;
+  }
+  return emitted;
+}
+
+/**
+ * 章节正文归一化 + 上游段 id 提取（段评 para_index 对齐的关键，fqapp parseChapterContent）：
+ * 服务器段评按上游 <p idx="N"> 段 id 分桶，而展示段落是清洗后的文本行，
+ * 空段 / 段内换行 / 插图等都会让「行号 == 段 id」漂移，必须按 idx 逐行对齐。
+ * 规则：idx 归属该 <p> 的首个非空展示行；空 <p> 消耗 id 但不产行；
+ * </p> 后 idx 无条件复位；无标记来源（缓存/本地书/纯文本）全部 -1。
+ */
+export function fqNormalizeChapterWithIdx(raw: string, chapterTitle: string): FqNormalizedChapter {
+  let html: string = raw;
+  html = html.replace(FQ_HIDDEN_BLOCK_RE, '');
+  html = html.replace(FQ_MARKER_RE, '');
+  html = html.replace(FQ_TRUNCATED_MARKER_RE, '');
+
+  const paragraphs: string[] = [];
+  const paraIdx: number[] = [];
+  let activeIdx: number = -1;
+  let buf: string = '';
+  let last: number = 0;
+  const tokenRe: RegExp = new RegExp(FQ_BLOCK_TOKEN_RE.source, 'gi');
+  let match: RegExpExecArray | null = tokenRe.exec(html);
+  while (match !== null) {
+    buf += html.substring(last, match.index);
+    last = match.index + match[0].length;
+    const token: string = match[0];
+    if (token.startsWith('<p')) {
+      // <p ...> 开标签：先冲刷缓冲（产出则复位 idx），再取新 idx（缺属性 -1）
+      const emitted: number = fqPushNormalizedLines(buf, activeIdx, paragraphs, paraIdx);
+      buf = '';
+      if (emitted > 0) {
+        activeIdx = -1;
+      }
+      const idxMatch: RegExpExecArray | null = FQ_P_IDX_ATTR_RE.exec(token);
+      activeIdx = idxMatch !== null ? Number.parseInt(idxMatch[1], 10) : -1;
+    } else if (/^<\/p[\s>]/i.test(token)) {
+      // </p>：冲刷缓冲后 idx 无条件复位（空 <p> 消耗 id 不产行）
+      fqPushNormalizedLines(buf, activeIdx, paragraphs, paraIdx);
+      buf = '';
+      activeIdx = -1;
+    } else {
+      // 其余块级边界（<br>/<hr>/</div> 等）：冲刷，产出才复位（段内续行无 idx）
+      const emitted: number = fqPushNormalizedLines(buf, activeIdx, paragraphs, paraIdx);
+      buf = '';
+      if (emitted > 0) {
+        activeIdx = -1;
+      }
+    }
+    match = tokenRe.exec(html);
+  }
+  buf += html.substring(last);
+  fqPushNormalizedLines(buf, activeIdx, paragraphs, paraIdx);
+
+  const title: string = chapterTitle.trim();
+  if (title.length > 0) {
+    if (paragraphs.length === 0
+      || paragraphs[0].replace(FQ_TITLE_SPACE_RE, '') !== title.replace(FQ_TITLE_SPACE_RE, '')) {
+      paragraphs.unshift(title);
+      paraIdx.unshift(-1);
+    }
+  }
+  return new FqNormalizedChapter(paragraphs.join('\n'), paraIdx);
 }
 
 // ---------------------------------------------------------------------------

@@ -16,7 +16,7 @@ import { FqDeployer } from './FqDeployer';
 import { FqKeyStore } from './FqKeyStore';
 import {   fqParseAuthorProfile, fqParseBookComments, fqParseBookDetail, fqParseChapterCommentPage, fqParseChapterIdeaCounts, fqParseChapterIdeaMeta, fqParseChapterSummaries,
   fqParseDanmaku, fqParseDirectory, fqParseEpisodeComments, fqParseEpisodeSource, fqParseHomepage, fqParseParagraphCommentPage, fqParseRankBoard, fqParseRankCatalog,
-  fqParseSearchTabs, fqParseSeriesFeed, fqParseSeriesRelateBook, fqLegacyChapterText, fqNormalizeChapterText, fqParseNovelChapter,
+  fqParseSearchTabs, fqParseSeriesFeed, fqParseSeriesRelateBook, fqLegacyChapterText, fqNormalizeChapterWithIdx, fqParseNovelChapter,
   fqIsValidMediaId, fqParseMediaIdResult,
   fqParseChapterImages } from './FqParser';
 import {
@@ -46,7 +46,7 @@ import {
   FqSearchTab,
   FqSeriesRelateBook,
 } from '../model/FqModels';
-import { FqParagraphCommentPage } from '../reader/ReaderTypes';
+import { FqNormalizedChapter, FqParagraphCommentPage } from '../reader/ReaderTypes';
 import {
   FqAudioSource,
   FqAudioToneSet,
@@ -402,15 +402,16 @@ export class FqBackend {
   }
 
   /** 章段评气泡计数（/api/v1/chapters/{itemId}/reviews?comment_source=3，data.data 按段 map）；
+   *  paraIdx[i] 为第 i 个展示段对应的上游段 id（-1 无标记恒 0）；
    *  装饰性数据，失败返回全 0。 */
-  public async chapterIdeaCounts(itemId: string, paragraphCount: number): Promise<number[]> {
+  public async chapterIdeaCounts(itemId: string, paraIdx: number[]): Promise<number[]> {
     try {
       const payload: Record<string, Object> = await this.getJson(
         `/api/v1/chapters/${encodeURIComponent(itemId)}/reviews`, 'comment_source=3', FQ_SHORT_TIMEOUT_MS);
-      return fqParseChapterIdeaCounts(payload, paragraphCount);
+      return fqParseChapterIdeaCounts(payload, paraIdx);
     } catch (error) {
       const counts: number[] = [];
-      for (let index: number = 0; index < paragraphCount; index++) {
+      for (let index: number = 0; index < paraIdx.length; index++) {
         counts.push(0);
       }
       return counts;
@@ -576,13 +577,21 @@ export class FqBackend {
    * 失败/未解密回退旧版 /api/content 文本桥（深度取 content/text 等字段）。
    */
   public async chapterText(itemId: string, chapterTitle: string): Promise<string> {
+    const normalized: FqNormalizedChapter = await this.chapterTextWithIdx(itemId, chapterTitle);
+    return normalized.text;
+  }
+
+  /**
+   * 章节正文 + 上游段 id（<p idx="N">，段评 para_index 对齐用；无标记 -1）。
+   */
+  public async chapterTextWithIdx(itemId: string, chapterTitle: string): Promise<FqNormalizedChapter> {
     try {
       const novelPayload: Record<string, Object> = await this.getJson(
         `/api/v1/chapters/${encodeURIComponent(itemId)}/novel`, '', FQ_SHORT_TIMEOUT_MS);
       const rawNovel: string = fqParseNovelChapter(novelPayload);
-      const novelText: string = fqNormalizeChapterText(rawNovel, chapterTitle);
-      if (novelText.trim().length > 0) {
-        return novelText;
+      const novel: FqNormalizedChapter = fqNormalizeChapterWithIdx(rawNovel, chapterTitle);
+      if (novel.text.trim().length > 0) {
+        return novel;
       }
     } catch (error) {
       // 回退旧版文本桥
@@ -590,8 +599,7 @@ export class FqBackend {
     const query: string = `source=${encodeURIComponent('番茄')}&item_id=${encodeURIComponent(itemId)}`
       + `&tab=${encodeURIComponent('小说')}`;
     const payload: Record<string, Object> = await this.getJson('/api/content', query);
-    const legacyText: string = fqNormalizeChapterText(fqLegacyChapterText(payload), chapterTitle);
-    return legacyText;
+    return fqNormalizeChapterWithIdx(fqLegacyChapterText(payload), chapterTitle);
   }
 
   // ---------------------------------------------------------------------------
