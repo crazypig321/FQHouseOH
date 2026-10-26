@@ -69,7 +69,28 @@
 
 ## 📱 软件截图
 
-（待补充）
+<div align="center">
+  <table>
+    <tr>
+      <td align="center"><img src=".appImage/screenshot_20261026_094611_com.crazypig321.FQhou.jpg" width="100%"></td>
+      <td align="center"><img src=".appImage/screenshot_20261026_094616_com.crazypig321.FQhou.jpg" width="100%"></td>
+      <td align="center"><img src=".appImage/screenshot_20261026_094633_com.crazypig321.FQhou.jpg" width="100%"></td>
+      <td align="center"><img src=".appImage/screenshot_20261026_094643_com.crazypig321.FQhou.jpg" width="100%"></td>
+    </tr>
+    <tr>
+      <td align="center"><img src=".appImage/screenshot_20261026_094649_com.crazypig321.FQhou.jpg" width="100%"></td>
+      <td align="center"><img src=".appImage/screenshot_20261026_094655_com.crazypig321.FQhou.jpg" width="100%"></td>
+      <td align="center"><img src=".appImage/screenshot_20261026_094707_com.crazypig321.FQhou.jpg" width="100%"></td>
+      <td align="center"><img src=".appImage/screenshot_20261026_094826_com.crazypig321.FQhou.jpg" width="100%"></td>
+    </tr>
+    <tr>
+      <td align="center"><img src=".appImage/screenshot_20261026_094857_com.crazypig321.FQhou.jpg" width="100%"></td>
+      <td align="center"><img src=".appImage/screenshot_20261026_094923_com.crazypig321.FQhou.jpg" width="100%"></td>
+      <td align="center"><img src=".appImage/screenshot_20261026_095040_com.crazypig321.FQhou.jpg" width="100%"></td>
+      <td align="center"><img src=".appImage/screenshot_20261026_095303_com.crazypig321.FQhou.jpg" width="100%"></td>
+    </tr>
+  </table>
+</div>
 
 ---
 
