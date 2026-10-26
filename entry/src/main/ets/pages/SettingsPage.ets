@@ -12,7 +12,7 @@ import { FqMenu, FqMenuItem } from '../view/CommonMenu';
 import { CommonLoading, FQ_ACCENT } from '../view/CommonCom';
 import { common, Want } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { FqTitleBarOptions, ROUTE_ABOUT, ROUTE_CACHED_BOOKS, ROUTE_CACHED_DRAMAS, ROUTE_CACHED_AUDIO, ROUTE_CACHED_COMICS } from '../model/FqNavModels';
+import { FqTitleBarOptions, ROUTE_ABOUT, ROUTE_CACHED_BOOKS, ROUTE_CACHED_DRAMAS, ROUTE_CACHED_AUDIO, ROUTE_CACHED_COMICS, ROUTE_LOGS } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import {
   FQ_THEME_DARK,
@@ -122,11 +122,16 @@ export struct SettingsPage {
           this.SectionHeader('服务')
           FqSettingsCard() {
             this.BackendRow()
+            this.RowDivider()
+            this.SettingRow($r('sys.symbol.list_bullet'), '#FF8B5CF6', '日志', '查看应用与核心运行日志', '', true,
+              (): void => {
+                NavPathUtils.push(ROUTE_LOGS);
+              })
           }
 
           this.SectionHeader('关于')
           FqSettingsCard() {
-            this.SettingRow($r('sys.symbol.person_fill'), '#FF8B5CF6', '关于我们', '版本与开源信息', '', true,
+            this.SettingRow($r('sys.symbol.person_fill'), '#FF8B5CF6', '关于', '版本与开源信息', '', true,
               (): void => {
                 NavPathUtils.push(ROUTE_ABOUT);
               })

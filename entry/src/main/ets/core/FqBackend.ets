@@ -29,6 +29,7 @@ import {
   fqSubtitleUnavailable,
 } from './FqAudioParser';
 import { fqParseObject } from './FqJson';
+import { FqLog } from './FqLogStore';
 import {
   FqAuthorProfile,
   FqBookCommentPage,
@@ -131,26 +132,32 @@ export class FqBackend {
   }
 
   private async startInternal(context: common.Context): Promise<void> {
-    const deployer: FqDeployer = new FqDeployer();
-    await deployer.deploy(context);
-    const backendDir: string = `${context.filesDir}/backend`;
-    const poolKey: Uint8Array | null = await FqKeyStore.get().devicePoolKey();
-    if (poolKey !== null) {
-      fq.setDevicePoolKey(poolKey);
+    try {
+      const deployer: FqDeployer = new FqDeployer();
+      await deployer.deploy(context);
+      const backendDir: string = `${context.filesDir}/backend`;
+      const poolKey: Uint8Array | null = await FqKeyStore.get().devicePoolKey();
+      if (poolKey !== null) {
+        fq.setDevicePoolKey(poolKey);
+      }
+      const result: string = await fq.init(
+        `${backendDir}/config/config.json`,
+        `${backendDir}/config/device_pool.json`,
+        `${backendDir}/config/filter.json`,
+        backendDir,
+        PORT,
+        '',
+      );
+      if (result !== 'running') {
+        throw new Error(`Rust core init failed: ${result}`);
+      }
+      this.baseUrlValue = await fq.baseUrl();
+      this.capabilityValue = await fq.sessionCapability();
+      FqLog.i('backend', `本地后端启动完成 (端口 ${PORT})`);
+    } catch (error) {
+      FqLog.e('backend', `本地后端启动失败: ${error instanceof Error ? error.message : String(error)}`);
+      throw error instanceof Error ? error : new Error(String(error));
     }
-    const result: string = await fq.init(
-      `${backendDir}/config/config.json`,
-      `${backendDir}/config/device_pool.json`,
-      `${backendDir}/config/filter.json`,
-      backendDir,
-      PORT,
-      '',
-    );
-    if (result !== 'running') {
-      throw new Error(`Rust core init failed: ${result}`);
-    }
-    this.baseUrlValue = await fq.baseUrl();
-    this.capabilityValue = await fq.sessionCapability();
   }
 
   /**
@@ -227,23 +234,32 @@ export class FqBackend {
   private async fetchJson(path: string, query: string,
     timeoutMs: number): Promise<Record<string, Object>> {
     const requestId: string = this.nextRequestId();
-    const resp: FqBridgeResponse = await fq.request(requestId, 'GET', path, query, new Uint8Array(0), timeoutMs);
-    const status: number = resp.status;
-    if (status === 499) {
-      throw new FqRequestError('请求已取消', 499);
+    try {
+      const resp: FqBridgeResponse = await fq.request(requestId, 'GET', path, query, new Uint8Array(0), timeoutMs);
+      const status: number = resp.status;
+      if (status === 499) {
+        throw new FqRequestError('请求已取消', 499);
+      }
+      if (status === 504) {
+        throw new FqRequestError('请求超时', 504);
+      }
+      if (status !== 200) {
+        throw new FqRequestError(`后端错误(${status})`, status);
+      }
+      const text: string = this.decodeText(resp.body);
+      const payload: Record<string, Object> | null = fqParseObject(text);
+      if (payload === null) {
+        throw new FqRequestError('响应不是有效 JSON', status);
+      }
+      return payload;
+    } catch (error) {
+      // 404 探测（ID 查找）与 499 主动取消是预期路径，不记日志
+      const status: number = error instanceof FqRequestError ? error.statusCode : -1;
+      if (status !== 404 && status !== 499) {
+        FqLog.w('backend', `GET ${path} 失败: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      throw error instanceof Error ? error : new Error(String(error));
     }
-    if (status === 504) {
-      throw new FqRequestError('请求超时', 504);
-    }
-    if (status !== 200) {
-      throw new FqRequestError(`后端错误(${status})`, status);
-    }
-    const text: string = this.decodeText(resp.body);
-    const payload: Record<string, Object> | null = fqParseObject(text);
-    if (payload === null) {
-      throw new FqRequestError('响应不是有效 JSON', status);
-    }
-    return payload;
   }
 
   private decodeText(data: ArrayBuffer): string {

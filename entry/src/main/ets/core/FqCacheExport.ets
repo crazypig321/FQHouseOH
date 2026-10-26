@@ -232,3 +232,32 @@ export async function fqExportCachedEpisode(context: common.Context,
     throw new Error('导出失败，请重试');
   }
 }
+
+/**
+ * 通用文本导出：直接写入 Download/<包名>/<fileName>（复用缓存导出目录体系），
+ * 返回文件路径。供日志页导出 TXT 使用。
+ */
+export async function fqExportTextFile(context: common.Context, fileName: string,
+  text: string): Promise<string> {
+  const root: string = await ensureExportRoot(context);
+  const path: string = `${root}/${fqSanitizeName(fileName, 'logs.txt')}`;
+  let file: fs.File | null = null;
+  try {
+    file = fs.openSync(path, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+    fs.writeSync(file.fd, text);
+    fs.closeSync(file);
+    hilog.info(0x0001, TAG, `export text ok: ${path} bytes=${text.length}`);
+    return path;
+  } catch (error) {
+    const err = error as BusinessError;
+    hilog.error(0x0001, TAG, `export text failed: ${path} code=${err.code} msg=${err.message}`);
+    if (file !== null) {
+      try {
+        fs.closeSync(file);
+      } catch (closeError) {
+        // 忽略
+      }
+    }
+    throw new Error('导出失败，请重试');
+  }
+}

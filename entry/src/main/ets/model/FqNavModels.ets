@@ -34,6 +34,8 @@ export const ROUTE_CACHED_DRAMAS: string = 'cachedDramas';
 export const ROUTE_CACHED_AUDIO: string = 'cachedAudio';
 /** 漫画缓存页（设置-漫画缓存，离线漫画管理）。 */
 export const ROUTE_CACHED_COMICS: string = 'cachedComics';
+/** 日志页（设置-服务-日志，应用/核心运行日志查看）。 */
+export const ROUTE_LOGS: string = 'logs';
 
 /** 详情页跳转参数（push 前由来源页赋值，详情页 aboutToAppear 读取）。 */
 export class DetailNavParams {
