@@ -81,7 +81,8 @@ async function rebuildViaDownloadMode(context: common.Context): Promise<void> {
     for (const u of uris) {
       try {
         const placeholder: string = new fileUri.FileUri(u).path;
-        if (fs.accessSync(placeholder)) {
+        // 防御：仅清理 0 字节占位空文件，任何有内容的文件（含历史导出）一律不动
+        if (fs.accessSync(placeholder) && fs.statSync(placeholder).size === 0) {
           fs.unlinkSync(placeholder);
         }
       } catch (error) {

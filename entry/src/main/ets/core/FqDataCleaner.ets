@@ -8,11 +8,15 @@
  *   offline_video（剧集离线）、offline_audio（听书离线）、offline_comic（漫画离线）、local_books（本地书籍文件）；
  * - 沙箱 cacheDir 临时缓存（更新包中转等）。
  *
- * 保留：后端运行时（backend）、导出文件（export）、阅读器字体、设备池密钥（Asset Store Kit，非应用数据）。
+ * 保留（白名单式删除，未列入一律不动）：
+ * - 公共导出目录 Download/<包名>/（沙箱外，用户可见的导出文件，任何情况不做清除）；
+ * - 沙箱导出回退目录 filesDir/export（resolveDownloadRoot 失败时的导出落点，同样保留）；
+ * - 后端运行时（backend）、阅读器字体、设备池密钥（Asset Store Kit，非应用数据）。
  *
  * 清除完成后由调用方 restartApp 重启应用：各 store 内存态随进程销毁，
  * 无需逐 store 刷新（store 均以 EntryAbility context 初始化，getPreferencesSync 命中同一实例，
- * clearSync 后即使有在途 flush 也只会写出已清空状态）。
+ * clearSync 后即使有在途 flush 也只会写出已清空状态）；DOWNLOAD 模式授予的
+ * Download/<包名> 持久化目录权限由系统管理，不随 KV 清除丢失，重启后可直接继续导出。
  */
 
 import { fileIo as fs } from '@kit.CoreFileKit';

@@ -169,7 +169,7 @@ export struct SettingsPage {
 
   private confirmClearAllData(): void {
     DialogManager.ShowConfirm('清除所有数据',
-      '将清空浏览 / 收听 / 观看记录、阅读统计与进度、书架收藏、本地书籍及全部离线缓存，并重置应用设置；完成后应用将自动重启',
+      '将清空浏览 / 收听 / 观看记录、阅读统计与进度、书架收藏、本地书籍及全部离线缓存，并重置应用设置；已导出到「Download/应用包名」文件夹的文件不受影响；完成后应用将自动重启',
       '清除', (): void => {
         this.performClearAllData();
       });
