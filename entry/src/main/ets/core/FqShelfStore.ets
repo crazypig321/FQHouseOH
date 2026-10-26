@@ -98,7 +98,12 @@ export class FqShelfStore {
       fqStoreBus.shelfVersion++;
       return false;
     }
-    if (item.id.length === 0) {
+    return FqShelfStore.addIfAbsent(item);
+  }
+
+  /** 幂等加入书架（本地书同文件重复导入复用同一 id）；已存在返回 false。 */
+  public static addIfAbsent(item: FqShelfItem): boolean {
+    if (item.id.length === 0 || FqShelfStore.ids.has(item.id)) {
       return false;
     }
     FqShelfStore.ids.add(item.id);

@@ -381,12 +381,13 @@ export struct ShelfPage {
       if (item === null) {
         return;
       }
-      FqShelfStore.toggle(item);
+      // 幂等入架：同文件重复导入复用同一本书（进度/已读保留），不产生重复条目
+      const added: boolean = FqShelfStore.addIfAbsent(item);
       if (this.currentTab !== 0) {
         this.switchTab(0);
       }
       this.refreshData();
-      this.showToast(`已导入《${item.title}》`);
+      this.showToast(added ? `已导入《${item.title}》` : `《${item.title}》已在书架，继续上次进度`);
       // 导入后按书名网络匹配封面（命中回填书架条目，失败保持图标占位）
       this.matchLocalBookCover(item.id, item.title);
     } catch (error) {

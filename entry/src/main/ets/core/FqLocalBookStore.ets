@@ -5,7 +5,8 @@
  * - UTF-8 优先解码（fatal 探测），失败回退 GBK；
  * - 章节切分：行首「第X章/回/节/卷」标记；无标记时整本一章；
  * - 正文写入应用沙箱 files/local_books/<id>.txt，章节偏移持久化到 preferences；
- * - 书架条目 id 形如 local_<ts>，kind 'book'，cover 为空（书架卡片显示 kind 图标占位）。
+ * - 书架条目 id 形如 local_h<内容哈希>（同文件重复导入复用同一本书，进度/已读命中），
+ *   kind 'book'，cover 为空（书架卡片显示 kind 图标占位）。
  */
 
 import preferences from '@ohos.data.preferences';
@@ -150,12 +151,22 @@ export class FqLocalBookStore {
       throw new Error('文件内容为空');
     }
     const chapters: FqLocalChapter[] = FqLocalBookStore.splitChapters(text);
-    const id: string = `${FQ_LOCAL_ID_PREFIX}${Date.now()}`;
+    // 内容哈希稳定 id：同一文件重复导入复用同一本书，阅读进度/已读章节直接命中
+    const id: string = `${FQ_LOCAL_ID_PREFIX}h${FqLocalBookStore.textHash(text)}`;
     const file: string = FqLocalBookStore.writeBookFile(context, id, text);
     const meta: FqLocalBookMeta = new FqLocalBookMeta(id, title, file, chapters);
     FqLocalBookStore.books.set(id, meta);
     FqLocalBookStore.persist();
     return new FqShelfItem(id, 'book', title, '');
+  }
+
+  /** 48 位 djb2 文本哈希（运算量控制在双精度可精确表示区间）；同内容文件得到相同哈希。 */
+  private static textHash(text: string): string {
+    let h: number = 5381;
+    for (let i: number = 0; i < text.length; i++) {
+      h = (h * 33 + text.charCodeAt(i)) % 281474976710656;
+    }
+    return h.toString(16);
   }
 
   private static titleFromUri(uri: string): string {
@@ -218,28 +229,37 @@ export class FqLocalBookStore {
 
   /**
    * 章节切分：行首「第X章/回/节/卷」为界；无标记时整本一章。
-   * 容错：连续标记行（本应用导出文件「目录标题 + 正文首行重复标题」、正文内标题变体）
-   * 合并为同一章，避免切出只含标题的空章节；首个标记前的正文立为前置章不丢弃。
+   * 容错：
+   * - 连续标记行（本应用导出文件「目录标题 + 正文首行重复标题」、正文内标题变体）合并为同一章；
+   * - 软标记：前后被空行包围的短行（本应用导出格式「内容+空行+空行+标题+空行+内容」）
+   *   也作为章节起点，覆盖目录标题不匹配「第X章」正则的章节；
+   * - 首个标记前的正文立为前置章不丢弃。
    */
   private static splitChapters(text: string): FqLocalChapter[] {
     const chapters: FqLocalChapter[] = [];
     const lines: string[] = text.split('\n');
-    let offset: number = 0;
+    const offsets: number[] = [];
+    let acc: number = 0;
+    for (const line of lines) {
+      offsets.push(acc);
+      acc += line.length + 1;
+    }
     let currentTitle: string = '';
     let chapterStart: number = -1;
     let hasBody: boolean = false;
     let preambleTitle: string = '';
-    for (const line of lines) {
-      const trimmed: string = line.trim();
-      if (FqLocalBookStore.isChapterTitleLine(trimmed)) {
+    for (let i: number = 0; i < lines.length; i++) {
+      const trimmed: string = lines[i].trim();
+      if (FqLocalBookStore.isChapterTitleLine(trimmed)
+        || FqLocalBookStore.isSoftChapterTitle(lines, i)) {
         // 上一段已有正文才立章；只含标题的空段并入新标记行
         if (chapterStart >= 0 && hasBody) {
-          chapters.push(new FqLocalChapter(currentTitle, chapterStart, offset - chapterStart));
+          chapters.push(new FqLocalChapter(currentTitle, chapterStart, offsets[i] - chapterStart));
         } else if (chapterStart < 0 && hasBody) {
-          chapters.push(new FqLocalChapter(preambleTitle.length > 0 ? preambleTitle : '正文', 0, offset));
+          chapters.push(new FqLocalChapter(preambleTitle.length > 0 ? preambleTitle : '正文', 0, offsets[i]));
         }
         currentTitle = trimmed;
-        chapterStart = offset;
+        chapterStart = offsets[i];
         hasBody = false;
       } else if (trimmed.length > 0) {
         if (chapterStart < 0 && preambleTitle.length === 0) {
@@ -247,7 +267,6 @@ export class FqLocalBookStore {
         }
         hasBody = true;
       }
-      offset += line.length + 1;
     }
     if (chapterStart >= 0 && hasBody) {
       chapters.push(new FqLocalChapter(currentTitle, chapterStart, text.length - chapterStart));
@@ -258,6 +277,24 @@ export class FqLocalBookStore {
       chapters.push(new FqLocalChapter('正文', 0, text.length));
     }
     return chapters;
+  }
+
+  /** 软章节标记：短行且前面至少两个空行、后面紧跟一个空行（本应用导出文件分章结构）。 */
+  private static isSoftChapterTitle(lines: string[], index: number): boolean {
+    const trimmed: string = lines[index].trim();
+    if (trimmed.length === 0 || trimmed.length > 40) {
+      return false;
+    }
+    if (index < 2) {
+      return false;
+    }
+    if (lines[index - 1].trim().length > 0 || lines[index - 2].trim().length > 0) {
+      return false;
+    }
+    if (index + 1 >= lines.length || lines[index + 1].trim().length > 0) {
+      return false;
+    }
+    return true;
   }
 
   private static writeBookFile(context: common.Context, id: string, text: string): string {
