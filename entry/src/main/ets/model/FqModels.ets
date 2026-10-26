@@ -749,3 +749,22 @@ export function fqFormatCountInt(value: number): string {
   }
   return `${trimFqZero((value / 100000000).toFixed(1))}亿`;
 }
+
+/** 缓存任务状态取值（离线缓存格渲染语义；各下载器任务类按此取值实现 FqCacheTaskView）。 */
+export const FQ_CACHE_TASK_WAITING: number = 0;
+export const FQ_CACHE_TASK_DOWNLOADING: number = 1;
+export const FQ_CACHE_TASK_PAUSED: number = 2;
+export const FQ_CACHE_TASK_COMPLETED: number = 3;
+export const FQ_CACHE_TASK_FAILED: number = 4;
+
+/**
+ * 离线缓存格任务态快照（FqCacheSheet 渲染进度/排队/暂停/失败）：
+ * 宿主下载器的任务类 implements 本接口（status 取值同 FQ_CACHE_TASK_* 常量），
+ * @ObservedV2 + @Trace 字段驱动缓存格实时刷新。
+ */
+export interface FqCacheTaskView {
+  /** 任务状态（FQ_CACHE_TASK_* 取值）。 */
+  readonly status: number;
+  readonly receivedBytes: number;
+  readonly totalBytes: number;
+}

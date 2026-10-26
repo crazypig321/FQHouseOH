@@ -15,7 +15,7 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { FqBackend } from './FqBackend';
 import { FqCachedEpisode, FqDramaCacheStore } from './FqDramaCacheStore';
-import { fqKindToTab } from '../model/FqModels';
+import { fqKindToTab, FqCacheTaskView } from '../model/FqModels';
 
 const TAG: string = 'FqDramaDL';
 
@@ -35,7 +35,7 @@ function fqIsPaused(status: DramaDownloadStatus): boolean {
 }
 
 @ObservedV2
-export class FqDramaDownloadTask {
+export class FqDramaDownloadTask implements FqCacheTaskView {
   public readonly seriesId: string;
   public readonly itemId: string;
   /** 集标题。 */
