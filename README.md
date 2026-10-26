@@ -61,7 +61,7 @@
 | --- | --- |
 | **ArkTS / ArkUI**（`@ComponentV2`） | 应用主体，状态驱动 V2 模型，UI 大框架对齐 musicfreeOH |
 | **HDS 组件库**（`@kit.UIDesignKit`） | 标题栏 / 底部页签 / 半模态等系统级 UI 组件 |
-| **Rust 核心**（vendored `fqapi_core`） | 进程内本地 HTTP 服务（`127.0.0.1:8080`），业务签名与解密在本地完成 |
+| **Rust 核心**（vendored `fqapi_core`） | 进程内本地 HTTP 服务（`127.0.0.1:8080`）|
 | **Node-API 绑定**（`crates/fqapi_napi`） | 手写 `libfqapi_napi.so` 适配层，ArkTS 经其驱动 Rust 核心 |
 | **mpv-arkts**（`@mpv-ohos/mpv-arkts`） | HarmonyOS libmpv 绑定，视频 / 听书播放内核 |
 | **Asset Store Kit**（`@kit.AssetStoreKit`） | 设备池密钥安全存储，不可用时降级明文池 |
