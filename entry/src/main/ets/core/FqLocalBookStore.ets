@@ -211,26 +211,48 @@ export class FqLocalBookStore {
     }
   }
 
-  /** 章节切分：行首「第X章/回/节/卷」为界；无标记时整本一章。 */
+  /** 章节标题行判定（导出规范化复用同一规则）。 */
+  public static isChapterTitleLine(line: string): boolean {
+    return FQ_CHAPTER_LINE.test(line);
+  }
+
+  /**
+   * 章节切分：行首「第X章/回/节/卷」为界；无标记时整本一章。
+   * 容错：连续标记行（本应用导出文件「目录标题 + 正文首行重复标题」、正文内标题变体）
+   * 合并为同一章，避免切出只含标题的空章节；首个标记前的正文立为前置章不丢弃。
+   */
   private static splitChapters(text: string): FqLocalChapter[] {
     const chapters: FqLocalChapter[] = [];
     const lines: string[] = text.split('\n');
     let offset: number = 0;
     let currentTitle: string = '';
     let chapterStart: number = -1;
+    let hasBody: boolean = false;
+    let preambleTitle: string = '';
     for (const line of lines) {
       const trimmed: string = line.trim();
-      if (FQ_CHAPTER_LINE.test(trimmed)) {
-        if (chapterStart >= 0) {
+      if (FqLocalBookStore.isChapterTitleLine(trimmed)) {
+        // 上一段已有正文才立章；只含标题的空段并入新标记行
+        if (chapterStart >= 0 && hasBody) {
           chapters.push(new FqLocalChapter(currentTitle, chapterStart, offset - chapterStart));
+        } else if (chapterStart < 0 && hasBody) {
+          chapters.push(new FqLocalChapter(preambleTitle.length > 0 ? preambleTitle : '正文', 0, offset));
         }
         currentTitle = trimmed;
         chapterStart = offset;
+        hasBody = false;
+      } else if (trimmed.length > 0) {
+        if (chapterStart < 0 && preambleTitle.length === 0) {
+          preambleTitle = trimmed.length > 40 ? trimmed.substring(0, 40) : trimmed;
+        }
+        hasBody = true;
       }
       offset += line.length + 1;
     }
-    if (chapterStart >= 0) {
+    if (chapterStart >= 0 && hasBody) {
       chapters.push(new FqLocalChapter(currentTitle, chapterStart, text.length - chapterStart));
+    } else if (chapterStart < 0 && hasBody) {
+      chapters.push(new FqLocalChapter(preambleTitle.length > 0 ? preambleTitle : '正文', 0, text.length));
     }
     if (chapters.length === 0) {
       chapters.push(new FqLocalChapter('正文', 0, text.length));

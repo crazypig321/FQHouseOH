@@ -109,6 +109,9 @@ export struct RankPage {
         if (this.loading && this.entryCount === 0) {
           Column({ space: 12 }) {
             CommonLoading({ sizeValue: 28, loadColor: FQ_ACCENT })
+            Text('正在加载榜单')
+              .fontSize(13)
+              .fontColor($r('sys.color.font_secondary'))
           }
           .layoutWeight(1)
           .width('100%')
@@ -307,6 +310,7 @@ export struct RankPage {
     }
     this.rankIndex = index;
     this.categoryIndex = 0;
+    this.prepareReload();
     this.loadBoard(true);
   }
 
@@ -315,7 +319,16 @@ export struct RankPage {
       return;
     }
     this.categoryIndex = index;
+    this.prepareReload();
     this.loadBoard(true);
+  }
+
+  /** 切换榜单/分类：先清空旧列表回顶，让 loading 占位立即出现（对齐首页切换频道体验）。 */
+  private prepareReload(): void {
+    this.dataSource.setEntries([]);
+    this.entryCount = 0;
+    this.hasMore = false;
+    this.scroller.scrollEdge(Edge.Top);
   }
 
   private retryLoad(): void {

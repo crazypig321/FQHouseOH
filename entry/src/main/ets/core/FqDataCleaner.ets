@@ -2,7 +2,7 @@
  * 清除所有数据（设置页「清除所有数据」）。
  *
  * 一次清空：
- * - 全部 preferences KV：浏览 / 收听 / 观看记录、阅读统计、书架收藏、阅读进度与阅读设置、
+ * - 全部 preferences KV：浏览 / 搜索 / 收听 / 观看记录、阅读统计、书架收藏、阅读进度与阅读设置、
  *   应用设置（深色模式 / 后台播放 / 代理下载）、首页缓存、剧集 / 听书 / 漫画缓存索引、本地书籍索引；
  * - filesDir 下各数据目录：chapter_cache（章节缓存）、detail_cache（详情缓存）、home_feed_cache（首页流缓存）、
  *   offline_video（剧集离线）、offline_audio（听书离线）、offline_comic（漫画离线）、local_books（本地书籍文件）；
@@ -29,6 +29,7 @@ const FQ_DATA_CLEAN_TAG: string = 'FqDataCleaner';
 /** 全部 preferences 存储名（新增 KV store 时需同步维护）。 */
 const FQ_PREF_NAMES: string[] = [
   'fq_browse_history',
+  'fq_search_history',
   'fq_listen_history',
   'fq_watched',
   'fq_read_stats',

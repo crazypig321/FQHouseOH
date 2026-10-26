@@ -15,6 +15,7 @@ import { fileIo as fs, fileUri, picker } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { FqCachedEpisode, FqDramaCacheStore } from './FqDramaCacheStore';
 import { FqChapterCacheStore } from './FqChapterCacheStore';
+import { FqLocalBookStore } from './FqLocalBookStore';
 
 const TAG: string = 'FqCacheExport';
 
@@ -128,6 +129,15 @@ export class FqExportedBook {
   }
 }
 
+/** 章节头规范化：标题本身是「第X章」行则原样，否则补「第N章」前缀，保证重新导入可切分。 */
+function chapterHeader(title: string, index: number): string {
+  const trimmed: string = title.trim();
+  if (FqLocalBookStore.isChapterTitleLine(trimmed)) {
+    return trimmed;
+  }
+  return trimmed.length > 0 ? `第${index}章 ${trimmed}` : `第${index}章`;
+}
+
 /**
  * 导出一本缓存书：按 catalog 章节顺序合并已缓存正文，
  * 直接写入 Download/<包名>/书名.txt；返回导出文件路径与章数统计。
@@ -146,7 +156,7 @@ export async function fqExportCachedBook(context: common.Context, bookId: string
       continue;
     }
     exported++;
-    parts.push(chapter.title.length > 0 ? chapter.title : '');
+    parts.push(chapterHeader(chapter.title, exported));
     parts.push('');
     parts.push(text.trim());
     parts.push('');
