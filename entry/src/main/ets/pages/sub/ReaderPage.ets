@@ -1186,6 +1186,26 @@ export struct ReaderPage {
     return Math.round(fqAudioSession.positionSec * 1000);
   }
 
+  /** 播放会话起播意图（供 @Monitor 监听播放停止/恢复；停止即清跟读高亮）。 */
+  @Computed
+  get audioWantPlay(): boolean {
+    return fqAudioSession.wantPlay;
+  }
+
+  /** 播放停止：清跟读高亮（听书停下阅读页不再有高亮段落）；恢复播放：重同步高亮。 */
+  @Monitor('audioWantPlay')
+  onAudioWantPlayChange(): void {
+    if (!this.listenAlong) {
+      return;
+    }
+    if (!fqAudioSession.wantPlay) {
+      this.highlightParaIndex = -1;
+      this.lastCueIndex = -2;
+    } else {
+      this.syncListenHighlight();
+    }
+  }
+
   /** 音频换章：阅读页跟章（itemId 优先、标题次之、下标兜底）。 */
   @Monitor('audioChapterIndex')
   onAudioChapterChange(): void {
@@ -1240,9 +1260,15 @@ export struct ReaderPage {
     return this.highlightParaIndex;
   }
 
-  /** 跟读高亮同步：cue 变化才重算；段落匹配失败保留旧高亮。 */
+  /** 跟读高亮同步：cue 变化才重算；段落匹配失败保留旧高亮；
+   *  播放停止（wantPlay=false）一律清高亮——听书停下阅读页不留高亮段落。 */
   private syncListenHighlight(): void {
     if (!this.listenAlong) {
+      return;
+    }
+    if (!fqAudioSession.wantPlay) {
+      this.highlightParaIndex = -1;
+      this.lastCueIndex = -2;
       return;
     }
     const layout: FqChapterLayout | null = this.curLayout;
