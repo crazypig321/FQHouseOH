@@ -2289,7 +2289,7 @@ export struct PlayerPage {
     const defaultItem: FqMenuItem = new FqMenuItem();
     defaultItem.label = '默认';
     if (this.qualityIndex < 0) {
-      defaultItem.endIcon = $r('sys.symbol.checkmark_circle_fill');
+      defaultItem.endIcon = $r('sys.symbol.checkmark');
     }
     defaultItem.onAction = (): void => {
       this.switchQuality(-1);
@@ -2300,7 +2300,7 @@ export struct PlayerPage {
       const item: FqMenuItem = new FqMenuItem();
       item.label = variant.name;
       if (this.qualityIndex === i) {
-        item.endIcon = $r('sys.symbol.checkmark_circle_fill');
+        item.endIcon = $r('sys.symbol.checkmark');
       }
       item.onAction = (): void => {
         this.switchQuality(i);

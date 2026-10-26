@@ -4,10 +4,11 @@
  * 页面仅需组装 FqMenuItem 列表并在锚点（id）处打开。
  */
 
-import { ComponentContent, LengthMetrics, UIContext, uiMaterial } from '@kit.ArkUI';
+import { ComponentContent, LengthMetrics, SymbolGlyphModifier, UIContext, uiMaterial } from '@kit.ArkUI';
 import { IsApiVersion_26 } from '../utils/ModifierUtils';
 
-/** 公共菜单项参数（icon 为空字符串时不显示图标；endIcon 用于选中态勾选等尾部图标）。 */
+/** 公共菜单项参数（icon 为空字符串时不显示图标；endIcon 仅支持 sys.symbol 资源，
+ *  经 SymbolGlyphModifier 渲染——MenuItem.endIcon 不支持 Symbol 图标，直接赋值不显示）。 */
 export class FqMenuItem {
   icon: ResourceStr = '';
   label: string = '';
@@ -33,12 +34,21 @@ export function fqMenuBuilder(params: FqMenuParams) {
   Menu() {
     ForEach(params.items, (item: FqMenuItem) => {
       if (typeof item.icon === 'string') {
-        MenuItem({ content: item.label, endIcon: item.endIcon === '' ? undefined : item.endIcon })
+        MenuItem({
+          content: item.label,
+          symbolEndIcon: typeof item.endIcon === 'string'
+            ? undefined : new SymbolGlyphModifier(item.endIcon).fontColor([$r('sys.color.icon_primary')])
+        })
           .onClick(() => {
             item.onAction();
           })
       } else {
-        MenuItem({ startIcon: item.icon, content: item.label, endIcon: item.endIcon === '' ? undefined : item.endIcon })
+        MenuItem({
+          startIcon: item.icon,
+          content: item.label,
+          symbolEndIcon: typeof item.endIcon === 'string'
+            ? undefined : new SymbolGlyphModifier(item.endIcon).fontColor([$r('sys.color.icon_primary')])
+        })
           .onClick(() => {
             item.onAction();
           })
