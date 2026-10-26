@@ -113,17 +113,18 @@ export class FqHomeFeed {
     this.sources = sources;
   }
 
-  /** 由持久化缓存条目构建（冷启动秒显用）：直接填充 merged，无游标、不可翻页。 */
-  public static fromCached(items: FqMediaItem[]): FqHomeFeed {
-    const feed: FqHomeFeed = new FqHomeFeed([]);
-    feed.merged = items;
+  /** 冷启动秒显：把持久化条目灌入 merged/seen，翻页源保持未加载态；
+   * 触底 loadMore 拉各源首页、按 kind:id 去重后仅追加新条目（前缀不变），
+   * 与 fqapp 首页持久化后续拉语义一致。 */
+  public continueFrom(items: FqMediaItem[]): void {
+    this.merged = items;
     const seen: Set<string> = new Set<string>();
     for (const item of items) {
-      seen.add(item.id);
+      seen.add(`${item.kind}:${item.id}`);
     }
-    feed.seen = seen;
-    feed.exhausted = true;
-    return feed;
+    this.seen = seen;
+    this.exhausted = false;
+    this.pendingErrorMessage = '';
   }
 
   /** 当前全量条目（前 3 项供焦点轮播，其余供网格）。 */
@@ -175,20 +176,21 @@ export class FqHomeFeed {
     this.pendingErrorMessage = '';
   }
 
-  /** 翻页：对仍有游标且已加载过的源并发下一页并追加。 */
-  public async loadMore(): Promise<void> {
+  /** 翻页：对仍有游标的源并发下一页并追加；未加载过的源（冷启动缓存态）拉首页。
+   * 返回本次新增条数。 */
+  public async loadMore(): Promise<number> {
     if (this.exhausted) {
-      return;
+      return 0;
     }
     const active: FqHomeSource[] = [];
     for (const source of this.sources) {
-      if (source.loaded && source.hasMore) {
+      if (source.hasMore) {
         active.push(source);
       }
     }
     if (active.length === 0) {
       this.exhausted = true;
-      return;
+      return 0;
     }
     const groups: FqMediaItem[][] = [];
     const tasks: Promise<boolean>[] = [];
@@ -202,6 +204,7 @@ export class FqHomeFeed {
     if (added === 0 && !this.hasMore) {
       this.exhausted = true;
     }
+    return added;
   }
 
   private async loadSourceSafe(source: FqHomeSource, groups: FqMediaItem[][]): Promise<boolean> {

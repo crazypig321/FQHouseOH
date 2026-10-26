@@ -94,10 +94,11 @@ export struct HomePage {
     if (saved >= 0 && saved < FQ_CHANNELS.length) {
       this.channelIndex = saved;
     }
-    // 冷启动：有持久化列表直接展示，不自动刷新（右上角手动刷新拉新）。
+    // 冷启动：有持久化列表直接展示（不自动刷新）；触底翻页按源续拉、去重追加。
     const cachedItems: FqMediaItem[] = FqHomeCache.loadFeedItems(this.channelIndex);
     if (cachedItems.length > 0) {
-      this.feed = FqHomeFeed.fromCached(cachedItems);
+      this.feed = new FqHomeFeed(FQ_CHANNELS[this.channelIndex].buildSources());
+      this.feed.continueFrom(cachedItems);
       this.channelFeeds[this.channelIndex] = this.feed;
       this.applyFeed();
     } else {
@@ -446,10 +447,11 @@ export struct HomePage {
       this.searchBarHidden = false;
       return;
     }
-    // 本次会话未访问过：回退磁盘持久化列表（手动刷新拉新）。
+    // 本次会话未访问过：回退磁盘持久化列表（触底续拉/手动刷新拉新）。
     const diskItems: FqMediaItem[] = FqHomeCache.loadFeedItems(index);
     if (diskItems.length > 0) {
-      const diskFeed: FqHomeFeed = FqHomeFeed.fromCached(diskItems);
+      const diskFeed: FqHomeFeed = new FqHomeFeed(FQ_CHANNELS[index].buildSources());
+      diskFeed.continueFrom(diskItems);
       this.channelFeeds[index] = diskFeed;
       this.feed = diskFeed;
       this.errorMsg = '';
@@ -545,13 +547,26 @@ export struct HomePage {
     const channel: number = this.channelIndex;
     this.loadingMore = true;
     try {
-      await this.feed.loadMore();
+      // 冷启动缓存态首次触底时 loadFirst 未跑过，需先确保后端就绪。
+      await FqBackend.get().start(getContext(this));
+      const added: number = await this.feed.loadMore();
       if (token !== this.loadToken) {
         return;
       }
       this.applyFeed();
-      FqHomeCache.saveFeedItems(channel, this.feed.items());
+      if (added > 0) {
+        FqHomeCache.saveFeedItems(channel, this.feed.items());
+      }
       this.maybeAutoLoadMore(token);
+      // 整页被去重（缓存已覆盖该页）且仍有源可拉：短延迟后自动续拉下一页。
+      if (added === 0 && this.feed.hasMore) {
+        setTimeout((): void => {
+          if (token !== this.loadToken) {
+            return;
+          }
+          this.loadMore();
+        }, 100);
+      }
     } finally {
       if (token === this.loadToken) {
         this.loadingMore = false;
