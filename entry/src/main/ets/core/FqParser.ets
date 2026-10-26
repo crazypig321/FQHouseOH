@@ -1146,6 +1146,7 @@ export function fqParseParagraphComments(payload: Record<string, Object>): FqPar
     }
     const userInfo: Record<string, Object> | null = common !== null ? fqAsRecord(common['user_info']) : null;
     const baseInfo: Record<string, Object> | null = userInfo !== null ? fqAsRecord(userInfo['base_info']) : null;
+    const tag: Record<string, Object> | null = userInfo !== null ? fqAsRecord(userInfo['user_tag']) : null;
     const stat: Record<string, Object> | null = fqAsRecord(commentRec['stat']);
     const expand: Record<string, Object> | null = fqAsRecord(commentRec['expand']);
     const comment: FqParagraphComment = new FqParagraphComment();
@@ -1155,7 +1156,8 @@ export function fqParseParagraphComments(payload: Record<string, Object>): FqPar
     comment.createdAtMs = common !== null ? fqCommentTimestampMs(common['create_timestamp']) : 0;
     comment.userName = baseInfo !== null ? fqStr(baseInfo, 'user_name') : '';
     comment.userAvatar = baseInfo !== null ? fqStr(baseInfo, 'user_avatar') : '';
-    comment.isAuthor = fqIsCreatorComment(userInfo !== null ? userInfo['user_id'] : undefined,
+    comment.isAuthor = fqIsCreatorComment(tag !== null && tag['is_author'] === true,
+      userInfo !== null ? userInfo['user_id'] : undefined,
       expand !== null ? expand['creator_id'] : undefined);
     comments.push(comment);
   }
@@ -1220,6 +1222,7 @@ export function fqParseChapterCommentPage(payload: Record<string, Object>): FqBo
       }
       const userInfo: Record<string, Object> = fqAsRecord(common['user_info']) ?? fqEmptyRecord();
       const baseInfo: Record<string, Object> = fqAsRecord(userInfo['base_info']) ?? fqEmptyRecord();
+      const userTag: Record<string, Object> = fqAsRecord(userInfo['user_tag']) ?? fqEmptyRecord();
       const expand: Record<string, Object> = fqAsRecord(commentRec['expand']) ?? fqEmptyRecord();
       const stat: Record<string, Object> = fqAsRecord(commentRec['stat']) ?? fqEmptyRecord();
       comments.push(new FqBookComment(
@@ -1233,7 +1236,7 @@ export function fqParseChapterCommentPage(payload: Record<string, Object>): FqBo
         fqCommentTimestampMs(common['create_timestamp']),
         fqStr(baseInfo, 'user_name'),
         fqStr(baseInfo, 'user_avatar'),
-        fqIsCreatorComment(userInfo['user_id'], expand['creator_id']),
+        fqIsCreatorComment(userTag['is_author'] === true, userInfo['user_id'], expand['creator_id']),
       ));
     }
   }
@@ -1631,7 +1634,7 @@ export function fqParseBookComments(payload: Record<string, Object>): FqBookComm
         fqCommentTimestampMs(rec['create_timestamp']),
         fqStr(user, 'user_name'),
         fqStr(user, 'user_avatar'),
-        fqIsCreatorComment(user['user_id'], rec['creator_id']),
+        user['is_author'] === true,
       ));
     }
   }

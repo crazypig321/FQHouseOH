@@ -123,15 +123,23 @@ export function fqParseObject(text: string): Record<string, Object> | null {
 }
 
 /**
- * 本书作者评论判定：评论者 user_id 与内容作者 creator_id 字符串相等才亮「作者」。
- * user_tag.is_author 仅代表评论者本人是平台作家，并非本书作者，会大面积误标。
+ * 段评/章评作者判定（仅 shape A 主楼列表，实测 3 本书 ~5700 条样本）：
+ * - 作者本人从不出现在主楼列表（仅经楼中楼回复参与，App 未渲染回复），
+ *   主楼中的 is_author 标记（user_tag.is_author）只代表评论者是平台作家（误标来源）；
+ * - 因此本判定仅在 creator_id 为空且 is_author 为真时视为作者（保守，不误标），
+ *   user_id 与 creator_id 相等时视为作者（同 id 兜底）。
+ * 书评（shape B）不走本函数：其 user_info.is_author 即本书作者，直接使用。
  */
-export function fqIsCreatorComment(userIdRaw: Object | undefined, creatorIdRaw: Object | undefined): boolean {
+export function fqIsCreatorComment(isAuthorFlag: boolean, userIdRaw: Object | undefined,
+  creatorIdRaw: Object | undefined): boolean {
   const userId: string = typeof userIdRaw === 'number' ? userIdRaw.toString()
     : (typeof userIdRaw === 'string' ? userIdRaw : '');
   const creatorId: string = typeof creatorIdRaw === 'number' ? creatorIdRaw.toString()
     : (typeof creatorIdRaw === 'string' ? creatorIdRaw : '');
-  return userId.length > 0 && userId === creatorId;
+  if (userId.length > 0 && creatorId.length > 0) {
+    return userId === creatorId;
+  }
+  return isAuthorFlag && creatorId.length === 0;
 }
 
 /** 浅合并 override 到 target（override 优先），用于摊平嵌套卡片字段。 */

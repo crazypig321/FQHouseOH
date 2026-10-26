@@ -3036,8 +3036,23 @@ export struct PlayerPage {
     }
   }
 
-  /** 播完回调：自动连播下一集；末集停在末帧。 */
+  /**
+   * 播完回调：实际播放过（hasDisplayed）才自动连播下一集。
+   * mpv 打不开流同样触发 eof（加载失败）：未起播的 eof 出重试卡，
+   * 不再黑屏半天后直接跳下一集；末集停在末帧。
+   */
   private onEpisodeEnd(): void {
+    // 取流中忽略（player.stop 后旧流残余事件；stop 本身不触发 eof）
+    if (this.loading) {
+      return;
+    }
+    if (!this.hasDisplayed) {
+      this.loading = false;
+      if (this.errorMsg.length === 0) {
+        this.errorMsg = '视频加载失败，请重试';
+      }
+      return;
+    }
     this.nextEpisode();
   }
 

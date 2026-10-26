@@ -190,9 +190,13 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
                     },
                 }))
             }
-            // Legacy clients recursively extract URLs from raw payloads;
-            // only the already-selected variant may survive a download error.
-            Err(_) => Ok(source),
+            // 下载失败旧版回退上游 URL——但那是 CENC 密文流，客户端解不了
+            // 只能黑屏半天后 eof 跳集（离线下载器还会把密文缓存成坏文件）。
+            // 显式报错让客户端立刻出重试卡（含离线缓存兜底）。
+            Err(err) => {
+                log::warn!("video {video_id}: download failed: {err}");
+                Err(ApiError::Internal("视频下载失败，请稍后重试".to_string()))
+            }
         }
     })
 }

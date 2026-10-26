@@ -194,7 +194,7 @@ async fn fallback_rejection_cannot_return_the_original_model_url() {
 }
 
 #[tokio::test]
-async fn download_failure_returns_only_the_selected_url_and_its_key() {
+async fn download_failure_returns_an_error_instead_of_the_encrypted_url() {
     let upstream = MockUpstream::start(|req| {
         if req.path.ends_with(".mp4") {
             return MockReply::status(500);
@@ -210,10 +210,13 @@ async fn download_failure_returns_only_the_selected_url_and_its_key() {
     let dir = TempDir::new("video-codec-download");
     let server = build_server(&dir, Some(upstream.origin.clone()), &[], &[], &pool_json(5)).await;
     let (status, body) = request_video(&server, "").await;
-    assert_eq!(status, 200);
-    assert_eq!(body["video_url"], ALLOWED_URL);
-    assert_eq!(body["key_hex"], KEY_HEX);
-    assert!(!body.to_string().contains(REJECTED_URL));
+    // 密文流客户端打不开：报错出重试，绝不回退 URL/key_hex。
+    assert_eq!(status, 500, "{body}");
+    assert_eq!(body["success"], false, "{body}");
+    assert_eq!(body["error"], "视频下载失败，请稍后重试", "{body}");
+    assert!(!body.to_string().contains(ALLOWED_URL), "{body}");
+    assert!(!body.to_string().contains(KEY_HEX), "{body}");
+    assert!(!body.to_string().contains(REJECTED_URL), "{body}");
     let requests = upstream.requests();
     assert!(requests.iter().any(|r| r.path == "/h264.mp4"));
     assert!(requests.iter().all(|r| r.path != "/bytevc2.mp4"));
