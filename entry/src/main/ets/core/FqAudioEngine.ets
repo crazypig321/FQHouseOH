@@ -7,6 +7,7 @@
 import media from '@ohos.multimedia.media';
 import audio from '@ohos.multimedia.audio';
 import { BusinessError } from '@kit.BasicServicesKit';
+import { fileIo as fs } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 export enum FqPlayState {
@@ -34,6 +35,8 @@ export class FqAudioEngine {
   private createPromise: Promise<media.AVPlayer> | null = null;
   private stateInternal: FqPlayState = FqPlayState.Idle;
   private rateValue: number = 1;
+  /** 本地缓存播放的 fd 句柄（换曲/回收时关闭，fd 生命周期需跨整个播放过程）。 */
+  private localFile: fs.File | null = null;
 
   /** 引擎状态翻转（completed/error 之外的状态迁移）。 */
   onStateChanged: (state: FqPlayState) => void = (_state: FqPlayState) => {
@@ -152,6 +155,7 @@ export class FqAudioEngine {
       return player;
     }
     if (state === 'error' || state === 'released') {
+      this.closeLocalFile();
       try {
         player.release();
       } catch (error) {
@@ -162,14 +166,37 @@ export class FqAudioEngine {
       return this.ensurePlayer();
     }
     await player.reset();
+    this.closeLocalFile();
     this.stateInternal = FqPlayState.Idle;
     return player;
   }
 
-  /** 加载音源并 prepare 完成（网络 http(s) 地址）。 */
+  /** 关闭本地缓存文件句柄（换曲/回收/释放时调用）。 */
+  private closeLocalFile(): void {
+    if (this.localFile === null) {
+      return;
+    }
+    try {
+      fs.closeSync(this.localFile);
+    } catch (error) {
+      // 句柄可能已被系统回收
+    }
+    this.localFile = null;
+  }
+
+  /** 加载音源并 prepare 完成（网络 http(s) 地址；file:// 本地缓存走 fd://）。 */
   async load(url: string): Promise<void> {
     const player: media.AVPlayer = await this.recycle();
-    player.url = url;
+    if (url.startsWith('file://')) {
+      // avPlayer 不支持裸磁盘路径：READ_ONLY 打开后以 fd:// 播放，
+      // 句柄保持到下次换曲/回收，否则流被截断。
+      this.closeLocalFile();
+      const path: string = url.substring('file://'.length);
+      this.localFile = fs.openSync(path, fs.OpenMode.READ_ONLY);
+      player.url = `fd://${this.localFile.fd}`;
+    } else {
+      player.url = url;
+    }
     // url 赋值后播放器异步迁移 idle → initialized，必须等迁移完成才能 prepare
     await FqAudioEngine.waitInitialized(player, FQ_WAIT_INITIALIZED_MS);
     await player.prepare();
@@ -257,6 +284,7 @@ export class FqAudioEngine {
   }
 
   async release(): Promise<void> {
+    this.closeLocalFile();
     const player: media.AVPlayer | null = this.player;
     this.player = null;
     this.stateInternal = FqPlayState.Released;

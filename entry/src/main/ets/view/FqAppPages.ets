@@ -4,7 +4,7 @@
  * - PageMapBuilder：二级路由页（Navigation.navDestination 单 builder 页表）
  */
 
-import { ROUTE_DETAIL, ROUTE_RANK, ROUTE_READER2, ROUTE_SEARCH, ROUTE_AUTHOR, ROUTE_LISTEN, ROUTE_PLAYER, ROUTE_COMIC, ROUTE_LISTEN_VIDEO, ROUTE_ABOUT, ROUTE_CACHED_BOOKS, ROUTE_CACHED_DRAMAS } from '../model/FqNavModels';
+import { ROUTE_DETAIL, ROUTE_RANK, ROUTE_READER2, ROUTE_SEARCH, ROUTE_AUTHOR, ROUTE_LISTEN, ROUTE_PLAYER, ROUTE_COMIC, ROUTE_LISTEN_VIDEO, ROUTE_ABOUT, ROUTE_CACHED_BOOKS, ROUTE_CACHED_DRAMAS, ROUTE_CACHED_AUDIO } from '../model/FqNavModels';
 import { MENU_CONFIG, MenuItem, tabBarSymbolOf } from '../model/FqTabsModels';
 import { HomePage } from '../pages/HomePage';
 import { ShelfPage } from '../pages/ShelfPage';
@@ -22,6 +22,7 @@ import { SettingsPage } from '../pages/SettingsPage';
 import { AboutPage } from '../pages/sub/AboutPage';
 import { CachedBooksPage } from '../pages/sub/CachedBooksPage';
 import { CachedDramasPage } from '../pages/sub/CachedDramasPage';
+import { CachedAudioPage } from '../pages/sub/CachedAudioPage';
 
 const TAB_ACCENT: string = '#FF7A3D';
 
@@ -78,5 +79,7 @@ export function PageMapBuilder(name: string) {
     CachedBooksPage()
   } else if (name === ROUTE_CACHED_DRAMAS) {
     CachedDramasPage()
+  } else if (name === ROUTE_CACHED_AUDIO) {
+    CachedAudioPage()
   }
 }

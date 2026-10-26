@@ -87,7 +87,8 @@ export struct FqCacheSheet {
     this.cancelLocate();
     this.locateTimer = setTimeout((): void => {
       this.locateTimer = 0;
-      this.scroller.scrollToIndex(this.currentIndex, false, ScrollAlign.CENTER);
+      // 网格只含当前分页段：定位到段内相对下标
+      this.scroller.scrollToIndex(this.currentIndex % FQ_CACHE_PAGE_SIZE, false, ScrollAlign.CENTER);
     }, 150);
   }
 
@@ -116,9 +117,9 @@ export struct FqCacheSheet {
         }
 
         Grid(this.scroller) {
-          ForEach(this.items, (item: FqChapter, index: number) => {
+          ForEach(this.pageItems(), (item: FqChapter, index: number) => {
             GridItem() {
-              this.Cell(item, index)
+              this.Cell(item, this.page * FQ_CACHE_PAGE_SIZE + index)
             }
           }, (item: FqChapter) => item.itemId)
         }
@@ -129,12 +130,6 @@ export struct FqCacheSheet {
         .layoutWeight(1)
         .scrollBar(BarState.Off)
         .padding({ left: 16, right: 16, top: 4, bottom: 8 })
-        .onScrollIndex((first: number, last: number): void => {
-          const next: number = Math.floor(first / FQ_CACHE_PAGE_SIZE);
-          if (next !== this.page && next >= 0 && next <= this.lastPage()) {
-            this.page = next;
-          }
-        })
 
         Row() {
           Text(this.allSelected() ? '取消全选' : '全选')
@@ -180,7 +175,7 @@ export struct FqCacheSheet {
               $r('sys.color.font_secondary') : $r('sys.color.font_tertiary'))
             .onClick((): void => {
               this.page = pageIndex;
-              this.scroller.scrollToIndex(pageIndex * FQ_CACHE_PAGE_SIZE, false, ScrollAlign.START);
+              this.scroller.scrollToIndex(0, false, ScrollAlign.START);
             })
         }, (label: string) => label)
       }
@@ -223,6 +218,17 @@ export struct FqCacheSheet {
   /** 分页条尾段下标。 */
   private lastPage(): number {
     return Math.max(0, Math.ceil(this.items.length / FQ_CACHE_PAGE_SIZE) - 1);
+  }
+
+  /** 当前分页段条目（>30 项时只构建本段 30 项：
+   *  听书动辄上千章，一次性 ForEach 全量建格会冻结 UI（sheet 呼不出、整页点不动）。 */
+  private pageItems(): FqChapter[] {
+    if (this.items.length <= FQ_CACHE_PAGE_SIZE) {
+      return this.items;
+    }
+    const start: number = this.page * FQ_CACHE_PAGE_SIZE;
+    const end: number = Math.min(start + FQ_CACHE_PAGE_SIZE, this.items.length);
+    return this.items.slice(start, end);
   }
 
   /** 分页条标签（「1-30」「31-60」…）。 */

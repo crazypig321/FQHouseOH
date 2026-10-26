@@ -13,6 +13,8 @@ export class FqStoreBus {
   @Trace chapterCacheVersion: number = 0;
   /** 剧集缓存数据版本（FqDramaCacheStore 每次变更 +1）。 */
   @Trace dramaCacheVersion: number = 0;
+  /** 听书音频缓存数据版本（FqAudioCacheStore 每次变更 +1）。 */
+  @Trace audioCacheVersion: number = 0;
 }
 
 export const fqStoreBus: FqStoreBus = new FqStoreBus();

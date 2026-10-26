@@ -12,7 +12,7 @@ import { FqMenu, FqMenuItem } from '../view/CommonMenu';
 import { CommonLoading, FQ_ACCENT } from '../view/CommonCom';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { FqTitleBarOptions, ROUTE_ABOUT, ROUTE_CACHED_BOOKS, ROUTE_CACHED_DRAMAS } from '../model/FqNavModels';
+import { FqTitleBarOptions, ROUTE_ABOUT, ROUTE_CACHED_BOOKS, ROUTE_CACHED_DRAMAS, ROUTE_CACHED_AUDIO } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import {
   FQ_THEME_DARK,
@@ -104,6 +104,11 @@ export struct SettingsPage {
             this.SettingRow($r('sys.symbol.film'), '#FFEF5038', '剧集缓存', '已下载的剧集视频', '', true,
               (): void => {
                 NavPathUtils.push(ROUTE_CACHED_DRAMAS);
+              })
+            this.RowDivider()
+            this.SettingRow($r('sys.symbol.waveform_headphones'), '#FF10B981', '听书缓存', '已下载的听书音频', '', true,
+              (): void => {
+                NavPathUtils.push(ROUTE_CACHED_AUDIO);
               })
             this.RowDivider()
             this.SettingRow($r('sys.symbol.trash'), '#FFF43F5E', '清空历史', '浏览、收听、观看与统计记录', '', true,

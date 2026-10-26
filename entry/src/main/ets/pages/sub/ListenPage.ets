@@ -21,11 +21,20 @@ import {
   ReaderNavParams,
   ROUTE_DETAIL,
   ROUTE_READER2,
+  ROUTE_CACHED_AUDIO,
 } from '../../model/FqNavModels';
 import { fqAudioSession, FqChapterOpenOptions } from '../../core/FqAudioSession';
 import { FqAudioTone, FqRelatedWork } from '../../model/FqAudioModels';
-import { FqChapter } from '../../model/FqModels';
+import { FqChapter, FqCacheTaskView } from '../../model/FqModels';
 import { FqShelfItem, FqShelfStore } from '../../core/FqShelfStore';
+import { FqAudioCacheStore } from '../../core/FqAudioCacheStore';
+import {
+  fqAudioDownloader,
+  FqAudioDownloader,
+  FqAudioDownloadTask,
+  AudioDownloadStatus,
+} from '../../core/FqAudioDownloader';
+import { FqCacheSheet } from '../../view/FqCacheSheet';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { appState } from '../../entryability/AppState';
 
@@ -83,6 +92,15 @@ export struct ListenPage {
   @Local catalogOpenToken: number = 0;
   /** 章评打开令牌：每次打开 +1（公共 FqCommentSheet 据此重拉当前章章评）。 */
   @Local commentsOpenToken: number = 0;
+  /** 离线缓存 sheet（独立宿主节点，规避与主 bindSheet 同节点互斥闪关）。 */
+  @Local cacheSheetVisible: boolean = false;
+  private cacheCloseToken: number = 0;
+  /** 缓存 sheet 打开令牌（FqCacheSheet 据此重置勾选并定位当前章）。 */
+  @Local cacheOpenToken: number = 0;
+  /** 当前书 + 音色已缓存章节集合（打开 sheet 时刷新）。 */
+  @Local cacheDownloadedIds: Set<string> = new Set<string>();
+  /** 音频下载器单例（@Trace taskList 驱动缓存格任务态实时刷新）。 */
+  @Local dl: FqAudioDownloader = fqAudioDownloader;
   /** 书架态刷新令牌（toggle 后驱动 @Computed 重算）。 */
   @Local shelfRefresh: number = 0;
   private scroller: Scroller = new Scroller();
@@ -131,6 +149,17 @@ export struct ListenPage {
     }) {
       Scroll(this.scroller) {
         Column() {
+          // 离线缓存 sheet 常驻宿主：bindSheet 挂零尺寸节点（置顶保持在视口内），
+          // 规避与 Scroll 上的主 bindSheet 同节点互斥闪关
+          Column()
+            .width(1)
+            .height(1)
+            .hitTestBehavior(HitTestMode.None)
+            .bindSheet(this.cacheSheetVisible, this.CacheSheetBuilder(),
+              FqSheetOptions((): void => {
+                this.closeCacheSheet();
+              }, fqRatioScreenHeightVp(0.75), false))
+
           this.CoverCard()
           this.ExcerptBlock()
           this.StatusLine()
@@ -362,7 +391,7 @@ export struct ListenPage {
       })
       this.ShelfActionItem()
       this.ActionItem($r('sys.symbol.download'), '下载', false, (): void => {
-        promptAction.showToast({ message: '下载功能即将上线', duration: 1500 });
+        this.openCacheSheet();
       })
       this.ActionItem($r('sys.symbol.message'), '章评', false, (): void => {
         this.commentsOpenToken += 1;
@@ -1146,6 +1175,37 @@ export struct ListenPage {
     }
   }
 
+  /**
+     * 离线缓存选章半模态（公共 FqCacheSheet 组件，独立宿主节点）：
+     * 按当前书 + 当前音色查已缓存集合与任务态；标题栏「管理」进听书缓存页。
+     */
+  @Builder
+  private CacheSheetBuilder() {
+    FqCacheSheet({
+      sheetTitle: `离线缓存 · ${fqAudioSession.title}`,
+      items: fqAudioSession.chapters,
+      currentIndex: fqAudioSession.index,
+      downloadedIds: this.cacheDownloadedIds,
+      taskViewOf: (itemId: string): FqCacheTaskView | null =>
+        this.dl.taskOfItem(fqAudioSession.bookId, itemId, fqAudioSession.toneId),
+      openToken: this.cacheOpenToken,
+      itemLabel: '章',
+      manageClick: (): void => {
+        this.closeCacheSheet();
+        NavPathUtils.push(ROUTE_CACHED_AUDIO);
+      },
+      closeClick: (): void => {
+        this.closeCacheSheet();
+      },
+      download: (itemIds: string[]): void => {
+        this.confirmCacheDownload(itemIds);
+      },
+      taskClick: (itemId: string): void => {
+        this.onCacheTaskClick(itemId);
+      },
+    })
+  }
+
   // ---------------------------------------------------------------------------
   // 行为
   // ---------------------------------------------------------------------------
@@ -1178,6 +1238,66 @@ export struct ListenPage {
         this.sheetVisible = false;
       }
     }, 0);
+  }
+
+  /** 打开离线缓存选章半模态：刷新当前书 + 音色的已缓存集合后呼出。 */
+  private openCacheSheet(): void {
+    if (fqAudioSession.chapters.length === 0) {
+      promptAction.showToast({ message: '章节目录加载中', duration: 1500 });
+      return;
+    }
+    this.refreshCacheSheetState();
+    this.cacheOpenToken += 1;
+    this.getUIContext().animateTo({ duration: 200 }, (): void => {
+      this.cacheSheetVisible = true;
+    });
+  }
+
+  /** 刷新当前书 + 当前音色的已缓存章节集合。 */
+  private refreshCacheSheetState(): void {
+    this.cacheDownloadedIds =
+      FqAudioCacheStore.cachedItemIds(fqAudioSession.bookId, fqAudioSession.toneId);
+  }
+
+  /** 关闭离线缓存半模态：延迟一拍置 isShow（面板事件内同步改 isShow 会被框架丢弃）。 */
+  private closeCacheSheet(): void {
+    const token: number = ++this.cacheCloseToken;
+    setTimeout((): void => {
+      if (token === this.cacheCloseToken) {
+        this.getUIContext().animateTo({ duration: 200 }, (): void => {
+          this.cacheSheetVisible = false;
+        });
+      }
+    }, 0);
+  }
+
+  /** 下载勾选章（FqCacheSheet 回传 itemId 数组；已缓存/已在队列的 enqueue 内部跳过）。 */
+  private confirmCacheDownload(itemIds: string[]): void {
+    if (itemIds.length === 0) {
+      return;
+    }
+    const chapters: FqChapter[] = fqAudioSession.chapters;
+    for (let i: number = 0; i < chapters.length; i++) {
+      const chapter: FqChapter | undefined = chapters[i];
+      if (chapter !== undefined && itemIds.includes(chapter.itemId)) {
+        this.dl.enqueue(fqAudioSession.bookId, chapter.itemId, fqAudioSession.toneId,
+          chapter.title, fqAudioSession.title, fqAudioSession.cover, i + 1);
+      }
+    }
+  }
+
+  /** 缓存任务格点击（FqCacheSheet 转发）：失败重试 / 暂停继续。 */
+  private onCacheTaskClick(itemId: string): void {
+    const task: FqAudioDownloadTask | null =
+      this.dl.taskOfItem(fqAudioSession.bookId, itemId, fqAudioSession.toneId);
+    if (task === null) {
+      return;
+    }
+    if (task.status === AudioDownloadStatus.Failed) {
+      this.dl.retry(task.key);
+    } else if (task.status === AudioDownloadStatus.Paused) {
+      this.dl.resume(task.key);
+    }
   }
 
   /** 各半模态高度（对齐原分挂 bindSheet 时 FqSheetOptions 的高度）。 */

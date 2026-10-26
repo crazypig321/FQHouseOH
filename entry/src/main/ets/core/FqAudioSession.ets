@@ -23,6 +23,7 @@ import { FqAudioHistory, FqListenRecord } from './FqAudioHistory';
 import { FqReadStatsStore } from './FqReadStatsStore';
 import { FqAppSettingsStore } from './FqAppSettingsStore';
 import { FqBackend, fqErrorMessage } from './FqBackend';
+import { FqAudioCacheStore } from './FqAudioCacheStore';
 import { FqChapter } from '../model/FqModels';
 import {
   FqAudioSource,
@@ -583,6 +584,11 @@ export class FqAudioSession {
 
   private async fetchSource(itemId: string, toneId: string,
     gen: number): Promise<FqAudioSource> {
+    // 离线优先：该章当前音色已缓存直接回本地文件（durationSec 由引擎 prepare 后补全）
+    const cachedPath: string | null = FqAudioCacheStore.cachedFilePath(this.bookId, itemId, toneId);
+    if (cachedPath !== null) {
+      return new FqAudioSource(itemId, `file://${cachedPath}`, toneId, 0);
+    }
     const backend: FqBackend = FqBackend.get();
     try {
       return await backend.audioChapterSource(this.bookId, itemId, toneId);
