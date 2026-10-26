@@ -95,8 +95,8 @@ export struct CachedComicsPage {
   @Local storeBus: FqStoreBus = fqStoreBus;
   /** 下载器单例（@Trace taskList 驱动任务行动态增删与实时进度）。 */
   @Local dl: FqComicDownloader = fqComicDownloader;
-  /** 收起的书 id（默认全部展开）。 */
-  @Local collapsedIds: string[] = [];
+  /** 展开的书 id（进入默认全部收起，点击头行展开/收起）。 */
+  @Local expandedIds: string[] = [];
   @Local bookCount: number = 0;
   @Local chapterCount: number = 0;
   @Local imageCount: number = 0;
@@ -203,15 +203,15 @@ export struct CachedComicsPage {
   }
 
   private isExpanded(bookId: string): boolean {
-    return this.collapsedIds.indexOf(bookId) === -1;
+    return this.expandedIds.indexOf(bookId) >= 0;
   }
 
   private toggleExpanded(bookId: string): void {
-    const index: number = this.collapsedIds.indexOf(bookId);
+    const index: number = this.expandedIds.indexOf(bookId);
     if (index >= 0) {
-      this.collapsedIds.splice(index, 1);
+      this.expandedIds.splice(index, 1);
     } else {
-      this.collapsedIds.push(bookId);
+      this.expandedIds.push(bookId);
     }
     this.refresh();
   }
@@ -359,7 +359,9 @@ export struct CachedComicsPage {
     .border({ width: 0.6, color: appState.isDark ? $r('sys.color.comp_divider') : Color.Transparent })
     .width('100%')
     .onClick((): void => {
-      this.toggleExpanded(row.book.bookId);
+      this.getUIContext().animateTo({ duration: 250, curve: Curve.EaseInOut }, (): void => {
+        this.toggleExpanded(row.book.bookId);
+      });
     })
   }
 
