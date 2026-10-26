@@ -51,7 +51,6 @@
 
 import { display, window } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
-import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Player, PlayerSurface, Media, PlayerConfig } from '@mpv-ohos/mpv-arkts';
 import { FQ_ACCENT } from '../../view/CommonCom';
 import { CommonNav } from '../../view/CommonNav';
@@ -113,6 +112,9 @@ const FQ_ADJUST_HIDE_MS: number = 600;
 const FQ_ADJUST_FULL_SWIPE: number = 1.2;
 /** 首次调节亮度起始百分比（窗口亮度只写不读，无从取当前值）。 */
 const FQ_ADJUST_INIT_PERCENT: number = 50;
+
+/** 横滑快进/快退：滑过一整屏宽度走过的秒数。 */
+const FQ_SEEK_FULL_SWIPE_SEC: number = 90;
 /** 横屏全屏右侧边栏宽（选集/播放设置共用）。 */
 const FQ_FS_SIDE_PANEL_W: number = 300;
 /** 侧边栏背景（近黑高不透明，压得住浅色画面又不糊死视频）。 */
@@ -285,6 +287,8 @@ export struct PlayerPage {
   private adjustStartValue: number = 0;
   /** 手势调节起始纵坐标（vp，globalY）。 */
   private adjustStartY: number = 0;
+  /** 横滑快进/快退起始播放位置（秒，-1 未在滑）。 */
+  private dragSeekFrom: number = -1;
   /** 手势调节浮层隐藏定时器（0 无任务）。 */
   private adjustHideTimer: number = 0;
   /** 窗口亮度百分比（-1 未手动调过；首次滑动从 50 起，离页恢复跟随系统）。 */
@@ -540,6 +544,7 @@ export struct PlayerPage {
         // 全屏：单击切控件显隐、双击切播放/暂停（互斥识别，双击优先）；
         // 长按屏幕右侧 2 倍速快进（锁定态全部吞掉，只唤出锁按钮）；
         // 全屏竖滑：左半屏调亮度、右半屏调音量（滑过 1.2 倍屏高走完全量程）；
+        // 横滑：快进/快退（滑过一屏走 90s，复用中央时间浮层与进度条预览）；
         // 非全屏：单击切播放（保持原样）
         .gesture(
           GestureGroup(GestureMode.Exclusive,
@@ -579,6 +584,19 @@ export struct PlayerPage {
               })
               .onActionCancel((): void => {
                 this.onAdjustPanEnd();
+              }),
+            PanGesture({ fingers: 1, direction: PanDirection.Horizontal })
+              .onActionStart((event?: GestureEvent): void => {
+                this.onSeekPanStart(event);
+              })
+              .onActionUpdate((event?: GestureEvent): void => {
+                this.onSeekPanUpdate(event);
+              })
+              .onActionEnd((): void => {
+                this.onSeekPanEnd();
+              })
+              .onActionCancel((): void => {
+                this.onSeekPanEnd();
               })
           )
         )
@@ -2287,10 +2305,6 @@ export struct PlayerPage {
     const page: FqEpisodeCommentPage = await FqBackend.get().seriesComments(
       PlayerNavParams.contentId, cursorIn);
     this.seriesCommentCursor = page.cursor;
-    hilog.info(0x0001, 'FqSeriesComments',
-      `series=${PlayerNavParams.contentId} refresh=${refresh}` +
-      ` cursorIn=${cursorIn} count=${page.comments.length} total=${page.totalCount}` +
-      ` hasMore=${page.hasMore} hasCursorOut=${page.cursor.length > 0}`);
     return new FqBookCommentPage(page.comments, page.totalCount, 0, '', page.hasMore, 0);
   }
 
@@ -2303,7 +2317,7 @@ export struct PlayerPage {
       const item: FqMenuItem = new FqMenuItem();
       item.label = fqSpeedStepLabel(step);
       if (this.isCurrentSpeedStep(step)) {
-        item.endIcon = $r('sys.symbol.checkmark_circle_fill');
+        item.endIcon = $r('sys.symbol.checkmark');
       }
       item.onAction = (): void => {
         this.player.setSpeed(step);
@@ -2873,6 +2887,62 @@ export struct PlayerPage {
     if (this.adjustHideTimer !== 0) {
       clearTimeout(this.adjustHideTimer);
       this.adjustHideTimer = 0;
+    }
+  }
+
+  /**
+   * 视频区横滑快进/快退起始：记录起始播放位置并亮出中央时间浮层；
+   * 锁定态只唤出锁按钮；半模态/侧边栏打开或未就绪（出错/无时长）时不响应。
+   */
+  private onSeekPanStart(event?: GestureEvent): void {
+    if (this.fsLocked) {
+      this.refreshLockVisibility();
+      return;
+    }
+    if (this.errorMsg.length > 0 || this.player.state.duration <= 0 ||
+      this.sheetVisible || this.settingsVisible || this.commentSheetVisible || this.sidePanel.length > 0) {
+      return;
+    }
+    this.dragSeekFrom = this.player.state.position;
+    this.seekPreview = this.dragSeekFrom;
+  }
+
+  /**
+   * 横滑过程：offsetX 相对滑过屏宽的比例 × FQ_SEEK_FULL_SWIPE_SEC 得到偏移秒数，
+   * 目标夹在 [0, 时长]；复用 seekPreview 驱动中央时间浮层与进度条预览（同拖动进度条）。
+   */
+  private onSeekPanUpdate(event?: GestureEvent): void {
+    if (this.dragSeekFrom < 0 || event === undefined) {
+      return;
+    }
+    const displayData: display.Display = display.getDefaultDisplaySync();
+    const density: number = displayData.densityPixels > 0 ? displayData.densityPixels : 1;
+    const widthVp: number = displayData.width / density;
+    const deltaSec: number = widthVp > 0 ? event.offsetX / widthVp * FQ_SEEK_FULL_SWIPE_SEC : 0;
+    const duration: number = this.player.state.duration;
+    let target: number = this.dragSeekFrom + deltaSec;
+    if (target < 0) {
+      target = 0;
+    }
+    if (duration > 0 && target > duration) {
+      target = duration;
+    }
+    this.seekPreview = target;
+  }
+
+  /** 横滑结束/取消：松手落到目标位置（同步弹幕、续播进度与播放态，同 skipPosition）。 */
+  private onSeekPanEnd(): void {
+    if (this.dragSeekFrom < 0) {
+      return;
+    }
+    const target: number = this.seekPreview;
+    this.dragSeekFrom = -1;
+    this.seekPreview = -1;
+    if (target >= 0 && Math.abs(target - this.player.state.position) >= 0.5) {
+      this.player.seek(target);
+      this.seekDanmaku(target * 1000);
+      this.saveCurrentProgress();
+      this.syncMediaState(this.player.state.playing);
     }
   }
 
