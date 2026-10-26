@@ -3,7 +3,7 @@
  *
  * 移植 fqapp BackendService/RustBackendTransport/ApiClient 的启动链路与
  * 请求语义（部署 → setDevicePoolKey → init → 缓存 baseUrl/capability；
- * GET 合并、并发闸、全局 `fq-N` requestId、20s 超时）。
+ * GET 合并、并发闸、全局 `fq-N` requestId、20s/10s 分级超时）。
  * 差异：napi uv 线程池较薄，并发上限 6（Flutter 侧为 16）；
  * 与 Rust 侧 tokio 4 worker 配套，列表页/详情页的多接口并发不再排队。
  */
@@ -59,6 +59,10 @@ import {
 
 const PORT: number = 8080;
 const REQUEST_TIMEOUT_MS: number = 20000;
+/** 短超时（ms）：装饰性数据（失败静默降级）与可回退链路（chapterText v1→legacy）。 */
+export const FQ_SHORT_TIMEOUT_MS: number = 10000;
+/** rankCatalog 内存 TTL（ms）：每次进排行榜页必拉，短缓存内直接复用。 */
+const RANK_CATALOG_TTL_MS: number = 30000;
 const MAX_CONCURRENCY: number = 6;
 
 export class FqRequestError extends Error {
@@ -80,6 +84,8 @@ export class FqBackend {
   private active: number = 0;
   private waiters: Array<() => void> = [];
   private inflightGet: Map<string, Promise<Record<string, Object>>> = new Map();
+  private rankCatalogValue: FqRankCatalog | null = null;
+  private rankCatalogCachedAtMs: number = 0;
 
   private constructor() {
   }
@@ -194,15 +200,17 @@ export class FqBackend {
 
   /**
    * GET 并解析 JSON。相同 path+query 的并发请求合并为一次。
+   * @param timeoutMs 超时（ms）；装饰性/可回退链路传 FQ_SHORT_TIMEOUT_MS。
    */
-  public getJson(path: string, query: string): Promise<Record<string, Object>> {
+  public getJson(path: string, query: string,
+    timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<Record<string, Object>> {
     const cacheKey: string = `${path}?${query}`;
     const existing: Promise<Record<string, Object>> | undefined = this.inflightGet.get(cacheKey);
     if (existing !== undefined) {
       return existing;
     }
     const task: Promise<Record<string, Object>> = this.acquire(
-      (): Promise<Record<string, Object>> => this.fetchJson(path, query),
+      (): Promise<Record<string, Object>> => this.fetchJson(path, query, timeoutMs),
     );
     this.inflightGet.set(cacheKey, task);
     task.then(
@@ -216,9 +224,10 @@ export class FqBackend {
     return task;
   }
 
-  private async fetchJson(path: string, query: string): Promise<Record<string, Object>> {
+  private async fetchJson(path: string, query: string,
+    timeoutMs: number): Promise<Record<string, Object>> {
     const requestId: string = this.nextRequestId();
-    const resp: FqBridgeResponse = await fq.request(requestId, 'GET', path, query, new Uint8Array(0), REQUEST_TIMEOUT_MS);
+    const resp: FqBridgeResponse = await fq.request(requestId, 'GET', path, query, new Uint8Array(0), timeoutMs);
     const status: number = resp.status;
     if (status === 499) {
       throw new FqRequestError('请求已取消', 499);
@@ -341,11 +350,13 @@ export class FqBackend {
     return fqParseAuthorProfile(payload);
   }
 
-  /** 书评一页 + 头部计数（/api/v1/books/{id}/comments，count/offset 分页）。 */
-  public async bookComments(bookId: string, count: number, offset: number): Promise<FqBookCommentPage> {
+  /** 书评一页 + 头部计数（/api/v1/books/{id}/comments，count/offset 分页）。
+   *  详情页预览传 FQ_SHORT_TIMEOUT_MS；评论面板翻页保持默认 20s。 */
+  public async bookComments(bookId: string, count: number, offset: number,
+    timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<FqBookCommentPage> {
     const query: string = `count=${count < 1 ? 10 : count}&offset=${offset < 0 ? 0 : offset}`;
     const payload: Record<string, Object> =
-      await this.getJson(`/api/v1/books/${encodeURIComponent(bookId)}/comments`, query);
+      await this.getJson(`/api/v1/books/${encodeURIComponent(bookId)}/comments`, query, timeoutMs);
     return fqParseBookComments(payload);
   }
 
@@ -360,7 +371,7 @@ export class FqBackend {
       + `&playlet_item_duration=${itemDurationSec < 0 ? 0 : itemDurationSec}`
       + (cursor.length > 0 ? `&cursor=${encodeURIComponent(cursor)}` : '');
     const payload: Record<string, Object> =
-      await this.getJson(`/api/v1/videos/${encodeURIComponent(vid)}/danmaku`, query);
+      await this.getJson(`/api/v1/videos/${encodeURIComponent(vid)}/danmaku`, query, FQ_SHORT_TIMEOUT_MS);
     return fqParseDanmaku(payload);
   }
 
@@ -386,7 +397,7 @@ export class FqBackend {
    */
   public async seriesRelateBook(seriesId: string): Promise<FqSeriesRelateBook | null> {
     const payload: Record<string, Object> =
-      await this.getJson(`/api/v1/series/${encodeURIComponent(seriesId)}`, '');
+      await this.getJson(`/api/v1/series/${encodeURIComponent(seriesId)}`, '', FQ_SHORT_TIMEOUT_MS);
     return fqParseSeriesRelateBook(payload);
   }
 
@@ -395,7 +406,7 @@ export class FqBackend {
   public async chapterIdeaCounts(itemId: string, paragraphCount: number): Promise<number[]> {
     try {
       const payload: Record<string, Object> = await this.getJson(
-        `/api/v1/chapters/${encodeURIComponent(itemId)}/reviews`, 'comment_source=3');
+        `/api/v1/chapters/${encodeURIComponent(itemId)}/reviews`, 'comment_source=3', FQ_SHORT_TIMEOUT_MS);
       return fqParseChapterIdeaCounts(payload, paragraphCount);
     } catch (error) {
       const counts: number[] = [];
@@ -466,10 +477,18 @@ export class FqBackend {
 
   /**
    * 排行榜目录（藏于 novel homepage tab_type=2 载荷）。
+   * 30s 内存 TTL：每次进排行榜页必拉，短缓存内直接复用。
    */
   public async rankCatalog(): Promise<FqRankCatalog> {
+    const now: number = Date.now();
+    if (this.rankCatalogValue !== null && now - this.rankCatalogCachedAtMs < RANK_CATALOG_TTL_MS) {
+      return this.rankCatalogValue;
+    }
     const payload: Record<string, Object> = await this.getJson('/api/v1/recommend/homepage', 'tab_type=2&offset=0');
-    return fqParseRankCatalog(payload);
+    const catalog: FqRankCatalog = fqParseRankCatalog(payload);
+    this.rankCatalogValue = catalog;
+    this.rankCatalogCachedAtMs = now;
+    return catalog;
   }
 
   /**
@@ -538,7 +557,8 @@ export class FqBackend {
     try {
       const ids: string = itemIds.map((value: string): string => encodeURIComponent(value)).join(',');
       const payload: Record<string, Object> = await this.getJson(
-        `/api/v1/books/${encodeURIComponent(bookId)}/chapters/summary`, `item_ids=${ids}`);
+        `/api/v1/books/${encodeURIComponent(bookId)}/chapters/summary`, `item_ids=${ids}`,
+        FQ_SHORT_TIMEOUT_MS);
       return fqParseChapterSummaries(payload);
     } catch (error) {
       return new Map();
@@ -553,7 +573,7 @@ export class FqBackend {
   public async chapterText(itemId: string, chapterTitle: string): Promise<string> {
     try {
       const novelPayload: Record<string, Object> = await this.getJson(
-        `/api/v1/chapters/${encodeURIComponent(itemId)}/novel`, '');
+        `/api/v1/chapters/${encodeURIComponent(itemId)}/novel`, '', FQ_SHORT_TIMEOUT_MS);
       const rawNovel: string = fqParseNovelChapter(novelPayload);
       const novelText: string = fqNormalizeChapterText(rawNovel, chapterTitle);
       if (novelText.trim().length > 0) {
@@ -639,7 +659,7 @@ export class FqBackend {
     try {
       const query: string = `source=${encodeURIComponent('番茄')}`
         + `&book_id=${encodeURIComponent(bookId)}&tab=${encodeURIComponent('小说')}`;
-      const payload: Record<string, Object> = await this.getJson('/api/detail', query);
+      const payload: Record<string, Object> = await this.getJson('/api/detail', query, FQ_SHORT_TIMEOUT_MS);
       return fqParseAudioVoices(payload);
     } catch (error) {
       return fqDefaultVoices();
@@ -649,7 +669,7 @@ export class FqBackend {
   /** 相关作品（原著小说 / 改编短剧）。 */
   public async relatedWorks(bookId: string): Promise<FqRelatedWork[]> {
     const payload: Record<string, Object> =
-      await this.getJson(`/api/v1/books/${encodeURIComponent(bookId)}/related`, '');
+      await this.getJson(`/api/v1/books/${encodeURIComponent(bookId)}/related`, '', FQ_SHORT_TIMEOUT_MS);
     return fqParseRelatedWorks(payload);
   }
 
@@ -662,7 +682,7 @@ export class FqBackend {
     try {
       const payload: Record<string, Object> = await this.getJson(
         `/api/v1/chapters/${encodeURIComponent(itemId)}/timeline`,
-        `genre=1&tone_id=${encodeURIComponent(tone)}`);
+        `genre=1&tone_id=${encodeURIComponent(tone)}`, FQ_SHORT_TIMEOUT_MS);
       if (fqSubtitleUnavailable(payload)) {
         return fqEmptySubtitleTrack();
       }

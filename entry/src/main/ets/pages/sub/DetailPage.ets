@@ -9,7 +9,7 @@
 
 import pasteboard from '@ohos.pasteboard';
 import { promptAction } from '@kit.ArkUI';
-import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
+import { FqBackend, FQ_SHORT_TIMEOUT_MS, fqErrorMessage } from '../../core/FqBackend';
 import {
   FqBookComment,
   FqBookCommentPage,
@@ -980,7 +980,7 @@ export struct DetailPage {
       // 书评预览：前 3 条 + 总数（失败不阻断详情，仅隐藏书评区）
       try {
         const commentsPage: FqBookCommentPage =
-          await FqBackend.get().bookComments(contentId, FQ_PREVIEW_COMMENT_COUNT, 0);
+          await FqBackend.get().bookComments(contentId, FQ_PREVIEW_COMMENT_COUNT, 0, FQ_SHORT_TIMEOUT_MS);
         if (token !== this.loadToken) {
           return;
         }
