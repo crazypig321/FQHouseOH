@@ -22,7 +22,7 @@ import {
 } from '../../model/FqModels';
 import { FqShelfStore, FqShelfItem } from '../../core/FqShelfStore';
 import { FqBrowseStore, FqBrowseItem } from '../../core/FqBrowseStore';
-import { FqDetailCacheEntry, fqDetailCacheGet, fqDetailCachePut } from '../../core/FqDetailCache';
+import { FqDetailCacheEntry, fqDetailCacheGet, fqDetailCacheInit, fqDetailCachePut } from '../../core/FqDetailCache';
 import { FqChapterCacheStore } from '../../core/FqChapterCacheStore';
 import { DialogManager } from '../../utils/DialogUtils';
 import { AuthorNavParams, ComicNavParams, DetailNavParams, FqTitleBarOptions, ListenNavParams, PlayerNavParams, ReaderNavParams, ROUTE_AUTHOR, ROUTE_COMIC, ROUTE_LISTEN, ROUTE_PLAYER, ROUTE_READER2 } from '../../model/FqNavModels';
@@ -83,6 +83,7 @@ export struct DetailPage {
     this.stableTopInset = appState.topRect;
     FqShelfStore.init(getContext(this));
     FqBrowseStore.init(getContext(this));
+    fqDetailCacheInit(getContext(this));
     this.refreshShelfState();
     this.load();
   }
@@ -910,14 +911,16 @@ export struct DetailPage {
     NavPathUtils.push(ROUTE_READER2);
   }
 
-  private async load(force: boolean = false): Promise<void> {
+  /** force：绕过缓存重新拉取；silent：静默刷新（秒显缓存后后台拉新，
+   * 不展示 loading/错误，失败保持缓存画面）。 */
+  private async load(force: boolean = false, silent: boolean = false): Promise<void> {
     if (this.itemId.length === 0) {
       this.errorMsg = '无效的作品';
       this.loadingState = false;
       return;
     }
     // 详情缓存命中：五块状态直接回填秒开（标题栏刷新按钮 force 绕过）
-    if (!force) {
+    if (!force && !silent) {
       const cached: FqDetailCacheEntry | null = fqDetailCacheGet(this.itemKind, this.itemId);
       if (cached !== null) {
         this.detail = cached.detail;
@@ -930,12 +933,15 @@ export struct DetailPage {
         this.refreshShelfState();
         FqBrowseStore.record(new FqBrowseItem(this.shelfId(), this.itemKind,
           cached.detail.title, cached.detail.cover, Date.now()));
+        this.load(true, true);
         return;
       }
     }
     const token: number = ++this.loadToken;
-    this.loadingState = true;
-    this.errorMsg = '';
+    if (!silent) {
+      this.loadingState = true;
+      this.errorMsg = '';
+    }
     try {
       await FqBackend.get().start(getContext(this));
       const tab: string = fqKindToTab(this.itemKind);
@@ -991,9 +997,11 @@ export struct DetailPage {
       if (token !== this.loadToken) {
         return;
       }
-      this.errorMsg = fqErrorMessage(error);
+      if (!silent) {
+        this.errorMsg = fqErrorMessage(error);
+      }
     } finally {
-      if (token === this.loadToken) {
+      if (token === this.loadToken && !silent) {
         this.loadingState = false;
       }
     }

@@ -94,7 +94,15 @@ export struct HomePage {
     if (saved >= 0 && saved < FQ_CHANNELS.length) {
       this.channelIndex = saved;
     }
-    this.loadFirst();
+    // 冷启动：有持久化列表直接展示，不自动刷新（右上角手动刷新拉新）。
+    const cachedItems: FqMediaItem[] = FqHomeCache.loadFeedItems(this.channelIndex);
+    if (cachedItems.length > 0) {
+      this.feed = FqHomeFeed.fromCached(cachedItems);
+      this.channelFeeds[this.channelIndex] = this.feed;
+      this.applyFeed();
+    } else {
+      this.loadFirst();
+    }
   }
 
   build() {
@@ -438,6 +446,18 @@ export struct HomePage {
       this.searchBarHidden = false;
       return;
     }
+    // 本次会话未访问过：回退磁盘持久化列表（手动刷新拉新）。
+    const diskItems: FqMediaItem[] = FqHomeCache.loadFeedItems(index);
+    if (diskItems.length > 0) {
+      const diskFeed: FqHomeFeed = FqHomeFeed.fromCached(diskItems);
+      this.channelFeeds[index] = diskFeed;
+      this.feed = diskFeed;
+      this.errorMsg = '';
+      this.applyFeed();
+      this.scroller.scrollEdge(Edge.Top);
+      this.searchBarHidden = false;
+      return;
+    }
     this.feed = new FqHomeFeed([]);
     this.spotlightItems = [];
     this.rowSource.setItems([]);
@@ -500,6 +520,7 @@ export struct HomePage {
       }
       this.errorMsg = '';
       this.channelFeeds[channel] = this.feed;
+      FqHomeCache.saveFeedItems(channel, this.feed.items());
       this.applyFeed();
       this.maybeAutoLoadMore(token);
     } catch (error) {
@@ -529,6 +550,7 @@ export struct HomePage {
         return;
       }
       this.applyFeed();
+      FqHomeCache.saveFeedItems(channel, this.feed.items());
       this.maybeAutoLoadMore(token);
     } finally {
       if (token === this.loadToken) {

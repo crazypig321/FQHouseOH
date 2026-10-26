@@ -10,6 +10,7 @@ import { CommonNav } from '../../view/CommonNav';
 import { FqTitleBarOptions } from '../../model/FqNavModels';
 import { FqCacheEmptyView, FqCacheStatsCard, fqFormatCacheBytes } from '../../view/FqCacheCommon';
 import { FqDramaCacheStore, FqCachedDramaSummary, FqCachedEpisode } from '../../core/FqDramaCacheStore';
+import { fqExportCachedEpisode } from '../../core/FqCacheExport';
 import { fqDramaDownloader, FqDramaDownloader, FqDramaDownloadTask, DramaDownloadStatus } from '../../core/FqDramaDownloader';
 import { fqStoreBus, FqStoreBus } from '../../core/FqStoreBus';
 import { DialogManager } from '../../utils/DialogUtils';
@@ -93,6 +94,8 @@ export struct CachedDramasPage {
   @Local hasRunningTasks: boolean = false;
   @Local hasPausedTasks: boolean = false;
   @Local hasContent: boolean = false;
+  /** 导出进行中（防重复点击）。 */
+  @Local exporting: boolean = false;
 
   @Monitor('storeBus.dramaCacheVersion')
   onCacheDataChange(): void {
@@ -370,6 +373,14 @@ export struct CachedDramasPage {
         Text(fqFormatCacheBytes(row.episode.bytes))
           .fontSize(11.5)
           .fontColor($r('sys.color.font_tertiary'))
+        Text('导出')
+          .fontSize(12)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#FFEF5038')
+          .padding({ left: 10, right: 2, top: 6, bottom: 6 })
+          .onClick((): void => {
+            this.exportEpisode(row.episode);
+          })
         SymbolGlyph($r('sys.symbol.trash'))
           .fontSize(14)
           .fontColor([$r('sys.color.font_tertiary')])
@@ -487,6 +498,28 @@ export struct CachedDramasPage {
     this.dl.removeTask(task.itemId);
     FqDramaCacheStore.removeEpisode(task.itemId);
     this.refresh();
+  }
+
+  /** 导出单集：复制 mp4 到 Download/<包名>/<剧名>/第N集 标题.mp4。 */
+  private async exportEpisode(episode: FqCachedEpisode | null): Promise<void> {
+    if (episode === null) {
+      return;
+    }
+    if (this.exporting) {
+      return;
+    }
+    this.exporting = true;
+    this.getUIContext().getPromptAction().showToast({ message: '正在导出…', duration: 1000 });
+    try {
+      const path: string = await fqExportCachedEpisode(getContext(this), episode);
+      const name: string = path.substring(path.lastIndexOf('/') + 1);
+      this.getUIContext().getPromptAction().showToast({ message: `已导出 ${name}`, duration: 2500 });
+    } catch (error) {
+      const message: string = error instanceof Error && error.message.length > 0 ? error.message : '导出失败，请重试';
+      this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 });
+    } finally {
+      this.exporting = false;
+    }
   }
 
   /** 删单集确认（对齐 fqapp 文案）。 */

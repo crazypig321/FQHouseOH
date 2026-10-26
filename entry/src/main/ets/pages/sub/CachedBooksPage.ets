@@ -10,6 +10,7 @@ import { FqTitleBarOptions } from '../../model/FqNavModels';
 import { ROUTE_READER2, ReaderNavParams } from '../../model/FqNavModels';
 import { FqCacheEmptyView, FqCacheStatsCard, fqFormatCacheBytes } from '../../view/FqCacheCommon';
 import { FqChapterCacheStore, FqCachedBookSummary } from '../../core/FqChapterCacheStore';
+import { fqExportCachedBook } from '../../core/FqCacheExport';
 import { fqStoreBus, FqStoreBus } from '../../core/FqStoreBus';
 import { DialogManager } from '../../utils/DialogUtils';
 import { NavPathUtils } from '../../utils/NavPathUtils';
@@ -77,6 +78,8 @@ export struct CachedBooksPage {
   @Local bookCount: number = 0;
   @Local chapterCount: number = 0;
   @Local totalBytes: number = 0;
+  /** 导出进行中（防重复点击）。 */
+  @Local exporting: boolean = false;
 
   @Monitor('storeBus.chapterCacheVersion')
   onCacheDataChange(): void {
@@ -183,6 +186,15 @@ export struct CachedBooksPage {
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
 
+      Text('导出')
+        .fontSize(12.5)
+        .fontWeight(FontWeight.Medium)
+        .fontColor('#FF7A3D')
+        .padding({ left: 10, right: 2, top: 8, bottom: 8 })
+        .onClick((): void => {
+          this.exportBook(row);
+        })
+
       SymbolGlyph($r('sys.symbol.chevron_right'))
         .fontSize(13)
         .fontColor([$r('sys.color.font_tertiary')])
@@ -203,6 +215,25 @@ export struct CachedBooksPage {
     .onClick((): void => {
       this.openBook(row);
     })
+  }
+
+  /** 导出单本：按目录顺序合并已缓存章节到 Download/<包名>/书名.txt。 */
+  private async exportBook(row: CachedBookRow): Promise<void> {
+    if (this.exporting) {
+      return;
+    }
+    this.exporting = true;
+    this.getUIContext().getPromptAction().showToast({ message: '正在导出…', duration: 1000 });
+    try {
+      const path: string = await fqExportCachedBook(getContext(this), row.summary.bookId);
+      const name: string = path.substring(path.lastIndexOf('/') + 1);
+      this.getUIContext().getPromptAction().showToast({ message: `已导出 ${name}`, duration: 2500 });
+    } catch (error) {
+      const message: string = error instanceof Error && error.message.length > 0 ? error.message : '导出失败，请重试';
+      this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 });
+    } finally {
+      this.exporting = false;
+    }
   }
 
   /** 点击离线续读：阅读页目录/正文优先命中章节缓存。 */

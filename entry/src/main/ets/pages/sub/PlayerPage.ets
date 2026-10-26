@@ -606,6 +606,17 @@ export struct PlayerPage {
           this.LockButton()
         }
 
+        // 离线缓存 sheet 常驻宿主：缓存入口在非全屏选集行内，全屏态不渲染；
+        // bindSheet 挂本常驻零尺寸节点，保证任意形态（全屏/侧边栏/设置 sheet）都能呼出
+        Column()
+          .width(1)
+          .height(1)
+          .hitTestBehavior(HitTestMode.None)
+          .bindSheet(this.cacheSheetVisible, this.CacheSheetBuilder(),
+            FqSheetOptions((): void => {
+              this.closeCacheSheet();
+            }, fqPlayerSheetHeightVp(), false))
+
         // 横屏全屏右侧边栏（选集/播放设置）：全屏遮罩点击收起，深色面板贴右滑入；
         // 底部 sheet 遮幅大影响观看，侧边栏只占右侧一条，视频不停播
         if (this.fullScreen && this.isLandscapeVideo() && this.sidePanel.length > 0) {
@@ -960,10 +971,6 @@ export struct PlayerPage {
         .onClick((): void => {
           this.openCacheSheet();
         })
-        .bindSheet(this.cacheSheetVisible, this.CacheSheetBuilder(),
-          FqSheetOptions((): void => {
-            this.closeCacheSheet();
-          }, fqPlayerSheetHeightVp(), false))
       }
       .width('100%')
       .padding({ left: 16, right: 16 })
@@ -1530,13 +1537,13 @@ export struct PlayerPage {
     return $r('sys.color.font_primary');
   }
 
-  /** 缓存格底色：任务/选中橙 8% 底，其余系统卡片底色（自动适配深浅模式）。 */
+  /** 缓存格底色：任务/选中橙 8% 底，其余黑 6% 底。 */
   private cacheCellBg(episode: FqChapter): ResourceColor {
     if (!this.cacheDownloadedIds.has(episode.itemId)
       && (this.dl.taskOf(episode.itemId) !== null || this.cacheSelectedIds.has(episode.itemId))) {
       return '#14FA6725';
     }
-    return $r('sys.color.comp_background_list_card');
+    return '#0F000000';
   }
 
   /** 缓存格尾随勾：已缓存或选中。 */

@@ -113,6 +113,19 @@ export class FqHomeFeed {
     this.sources = sources;
   }
 
+  /** 由持久化缓存条目构建（冷启动秒显用）：直接填充 merged，无游标、不可翻页。 */
+  public static fromCached(items: FqMediaItem[]): FqHomeFeed {
+    const feed: FqHomeFeed = new FqHomeFeed([]);
+    feed.merged = items;
+    const seen: Set<string> = new Set<string>();
+    for (const item of items) {
+      seen.add(item.id);
+    }
+    feed.seen = seen;
+    feed.exhausted = true;
+    return feed;
+  }
+
   /** 当前全量条目（前 3 项供焦点轮播，其余供网格）。 */
   public items(): FqMediaItem[] {
     return this.merged;
