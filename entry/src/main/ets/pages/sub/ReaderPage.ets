@@ -30,7 +30,7 @@ import { FqAppSettingsStore, FQ_THEME_DARK, FQ_THEME_LIGHT } from '../../core/Fq
 import { FqReadStatsStore } from '../../core/FqReadStatsStore';
 import { FqLocalBookStore } from '../../core/FqLocalBookStore';
 import { FqChapterCacheStore, FqCachedCatalog } from '../../core/FqChapterCacheStore';
-import { ReaderNavParams } from '../../model/FqNavModels';
+import { ReaderNavParams, ListenNavParams, ROUTE_LISTEN } from '../../model/FqNavModels';
 import { CommonNav, titleBarOf } from '../../view/CommonNav';
 import { CommonLoading, FQ_ACCENT } from '../../view/CommonCom';
 import { CommonSheet, FqSheetOptions } from '../../view/CommonSheet';
@@ -42,6 +42,7 @@ import { FqSubtitleCue, FqSubtitleTrack } from '../../model/FqAudioModels';
 import { appState } from '../../entryability/AppState';
 import { themeUtils } from '../../utils/ThemeUtils';
 import { DialogManager } from '../../utils/DialogUtils';
+import { NavPathUtils } from '../../utils/NavPathUtils';
 import { FQ_READER_THEMES, FqReaderTheme } from '../../view/dialog/ReaderSettingsDialogContent';
 import { fqReaderSettingsBus } from '../../core/FqReaderSettingsBus';
 import {
@@ -49,6 +50,7 @@ import {
   FqChapterLayout,
   FqPageFragment,
   FqParagraphComment,
+  FqParagraphCommentPage,
   FqReaderLayoutMetrics,
   FqReaderPageData,
 } from '../../reader/ReaderTypes';
@@ -134,6 +136,64 @@ export class FqVerticalPageSource implements IDataSource {
   }
 }
 
+/** 段评懒加载数据源（List + LazyForEach；续拉按 comment_id 去重，重置整体通知）。 */
+class FqParaCommentSource implements IDataSource {
+  private items: FqParagraphComment[] = [];
+  private listeners: DataChangeListener[] = [];
+
+  setItems(items: FqParagraphComment[]): void {
+    this.items = items;
+    this.notifyReloaded();
+  }
+
+  /** 续拉追加：非空 comment_id 与已有条目去重，避免分页交界重复渲染。 */
+  appendItems(items: FqParagraphComment[]): void {
+    for (const item of items) {
+      if (item.id.length > 0 && this.containsId(item.id)) {
+        continue;
+      }
+      this.items.push(item);
+    }
+    this.notifyReloaded();
+  }
+
+  totalCount(): number {
+    return this.items.length;
+  }
+
+  getData(index: number): Object {
+    return this.items[index];
+  }
+
+  registerDataChangeListener(listener: DataChangeListener): void {
+    if (this.listeners.indexOf(listener) < 0) {
+      this.listeners.push(listener);
+    }
+  }
+
+  unregisterDataChangeListener(listener: DataChangeListener): void {
+    const index: number = this.listeners.indexOf(listener);
+    if (index >= 0) {
+      this.listeners.splice(index, 1);
+    }
+  }
+
+  private containsId(id: string): boolean {
+    for (const known of this.items) {
+      if (known.id === id) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private notifyReloaded(): void {
+    for (const listener of this.listeners) {
+      listener.onDataReloaded();
+    }
+  }
+}
+
 @ComponentV2
 export struct ReaderPage {
   @Local loadingState: boolean = true;
@@ -149,9 +209,18 @@ export struct ReaderPage {
   /** 段评半模态（段尾气泡呼出）。 */
   @Local paraSheetVisible: boolean = false;
   @Local paraSheetParaIndex: number = -1;
-  @Local paraComments: FqParagraphComment[] = [];
+  /** 段评懒加载源（LazyForEach）；已加载数另存 @Local 驱动空态。 */
+  private paraSource: FqParaCommentSource = new FqParaCommentSource();
+  @Local paraCount: number = 0;
   @Local paraLoading: boolean = false;
   @Local paraError: string = '';
+  /** 段评分页：触底续拉（cursor 数字偏移）与底态。 */
+  @Local paraHasMore: boolean = false;
+  @Local paraLoadingMore: boolean = false;
+  @Local paraMoreFailed: boolean = false;
+  private paraNextOffset: number = 0;
+  /** 段评加载代际：换段/重开作废在途请求的迟到写入。 */
+  private paraLoadGen: number = 0;
   /** 眉页/眉脚字体族（随阅读字体档位注册；空串回退系统默认）。 */
   @Local readerFontFamily: string = '';
   /** 阅读时手势条避让高（menuVisible=false 时记录，避免工具栏呼出/关闭导致眉脚跳高）。 */
@@ -230,9 +299,19 @@ export struct ReaderPage {
             },
           },
         },
+        {
+          content: {
+            icon: $r('sys.symbol.waveform_headphones'),
+            label: 'listen',
+            action: (): void => {
+              this.openListenFromReader();
+            },
+          },
+        },
       ]);
     }
     this.startChapterIndex = ReaderNavParams.chapterIndex;
+    ReaderNavParams.chapterIndex = -1;
     this.listenAlong = ReaderNavParams.listenAlong;
     ReaderNavParams.listenAlong = false;
     FqReaderStore.init(getContext(this));
@@ -270,6 +349,21 @@ export struct ReaderPage {
       clearInterval(this.clockTimer);
       this.clockTimer = -1;
     }
+  }
+
+  /** 标题栏听书：携当前章进入听书页，从当前正在看的章节开始听。 */
+  private openListenFromReader(): void {
+    if (this.chapters.length === 0) {
+      promptAction.showToast({ message: '目录加载中，请稍后再试', duration: 1500 });
+      return;
+    }
+    ListenNavParams.bookId = this.bookId;
+    ListenNavParams.tab = fqKindToTab(this.kind);
+    ListenNavParams.title = this.bookTitle;
+    ListenNavParams.cover = '';
+    ListenNavParams.chapters = this.chapters;
+    ListenNavParams.chapterIndex = this.chapterIndex;
+    NavPathUtils.push(ROUTE_LISTEN);
   }
 
   build() {
@@ -1687,10 +1781,16 @@ export struct ReaderPage {
       return;
     }
     this.paraSheetParaIndex = paraIndex;
-    this.paraComments = [];
+    this.paraLoadGen += 1;
+    this.paraSource.setItems([]);
+    this.paraCount = 0;
+    this.paraHasMore = false;
+    this.paraLoadingMore = false;
+    this.paraMoreFailed = false;
+    this.paraNextOffset = 0;
     this.paraError = '';
     this.paraSheetVisible = true;
-    this.loadParaComments(paraIndex);
+    this.loadParaComments(paraIndex, true);
   }
 
   private onParaSheetClose(): void {
@@ -1726,24 +1826,39 @@ export struct ReaderPage {
     return layout.paragraphs[this.paraSheetParaIndex].trim();
   }
 
-  private async loadParaComments(paraIndex: number): Promise<void> {
+  /** 段评一页：refresh 重置拉首页（首开/重试），false 触底续拉（cursor 分页）。 */
+  private async loadParaComments(paraIndex: number, refresh: boolean): Promise<void> {
     const layout: FqChapterLayout | null = this.curLayout;
     if (layout === null) {
       return;
     }
     const chapter: FqChapter | undefined = this.chapters[this.chapterIndex];
     if (chapter === undefined || FqLocalBookStore.isLocalBookId(this.bookId)) {
-      this.paraComments = [];
       return;
     }
-    this.paraLoading = true;
-    this.paraError = '';
+    if (refresh) {
+      if (this.paraLoading) {
+        return;
+      }
+      this.paraLoading = true;
+      this.paraError = '';
+    } else {
+      if (this.paraLoading || this.paraLoadingMore || !this.paraHasMore) {
+        return;
+      }
+      this.paraLoadingMore = true;
+      this.paraMoreFailed = false;
+    }
+    const gen: number = this.paraLoadGen;
     try {
       // 段评接口必传 item_version：旧目录缺 version 时刷新目录按 itemId 找回
       let version: string = chapter.version;
       if (version.length === 0) {
         const refreshed: FqChapter[] =
           await FqBackend.get().directoryChapters(this.bookId, fqKindToTab(this.kind));
+        if (gen !== this.paraLoadGen) {
+          return;
+        }
         for (const item of refreshed) {
           if (item.itemId === chapter.itemId) {
             version = item.version;
@@ -1751,15 +1866,39 @@ export struct ReaderPage {
           }
         }
       }
-      const comments: FqParagraphComment[] = await FqBackend.get().paragraphComments(
-        this.bookId, chapter.itemId, version, paraIndex, 20);
-      hilog.info(0x0001, 'ReaderPage',
-        `loadParaComments item=${chapter.itemId} ver=${version} para=${paraIndex} n=${comments.length}`);
-      this.paraComments = comments;
+      const cursor: string = refresh ? '' : `${this.paraNextOffset}`;
+      const page: FqParagraphCommentPage = await FqBackend.get().paragraphComments(
+        this.bookId, chapter.itemId, version, paraIndex, 20, cursor);
+      if (gen !== this.paraLoadGen) {
+        return;
+      }
+      if (refresh) {
+        this.paraSource.setItems(page.comments);
+        this.paraCount = page.comments.length;
+        this.paraNextOffset = page.nextOffset;
+        this.paraHasMore = page.hasMore && page.comments.length > 0;
+        this.paraLoading = false;
+      } else {
+        this.paraSource.appendItems(page.comments);
+        this.paraCount = this.paraSource.totalCount();
+        const advanced: number = page.nextOffset > this.paraNextOffset
+          ? page.nextOffset : this.paraNextOffset + page.comments.length;
+        this.paraNextOffset = advanced;
+        this.paraHasMore = page.hasMore && page.comments.length > 0;
+        this.paraLoadingMore = false;
+      }
     } catch (error) {
-      this.paraError = fqErrorMessage(error);
+      if (gen !== this.paraLoadGen) {
+        return;
+      }
+      if (refresh) {
+        this.paraError = fqErrorMessage(error);
+        this.paraLoading = false;
+      } else {
+        this.paraLoadingMore = false;
+        this.paraMoreFailed = true;
+      }
     }
-    this.paraLoading = false;
   }
 
   /** 段评相对时间（刚刚/N分钟前/N小时前/N天前）。 */
@@ -2270,13 +2409,13 @@ export struct ReaderPage {
             Button('重试')
               .backgroundColor(FQ_ACCENT)
               .onClick(() => {
-                this.loadParaComments(this.paraSheetParaIndex);
+                this.loadParaComments(this.paraSheetParaIndex, true);
               })
           }
           .width('100%')
           .layoutWeight(1)
           .justifyContent(FlexAlign.Center)
-        } else if (this.paraComments.length === 0) {
+        } else if (this.paraCount === 0) {
           Column() {
             Text('本段暂无段评，快来抢沙发吧')
               .fontSize(14)
@@ -2288,14 +2427,19 @@ export struct ReaderPage {
           .justifyContent(FlexAlign.Center)
         } else {
           List() {
-            ForEach(this.paraComments, (comment: FqParagraphComment) => {
+            LazyForEach(this.paraSource, (comment: FqParagraphComment) => {
               ListItem() {
                 this.ParaCommentTile(comment)
               }
-            }, (comment: FqParagraphComment): string => comment.id)
+            }, (comment: FqParagraphComment): string =>
+              comment.id.length > 0 ? comment.id : `c${comment.createdAtMs}_${comment.text.length}`)
+            ListItem() {
+              this.ParaMoreFooter()
+            }
           }
           .width('100%')
           .layoutWeight(1)
+          .cachedCount(8)
           .scrollBar(BarState.Off)
           .contentEndOffset(appState.bottomRect)
           .divider({
@@ -2303,6 +2447,9 @@ export struct ReaderPage {
             color: this.panelDividerColor(),
             startMargin: 20,
             endMargin: 20,
+          })
+          .onReachEnd((): void => {
+            this.loadParaComments(this.paraSheetParaIndex, false);
           })
         }
       }
@@ -2396,5 +2543,44 @@ export struct ReaderPage {
   /** 面板内分隔线颜色（随阅读主题）。 */
   private panelDividerColor(): ResourceColor {
     return $r('sys.color.comp_divider');
+  }
+
+  /** 段评列表底态：续拉 Loading / 失败重试 / 没有更多。 */
+  @Builder
+  private ParaMoreFooter() {
+    if (this.paraLoadingMore) {
+      Row({ space: 8 }) {
+        LoadingProgress()
+          .width(18)
+          .height(18)
+          .color(FQ_ACCENT)
+        Text('正在加载')
+          .fontSize(12)
+          .fontColor(this.theme().fontColor)
+          .opacity(0.55)
+      }
+      .width('100%')
+      .justifyContent(FlexAlign.Center)
+      .padding({ top: 14, bottom: 14 })
+    } else if (this.paraMoreFailed) {
+      Text('加载失败，点击重试')
+        .fontSize(12)
+        .fontColor(this.theme().fontColor)
+        .opacity(0.55)
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .padding({ top: 14, bottom: 14 })
+        .onClick(() => {
+          this.loadParaComments(this.paraSheetParaIndex, false);
+        })
+    } else if (!this.paraHasMore) {
+      Text('没有更多段评了')
+        .fontSize(12)
+        .fontColor(this.theme().fontColor)
+        .opacity(0.55)
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .padding({ top: 14, bottom: 14 })
+    }
   }
 }

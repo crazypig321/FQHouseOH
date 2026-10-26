@@ -639,6 +639,7 @@ export struct ShelfPage {
       ReaderNavParams.kind = 'book';
       ReaderNavParams.title = row.title;
       ReaderNavParams.chapterIndex = -1;
+      ReaderNavParams.listenAlong = false;
       NavPathUtils.push(ROUTE_READER2);
       return;
     }

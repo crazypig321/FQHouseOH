@@ -10,7 +10,7 @@ import { FqTitleBarOptions } from '../../model/FqNavModels';
 import { ROUTE_READER2, ReaderNavParams } from '../../model/FqNavModels';
 import { FqCacheEmptyView, FqCacheStatsCard, fqFormatCacheBytes } from '../../view/FqCacheCommon';
 import { FqChapterCacheStore, FqCachedBookSummary } from '../../core/FqChapterCacheStore';
-import { fqExportCachedBook, fqExportDirName } from '../../core/FqCacheExport';
+import { fqExportCachedBook, fqExportDirName, FqExportedBook } from '../../core/FqCacheExport';
 import { fqStoreBus, FqStoreBus } from '../../core/FqStoreBus';
 import { DialogManager } from '../../utils/DialogUtils';
 import { NavPathUtils } from '../../utils/NavPathUtils';
@@ -234,9 +234,16 @@ export struct CachedBooksPage {
     this.exporting = true;
     this.getUIContext().getPromptAction().showToast({ message: '正在导出…', duration: 1000 });
     try {
-      const path: string = await fqExportCachedBook(getContext(this), row.summary.bookId);
-      const name: string = path.substring(path.lastIndexOf('/') + 1);
-      this.getUIContext().getPromptAction().showToast({ message: `已导出 ${name}`, duration: 2500 });
+      const result: FqExportedBook = await fqExportCachedBook(getContext(this), row.summary.bookId);
+      const name: string = result.path.substring(result.path.lastIndexOf('/') + 1);
+      if (result.partial) {
+        this.getUIContext().getPromptAction().showToast({
+          message: `已导出 ${name}（${result.exportedChapters}/${result.totalChapters} 章，未缓存章节已跳过）`,
+          duration: 3000,
+        });
+      } else {
+        this.getUIContext().getPromptAction().showToast({ message: `已导出 ${name}`, duration: 2500 });
+      }
     } catch (error) {
       const message: string = error instanceof Error && error.message.length > 0 ? error.message : '导出失败，请重试';
       this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 });

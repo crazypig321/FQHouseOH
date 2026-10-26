@@ -4,7 +4,8 @@
  * 移植 fqapp BackendService/RustBackendTransport/ApiClient 的启动链路与
  * 请求语义（部署 → setDevicePoolKey → init → 缓存 baseUrl/capability；
  * GET 合并、并发闸、全局 `fq-N` requestId、20s 超时）。
- * 差异：napi uv 线程池较薄，并发上限 3（Flutter 侧为 16）。
+ * 差异：napi uv 线程池较薄，并发上限 6（Flutter 侧为 16）；
+ * 与 Rust 侧 tokio 4 worker 配套，列表页/详情页的多接口并发不再排队。
  */
 
 import { common } from '@kit.AbilityKit';
@@ -14,7 +15,7 @@ import fq, { FqBridgeResponse } from 'libfqapi_napi.so';
 import { FqDeployer } from './FqDeployer';
 import { FqKeyStore } from './FqKeyStore';
 import {   fqParseAuthorProfile, fqParseBookComments, fqParseBookDetail, fqParseChapterCommentPage, fqParseChapterIdeaCounts, fqParseChapterIdeaMeta, fqParseChapterSummaries,
-  fqParseDanmaku, fqParseDirectory, fqParseEpisodeComments, fqParseEpisodeSource, fqParseHomepage, fqParseParagraphComments, fqParseRankBoard, fqParseRankCatalog,
+  fqParseDanmaku, fqParseDirectory, fqParseEpisodeComments, fqParseEpisodeSource, fqParseHomepage, fqParseParagraphCommentPage, fqParseRankBoard, fqParseRankCatalog,
   fqParseSearchTabs, fqParseSeriesFeed, fqParseSeriesRelateBook, fqLegacyChapterText, fqNormalizeChapterText, fqParseNovelChapter,
   fqIsValidMediaId, fqParseMediaIdResult,
   fqParseChapterImages } from './FqParser';
@@ -45,7 +46,7 @@ import {
   FqSearchTab,
   FqSeriesRelateBook,
 } from '../model/FqModels';
-import { FqParagraphComment } from '../reader/ReaderTypes';
+import { FqParagraphCommentPage } from '../reader/ReaderTypes';
 import {
   FqAudioSource,
   FqAudioToneSet,
@@ -58,7 +59,7 @@ import {
 
 const PORT: number = 8080;
 const REQUEST_TIMEOUT_MS: number = 20000;
-const MAX_CONCURRENCY: number = 3;
+const MAX_CONCURRENCY: number = 6;
 
 export class FqRequestError extends Error {
   readonly statusCode: number;
@@ -406,28 +407,27 @@ export class FqBackend {
   }
 
   /**
-   * 某段段评列表（/api/v1/books/{bookId}/reviews 段评配方，fqapp paragraphComments）：
+   * 某段段评一页（/api/v1/books/{bookId}/reviews 段评配方，fqapp paragraphComments）：
    * group_id=章节 itemId、group_type=15、server_channel=38（43 官方值恒空、39 仅部分书命中）、
-   * item_version 必传（目录 version）；装饰性数据，失败返回空。
+   * item_version 必传（目录 version）；cursor 为上页 common_list_info.cursor 数字串（首页空）。
    */
   public async paragraphComments(bookId: string, itemId: string, itemVersion: string,
-    paraIndex: number, count: number): Promise<FqParagraphComment[]> {
-    try {
-      const query: string = `book_id=${encodeURIComponent(bookId)}`
-        + `&group_id=${encodeURIComponent(itemId)}`
-        + `&group_type=15&comment_source=2&comment_type=1&server_channel=38`
-        + `&para_index=${paraIndex}`
-        + `&item_version=${encodeURIComponent(itemVersion)}`
-        + `&count=${count < 1 ? 20 : count}`;
-      const payload: Record<string, Object> =
-        await this.getJson(`/api/v1/books/${encodeURIComponent(bookId)}/reviews`, query);
-      const comments: FqParagraphComment[] = fqParseParagraphComments(payload);
-      hilog.info(0x0001, 'FqBackend',
-        `paragraphComments ver=${itemVersion} para=${paraIndex} code=${payload['code']} n=${comments.length}`);
-      return comments;
-    } catch (error) {
-      return [];
+    paraIndex: number, count: number, cursor: string): Promise<FqParagraphCommentPage> {
+    let query: string = `book_id=${encodeURIComponent(bookId)}`
+      + `&group_id=${encodeURIComponent(itemId)}`
+      + `&group_type=15&comment_source=2&comment_type=1&server_channel=38`
+      + `&para_index=${paraIndex}`
+      + `&item_version=${encodeURIComponent(itemVersion)}`
+      + `&count=${count < 1 ? 20 : count}`;
+    if (cursor.length > 0) {
+      query += `&cursor=${encodeURIComponent(cursor)}`;
     }
+    const payload: Record<string, Object> =
+      await this.getJson(`/api/v1/books/${encodeURIComponent(bookId)}/reviews`, query);
+    const page: FqParagraphCommentPage = fqParseParagraphCommentPage(payload);
+    hilog.info(0x0001, 'FqBackend',
+      `paragraphComments ver=${itemVersion} para=${paraIndex} code=${payload['code']} n=${page.comments.length} total=${page.totalCount} more=${page.hasMore}`);
+    return page;
   }
 
   /**

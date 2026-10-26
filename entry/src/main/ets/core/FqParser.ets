@@ -45,7 +45,7 @@ import {
   fqFormatCounter,
   FqChapterIdeaMeta,
 } from '../model/FqModels';
-import { FqParagraphComment } from '../reader/ReaderTypes';
+import { FqParagraphComment, FqParagraphCommentPage } from '../reader/ReaderTypes';
 
 const VIDEO_RE: RegExp = /短剧|短片|剧集|video|drama/i;
 const MANGA_RE: RegExp = /漫画|轻漫|条漫|comic|manga/i;
@@ -1158,6 +1158,29 @@ export function fqParseParagraphComments(payload: Record<string, Object>): FqPar
     comments.push(comment);
   }
   return comments;
+}
+
+/**
+ * 段评一页（段评配方 + 页级 common_list_info.total/has_more/cursor，
+ * 与章评分页同构：cursor 为数字串或 {"offset":N}）。
+ */
+export function fqParseParagraphCommentPage(payload: Record<string, Object>): FqParagraphCommentPage {
+  const comments: FqParagraphComment[] = fqParseParagraphComments(payload);
+  const code: number = fqAsInt(payload['code'], 0);
+  if (code !== 0 && code !== 200) {
+    return new FqParagraphCommentPage(comments, 0, false, 0);
+  }
+  const dataRec: Record<string, Object> | null = fqAsRecord(payload['data']);
+  if (dataRec === null) {
+    return new FqParagraphCommentPage(comments, 0, false, 0);
+  }
+  const info: Record<string, Object> = fqAsRecord(dataRec['common_list_info']) ?? fqEmptyRecord();
+  return new FqParagraphCommentPage(
+    comments,
+    fqAsInt(info['total'], 0),
+    info['has_more'] === true,
+    fqCursorOffset(fqStr(info, 'cursor')),
+  );
 }
 
 /**

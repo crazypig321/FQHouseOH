@@ -111,12 +111,29 @@ async function ensureExportRoot(context: common.Context): Promise<string> {
   throw new Error('导出目录不可用，请重试');
 }
 
+/** 全本导出结果：文件路径 + 已导出章数 / 目录总章数（不等说明有未缓存章节被跳过）。 */
+export class FqExportedBook {
+  readonly path: string;
+  readonly exportedChapters: number;
+  readonly totalChapters: number;
+
+  constructor(path: string, exportedChapters: number, totalChapters: number) {
+    this.path = path;
+    this.exportedChapters = exportedChapters;
+    this.totalChapters = totalChapters;
+  }
+
+  get partial(): boolean {
+    return this.exportedChapters < this.totalChapters;
+  }
+}
+
 /**
  * 导出一本缓存书：按 catalog 章节顺序合并已缓存正文，
- * 直接写入 Download/<包名>/书名.txt；返回导出文件路径。
+ * 直接写入 Download/<包名>/书名.txt；返回导出文件路径与章数统计。
  * 无目录或全部章节未缓存时抛错。
  */
-export async function fqExportCachedBook(context: common.Context, bookId: string): Promise<string> {
+export async function fqExportCachedBook(context: common.Context, bookId: string): Promise<FqExportedBook> {
   const catalog = FqChapterCacheStore.catalog(bookId);
   if (catalog === null) {
     throw new Error('未找到缓存目录数据');
@@ -145,8 +162,8 @@ export async function fqExportCachedBook(context: common.Context, bookId: string
     file = fs.openSync(path, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
     fs.writeSync(file.fd, parts.join('\n'));
     fs.closeSync(file);
-    hilog.info(0x0001, TAG, `export book ok: ${path} chapters=${exported}`);
-    return path;
+    hilog.info(0x0001, TAG, `export book ok: ${path} chapters=${exported}/${catalog.chapters.length}`);
+    return new FqExportedBook(path, exported, catalog.chapters.length);
   } catch (error) {
     const err = error as BusinessError;
     hilog.error(0x0001, TAG, `export book failed: ${path} code=${err.code} msg=${err.message}`);

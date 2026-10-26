@@ -151,3 +151,19 @@ export class FqParagraphComment {
   createdAtMs: number = 0;
   isAuthor: boolean = false;
 }
+
+/** 段评一页（段评配方 + data.common_list_info 分页：total/has_more/cursor 数字偏移）。 */
+export class FqParagraphCommentPage {
+  readonly comments: FqParagraphComment[];
+  readonly totalCount: number;
+  readonly hasMore: boolean;
+  /** 下页 cursor（数字偏移；0 无更多）。 */
+  readonly nextOffset: number;
+
+  constructor(comments: FqParagraphComment[], totalCount: number, hasMore: boolean, nextOffset: number) {
+    this.comments = comments;
+    this.totalCount = totalCount;
+    this.hasMore = hasMore;
+    this.nextOffset = nextOffset;
+  }
+}
