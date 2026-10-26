@@ -22,6 +22,7 @@ import { DialogManager } from '../../utils/DialogUtils';
 import { fileIo as fs, picker } from '@kit.CoreFileKit';
 import { FqColorUtils } from '../../utils/FqColorUtils';
 import { appState } from '../../entryability/AppState';
+import { FqChangelogSheet } from '../../view/FqChangelogSheet';
 
 const FQ_ABOUT_TAG: string = 'FqAboutPage';
 const FQ_ABOUT_TOP_INSET: number = 56;
@@ -55,19 +56,6 @@ class FqLibraryEntry {
     this.name = name;
     this.license = license;
     this.desc = desc;
-  }
-}
-
-/** 更新日志条目：version/date 用于分组标题展示，lines 为该版本日志正文行。 */
-class FqChangelogEntry {
-  public readonly version: string;
-  public readonly date: string;
-  public readonly lines: string[];
-
-  constructor(version: string, date: string, lines: string[]) {
-    this.version = version;
-    this.date = date;
-    this.lines = lines;
   }
 }
 
@@ -153,10 +141,6 @@ export struct AboutPage {
   /** 更新包代理下载开关（仅用于下载更新软件包：开=代理，关=直连）。 */
   @Local proxyDownload: boolean = false;
   private sections: FqAboutSection[] = [];
-  /** 更新日志数据（按版本分组）。 */
-  private changelogs: FqChangelogEntry[] = [];
-  /** 当前展开的日志版本（空 = 全部收起，手风琴同时只展开一个）。 */
-  @Local expandedVersion: string = '';
 
   aboutToAppear(): void {
     try {
@@ -169,27 +153,8 @@ export struct AboutPage {
       const err = error as BusinessError;
       hilog.error(0x0000, FQ_ABOUT_TAG, `read versionName failed: ${JSON.stringify(err)}`);
     }
-    this.buildChangelogs();
-    this.expandedVersion = this.versionName;
     this.proxyDownload = FqAppSettingsStore.isUpdateProxyDownload();
     this.buildSections();
-  }
-
-  /** 更新日志数据（首个版本随包版本号）。 */
-  private buildChangelogs(): void {
-    const entries: FqChangelogEntry[] = [];
-    entries.push(new FqChangelogEntry(this.versionName, '2026-10-26', [
-      '全新 HarmonyOS 原生版本（ArkTS），UI 大框架对齐 musicfreeOH',
-      '小说 / 漫画阅读器：上下翻页、段评气泡、章评、真实阅读进度与统计',
-      '短剧 / 漫剧：mpv 内核视频播放、弹幕、倍速、后台播放、听视频模式',
-      '听书：多音色 TTS、倍速、播控中心 / 实况窗、播控球、边听边读高亮',
-      '缓存管理：章节 / 剧集（可导出）/ 听书 / 漫画离线缓存，清除所有数据',
-      '书架收藏、聚合搜索、榜单、作者主页、我的页面',
-      '本地 Rust 后端内核，签名与解密在本地完成',
-      '深色模式三档切换、沉浸光感材质',
-      '设置中心：更新日志、检查更新（代理下载更新包）、开源许可',
-    ]));
-    this.changelogs = entries;
   }
 
   build() {
@@ -452,76 +417,15 @@ export struct AboutPage {
     }
   }
 
-  /** 更新日志分组头：版本号 + 日期 + 展开箭头，点击切换展开/收起。 */
-  @Builder
-  private ChangelogGroupHeader(entry: FqChangelogEntry) {
-    Row({ space: 10 }) {
-      Column({ space: 2 }) {
-        Text(`v${entry.version}`)
-          .fontSize(15)
-          .fontWeight(FontWeight.Medium)
-          .fontColor($r('sys.color.font_primary'))
-        Text(entry.date)
-          .fontSize(11)
-          .fontColor($r('sys.color.font_tertiary'))
-      }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
-
-      SymbolGlyph($r('sys.symbol.chevron_right'))
-        .fontSize(14)
-        .fontColor([$r('sys.color.font_tertiary')])
-        .rotate({ angle: this.expandedVersion === entry.version ? 90 : 0 })
-        .animation({ duration: 200, curve: Curve.Smooth })
-    }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-    .onClick((): void => {
-      this.toggleChangelog(entry.version);
-    })
-  }
-
-  /** 更新日志 sheet：List + ListItemGroup 手风琴，一次只展开一个版本。 */
+  /** 更新日志 sheet：共用 FqChangelogSheet（Index 启动自动弹出同款）。 */
   @Builder
   private ChangelogSheetBuilder() {
-    CommonSheet({
-      sheetTitle: '更新日志',
-      showClose: true,
+    FqChangelogSheet({
+      focusVersion: this.versionName,
       closeClick: (): void => {
         this.closeSheet();
       },
-    }) {
-      List({ space: 10 }) {
-        ForEach(this.changelogs, (entry: FqChangelogEntry) => {
-          ListItemGroup({ header: this.ChangelogGroupHeader(entry) }) {
-            if (this.expandedVersion === entry.version) {
-              ListItem() {
-                Column({ space: 8 }) {
-                  ForEach(entry.lines, (line: string) => {
-                    Text(`· ${line}`)
-                      .fontSize(13.5)
-                      .fontColor($r('sys.color.font_secondary'))
-                      .lineHeight(21)
-                  }, (line: string) => line)
-                }
-                .alignItems(HorizontalAlign.Start)
-                .width('100%')
-                .padding({ top: 4, bottom: 12 })
-              }
-              .padding({ left: 16, right: 16 })
-              .transition(TransitionEffect.OPACITY.animation({ duration: 200 }))
-            }
-          }
-          .backgroundColor($r('sys.color.comp_background_list_card'))
-          .borderRadius(14)
-        }, (entry: FqChangelogEntry) => entry.version)
-      }
-      .padding({ left: 20, right: 20, bottom: 24 })
-      .width('100%')
-      .height('100%')
-      .scrollBar(BarState.Off)
-      .edgeEffect(EdgeEffect.Spring)
-    }
+    })
   }
 
   @Builder
@@ -772,13 +676,6 @@ export struct AboutPage {
         this.sheetVisible = false;
       }
     }, 0);
-  }
-
-  /** 切换展开版本（手风琴，animateTo 驱动高度过渡）。 */
-  private toggleChangelog(version: string): void {
-    this.getUIContext().animateTo({ duration: 250, curve: Curve.Linear }, (): void => {
-      this.expandedVersion = this.expandedVersion === version ? '' : version;
-    });
   }
 
   /** 检查更新：拉取 GitHub 最新 release（按代理开关排序直连/代理），有新版本时确认后下载。 */

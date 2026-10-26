@@ -6,7 +6,7 @@
 
 import { HdsAnimationMode, HdsNavigation, HdsNavigationTitleMode, HdsTabs, HdsTabsController } from '@kit.UIDesignKit';
 import { CustomContentDialog } from '@kit.ArkUI';
-import { common } from '@kit.AbilityKit';
+import { bundleManager, common } from '@kit.AbilityKit';
 import { AppState, appState } from '../entryability/AppState';
 import { MainTabPagesBuilder, PageMapBuilder } from '../view/FqAppPages';
 import { DialogManager } from '../utils/DialogUtils';
@@ -15,6 +15,9 @@ import { fqEffectiveReaderTheme, ReaderSettingsDialogContent } from '../view/dia
 import { FqComicSettingsHandler, fqComicSettingsBus } from '../core/FqComicSettingsBus';
 import { ComicSettingsDialogContent } from '../view/dialog/ComicSettingsDialogContent';
 import { FqPlaybackBall } from '../view/FqPlaybackBall';
+import { FqSheetOptions } from '../view/CommonSheet';
+import { FqChangelogSheet } from '../view/FqChangelogSheet';
+import { FqAppSettingsStore } from '../core/FqAppSettingsStore';
 
 @Entry
 @ComponentV2
@@ -22,6 +25,11 @@ struct Index {
   private tabsController: HdsTabsController = new HdsTabsController();
 
   @Local appStateUse: AppState = appState
+
+  /** 首次启动 / 版本升级后自动弹出的更新日志半模态。 */
+  @Local showChangelogSheet: boolean = false
+  /** 当前包版本号（更新日志 sheet 默认展开版本）。 */
+  @Local appVersionName: string = ''
 
   /** 监听 tabbar的显示和消失 */
   @Monitor('appStateUse.isBatchMode')
@@ -52,6 +60,32 @@ struct Index {
         this.dataDialog.close()
       }
     })
+    this.checkChangelogOnLaunch()
+  }
+
+  /**
+   * 首次打开应用或版本更新后冷启动自动弹出更新日志 sheet（参考 musicfreeOH Index）：
+   * 「已展示版本」与当前包版本不一致即弹出并记录（首次安装 pref 为空同样弹出）。
+   */
+  private checkChangelogOnLaunch(): void {
+    try {
+      const info: bundleManager.BundleInfo = bundleManager.getBundleInfoForSelfSync(
+        bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT)
+      if (info.versionName.length === 0) {
+        return
+      }
+      this.appVersionName = info.versionName
+      if (FqAppSettingsStore.getChangelogShownVersion() === this.appVersionName) {
+        return
+      }
+      FqAppSettingsStore.setChangelogShownVersion(this.appVersionName)
+      // 延迟弹出，等待主页渲染完成
+      setTimeout((): void => {
+        this.showChangelogSheet = true
+      }, 600)
+    } catch (error) {
+      // 版本号读取失败不弹
+    }
   }
 
   /** 全局播控球显隐：播放器/听书页经 CommonNav onShown 置 hidePlaybackBall。 */
@@ -101,6 +135,21 @@ struct Index {
     }
     .width('100%')
     .height('100%')
+    .bindSheet(this.showChangelogSheet, this.ChangelogSheetBuilder(),
+      FqSheetOptions((): void => {
+        this.showChangelogSheet = false
+      }, 440))
+  }
+
+  /** 启动自动弹出的更新日志 sheet（与关于页同款，默认展开当前版本）。 */
+  @Builder
+  ChangelogSheetBuilder() {
+    FqChangelogSheet({
+      focusVersion: this.appVersionName,
+      closeClick: (): void => {
+        this.showChangelogSheet = false
+      },
+    })
   }
 
   /** 返回手势（导航栈空时到达，二级页出栈由 Navigation 处理，参考 musicfreeOH Index.onBackPress）：
