@@ -14,11 +14,11 @@
 import avSession from '@ohos.multimedia.avsession';
 import image from '@ohos.multimedia.image';
 import http from '@ohos.net.http';
-import { common, wantAgent, WantAgent } from '@kit.AbilityKit';
-import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
+import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { FqAudioEngine } from './FqAudioEngine';
+import { FqMediaBgTask } from './FqMediaBgTask';
 import { FqAudioHistory, FqListenRecord } from './FqAudioHistory';
 import { FqReadStatsStore } from './FqReadStatsStore';
 import { FqAppSettingsStore } from './FqAppSettingsStore';
@@ -113,6 +113,10 @@ export class FqAudioSession {
   /** 今日已读统计：播放中 tick 计数，满 10 次（5s）累计一次。 */
   private statPlayingTicks: number = 0;
   private avSessionValue: avSession.AVSession | null = null;
+  /** 会话创建进行中（防同标签并发 create：服务侧报 session is existed 且引用被置空泄漏）。 */
+  private avCreating: boolean = false;
+  /** 会话代际（close/teardown 后作废在途创建）。 */
+  private avEpoch: number = 0;
   private bgStarted: boolean = false;
   /** AVSession 后台播放模式最近一次已应用值（undefined=未应用，会话新建后重设）。 */
   private bgPlayModeApplied: boolean | undefined = undefined;
@@ -923,16 +927,26 @@ export class FqAudioSession {
   // ---------------------------------------------------------------------------
 
   private ensureAvSession(): void {
-    if (this.avSessionValue !== null || this.context === null) {
+    if (this.avSessionValue !== null || this.avCreating || this.context === null) {
       return;
     }
     // 设置开关：后台播放关闭时不创建 AVSession（无胶囊/播控中心通知）
     if (!FqAppSettingsStore.isBackgroundAudio()) {
       return;
     }
+    this.avCreating = true;
+    const epoch: number = this.avEpoch;
     const context: common.UIAbilityContext = this.context;
     avSession.createAVSession(context, 'FqListen', 'audio')
-      .then((session: avSession.AVSession): Promise<void> => {
+      .then((session: avSession.AVSession): void => {
+        this.avCreating = false;
+        if (epoch !== this.avEpoch) {
+          // teardown 已作废本次创建：立即销毁防泄漏
+          session.destroy().catch((): void => {
+          });
+          return;
+        }
+        this.avSessionValue = session;
         session.on('play', (): void => {
           this.play();
         });
@@ -951,25 +965,41 @@ export class FqAudioSession {
         session.on('seek', (time: number): void => {
           this.seekTo(time / 1000);
         });
-        this.avSessionValue = session;
         this.syncAvMetadata();
         this.syncAvPlaybackState(true);
         this.bgPlayModeApplied = undefined;
         this.syncBackgroundPlayMode();
-        return session.activate();
+        session.activate().catch((error: BusinessError): void => {
+          hilog.warn(0x0001, TAG, `AVSession activate failed: ${error.message}`);
+        });
       })
       .catch((error: BusinessError): void => {
-        hilog.warn(0x0001, TAG, `AVSession create failed: ${error.message}`);
+        this.avCreating = false;
+        const created: avSession.AVSession | null =
+          epoch === this.avEpoch ? this.avSessionValue : null;
+        this.avSessionValue = null;
+        if (created !== null) {
+          // 创建成功但注册链路异常：销毁防泄漏
+          created.deactivate().catch((): void => {
+          }).then((): Promise<void> => created.destroy()).catch((): void => {
+          });
+        } else {
+          hilog.warn(0x0001, TAG, `AVSession create failed: ${error.message}`);
+        }
       });
   }
 
   /** 销毁 AVSession（关闭后台播放/close：无胶囊/播控中心通知）。 */
   private teardownAvSession(): void {
+    this.avEpoch += 1;
+    this.avCreating = false;
     const session: avSession.AVSession | null = this.avSessionValue;
     this.avSessionValue = null;
     this.bgPlayModeApplied = undefined;
     if (session !== null) {
-      session.deactivate().then((): Promise<void> => session.destroy()).catch((): void => {
+      // deactivate 失败也必须 destroy：泄漏会永久阻塞本应用后续 create（session is existed）
+      session.deactivate().catch((): void => {
+      }).then((): Promise<void> => session.destroy()).catch((): void => {
       });
     }
     this.coverPixel = null;
@@ -1077,6 +1107,7 @@ export class FqAudioSession {
       });
   }
 
+  /** 后台长时任务（audioPlayback：应用级引用计数共享，首个引用申请，release 释放）。 */
   private startBackgroundTask(): void {
     // 设置开关：关闭后台播放后不再申请长时任务（无法后台播放）
     if (!FqAppSettingsStore.isBackgroundAudio()) {
@@ -1085,40 +1116,16 @@ export class FqAudioSession {
     if (this.bgStarted || this.context === null) {
       return;
     }
-    const context: common.UIAbilityContext = this.context;
     this.bgStarted = true;
-    const info: wantAgent.WantAgentInfo = {
-      wants: [{
-        bundleName: context.abilityInfo.bundleName,
-        abilityName: context.abilityInfo.name,
-      }],
-      operationType: wantAgent.OperationType.START_ABILITY,
-      requestCode: 0,
-    };
-    wantAgent.getWantAgent(info)
-      .then((agent: WantAgent): void => {
-        backgroundTaskManager.startBackgroundRunning(context, ['audioPlayback'], agent)
-          .then((): void => {
-            hilog.info(0x0001, TAG, 'background audioPlayback task started');
-          })
-          .catch((error: BusinessError): void => {
-            this.bgStarted = false;
-            hilog.warn(0x0001, TAG, `startBackgroundRunning failed: ${error.message}`);
-          });
-      })
-      .catch((error: BusinessError): void => {
-        this.bgStarted = false;
-        hilog.warn(0x0001, TAG, `getWantAgent failed: ${error.message}`);
-      });
+    FqMediaBgTask.acquire(this.context);
   }
 
   private stopBackgroundTask(): void {
-    if (!this.bgStarted || this.context === null) {
+    if (!this.bgStarted) {
       return;
     }
     this.bgStarted = false;
-    backgroundTaskManager.stopBackgroundRunning(this.context).catch((): void => {
-    });
+    FqMediaBgTask.release();
   }
 }
 

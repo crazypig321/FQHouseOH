@@ -189,7 +189,7 @@ export struct ShelfPage {
                 this.onRowLongPress(row);
               }))
           }, (row: ShelfRow, index: number): string =>
-            `${row.id}_${this.layout}`)
+            `${row.id}_${row.cover.length > 0 ? 'c' : 'n'}_${this.layout}`)
         }
         .width('100%')
         .height('100%')

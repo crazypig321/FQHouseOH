@@ -284,6 +284,7 @@ export struct RankPage {
     .width('100%')
     .padding({ top: 50, bottom: 10})
     .align(Alignment.Center)
+    .hitTestBehavior(HitTestMode.Transparent)
   }
 
   private currentRank(): FqRankTab {

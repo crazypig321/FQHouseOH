@@ -11,11 +11,11 @@
 import avSession from '@ohos.multimedia.avsession';
 import image from '@ohos.multimedia.image';
 import http from '@ohos.net.http';
-import { common, wantAgent, WantAgent } from '@kit.AbilityKit';
-import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
+import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { FqAppSettingsStore } from './FqAppSettingsStore';
+import { FqMediaBgTask } from './FqMediaBgTask';
 
 const TAG: string = 'FqVideoMedia';
 
@@ -34,6 +34,14 @@ export class FqVideoMedia {
   private readonly sessionTag: string;
   private context: common.UIAbilityContext | null = null;
   private sessionValue: avSession.AVSession | null = null;
+  /** 会话创建进行中（防同标签并发 create：服务侧报 session is existed 且引用被置空泄漏）。 */
+  private sessionCreating: boolean = false;
+  /** 会话代际（release/teardown 后作废在途创建与重试）。 */
+  private sessionEpoch: number = 0;
+  /** 创建失败有界重试定时器（0 无任务）。 */
+  private ensureRetryTimer: number = 0;
+  /** 创建失败有界重试计数。 */
+  private ensureRetryCount: number = 0;
   private bgStarted: boolean = false;
   /** 最近一次 ensureSession 的会话类型（后台播放开关重开时重建会话用）。 */
   private lastSessionType: string = 'video';
@@ -56,19 +64,35 @@ export class FqVideoMedia {
   }
 
   /** 起播时确保 AVSession（sessionType：'video' 视频页 / 'audio' 听视频页）。
-   * 显式开启后台播放模式：video 会话默认 DISABLE_BACKGROUND_PLAY，不设则退后台无实况窗胶囊。 */
+   * 显式开启后台播放模式：video 会话默认 DISABLE_BACKGROUND_PLAY，不设则退后台无实况窗胶囊。
+   * 让路页旧会话销毁为异步：创建报 session is existed 时 600ms 有界重试自愈。 */
   public ensureSession(sessionType: string): void {
-    if (this.sessionValue !== null || this.context === null) {
+    if (this.sessionValue !== null || this.sessionCreating || this.context === null) {
       return;
     }
     // 设置开关：后台播放关闭时不创建 AVSession（无胶囊/播控中心通知）
     if (!FqAppSettingsStore.isBackgroundAudio()) {
       return;
     }
+    if (this.ensureRetryTimer !== 0) {
+      clearTimeout(this.ensureRetryTimer);
+      this.ensureRetryTimer = 0;
+    }
+    this.sessionCreating = true;
     this.lastSessionType = sessionType;
+    const epoch: number = this.sessionEpoch;
     const context: common.UIAbilityContext = this.context;
     avSession.createAVSession(context, this.sessionTag, sessionType === 'audio' ? 'audio' : 'video')
-      .then((session: avSession.AVSession): Promise<void> => {
+      .then((session: avSession.AVSession): void => {
+        this.sessionCreating = false;
+        if (epoch !== this.sessionEpoch) {
+          // teardown 已作废本次创建：立即销毁防泄漏
+          session.destroy().catch((): void => {
+          });
+          return;
+        }
+        this.ensureRetryCount = 0;
+        this.sessionValue = session;
         session.on('play', (): void => {
           this.onPlay();
         });
@@ -93,18 +117,37 @@ export class FqVideoMedia {
         session.on('rewind', (time?: number): void => {
           this.onRewind(time !== undefined ? time / 1000 : 15);
         });
-        this.sessionValue = session;
         if (this.lastMeta !== null) {
           session.setAVMetadata(this.lastMeta).catch((): void => {
           });
         }
         this.bgPlayModeApplied = undefined;
         this.syncBackgroundPlayMode();
-        return session.activate();
+        session.activate().catch((error: BusinessError): void => {
+          hilog.warn(0x0001, TAG, `AVSession activate failed: ${error.message}`);
+        });
       })
       .catch((error: BusinessError): void => {
+        this.sessionCreating = false;
+        const created: avSession.AVSession | null =
+          epoch === this.sessionEpoch ? this.sessionValue : null;
         this.sessionValue = null;
-        hilog.warn(0x0001, TAG, `AVSession create failed: ${error.message}`);
+        if (created !== null) {
+          // 创建成功但注册链路异常：销毁防泄漏
+          created.deactivate().catch((): void => {
+          }).then((): Promise<void> => created.destroy()).catch((): void => {
+          });
+        } else {
+          hilog.warn(0x0001, TAG, `AVSession create failed: ${error.message}`);
+        }
+        if (epoch !== this.sessionEpoch || this.ensureRetryCount >= 6) {
+          return;
+        }
+        this.ensureRetryCount += 1;
+        this.ensureRetryTimer = setTimeout((): void => {
+          this.ensureRetryTimer = 0;
+          this.ensureSession(sessionType);
+        }, 600);
       });
   }
 
@@ -184,7 +227,7 @@ export class FqVideoMedia {
       });
   }
 
-  /** 后台长时任务（audioPlayback：首次播放申请，release 释放）。 */
+  /** 后台长时任务（audioPlayback：应用级引用计数共享，首个引用申请，release 释放）。 */
   public startBackground(): void {
     // 设置开关：关闭后台播放后不再申请长时任务（无法后台播放）
     if (!FqAppSettingsStore.isBackgroundAudio()) {
@@ -193,40 +236,26 @@ export class FqVideoMedia {
     if (this.bgStarted || this.context === null) {
       return;
     }
-    const context: common.UIAbilityContext = this.context;
     this.bgStarted = true;
-    const info: wantAgent.WantAgentInfo = {
-      wants: [{
-        bundleName: context.abilityInfo.bundleName,
-        abilityName: context.abilityInfo.name,
-      }],
-      operationType: wantAgent.OperationType.START_ABILITY,
-      requestCode: 0,
-    };
-    wantAgent.getWantAgent(info)
-      .then((agent: WantAgent): void => {
-        backgroundTaskManager.startBackgroundRunning(context, ['audioPlayback'], agent)
-          .then((): void => {
-            hilog.info(0x0001, TAG, 'background audioPlayback task started');
-          })
-          .catch((error: BusinessError): void => {
-            this.bgStarted = false;
-            hilog.warn(0x0001, TAG, `startBackgroundRunning failed: ${error.message}`);
-          });
-      })
-      .catch((error: BusinessError): void => {
-        this.bgStarted = false;
-        hilog.warn(0x0001, TAG, `getWantAgent failed: ${error.message}`);
-      });
+    FqMediaBgTask.acquire(this.context);
   }
 
   /** 销毁 AVSession（关闭后台播放/release：无胶囊/播控中心通知）。 */
   private teardownSession(): void {
+    this.sessionEpoch += 1;
+    this.sessionCreating = false;
+    if (this.ensureRetryTimer !== 0) {
+      clearTimeout(this.ensureRetryTimer);
+      this.ensureRetryTimer = 0;
+    }
+    this.ensureRetryCount = 0;
     const session: avSession.AVSession | null = this.sessionValue;
     this.sessionValue = null;
     this.bgPlayModeApplied = undefined;
     if (session !== null) {
-      session.deactivate().then((): Promise<void> => session.destroy()).catch((): void => {
+      // deactivate 失败也必须 destroy：泄漏会永久阻塞本应用后续 create（session is existed）
+      session.deactivate().catch((): void => {
+      }).then((): Promise<void> => session.destroy()).catch((): void => {
       });
     }
     this.coverPixel = null;
@@ -278,11 +307,10 @@ export class FqVideoMedia {
   }
 
   private stopBackground(): void {
-    if (!this.bgStarted || this.context === null) {
+    if (!this.bgStarted) {
       return;
     }
     this.bgStarted = false;
-    backgroundTaskManager.stopBackgroundRunning(this.context).catch((): void => {
-    });
+    FqMediaBgTask.release();
   }
 }
