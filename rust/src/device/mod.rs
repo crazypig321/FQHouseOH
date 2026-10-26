@@ -526,7 +526,12 @@ impl DevicePool {
         }
     }
 
-    async fn check_and_refill(&self) -> Result<(), String> {
+    /// Refills the pool up to `MIN_POOL_SIZE`. Called on every `get()` and
+    /// once at init time (api prewarm) so an empty or depleted pool is
+    /// replenished off the first user-visible request: registration is
+    /// several sequential HTTPS round trips, and without the prewarm the
+    /// first request after a wipe pays for all of it.
+    pub async fn check_and_refill(&self) -> Result<(), String> {
         let _maintenance = self.maintenance_lock.lock().await;
         let need = {
             let s = self.state.lock().await;

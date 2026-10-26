@@ -156,7 +156,7 @@ extern "C" {
 fn runtime() -> &'static tokio::runtime::Runtime {
     static RT: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
         tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
+            .worker_threads(4)
             .enable_all()
             .build()
             .expect("failed to build tokio runtime for fqapi_core")

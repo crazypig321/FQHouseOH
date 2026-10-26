@@ -168,6 +168,9 @@ pub(crate) async fn init_core(
         &root.to_string_lossy(),
     )?);
 
+    // Prewarm handle: clone before `pool` moves into `Ctx`.
+    let prewarm_pool = pool.clone();
+
     let ctx = Arc::new(Ctx {
         up,
         pool,
@@ -200,6 +203,18 @@ pub(crate) async fn init_core(
         token,
         task,
     }));
+    drop(guard);
+
+    // Refill a depleted/empty device pool in the background so the first
+    // user-visible request does not block on several sequential device
+    // registrations. `check_and_refill` takes the maintenance lock, so a
+    // concurrent `get()` either waits for this pass or finds the pool
+    // already topped up - never duplicates the work.
+    tokio::spawn(async move {
+        if let Err(e) = prewarm_pool.check_and_refill().await {
+            log::warn!("device pool prewarm: {e}");
+        }
+    });
     Ok("running".to_string())
 }
 
