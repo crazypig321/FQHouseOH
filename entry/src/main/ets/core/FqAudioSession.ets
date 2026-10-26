@@ -523,6 +523,8 @@ export class FqAudioSession {
       this.completed = options.completed;
       if (wantAutoplay && !options.completed) {
         this.wantPlay = true;
+        // 自动起播不走 play()，需在此申请 audioPlayback 长时任务，否则退后台数秒后被静音
+        this.startBackgroundTask();
         try {
           await this.engine.play();
         } catch (playError) {
@@ -817,6 +819,8 @@ export class FqAudioSession {
     }
     const now: number = Date.now();
     if (this.engine.isPlaying) {
+      // 兜底：任何路径进入播放态都确保持有长时任务（startBackgroundTask 内部去重）
+      this.startBackgroundTask();
       this.positionSec = this.engine.positionSec;
       const duration: number = this.engine.durationSec;
       if (duration > 0 && Math.abs(duration - this.durationSec) > 0.5) {
