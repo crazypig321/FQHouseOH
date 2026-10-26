@@ -5,7 +5,7 @@
  * - 软件版本：更新日志（sheet）/ 检查更新（GitHub release，代理回退）/ 代理下载新版本（开关：仅用于下载更新软件包）；
  * - 开源与条款：GPL3.0 协议、免责声明（sheet）；
  * - 三方库：三方库列表（sheet）；
- * - 其他：支持作者（sheet + 爱发电）。
+ * - 其他：温馨提醒（sheet：不可与同类软件共用）/ 支持作者（sheet + 爱发电）。
  * 内容用 List + ForEach 分组卡片渲染（SectionHeader + 卡片，对齐设置页样式）。
  */
 
@@ -42,6 +42,7 @@ class FqAboutSheetKind {
   public static readonly disclaimer: string = 'disclaimer';
   public static readonly libraries: string = 'libraries';
   public static readonly support: string = 'support';
+  public static readonly notice: string = 'notice';
 }
 
 /** 三方库条目（名称 + 许可证徽标 + 用途说明）。 */
@@ -177,12 +178,16 @@ export struct AboutPage {
   /** 更新日志数据（首个版本随包版本号）。 */
   private buildChangelogs(): void {
     const entries: FqChangelogEntry[] = [];
-    entries.push(new FqChangelogEntry(this.versionName, '2026-10-25', [
-      '全新 HarmonyOS 原生版本（ArkTS）',
-      '小说 / 短剧 / 漫剧 / 漫画 / 听书聚合',
+    entries.push(new FqChangelogEntry(this.versionName, '2026-10-26', [
+      '全新 HarmonyOS 原生版本（ArkTS），UI 大框架对齐 musicfreeOH',
+      '小说 / 漫画阅读器：上下翻页、段评气泡、章评、真实阅读进度与统计',
+      '短剧 / 漫剧：mpv 内核视频播放、弹幕、倍速、后台播放、听视频模式',
+      '听书：多音色 TTS、倍速、播控中心 / 实况窗、播控球、边听边读高亮',
+      '缓存管理：章节 / 剧集（可导出）/ 听书 / 漫画离线缓存，清除所有数据',
+      '书架收藏、聚合搜索、榜单、作者主页、我的页面',
       '本地 Rust 后端内核，签名与解密在本地完成',
-      'mpv 播放内核：视频、听书与倍速播放',
-      '深色模式、后台播放与播控中心支持',
+      '深色模式三档切换、沉浸光感材质',
+      '设置中心：更新日志、检查更新（代理下载更新包）、开源许可',
     ]));
     this.changelogs = entries;
   }
@@ -292,6 +297,10 @@ export struct AboutPage {
         }),
     ]));
     sections.push(new FqAboutSection('其他', [
+      new FqAboutItem($r('sys.symbol.exclamationmark_circle'), '#FFF59E0B', '温馨提醒', '不可与同类软件共用', '', true,
+        (): void => {
+          this.openSheet(FqAboutSheetKind.notice);
+        }),
       new FqAboutItem($r('sys.symbol.hand_thumbsup'), '#FFF43F5E', '支持作者', '感谢每一份支持', '', true,
         (): void => {
           this.openSheet(FqAboutSheetKind.support);
@@ -438,6 +447,8 @@ export struct AboutPage {
       this.LibrariesSheetBuilder()
     } else if (this.activeSheet === FqAboutSheetKind.support) {
       this.SupportSheetBuilder()
+    } else if (this.activeSheet === FqAboutSheetKind.notice) {
+      this.NoticeSheetBuilder()
     }
   }
 
@@ -588,6 +599,38 @@ export struct AboutPage {
     }
   }
 
+  /** 温馨提醒 sheet：不可与同类软件共用（本地后端冲突导致启动失败）。 */
+  @Builder
+  private NoticeSheetBuilder() {
+    CommonSheet({
+      sheetTitle: '温馨提醒',
+      showClose: true,
+      closeClick: (): void => {
+        this.closeSheet();
+      },
+    }) {
+      List({ space: 12 }) {
+        ForEach([
+          '1. 本软件不可与原版 fqapp 及其他基于相同本地后端的同类软件同时使用。',
+          '2. 原因：此类软件会在设备本地启动相同的后端服务（监听同一端口、占用相同的运行时资源），同时存在会相互冲突，导致后端启动失败，表现为内容加载失败、页面空白或功能异常。',
+          '3. 解决方式：请先彻底关掉同类软件，再启动本软件，即可恢复。',
+        ], (paragraph: string) => {
+          ListItem() {
+            Text(paragraph)
+              .fontSize(13.5)
+              .fontColor($r('sys.color.font_secondary'))
+              .lineHeight(22)
+          }
+        }, (paragraph: string) => paragraph)
+      }
+      .padding({ left: 20, right: 20, bottom: 24 })
+      .width('100%')
+      .height('100%')
+      .scrollBar(BarState.Off)
+      .edgeEffect(EdgeEffect.Spring)
+    }
+  }
+
   @Builder
   private LibrariesSheetBuilder() {
     CommonSheet({
@@ -700,6 +743,8 @@ export struct AboutPage {
         return 460;
       case FqAboutSheetKind.support:
         return 420;
+      case FqAboutSheetKind.notice:
+        return 440;
       default:
         return 600;
     }

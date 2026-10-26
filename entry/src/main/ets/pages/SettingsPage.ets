@@ -2,7 +2,7 @@
  * 应用设置页（主 Tab 第四页 + 我的-应用设置入口共用，@Param isTab 区分）：
  * - 外观：深色模式（跟随系统/浅色/深色，FqMenu 档位直选，即时生效）；
  * - 播放：开启后台播放开关（开=支持后台播放，关=无法后台播放）；
- * - 数据：章节缓存/剧集缓存入口、清空历史（确认弹窗，清浏览+收听+观看+统计）；
+ * - 数据：章节缓存/剧集缓存入口、清除所有数据（确认弹窗提示重启，清全部 KV/缓存/设置后 restartApp）；
  * - 服务：本地后端地址展示（点击浏览器打开 + 刷新按钮）；
  * - 关于：关于我们入口。
  */
@@ -10,7 +10,7 @@
 import { CommonNav } from '../view/CommonNav';
 import { FqMenu, FqMenuItem } from '../view/CommonMenu';
 import { CommonLoading, FQ_ACCENT } from '../view/CommonCom';
-import { common } from '@kit.AbilityKit';
+import { common, Want } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { FqTitleBarOptions, ROUTE_ABOUT, ROUTE_CACHED_BOOKS, ROUTE_CACHED_DRAMAS, ROUTE_CACHED_AUDIO, ROUTE_CACHED_COMICS } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
@@ -20,10 +20,7 @@ import {
   FQ_THEME_LIGHT,
   FqAppSettingsStore,
 } from '../core/FqAppSettingsStore';
-import { FqAudioHistory } from '../core/FqAudioHistory';
-import { FqBrowseStore } from '../core/FqBrowseStore';
-import { FqReadStatsStore } from '../core/FqReadStatsStore';
-import { FqWatchedStore } from '../core/FqWatchedStore';
+import { FqDataCleaner } from '../core/FqDataCleaner';
 import { FqBackend } from '../core/FqBackend';
 import { DialogManager } from '../utils/DialogUtils';
 import { FqColorUtils } from '../utils/FqColorUtils';
@@ -116,9 +113,9 @@ export struct SettingsPage {
                 NavPathUtils.push(ROUTE_CACHED_COMICS);
               })
             this.RowDivider()
-            this.SettingRow($r('sys.symbol.trash'), '#FFF43F5E', '清空历史', '浏览、收听、观看与统计记录', '', true,
+            this.SettingRow($r('sys.symbol.trash'), '#FFF43F5E', '清除所有数据', '清空全部记录、缓存与设置，完成后重启应用', '', true,
               (): void => {
-                this.confirmClearHistory();
+                this.confirmClearAllData();
               })
           }
 
@@ -170,14 +167,35 @@ export struct SettingsPage {
     FqAppSettingsStore.setThemeMode(mode);
   }
 
-  private confirmClearHistory(): void {
-    DialogManager.ShowConfirm('清空历史', '将清空浏览、收听、观看与统计记录，且不可恢复', '清空', (): void => {
-      FqBrowseStore.clear();
-      FqAudioHistory.clear();
-      FqWatchedStore.clear();
-      FqReadStatsStore.clear();
-      this.getUIContext().getPromptAction().showToast({ message: '已清空历史记录', duration: 1500 });
-    });
+  private confirmClearAllData(): void {
+    DialogManager.ShowConfirm('清除所有数据',
+      '将清空浏览 / 收听 / 观看记录、阅读统计与进度、书架收藏、本地书籍及全部离线缓存，并重置应用设置；完成后应用将自动重启',
+      '清除', (): void => {
+        this.performClearAllData();
+      });
+  }
+
+  /** 执行清除：清空全部 KV 与数据目录后 restartApp 重启（主线程 + 应用获焦时调用）。 */
+  private async performClearAllData(): Promise<void> {
+    const context: common.UIAbilityContext | null = appState.abilityContext;
+    if (context === null) {
+      this.toast('清除失败，请稍后重试');
+      return;
+    }
+    this.toast('正在清除数据…');
+    const ok: boolean = await FqDataCleaner.clearAll(context);
+    if (!ok) {
+      this.toast('部分数据清除失败，将在重启后重试清理');
+    }
+    try {
+      const want: Want = {
+        bundleName: context.abilityInfo.bundleName,
+        abilityName: context.abilityInfo.name,
+      };
+      context.getApplicationContext().restartApp(want);
+    } catch (error) {
+      this.toast('清除完成，请手动重启应用');
+    }
   }
 
   @Builder
@@ -436,10 +454,15 @@ export struct SettingsPage {
     setTimeout((): void => {
       this.backendRefreshing = false;
       if (failedMessage.length > 0) {
-        this.getUIContext().getPromptAction().showToast({ message: failedMessage, duration: 1500 });
+        this.toast(failedMessage);
       } else {
-        this.getUIContext().getPromptAction().showToast({ message: '已刷新', duration: 1000 });
+        this.toast('已刷新');
       }
     }, remainMs);
+  }
+
+  /** 页面内统一 toast。 */
+  private toast(message: string): void {
+    this.getUIContext().getPromptAction().showToast({ message: message, duration: 1500 });
   }
 }

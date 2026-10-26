@@ -10,6 +10,7 @@
   <a href="https://www.gnu.org/licenses/gpl-3.0.html"><img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg" alt="License: GPL-3.0"></a>
   <a href="https://www.harmonyos.com/"><img src="https://img.shields.io/badge/Platform-HarmonyOS-green.svg" alt="Platform: HarmonyOS"></a>
   <a href="https://developer.huawei.com/consumer/cn/arkts/"><img src="https://img.shields.io/badge/Language-ArkTS-orange.svg" alt="Language: ArkTS"></a>
+  <a href="./CHANGELOG.md"><img src="https://img.shields.io/badge/升级日志-Changelog-blue.svg" alt="Changelog"></a>
 </p>
 
 ---
@@ -47,7 +48,7 @@
 | 🎬 **mpv 播放内核** | 基于 mpv-arkts（libmpv）的视频与听书播放，支持倍速、后台播放 |
 | 🔍 **搜索与榜单** | 聚合搜索、榜单分类、作者主页 |
 | ⭐ **书架收藏** | 收藏管理、批量操作、浏览 / 收听 / 观看 / 阅读统计记录 |
-| ⬇️ **缓存管理** | 章节缓存、剧集缓存、一键清空历史 |
+| ⬇️ **缓存管理** | 章节 / 剧集（可导出）/ 听书 / 漫画离线缓存，分组手风琴管理；清除所有数据（记录 / 缓存 / 设置，自动重启） |
 | 🌙 **深色模式** | 跟随系统 / 浅色 / 深色三档切换，即时生效 |
 | 🖥️ **本地后端** | Rust 核心进程内运行 |
 | ⚙️ **设置中心** | 外观、播放、数据、服务、关于（更新日志 / 代理下载更新包 / 开源许可 / 支持作者）等 |
