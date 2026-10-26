@@ -292,7 +292,7 @@ export struct AboutPage {
         }),
     ]));
     sections.push(new FqAboutSection('其他', [
-      new FqAboutItem($r('sys.symbol.hand_thumbsup'), '#FFF43F5E', '支持作者', '用爱发电，感谢每一份支持', '', true,
+      new FqAboutItem($r('sys.symbol.hand_thumbsup'), '#FFF43F5E', '支持作者', '感谢每一份支持', '', true,
         (): void => {
           this.openSheet(FqAboutSheetKind.support);
         }),

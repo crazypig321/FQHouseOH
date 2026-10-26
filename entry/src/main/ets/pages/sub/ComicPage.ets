@@ -15,19 +15,29 @@ import { common } from '@kit.AbilityKit';
 import { display, promptAction, window } from '@kit.ArkUI';
 import { image } from '@kit.ImageKit';
 import { http } from '@kit.NetworkKit';
+import { fileIo as fs } from '@kit.CoreFileKit';
 import { batteryInfo, BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { TitleBarContentOptions } from '@kit.UIDesignKit';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
-import { FqChapter, fqKindToTab } from '../../model/FqModels';
+import { FqChapter, FqCacheTaskView, fqKindToTab } from '../../model/FqModels';
 import { FqReaderProgress, FqReaderStore } from '../../core/FqReaderStore';
 import { FqReadStatsStore } from '../../core/FqReadStatsStore';
-import { ComicNavParams } from '../../model/FqNavModels';
+import { ComicNavParams, ROUTE_CACHED_COMICS } from '../../model/FqNavModels';
+import { NavPathUtils } from '../../utils/NavPathUtils';
 import { CommonNav, titleBarOf } from '../../view/CommonNav';
 import { CommonLoading, FQ_ACCENT } from '../../view/CommonCom';
 import { FqSheetOptions } from '../../view/CommonSheet';
 import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/FqCommentSheet';
 import { FqCatalogSheet } from '../../view/FqCatalogSheet';
+import { FqCacheSheet } from '../../view/FqCacheSheet';
+import { FqComicCacheStore } from '../../core/FqComicCacheStore';
+import {
+  fqComicDownloader,
+  FqComicDownloader,
+  FqComicDownloadTask,
+  ComicDownloadStatus,
+} from '../../core/FqComicDownloader';
 import { appState } from '../../entryability/AppState';
 import { DialogManager } from '../../utils/DialogUtils';
 import { FqReaderFlip } from '../../reader/FqReaderFlip';
@@ -135,6 +145,15 @@ export struct ComicPage {
   @Local bodyHeightVp: number = 0;
   /** 标题栏下压补偿量（vp，外层实测；0=未下压）。 */
   @Local bodyTopCompVp: number = 0;
+  /** 离线缓存 sheet（独立零尺寸宿主，标题栏下载键呼出）。 */
+  @Local cacheSheetVisible: boolean = false;
+  private cacheCloseToken: number = 0;
+  /** 缓存 sheet 打开令牌（FqCacheSheet 据此重置勾选并定位当前话）。 */
+  @Local cacheOpenToken: number = 0;
+  /** 当前书已离线话集合（打开 sheet 时刷新）。 */
+  @Local cacheDownloadedIds: Set<string> = new Set<string>();
+  /** 漫画下载器单例（@Trace taskList 驱动缓存格任务态实时刷新）。 */
+  @Local dl: FqComicDownloader = fqComicDownloader;
 
   private bookId: string = '';
   private bookTitle: string = '';
@@ -175,6 +194,15 @@ export struct ComicPage {
           label: 'comments',
           action: (): void => {
             this.openCommentSheet();
+          },
+        },
+      },
+      {
+        content: {
+          icon: $r('sys.symbol.download'),
+          label: 'cache',
+          action: (): void => {
+            this.openCacheSheet();
           },
         },
       },
@@ -267,6 +295,14 @@ export struct ComicPage {
             .bindSheet(this.commentSheetVisible, this.CommentSheet(), FqSheetOptions((): void => {
               this.onCommentSheetClose();
             }, fqCommentSheetHeightVp()))
+
+          // 离线缓存 sheet 宿主（0 尺寸稳定节点，标题栏下载键呼出）
+          Column()
+            .width(0)
+            .height(0)
+            .bindSheet(this.cacheSheetVisible, this.CacheSheetBuilder(), FqSheetOptions((): void => {
+              this.closeCacheSheet();
+            }, this.fqRatioSheetHeightVp(), false))
 
           if (this.loadingState) {
             Column({ space: 12 }) {
@@ -423,8 +459,12 @@ export struct ComicPage {
     return false;
   }
 
-  /** 下载并解码网络图片（http → ArrayBuffer → ImageSource → PixelMap）。 */
+  /** 下载并解码网络图片（http → ArrayBuffer → ImageSource → PixelMap）；
+   *  本地离线图片（file://）直接读盘解码，不走网络。 */
   private static async fetchPixelMap(url: string): Promise<image.PixelMap> {
+    if (url.startsWith('file://')) {
+      return ComicPage.fetchLocalPixelMap(url.substring('file://'.length));
+    }
     const client: http.HttpRequest = http.createHttp();
     try {
       const response: http.HttpResponse = await client.request(url, {
@@ -447,6 +487,22 @@ export struct ComicPage {
       return map;
     } finally {
       client.destroy();
+    }
+  }
+
+  /** 本地图片解码（读盘 → ImageSource → PixelMap）。 */
+  private static async fetchLocalPixelMap(path: string): Promise<image.PixelMap> {
+    const file: fs.File = fs.openSync(path, fs.OpenMode.READ_ONLY);
+    try {
+      const stat: fs.Stat = fs.statSync(path);
+      const buffer: ArrayBuffer = new ArrayBuffer(stat.size);
+      fs.readSync(file.fd, buffer);
+      const source: image.ImageSource = image.createImageSource(buffer);
+      const map: image.PixelMap = await source.createPixelMap();
+      source.release();
+      return map;
+    } finally {
+      fs.closeSync(file);
     }
   }
 
@@ -1172,7 +1228,8 @@ export struct ComicPage {
     }
   }
 
-  /** 章图片获取（会话缓存优先，未命中请求后端并回填）。 */
+  /** 章图片获取（三层：会话缓存 → 离线整话（本地文件）→ 列表缓存（秒开）
+   *  → 请求后端并回填列表缓存）。 */
   private async fetchChapterImages(index: number): Promise<string[]> {
     const cached: string[] | undefined = this.chapterImageCache.get(index);
     if (cached !== undefined) {
@@ -1182,9 +1239,24 @@ export struct ComicPage {
     if (chapter === undefined) {
       return [];
     }
+    // 离线层：整话已下载 → file:// 本地路径，不走网络
+    const local: string[] | null =
+      FqComicCacheStore.cachedChapterImages(this.bookId, chapter.itemId);
+    if (local !== null) {
+      this.chapterImageCache.set(index, local);
+      return local;
+    }
+    // 秒开层：图片 URL 列表缓存命中（TTL 内），列表不再请求后端
+    const listCache: string[] | null =
+      FqComicCacheStore.cachedImageList(this.bookId, chapter.itemId);
+    if (listCache !== null) {
+      this.chapterImageCache.set(index, listCache);
+      return listCache;
+    }
     const images: string[] = await FqBackend.get().chapterImages(chapter.itemId);
     if (images.length > 0) {
       this.chapterImageCache.set(index, images);
+      FqComicCacheStore.saveImageList(this.bookId, chapter.itemId, images);
     }
     return images;
   }
@@ -1294,5 +1366,90 @@ export struct ComicPage {
       fontColor: $r('sys.color.font_primary'),
       commentLabel: '漫评',
     })
+  }
+
+  /** 离线缓存选话半模态（公共 FqCacheSheet 组件，标题栏下载键呼出）。 */
+  @Builder
+  private CacheSheetBuilder() {
+    FqCacheSheet({
+      sheetTitle: `离线缓存 · ${this.bookTitle}`,
+      items: this.chapters,
+      currentIndex: this.chapterIndex,
+      downloadedIds: this.cacheDownloadedIds,
+      taskViewOf: (itemId: string): FqCacheTaskView | null =>
+        this.dl.taskOfItem(this.bookId, itemId),
+      openToken: this.cacheOpenToken,
+      itemLabel: '话',
+      manageClick: (): void => {
+        this.closeCacheSheet();
+        NavPathUtils.push(ROUTE_CACHED_COMICS);
+      },
+      closeClick: (): void => {
+        this.closeCacheSheet();
+      },
+      download: (itemIds: string[]): void => {
+        this.confirmCacheDownload(itemIds);
+      },
+      taskClick: (itemId: string): void => {
+        this.onCacheTaskClick(itemId);
+      },
+    })
+  }
+
+  /** 缓存 sheet 高度（屏高 75%，vp）。 */
+  private fqRatioSheetHeightVp(): number {
+    return Math.round(this.screenHeightVp() * 0.75);
+  }
+
+  /** 打开离线缓存选话半模态：刷新当前书已离线集合后呼出。 */
+  private openCacheSheet(): void {
+    if (this.chapters.length === 0) {
+      promptAction.showToast({ message: '目录加载中', duration: 1500 });
+      return;
+    }
+    this.cacheDownloadedIds = FqComicCacheStore.cachedItemIds(this.bookId);
+    this.cacheOpenToken += 1;
+    this.getUIContext().animateTo({ duration: 200 }, (): void => {
+      this.cacheSheetVisible = true;
+    });
+  }
+
+  /** 关闭离线缓存半模态：延迟一拍置 isShow（面板事件内同步改 isShow 会被框架丢弃）。 */
+  private closeCacheSheet(): void {
+    const token: number = ++this.cacheCloseToken;
+    setTimeout((): void => {
+      if (token === this.cacheCloseToken) {
+        this.getUIContext().animateTo({ duration: 200 }, (): void => {
+          this.cacheSheetVisible = false;
+        });
+      }
+    }, 0);
+  }
+
+  /** 下载勾选话（FqCacheSheet 回传 itemId 数组；已离线/已在队列的 enqueue 内部跳过）。 */
+  private confirmCacheDownload(itemIds: string[]): void {
+    if (itemIds.length === 0) {
+      return;
+    }
+    for (let i: number = 0; i < this.chapters.length; i++) {
+      const chapter: FqChapter | undefined = this.chapters[i];
+      if (chapter !== undefined && itemIds.includes(chapter.itemId)) {
+        this.dl.enqueue(this.bookId, chapter.itemId, chapter.title,
+          this.bookTitle, i + 1);
+      }
+    }
+  }
+
+  /** 缓存任务格点击（FqCacheSheet 转发）：失败重试 / 暂停继续。 */
+  private onCacheTaskClick(itemId: string): void {
+    const task: FqComicDownloadTask | null = this.dl.taskOfItem(this.bookId, itemId);
+    if (task === null) {
+      return;
+    }
+    if (task.status === ComicDownloadStatus.Failed) {
+      this.dl.retry(task.key);
+    } else if (task.status === ComicDownloadStatus.Paused) {
+      this.dl.resume(task.key);
+    }
   }
 }

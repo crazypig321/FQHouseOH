@@ -29,6 +29,8 @@ import { FqDramaCacheStore } from '../core/FqDramaCacheStore';
 import { fqDramaDownloader } from '../core/FqDramaDownloader';
 import { FqAudioCacheStore } from '../core/FqAudioCacheStore';
 import { fqAudioDownloader } from '../core/FqAudioDownloader';
+import { FqComicCacheStore } from '../core/FqComicCacheStore';
+import { fqComicDownloader } from '../core/FqComicDownloader';
 import { appState } from './AppState';
 import { themeUtils } from '../utils/ThemeUtils';
 
@@ -55,6 +57,9 @@ export default class EntryAbility extends UIAbility {
     // 听书音频缓存（离线播放 + 缓存下载）初始化
     FqAudioCacheStore.init(this.context);
     fqAudioDownloader.init(this.context);
+    // 漫画离线缓存（图片列表秒开 + 整话离线）初始化
+    FqComicCacheStore.init(this.context);
+    fqComicDownloader.init(this.context);
     FqBackend.get().start(this.context).catch((error: Object): void => {
       hilog.error(DOMAIN, 'FqBackend', 'backend start failed: %{public}s', `${error}`);
     });

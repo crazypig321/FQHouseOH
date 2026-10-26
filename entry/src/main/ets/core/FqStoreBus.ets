@@ -15,6 +15,8 @@ export class FqStoreBus {
   @Trace dramaCacheVersion: number = 0;
   /** 听书音频缓存数据版本（FqAudioCacheStore 每次变更 +1）。 */
   @Trace audioCacheVersion: number = 0;
+  /** 漫画缓存数据版本（FqComicCacheStore 每次变更 +1）。 */
+  @Trace comicCacheVersion: number = 0;
 }
 
 export const fqStoreBus: FqStoreBus = new FqStoreBus();
