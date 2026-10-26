@@ -10,7 +10,7 @@ import { CommonNav } from '../../view/CommonNav';
 import { FqTitleBarOptions } from '../../model/FqNavModels';
 import { FqCacheEmptyView, FqCacheStatsCard, fqFormatCacheBytes } from '../../view/FqCacheCommon';
 import { FqDramaCacheStore, FqCachedDramaSummary, FqCachedEpisode } from '../../core/FqDramaCacheStore';
-import { fqExportCachedEpisode } from '../../core/FqCacheExport';
+import { fqExportCachedEpisode, fqExportDirName } from '../../core/FqCacheExport';
 import { fqDramaDownloader, FqDramaDownloader, FqDramaDownloadTask, DramaDownloadStatus } from '../../core/FqDramaDownloader';
 import { fqStoreBus, FqStoreBus } from '../../core/FqStoreBus';
 import { DialogManager } from '../../utils/DialogUtils';
@@ -379,7 +379,7 @@ export struct CachedDramasPage {
           .fontColor('#FFEF5038')
           .padding({ left: 10, right: 2, top: 6, bottom: 6 })
           .onClick((): void => {
-            this.exportEpisode(row.episode);
+            this.confirmExportEpisode(row.episode);
           })
         SymbolGlyph($r('sys.symbol.trash'))
           .fontSize(14)
@@ -498,6 +498,19 @@ export struct CachedDramasPage {
     this.dl.removeTask(task.itemId);
     FqDramaCacheStore.removeEpisode(task.itemId);
     this.refresh();
+  }
+
+  /** 导出确认：提示导出路径后再执行。 */
+  private confirmExportEpisode(episode: FqCachedEpisode | null): void {
+    if (episode === null) {
+      return;
+    }
+    DialogManager.ShowConfirm('导出这一集',
+      `《${episode.seriesTitle}》第${episode.index}集 ${episode.title} 将导出到 Download/FQHouseOH 文件夹里。`,
+      '导出',
+      (): void => {
+        this.exportEpisode(episode);
+      });
   }
 
   /** 导出单集：复制 mp4 到 Download/<包名>/<剧名>/第N集 标题.mp4。 */

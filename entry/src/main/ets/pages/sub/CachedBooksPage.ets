@@ -10,7 +10,7 @@ import { FqTitleBarOptions } from '../../model/FqNavModels';
 import { ROUTE_READER2, ReaderNavParams } from '../../model/FqNavModels';
 import { FqCacheEmptyView, FqCacheStatsCard, fqFormatCacheBytes } from '../../view/FqCacheCommon';
 import { FqChapterCacheStore, FqCachedBookSummary } from '../../core/FqChapterCacheStore';
-import { fqExportCachedBook } from '../../core/FqCacheExport';
+import { fqExportCachedBook, fqExportDirName } from '../../core/FqCacheExport';
 import { fqStoreBus, FqStoreBus } from '../../core/FqStoreBus';
 import { DialogManager } from '../../utils/DialogUtils';
 import { NavPathUtils } from '../../utils/NavPathUtils';
@@ -192,7 +192,7 @@ export struct CachedBooksPage {
         .fontColor('#FF7A3D')
         .padding({ left: 10, right: 2, top: 8, bottom: 8 })
         .onClick((): void => {
-          this.exportBook(row);
+        this.confirmExportBook(row);
         })
 
       SymbolGlyph($r('sys.symbol.chevron_right'))
@@ -215,6 +215,15 @@ export struct CachedBooksPage {
     .onClick((): void => {
       this.openBook(row);
     })
+  }
+
+  /** 导出确认：提示导出路径后再执行。 */
+  private confirmExportBook(row: CachedBookRow): void {
+    DialogManager.ShowConfirm('导出这本书',
+      `${row.summary.title} 将导出到 Download/FQHouseOH 文件夹里。`, '导出',
+      (): void => {
+        this.exportBook(row);
+      });
   }
 
   /** 导出单本：按目录顺序合并已缓存章节到 Download/<包名>/书名.txt。 */

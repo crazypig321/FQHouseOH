@@ -1,38 +1,26 @@
 /**
  * 缓存导出（章节缓存 → 合并 txt / 剧集缓存 → mp4 副本）。
  *
- * 默认导出到公共下载目录 Download/<bundleName>/（fileUri 构造，用户可见可读写）；
- * 构造失败回落应用沙箱 files/export/（实际不会发生）。
- * 文件名做非法字符清洗；目标重名直接覆盖。
+ * 对齐 musicfreeOH PathConst 的公共下载目录方案：
+ * - 导出目录固定为公共 Download/<bundleName>/（fileUri 同步构造，无沙箱回落）；
+ * - 目录不可用时通过 DOWNLOAD 模式 save（免弹窗）让系统自动重建
+ *   Download/包名/ 并授予持久化权限，随后清理预置的占位空文件；
+ * - 授权后直接 fs 写入（应用仅可访问自己包名子树，FAQ 67 语义）。
  */
 
-import { bundleManager, common } from '@kit.AbilityKit';
+import { common } from '@kit.AbilityKit';
+import { bundleManager } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { fileIo as fs, fileUri } from '@kit.CoreFileKit';
+import { fileIo as fs, fileUri, picker } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { FqCachedEpisode, FqDramaCacheStore } from './FqDramaCacheStore';
 import { FqChapterCacheStore } from './FqChapterCacheStore';
 
 const TAG: string = 'FqCacheExport';
 
-/** 同步构造公共下载目录 Download/<bundleName>/ 路径（仅构造失败才回落沙箱，实际不会发生）。 */
-export function fqResolvePublicDownloadPath(context: common.Context): string {
-  try {
-    const bundleInfo: bundleManager.BundleInfo = bundleManager.getBundleInfoForSelfSync(
-      bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
-    const uri: string = 'file://docs/storage/Users/currentUser/Download/' + bundleInfo.name;
-    const dirPath: string = new fileUri.FileUri(uri).path;
-    if (dirPath.length > 0) {
-      return dirPath;
-    }
-  } catch (error) {
-    const detail = error as BusinessError;
-    hilog.error(0x0001, TAG, `构造公共下载目录失败: ${detail.code} ${detail.message}`);
-  }
-  return `${context.filesDir}/export/`;
-}
+let downloadRoot: string = '';
 
-/** 文件/目录名清洗：去非法字符与首尾空白，超长截断，空结果回退 fallback。 */
+/** 文件名清洗：去非法字符与首尾空白，超长截断，空结果回退 fallback。 */
 function fqSanitizeName(raw: string, fallback: string): string {
   let name: string = raw.replace(/[\\/:*?"<>|]/g, ' ').trim();
   if (name.length > 80) {
@@ -41,24 +29,91 @@ function fqSanitizeName(raw: string, fallback: string): string {
   return name.length > 0 ? name : fallback;
 }
 
-/** 目录确保存在：mkdir 递归模式对已存在目录抛 13900015，存在即成功。 */
-function fqEnsureDir(dir: string): boolean {
+/** 导出目录名（= 应用包名，Download/ 下的固定子目录；弹窗提示文案用）。 */
+export function fqExportDirName(): string {
   try {
-    fs.mkdirSync(dir, true);
+    const bundleInfo: bundleManager.BundleInfo =
+      bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
+    if (bundleInfo.name.length > 0) {
+      return bundleInfo.name;
+    }
+  } catch (error) {
+    // 回退默认名
+  }
+  return 'FQHouseOH';
+}
+
+/** 同步构造公共下载目录 Download/<bundleName>/ 路径；失败回退沙箱 export 目录。 */
+function resolveDownloadRoot(context: common.Context): string {
+  try {
+    const bundleInfo: bundleManager.BundleInfo =
+      bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
+    const dirPath: string =
+      new fileUri.FileUri('file://docs/storage/Users/currentUser/Download/' + bundleInfo.name).path;
+    if (dirPath.length > 0) {
+      return dirPath;
+    }
+  } catch (error) {
+    hilog.warn(0x0001, TAG, 'resolve download root failed');
+  }
+  return `${context.filesDir}/export`;
+}
+
+/** 探测目录可写性：不存在则尝试直接 mkdir（公共 Download 下通常被拒绝）。 */
+function probeWritable(dir: string): boolean {
+  try {
+    if (!fs.accessSync(dir)) {
+      fs.mkdirSync(dir, true);
+    }
     return true;
   } catch (error) {
-    try {
-      return fs.accessSync(dir);
-    } catch (accessError) {
-      return false;
-    }
+    return false;
   }
 }
 
+/** DOWNLOAD 模式保存（免弹窗）：系统自动重建 Download/包名/ 并授予持久化权限。 */
+async function rebuildViaDownloadMode(context: common.Context): Promise<void> {
+  try {
+    const docPicker: picker.DocumentViewPicker = new picker.DocumentViewPicker(context);
+    const saveOptions: picker.DocumentSaveOptions = new picker.DocumentSaveOptions();
+    saveOptions.pickerMode = picker.DocumentPickerMode.DOWNLOAD;
+    const uris: string[] = await docPicker.save(saveOptions);
+    for (const u of uris) {
+      try {
+        const placeholder: string = new fileUri.FileUri(u).path;
+        if (fs.accessSync(placeholder)) {
+          fs.unlinkSync(placeholder);
+        }
+      } catch (error) {
+        // 占位文件清理失败不影响目录可用性
+      }
+    }
+  } catch (error) {
+    // 重建失败由外层探测兜底
+  }
+}
+
+/** 确保导出根目录就绪（懒解析 + 按需 DOWNLOAD 模式重建）；不可用抛错。 */
+async function ensureExportRoot(context: common.Context): Promise<string> {
+  if (downloadRoot.length === 0) {
+    downloadRoot = resolveDownloadRoot(context);
+  }
+  if (probeWritable(downloadRoot)) {
+    return downloadRoot;
+  }
+  hilog.info(0x0001, TAG, `download root missing, rebuild via download mode: ${downloadRoot}`);
+  await rebuildViaDownloadMode(context);
+  if (probeWritable(downloadRoot)) {
+    hilog.info(0x0001, TAG, `download root rebuilt: ${downloadRoot}`);
+    return downloadRoot;
+  }
+  throw new Error('导出目录不可用，请重试');
+}
+
 /**
- * 导出一本缓存书：按 catalog 章节顺序合并已缓存正文为单个 txt。
- * 返回导出文件路径；无目录或全部章节未缓存时抛错。
- * （章节正文为 KB 级小文件，同步读取耗时可控。）
+ * 导出一本缓存书：按 catalog 章节顺序合并已缓存正文，
+ * 直接写入 Download/<包名>/书名.txt；返回导出文件路径。
+ * 无目录或全部章节未缓存时抛错。
  */
 export async function fqExportCachedBook(context: common.Context, bookId: string): Promise<string> {
   const catalog = FqChapterCacheStore.catalog(bookId);
@@ -82,12 +137,8 @@ export async function fqExportCachedBook(context: common.Context, bookId: string
   if (exported === 0) {
     throw new Error('暂无已缓存章节可导出');
   }
-  const root: string = fqResolvePublicDownloadPath(context);
-  if (!fqEnsureDir(root)) {
-    throw new Error('创建导出目录失败');
-  }
-  const fileName: string = `${fqSanitizeName(catalog.title, bookId)}.txt`;
-  const path: string = `${root}/${fileName}`;
+  const root: string = await ensureExportRoot(context);
+  const path: string = `${root}/${fqSanitizeName(catalog.title, bookId)}.txt`;
   let file: fs.File | null = null;
   try {
     file = fs.openSync(path, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
@@ -110,8 +161,9 @@ export async function fqExportCachedBook(context: common.Context, bookId: string
 }
 
 /**
- * 导出一集缓存剧集：复制 mp4 到 Download/<bundleName>/<剧名>/第N集 标题.mp4。
- * mp4 体积大，用异步 copyFile 避免阻塞 UI 线程；源文件缺失时抛错。
+ * 导出一集缓存剧集：在 Download/<包名>/<剧名>/ 下创建
+ * 第N集 标题.mp4 后拷入缓存正文；返回导出文件路径。
+ * 源文件缺失时抛错。
  */
 export async function fqExportCachedEpisode(context: common.Context,
   episode: FqCachedEpisode): Promise<string> {
@@ -125,20 +177,30 @@ export async function fqExportCachedEpisode(context: common.Context,
   if (!exists) {
     throw new Error('缓存文件缺失，请重新下载');
   }
-  const root: string = fqResolvePublicDownloadPath(context);
+  const root: string = await ensureExportRoot(context);
   const seriesDir: string = `${root}/${fqSanitizeName(episode.seriesTitle, episode.seriesId)}`;
-  if (!fqEnsureDir(root) || !fqEnsureDir(seriesDir)) {
-    throw new Error('创建导出目录失败');
+  if (!probeWritable(seriesDir)) {
+    throw new Error('创建剧集目录失败，请重试');
   }
-  const fileName: string = `${fqSanitizeName(`第${episode.index}集 ${episode.title}`, episode.itemId)}.mp4`;
-  const destPath: string = `${seriesDir}/${fileName}`;
+  const path: string = `${seriesDir}/${
+    fqSanitizeName(`第${episode.index}集 ${episode.title}`, episode.itemId)}.mp4`;
+  let file: fs.File | null = null;
   try {
-    await fs.copyFile(srcPath, destPath);
-    hilog.info(0x0001, TAG, `export episode ok: ${destPath}`);
-    return destPath;
+    file = fs.openSync(path, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+    fs.copyFileSync(srcPath, file.fd);
+    fs.closeSync(file);
+    hilog.info(0x0001, TAG, `export episode ok: ${path}`);
+    return path;
   } catch (error) {
     const err = error as BusinessError;
-    hilog.error(0x0001, TAG, `export episode failed: ${destPath} code=${err.code} msg=${err.message}`);
+    hilog.error(0x0001, TAG, `export episode failed: ${path} code=${err.code} msg=${err.message}`);
+    if (file !== null) {
+      try {
+        fs.closeSync(file);
+      } catch (closeError) {
+        // 忽略
+      }
+    }
     throw new Error('导出失败，请重试');
   }
 }

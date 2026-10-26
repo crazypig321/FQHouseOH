@@ -68,12 +68,15 @@ export struct CommonSheet {
   @Param sortAscending: boolean = true;
   /** 标题栏右侧是否显示关闭按钮。 */
   @Param showClose: boolean = false;
+  /** 标题栏右侧是否显示管理按钮（关闭钮之前）。 */
+  @Param showManage: boolean = false;
   @Event searchToggle: () => void = (): void => {};
   @Event searchChange: (value: string) => void = (_value: string): void => {};
   @Event searchSubmit: (value: string) => void = (_value: string): void => {};
   @Event locateClick: () => void = (): void => {};
   @Event sortClick: () => void = (): void => {};
   @Event closeClick: () => void = (): void => {};
+  @Event manageClick: () => void = (): void => {};
   @BuilderParam content: () => void;
 
   build() {
@@ -153,6 +156,17 @@ export struct CommonSheet {
           label: 'sort',
           action: (): void => {
             this.sortClick();
+          },
+        },
+      });
+    }
+    if (this.showManage) {
+      menus.push({
+        content: {
+          icon: $r('sys.symbol.circle_and_arrow_down'),
+          label: 'manage',
+          action: (): void => {
+            this.manageClick();
           },
         },
       });

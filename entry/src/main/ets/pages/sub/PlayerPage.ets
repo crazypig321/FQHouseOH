@@ -53,7 +53,7 @@ import { common } from '@kit.AbilityKit';
 import { Player, PlayerSurface, Media, PlayerConfig } from '@mpv-ohos/mpv-arkts';
 import { FQ_ACCENT } from '../../view/CommonCom';
 import { CommonNav } from '../../view/CommonNav';
-import { FqSheetOptions } from '../../view/CommonSheet';
+import { CommonSheet, FqSheetOptions } from '../../view/CommonSheet';
 import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/FqCommentSheet';
 import { FqMenu, FqMenuItem } from '../../view/CommonMenu';
 import { FqDanmakuView } from '../../view/FqDanmakuView';
@@ -632,6 +632,8 @@ export struct PlayerPage {
           Column() {
             if (this.sidePanel === 'episodes') {
               this.SideEpisodes()
+            } else if (this.sidePanel === 'cache') {
+              this.SideCache()
             } else {
               this.SideSettings()
             }
@@ -1261,100 +1263,92 @@ export struct PlayerPage {
   }
 
   /**
-   * 离线缓存选集半模态（fqapp DramaDownloadSheet 语义）：头部「离线缓存 · 剧名」
-   * +「管理」（进剧集缓存管理页）、集数网格复选（已缓存置灰打勾、任务态实时
-   * 进度/排队/暂停/失败、选中橙底描边打勾、默认全选未缓存集）、全选 + 下载按钮。
+   * 离线缓存选集半模态（fqapp DramaDownloadSheet 语义，走 CommonSheet 公共框架）：
+   * 标题栏「离线缓存 · 剧名」+ 管理钮（circle_and_arrow_down，进剧集缓存管理页）+ 关闭钮；
+   * 集数网格复选（已缓存置灰打勾、任务态实时进度/排队/暂停/失败、
+   * 选中橙底描边打勾、默认全选未缓存集）、全选 + 下载按钮。
    */
   @Builder
   private CacheSheetBuilder() {
-    Column() {
-      Row() {
-        Text(`离线缓存 · ${this.title}`)
-          .fontSize(16)
-          .fontWeight(FontWeight.Bold)
-          .fontColor($r('sys.color.font_primary'))
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .layoutWeight(1)
-        Text('管理')
-          .fontSize(14)
-          .fontColor(FQ_STORY_ORANGE)
-          .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-          .onClick((): void => {
-            this.closeCacheSheet();
-            NavPathUtils.push(ROUTE_CACHED_DRAMAS);
-          })
+    CommonSheet({
+      sheetTitle: `离线缓存 · ${this.title}`,
+      showClose: true,
+      closeClick: (): void => {
+        this.closeCacheSheet();
+      },
+      showManage: true,
+      manageClick: (): void => {
+        this.closeCacheSheet();
+        NavPathUtils.push(ROUTE_CACHED_DRAMAS);
+      },
+    }) {
+      Column() {
+        Grid() {
+          ForEach(this.episodes, (episode: FqChapter, index: number) => {
+            GridItem() {
+              this.CacheEpisodeCell(episode, index, false)
+            }
+          }, (episode: FqChapter) => episode.itemId)
+        }
+        .columnsTemplate('1fr 1fr 1fr 1fr')
+        .columnsGap(8)
+        .rowsGap(8)
+        .width('100%')
+        .layoutWeight(1)
+        .scrollBar(BarState.Off)
+        .padding({ left: 16, right: 16, top: 4, bottom: 8 })
+
+        Row() {
+          Text(this.cacheAllSelected() ? '取消全选' : '全选')
+            .fontSize(14)
+            .fontColor(this.cachePendingCount() === 0 ? $r('sys.color.font_tertiary') : FQ_STORY_ORANGE)
+            .padding({ left: 4, right: 4, top: 10, bottom: 10 })
+            .onClick((): void => {
+              this.toggleCacheSelectAll();
+            })
+
+          Blank()
+
+          Button(`下载 (${this.cacheSelectedIds.size})`)
+            .type(ButtonType.Capsule)
+            .height(36)
+            .fontSize(14)
+            .fontColor(Color.White)
+            .backgroundColor(this.cacheSelectedIds.size > 0 ? FQ_STORY_ORANGE : '#33000000')
+            .enabled(this.cacheSelectedIds.size > 0)
+            .onClick((): void => {
+              this.confirmCacheDownload();
+            })
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, bottom: appState.bottomRect, top: 12 })
+        .alignItems(VerticalAlign.Center)
       }
       .width('100%')
-      .height(48)
-      .padding({ left: 20, right: 8 })
-      .alignItems(VerticalAlign.Center)
-
-      Grid() {
-        ForEach(this.episodes, (episode: FqChapter, index: number) => {
-          GridItem() {
-            this.CacheEpisodeCell(episode, index)
-          }
-        }, (episode: FqChapter) => episode.itemId)
-      }
-      .columnsTemplate('1fr 1fr 1fr 1fr')
-      .columnsGap(8)
-      .rowsGap(8)
-      .width('100%')
-      .layoutWeight(1)
-      .scrollBar(BarState.Off)
-      .padding({ left: 16, right: 16, top: 4, bottom: 8 })
-
-      Row() {
-        Text(this.cacheAllSelected() ? '取消全选' : '全选')
-          .fontSize(14)
-          .fontColor(this.cachePendingCount() === 0 ? $r('sys.color.font_tertiary') : FQ_STORY_ORANGE)
-          .padding({ left: 4, right: 4, top: 10, bottom: 10 })
-          .onClick((): void => {
-            this.toggleCacheSelectAll();
-          })
-
-        Blank()
-
-        Button(`下载 (${this.cacheSelectedIds.size})`)
-          .type(ButtonType.Capsule)
-          .height(36)
-          .fontSize(14)
-          .fontColor(Color.White)
-          .backgroundColor(this.cacheSelectedIds.size > 0 ? FQ_STORY_ORANGE : '#33000000')
-          .enabled(this.cacheSelectedIds.size > 0)
-          .onClick((): void => {
-            this.confirmCacheDownload();
-          })
-      }
-      .width('100%')
-      .padding({ left: 16, right: 16, bottom: 16 })
-      .alignItems(VerticalAlign.Center)
+      .height('100%')
     }
-    .width('100%')
-    .height('100%')
   }
 
   /** 缓存格：已缓存置灰打勾 / 任务态橙色（进度%/排队/暂停/失败）/ 可选集（选中橙底描边打勾）。 */
   @Builder
-  private CacheEpisodeCell(episode: FqChapter, index: number) {
+  private CacheEpisodeCell(episode: FqChapter, index: number, dark: boolean) {
     Row({ space: 3 }) {
       Text(this.cacheCellLabel(episode, index))
         .fontSize(13)
-        .fontColor(this.cacheCellTextColor(episode))
+        .fontColor(this.cacheCellTextColor(episode, dark))
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
       if (this.cacheCellShowCheck(episode)) {
         SymbolGlyph($r('sys.symbol.checkmark'))
           .fontSize(13)
-          .fontColor([this.cacheCellTextColor(episode)])
+          .fontColor([this.cacheCellTextColor(episode, dark)])
       }
     }
     .height(32)
     .width('100%')
     .padding({ left: 6, right: 6 })
     .borderRadius(8)
-    .backgroundColor(this.cacheCellBg(episode))
+    .backgroundColor(this.cacheCellBg(episode, dark))
     .border({ width: this.cacheCellSelected(episode) ? 1 : 0, color: FQ_STORY_ORANGE })
     .justifyContent(FlexAlign.Center)
     .alignItems(VerticalAlign.Center)
@@ -1364,13 +1358,19 @@ export struct PlayerPage {
   }
 
   /** 打开离线缓存选集半模态：刷新缓存/勾选状态（默认全选未缓存集）。
-   *  全屏（横/竖屏沉浸）下原样呼出，不退出全屏；横屏侧边栏呼出时先收侧边栏。 */
+   *  横屏沉浸全屏：改走右侧边栏（与切集/播放设置同款 UI，不退全屏）；
+   *  其余形态（竖屏全屏/非全屏）原样呼出底部 sheet。 */
   private openCacheSheet(): void {
     if (this.episodes.length === 0) {
       this.getUIContext().getPromptAction().showToast({ message: '剧集目录加载中', duration: 1500 });
       return;
     }
     this.closeSettings();
+    if (this.fullScreen && this.isLandscapeVideo()) {
+      this.refreshCacheSheetState();
+      this.openSidePanel('cache');
+      return;
+    }
     if (this.sidePanel.length > 0) {
       this.closeSidePanel();
     }
@@ -1520,9 +1520,9 @@ export struct PlayerPage {
   }
 
   /** 缓存格文字色：已缓存系统三级、失败红、任务/选中橙、普通系统主色。 */
-  private cacheCellTextColor(episode: FqChapter): ResourceColor {
+  private cacheCellTextColor(episode: FqChapter, dark: boolean): ResourceColor {
     if (this.cacheDownloadedIds.has(episode.itemId)) {
-      return $r('sys.color.font_tertiary');
+      return dark ? FQ_DARK_TERTIARY_TEXT : $r('sys.color.font_tertiary');
     }
     const task: FqDramaDownloadTask | null = this.dl.taskOf(episode.itemId);
     if (task !== null) {
@@ -1534,16 +1534,16 @@ export struct PlayerPage {
     if (this.cacheSelectedIds.has(episode.itemId)) {
       return FQ_STORY_ORANGE;
     }
-    return $r('sys.color.font_primary');
+    return dark ? Color.White : $r('sys.color.font_primary');
   }
 
-  /** 缓存格底色：任务/选中橙 8% 底，其余黑 6% 底。 */
-  private cacheCellBg(episode: FqChapter): ResourceColor {
+  /** 缓存格底色：任务/选中橙 8% 底，其余浅色黑 6% / 深色白 15% 底。 */
+  private cacheCellBg(episode: FqChapter, dark: boolean): ResourceColor {
     if (!this.cacheDownloadedIds.has(episode.itemId)
       && (this.dl.taskOf(episode.itemId) !== null || this.cacheSelectedIds.has(episode.itemId))) {
       return '#14FA6725';
     }
-    return '#0F000000';
+    return dark ? FQ_DARK_CARD_BG : '#0F000000';
   }
 
   /** 缓存格尾随勾：已缓存或选中。 */
@@ -1907,6 +1907,87 @@ export struct PlayerPage {
       this.SidePanelHeader('播放设置')
 
       this.SettingRows(true)
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  /** 侧边栏·离线缓存（横屏全屏形态）：头部左侧「管理」（进剧集缓存管理页）+
+   *  标题 + 右上关闭；集数网格复选/全选/下载行与底部半模态同款逻辑。 */
+  @Builder
+  private SideCache() {
+    Column() {
+      Row() {
+        Text('管理')
+          .fontSize(14)
+          .fontColor(FQ_STORY_ORANGE)
+          .padding({ left: 12, right: 4, top: 12, bottom: 12 })
+          .onClick((): void => {
+            this.closeSidePanel();
+            NavPathUtils.push(ROUTE_CACHED_DRAMAS);
+          })
+
+        Text(`离线缓存 · ${this.title}`)
+          .fontSize(16)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(Color.White)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .layoutWeight(1)
+
+        SymbolGlyph($r('sys.symbol.xmark'))
+          .fontSize(16)
+          .fontColor([Color.White])
+          .padding(10)
+          .onClick((): void => {
+            this.closeSidePanel();
+          })
+      }
+      .width('100%')
+      .height(48)
+      .padding({ left: 4, right: 6 })
+      .alignItems(VerticalAlign.Center)
+
+      Grid() {
+        ForEach(this.episodes, (episode: FqChapter, index: number) => {
+          GridItem() {
+            this.CacheEpisodeCell(episode, index, true)
+          }
+        }, (episode: FqChapter) => episode.itemId)
+      }
+      .columnsTemplate('1fr 1fr 1fr 1fr')
+      .columnsGap(8)
+      .rowsGap(8)
+      .width('100%')
+      .layoutWeight(1)
+      .scrollBar(BarState.Off)
+      .padding({ left: 12, right: 12, top: 4, bottom: 8 })
+
+      Row() {
+        Text(this.cacheAllSelected() ? '取消全选' : '全选')
+          .fontSize(14)
+          .fontColor(this.cachePendingCount() === 0 ? FQ_DARK_TERTIARY_TEXT : FQ_STORY_ORANGE)
+          .padding({ left: 4, right: 4, top: 10, bottom: 10 })
+          .onClick((): void => {
+            this.toggleCacheSelectAll();
+          })
+
+        Blank()
+
+        Button(`下载 (${this.cacheSelectedIds.size})`)
+          .type(ButtonType.Capsule)
+          .height(36)
+          .fontSize(14)
+          .fontColor(Color.White)
+          .backgroundColor(this.cacheSelectedIds.size > 0 ? FQ_STORY_ORANGE : '#33000000')
+          .enabled(this.cacheSelectedIds.size > 0)
+          .onClick((): void => {
+            this.confirmCacheDownload();
+          })
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, bottom: 16 })
+      .alignItems(VerticalAlign.Center)
     }
     .width('100%')
     .height('100%')

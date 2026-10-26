@@ -19,8 +19,8 @@ import { fqAsArray, fqAsRecord, fqNum, fqParseObject, fqStr } from './FqJson';
 const FQ_CACHE_STORE_NAME: string = 'fq_home_cache';
 const FQ_CACHE_KEY_CHANNEL_INDEX: string = 'channel_index';
 const FQ_FEED_DIR: string = 'home_feed_cache';
-/** 单频道持久化条目上限（限制文件体积）。 */
-const FQ_FEED_MAX_ITEMS: number = 300;
+/** 单频道持久化条目上限：只存列表前 15 条（冷启动秒显首屏即可，触底续拉补全）。 */
+const FQ_FEED_MAX_ITEMS: number = 15;
 const TAG: string = 'FqHomeCache';
 
 export class FqHomeCache {
