@@ -2257,17 +2257,16 @@ export struct ReaderPage {
     if (FqLocalBookStore.isLocalBookId(this.bookId)) {
       return FqLocalBookStore.chapterText(this.bookId, index);
     }
-    // 章节缓存命中：直接返回缓存正文（免重复在线拉取，离线可读）
-    const cached: string = FqChapterCacheStore.read(this.bookId, chapter.itemId);
-    if (cached.trim().length > 0) {
-      return cached;
-    }
+    // 网络优先：在线拉取最新正文并写章节缓存；失败（离线）回退缓存正文离线续读
     try {
       const text: string = await FqBackend.get().chapterText(chapter.itemId, chapter.title);
-      // 阅读即缓存：在线正文拉取成功后自动写入章节缓存
       FqChapterCacheStore.write(this.bookId, chapter.itemId, chapter.title, text);
       return text;
     } catch (error) {
+      const cached: string = FqChapterCacheStore.read(this.bookId, chapter.itemId);
+      if (cached.trim().length > 0) {
+        return cached;
+      }
       throw new Error(fqErrorMessage(error));
     }
   }

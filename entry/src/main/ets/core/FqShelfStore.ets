@@ -131,6 +131,26 @@ export class FqShelfStore {
     fqStoreBus.shelfVersion++;
   }
 
+  /** 回填封面（本地书按书名网络匹配命中）；条目存在且封面有变化返回 true。 */
+  public static updateCover(id: string, cover: string): boolean {
+    if (id.length === 0 || cover.length === 0) {
+      return false;
+    }
+    for (let index: number = 0; index < FqShelfStore.items.length; index++) {
+      const entry: FqShelfItem = FqShelfStore.items[index];
+      if (entry.id === id) {
+        if (entry.cover === cover) {
+          return false;
+        }
+        FqShelfStore.items[index] = new FqShelfItem(entry.id, entry.kind, entry.title, cover);
+        FqShelfStore.persist();
+        fqStoreBus.shelfVersion++;
+        return true;
+      }
+    }
+    return false;
+  }
+
   private static persist(): void {
     const pref: preferences.Preferences | null = FqShelfStore.pref;
     if (pref === null) {

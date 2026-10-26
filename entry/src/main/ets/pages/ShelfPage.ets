@@ -6,7 +6,7 @@
  * 批量多选以 appState.isBatchMode 为单一数据源（Index 返回手势退出多选、主 TabBar 显隐共享）。
  */
 
-import { ROUTE_DETAIL, ROUTE_READER2, DetailNavParams, ReaderNavParams } from '../model/FqNavModels';
+import { ROUTE_DETAIL, ROUTE_READER2, ROUTE_CACHED_BOOKS, DetailNavParams, ReaderNavParams } from '../model/FqNavModels';
 import { CommonNav, titleBarOf } from '../view/CommonNav';
 import { FQ_ACCENT, CommonSearch, CommonBlur } from '../view/CommonCom';
 import { FqMenu, FqMenuItem } from '../view/CommonMenu';
@@ -16,7 +16,8 @@ import { fqStoreBus, FqStoreBus } from '../core/FqStoreBus';
 import { DialogManager } from '../utils/DialogUtils';
 import { FqReadStatsStore } from '../core/FqReadStatsStore';
 import { FqLocalBookStore } from '../core/FqLocalBookStore';
-import { FqMediaItem, fqKindLabel } from '../model/FqModels';
+import { FqBackend } from '../core/FqBackend';
+import { FqMediaItem, FqSearchTab, fqKindLabel } from '../model/FqModels';
 import { FqMediaCard } from '../view/FqMediaCard';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import { appState, AppState } from '../entryability/AppState';
@@ -105,6 +106,8 @@ export struct ShelfPage {
   private scroller: Scroller = new Scroller();
   private dataSource: ShelfDataSource = new ShelfDataSource();
   private layoutPref: preferences.Preferences | null = null;
+  /** 已尝试封面匹配的本地书（会话内去重，避免重复搜索）。 */
+  private coverMatchTried: Set<string> = new Set<string>();
 
   /** 书架/浏览历史数据变化（详情页收藏、阅读记录、批量移除等）实时刷新列表。 */
   @Monitor('storeBus.shelfVersion', 'storeBus.browseVersion')
@@ -135,6 +138,7 @@ export struct ShelfPage {
       this.layoutPref = null;
     }
     this.refreshData();
+    this.matchUncoveredLocalBooks();
   }
 
   aboutToDisappear(): void {
@@ -383,6 +387,8 @@ export struct ShelfPage {
       }
       this.refreshData();
       this.showToast(`已导入《${item.title}》`);
+      // 导入后按书名网络匹配封面（命中回填书架条目，失败保持图标占位）
+      this.matchLocalBookCover(item.id, item.title);
     } catch (error) {
       const err: BusinessError = error as BusinessError;
       this.showToast(`导入失败：${err.message.length > 0 ? err.message : '请重试'}`);
@@ -393,6 +399,43 @@ export struct ShelfPage {
 
   private showToast(message: string): void {
     this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 });
+  }
+
+  /** 书架内无封面本地书批量匹配（进入页面时补齐历史导入的匹配机会）。 */
+  private matchUncoveredLocalBooks(): void {
+    for (const entry of FqShelfStore.all()) {
+      if (FqLocalBookStore.isLocalBookId(entry.id) && entry.cover.length === 0) {
+        this.matchLocalBookCover(entry.id, entry.title);
+      }
+    }
+  }
+
+  /** 本地书封面网络匹配：按书名搜小说源，命中同名作品则取封面回填书架条目。
+   *  会话内每本只试一次（coverMatchTried 去重），失败静默保持图标占位。 */
+  private async matchLocalBookCover(id: string, title: string): Promise<void> {
+    if (title.trim().length === 0 || this.coverMatchTried.has(id)) {
+      return;
+    }
+    this.coverMatchTried.add(id);
+    try {
+      await FqBackend.get().start(getContext(this));
+      const tabs: FqSearchTab[] = await FqBackend.get().searchTabs(title.trim(), 3, 0);
+      for (const tab of tabs) {
+        for (const media of tab.items) {
+          if (media.kind !== 'book' || media.cover.length === 0) {
+            continue;
+          }
+          if (media.title.trim() === title.trim()) {
+            if (FqShelfStore.updateCover(id, media.cover)) {
+              this.showToast(`已匹配《${title}》封面`);
+            }
+            return;
+          }
+        }
+      }
+    } catch (error) {
+      // 匹配失败保持图标占位（本会话不再重试）
+    }
   }
 
   /** 更多菜单：预览方式（两 tab 共享）+ 离线缓存 + 清空（按 tab 区分）。 */
@@ -431,7 +474,7 @@ export struct ShelfPage {
     offlineItem.label = '离线缓存';
     offlineItem.onAction = (): void => {
       FqMenu.dismiss();
-      this.showToast('离线缓存功能即将上线');
+      NavPathUtils.push(ROUTE_CACHED_BOOKS);
     };
     items.push(offlineItem);
 
@@ -744,7 +787,7 @@ export struct ShelfPage {
           .transition(TransitionEffect.OPACITY)
       }
       if (row.cover.length > 0) {
-        Image(row.cover)
+        Image(FqBackend.get().resourceUrl(row.cover))
           .width(60)
           .height(82)
           .borderRadius(8)
