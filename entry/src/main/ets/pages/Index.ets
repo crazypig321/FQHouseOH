@@ -18,6 +18,7 @@ import { FqPlaybackBall } from '../view/FqPlaybackBall';
 import { FqSheetOptions } from '../view/sheet/CommonSheet';
 import { FqChangelogSheet } from '../view/sheet/FqChangelogSheet';
 import { FqAppSettingsStore } from '../core/FqAppSettingsStore';
+import { HSBColorPicker, HSBColorPickerLayout } from '@keke/color-picker';
 
 @Entry
 @ComponentV2
@@ -284,6 +285,18 @@ struct Index {
           }
         },
       })
+    } else if (key === '自定义颜色') {
+      HSBColorPicker({
+        color: DialogManager.customColorInitial,
+        layout: HSBColorPickerLayout.COLUMN,
+        radius: 8,
+        showAlpha: true,
+        onChange: (value: string): void => {
+          DialogManager.customColorPicked = value;
+        },
+      })
+      .width('100%')
+      .height(320)
     }
   }
 }

@@ -27,6 +27,14 @@ export class DialogManager {
   /** 通用确认弹窗确认回调（点击确认后执行；取消/关闭弹窗不触发）。 */
   public static confirmCallback: (() => void) | null = null;
 
+  // ===== 自定义颜色弹窗参数（打开前由调用方赋值，弹窗关闭后自动清空） =====
+  /** 自定义颜色弹窗：取色器起始色。 */
+  public static customColorInitial: string = '#FF7A3D';
+  /** 自定义颜色弹窗：当前拖选色（确认后回传，取消丢弃）。 */
+  public static customColorPicked: string = '#FF7A3D';
+  /** 自定义颜色弹窗确认回调（确认后执行并回传所选色；取消/关闭不触发）。 */
+  private static customColorConfirmCallback: ((hex: string) => void) | null = null;
+
   // ===== 宿主注册动作（由持有 CustomDialogController 的页面注入） =====
   private static opener: (() => void) | null = null;
   private static toaster: ((message: string) => void) | null = null;
@@ -81,36 +89,47 @@ export class DialogManager {
     DialogManager.OpenDialog('通用确认');
   }
 
+  /** 自定义颜色弹窗（HSB 取色器 + 确认/取消）：initial 取色器起始色，onConfirm 确认后回传所选色（取消/关闭不触发）。 */
+  public static ShowCustomColorPicker(initial: string, onConfirm: (hex: string) => void): void {
+    DialogManager.customColorInitial = initial;
+    DialogManager.customColorPicked = initial;
+    DialogManager.customColorConfirmCallback = onConfirm;
+    DialogManager.OpenDialog('自定义颜色');
+  }
+
   /** 弹窗标题（宿主渲染时读取）。 */
   public static DialogTitle(key: string): ResourceStr {
     if (key === '通用确认') {
       return DialogManager.confirmTitle;
+    }
+    if (key === '自定义颜色') {
+      return '自定义颜色';
     }
     return '';
   }
 
   /** 弹窗底部按钮（宿主渲染时读取；CustomContentDialog 点击按钮后自动关闭）。 */
   public static DialogButtons(key: string): Array<ButtonOptions> {
-    if (key !== '通用确认') {
-      return [];
+    if (key === '通用确认' || key === '自定义颜色') {
+      const cancel: ButtonOptions = {
+        value: '取消',
+        fontColor: appState.accentColor,
+        buttonStyle: ButtonStyleMode.TEXTUAL,
+        action: (): void => {
+        }
+      };
+      const confirm: ButtonOptions = {
+        value: key === '通用确认' ? DialogManager.confirmLabel : '确认',
+        fontColor: Color.White,
+        background: appState.accentColor,
+        buttonStyle: ButtonStyleMode.TEXTUAL,
+        action: (): void => {
+          DialogManager.ConfirmButtonDialog(key);
+        }
+      };
+      return [cancel, confirm];
     }
-    const cancel: ButtonOptions = {
-      value: '取消',
-      fontColor: appState.accentColor,
-      buttonStyle: ButtonStyleMode.TEXTUAL,
-      action: (): void => {
-      }
-    };
-    const confirm: ButtonOptions = {
-      value: DialogManager.confirmLabel,
-      fontColor: Color.White,
-      background: appState.accentColor,
-      buttonStyle: ButtonStyleMode.TEXTUAL,
-      action: (): void => {
-        DialogManager.ConfirmButtonDialog(key);
-      }
-    };
-    return [cancel, confirm];
+    return [];
   }
 
   /** 弹窗确认键回调（宿主按钮 action 调用）。 */
@@ -119,6 +138,12 @@ export class DialogManager {
       const cb: (() => void) | null = DialogManager.confirmCallback;
       if (cb !== null) {
         cb();
+      }
+    }
+    if (key === '自定义颜色') {
+      const cb: ((hex: string) => void) | null = DialogManager.customColorConfirmCallback;
+      if (cb !== null) {
+        cb(DialogManager.customColorPicked);
       }
     }
   }
@@ -135,6 +160,12 @@ export class DialogManager {
       DialogManager.confirmMessage = '';
       DialogManager.confirmLabel = '确定';
       DialogManager.confirmCallback = null;
+    }
+    // 自定义颜色弹窗参数一次性，关闭后清理（取消丢弃拖选色）
+    if (key === '自定义颜色') {
+      DialogManager.customColorInitial = '#FF7A3D';
+      DialogManager.customColorPicked = '#FF7A3D';
+      DialogManager.customColorConfirmCallback = null;
     }
     const cb: (() => void) | null = DialogManager.onDialogClosed;
     DialogManager.onDialogClosed = null;

@@ -26,8 +26,6 @@ import { FqBackend } from '../core/FqBackend';
 import { DialogManager } from '../utils/DialogUtils';
 import { FqColorUtils } from '../utils/FqColorUtils';
 import { appState } from '../entryability/AppState';
-import { CommonSheet, FqSheetOptions } from '../view/sheet/CommonSheet';
-import { HSBColorPicker, HSBColorPickerLayout } from '@keke/color-picker';
 
 const FQ_HOME_TOP_INSET: number = 56;
 /** 滚动内容末尾偏移：悬浮底栏 56 + 底部悬浮边距 28。 */
@@ -68,9 +66,6 @@ export struct SettingsPage {
   @Local backgroundAudio: boolean = true;
   @Local backendUrl: string = '';
   @Local backendRefreshing: boolean = false;
-  /** 自定义颜色取色器 sheet 可见性 + 起始色（三方 HSBColorPicker）。 */
-  @Local colorSheetVisible: boolean = false;
-  @Local pickerColor: string = '#FF7A3D';
 
   aboutToAppear(): void {
     this.themeMode = FqAppSettingsStore.getThemeMode();
@@ -155,9 +150,6 @@ export struct SettingsPage {
       .contentEndOffset(appState.bottomRect + FQ_SETTINGS_BOTTOM_INSET)
       .width('100%')
       .height('100%')
-      .bindSheet(this.colorSheetVisible, this.ColorPickerSheet(), FqSheetOptions((): void => {
-        this.colorSheetVisible = false;
-      }, 480))
     }
   }
 
@@ -210,37 +202,13 @@ export struct SettingsPage {
     FqMenu.open(this.getUIContext(), FQ_THEME_COLOR_ANCHOR_ID, items);
   }
 
-  /** 打开自定义颜色取色器（起始色 = 当前自定义色，选色即时生效）。 */
+  /** 打开自定义颜色取色器（公共弹窗：底部确认/取消，确认后应用所选颜色）。 */
   private openCustomColorPicker(): void {
-    this.pickerColor = FqAppSettingsStore.getThemeCustomColor();
-    this.colorSheetVisible = true;
-  }
-
-  /** 自定义颜色 sheet：三方 HSBColorPicker 纵向布局（色相/饱和度/亮度 + 预设色），选色即时应用全局高亮色。 */
-  @Builder
-  private ColorPickerSheet() {
-    CommonSheet({
-      sheetTitle: '自定义颜色',
-      showClose: true,
-      closeClick: (): void => {
-        this.colorSheetVisible = false;
-      },
-    }) {
-      HSBColorPicker({
-        color: this.pickerColor,
-        layout: HSBColorPickerLayout.COLUMN,
-        radius: 8,
-        showAlpha: true,
-        onChange: (value: string): void => {
-          this.pickerColor = value;
-          FqAppSettingsStore.setThemeCustomColor(value);
-          FqAppSettingsStore.setThemeColor('custom');
-        },
-      })
-      .width('100%')
-      .height(320)
-      .padding({ left: 20, right: 20 })
-    }
+    DialogManager.ShowCustomColorPicker(FqAppSettingsStore.getThemeCustomColor(),
+      (hex: string): void => {
+        FqAppSettingsStore.setThemeCustomColor(hex);
+        FqAppSettingsStore.setThemeColor('custom');
+      });
   }
 
   private confirmClearAllData(): void {
