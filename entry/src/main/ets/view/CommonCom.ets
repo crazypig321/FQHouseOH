@@ -160,17 +160,13 @@ export struct CommonBlur{
 export function SettingChip(label: Resource, action: () => void) {
   Column() {
     SymbolGlyph(label)
-      .fontSize(18)
+      .fontSize(12)
       .fontColor([themeUtils.terTextColor])
   }
   .width(24)
   .height(24)
   .borderRadius(17)
   .backgroundColor($r('app.color.reader_chip_bg'))
-  .border({
-    width: 1,
-    color: themeUtils.terTextColor,
-  })
   .justifyContent(FlexAlign.Center)
   .onClick((): void => {
     action();
