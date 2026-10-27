@@ -12,7 +12,7 @@ export class ThemeUtils {
   /** 主文本色（标题 / 图标） */
   @Trace textColor: ResourceColor = $r('sys.color.font');
   /** 三级文本色（副标题） */
-  @Trace terTextColor: ResourceColor = $r('sys.color.font_tertiary');
+  @Trace terTextColor: ResourceColor = $r('sys.color.font_fourth');
 
   /**
    * 深浅模式变化时调用（EntryAbility.onConfigurationUpdate）

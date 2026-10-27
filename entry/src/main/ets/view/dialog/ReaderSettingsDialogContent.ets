@@ -11,6 +11,7 @@ import { FqCustomReaderTheme, fqCustomThemeUseDark } from '../../core/FqReaderSt
 import { FqAppSettingsStore, FQ_THEME_DARK, FQ_THEME_LIGHT } from '../../core/FqAppSettingsStore';
 import { appState } from '../../entryability/AppState';
 import { themeUtils } from '../../utils/ThemeUtils';
+import { SettingChip } from '../CommonCom';
 
 /** 阅读主题：themeColor 仅支持 6 位色值（无透明度）。 */
 export interface FqReaderTheme {
@@ -106,15 +107,15 @@ export struct ReaderSettingsDialogContent {
           .fontSize(14)
           .fontColor(themeUtils.textColor)
           .width(36)
-        this.SettingChip('A-', (): void => {
+        SettingChip($r('sys.symbol.minus'), (): void => {
           this.fontSizeChange(-1);
         })
         Text(`${this.fontSize}`)
           .fontSize(14)
           .fontColor(themeUtils.textColor)
-          .width(32)
+          .width(20)
           .textAlign(TextAlign.Center)
-        this.SettingChip('A+', (): void => {
+        SettingChip($r('sys.symbol.plus'), (): void => {
           this.fontSizeChange(1);
         })
       }
@@ -126,15 +127,15 @@ export struct ReaderSettingsDialogContent {
           .fontSize(14)
           .fontColor(themeUtils.textColor)
           .width(36)
-        this.SettingChip('-', (): void => {
+        SettingChip($r('sys.symbol.minus'), (): void => {
           this.lineHeightChange(-0.1);
         })
         Text(`${this.lineHeight.toFixed(1)}`)
           .fontSize(14)
           .fontColor(themeUtils.textColor)
-          .width(32)
+          .width(20)
           .textAlign(TextAlign.Center)
-        this.SettingChip('+', (): void => {
+        SettingChip($r('sys.symbol.plus'), (): void => {
           this.lineHeightChange(0.1);
         })
       }
@@ -351,22 +352,5 @@ export struct ReaderSettingsDialogContent {
         this.addCustomThemeChange();
       })
     }
-  }
-
-  /** 设置圆形按钮（字号/行距增减），背景随系统深浅色。 */
-  @Builder
-  private SettingChip(label: string, action: () => void) {
-    Text(label)
-      .fontSize(14)
-      .fontWeight(FontWeight.Medium)
-      .fontColor(themeUtils.textColor)
-      .width(34)
-      .height(34)
-      .borderRadius(17)
-      .textAlign(TextAlign.Center)
-      .backgroundColor($r('app.color.reader_chip_bg'))
-      .onClick((): void => {
-        action();
-      })
   }
 }

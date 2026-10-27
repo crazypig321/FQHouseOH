@@ -1,6 +1,7 @@
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { searchImmersiveModifier } from '../utils/UiUtils';
 import { appState } from '../entryability/AppState';
+import { themeUtils } from '../utils/ThemeUtils';
 
 /**
  * 公共搜索组件（移植 musicfreeOH CommonSearch）。
@@ -152,4 +153,26 @@ export struct CommonBlur{
       .linearGradientBlur(30,
         { fractionStops: [[0, 0], [0.9, 0.15], [1, 0.3], [1, 1]], direction: this.gradientDirection })
   }
+}
+
+/** 设置圆形按钮（字号/行距增减），背景随系统深浅色。 */
+@Builder
+export function SettingChip(label: Resource, action: () => void) {
+  Column() {
+    SymbolGlyph(label)
+      .fontSize(18)
+      .fontColor([themeUtils.terTextColor])
+  }
+  .width(24)
+  .height(24)
+  .borderRadius(17)
+  .backgroundColor($r('app.color.reader_chip_bg'))
+  .border({
+    width: 1,
+    color: themeUtils.terTextColor,
+  })
+  .justifyContent(FlexAlign.Center)
+  .onClick((): void => {
+    action();
+  })
 }

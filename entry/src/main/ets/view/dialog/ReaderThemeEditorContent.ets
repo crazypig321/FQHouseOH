@@ -16,6 +16,7 @@ import { FQ_FONT_OPTIONS, FqFontOption } from '../../core/FqOnlineParser';
 import { appState } from '../../entryability/AppState';
 import { themeUtils } from '../../utils/ThemeUtils';
 import { rowImmersiveModifier } from '../../utils/ModifierUtils';
+import { SettingChip } from '../CommonCom';
 
 /** 编辑弹窗预设字色（配合自定义背景：深色 4 档 + 浅色 1 档）。 */
 const FQ_EDITOR_FONT_COLORS: string[] = ['#1F2329', '#5B4636', '#33506B', '#3D5A4C', '#E8E6E1'];
@@ -244,35 +245,17 @@ export struct ReaderThemeEditorContent {
           .onClick((): void => {
             this.applyCurFontSize(0);
           })
-        Text('A-')
-          .fontSize(13)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(themeUtils.textColor)
-          .width(28)
-          .height(28)
-          .borderRadius(14)
-          .textAlign(TextAlign.Center)
-          .backgroundColor($r('app.color.reader_chip_bg'))
-          .onClick((): void => {
-            this.stepCurFontSize(-1);
-          })
+        SettingChip($r('sys.symbol.minus'), (): void => {
+          this.stepCurFontSize(-1);
+        })
         Text(this.curFontSize() > 0 ? `${this.curFontSize()}` : '跟随')
           .fontSize(13)
           .fontColor(themeUtils.textColor)
           .width(36)
           .textAlign(TextAlign.Center)
-        Text('A+')
-          .fontSize(13)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(themeUtils.textColor)
-          .width(28)
-          .height(28)
-          .borderRadius(14)
-          .textAlign(TextAlign.Center)
-          .backgroundColor($r('app.color.reader_chip_bg'))
-          .onClick((): void => {
-            this.stepCurFontSize(1);
-          })
+        SettingChip($r('sys.symbol.plus'), (): void => {
+          this.stepCurFontSize(1);
+        })
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
@@ -291,35 +274,17 @@ export struct ReaderThemeEditorContent {
           .onClick((): void => {
             this.applyCurLineHeight(0);
           })
-        Text('-')
-          .fontSize(13)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(themeUtils.textColor)
-          .width(28)
-          .height(28)
-          .borderRadius(14)
-          .textAlign(TextAlign.Center)
-          .backgroundColor($r('app.color.reader_chip_bg'))
-          .onClick((): void => {
-            this.stepCurLineHeight(-0.1);
-          })
+        SettingChip($r('sys.symbol.minus'), (): void => {
+          this.stepCurLineHeight(-0.1);
+        })
         Text(this.curLineHeight() > 0 ? this.curLineHeight().toFixed(1) : '跟随')
           .fontSize(13)
           .fontColor(themeUtils.textColor)
           .width(36)
           .textAlign(TextAlign.Center)
-        Text('+')
-          .fontSize(13)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(themeUtils.textColor)
-          .width(28)
-          .height(28)
-          .borderRadius(14)
-          .textAlign(TextAlign.Center)
-          .backgroundColor($r('app.color.reader_chip_bg'))
-          .onClick((): void => {
-            this.stepCurLineHeight(0.1);
-          })
+        SettingChip($r('sys.symbol.plus'), (): void => {
+          this.stepCurLineHeight(0.1);
+        })
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
