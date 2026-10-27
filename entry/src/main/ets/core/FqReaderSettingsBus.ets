@@ -10,6 +10,7 @@ export class FqReaderSettingsBus {
   @Trace themeIndex: number = 0;
   @Trace flipIndex: number = 0;
   @Trace fontIndex: number = 0;
+  @Trace showParagraphComment: boolean = true;
   /** 阅读页注册的变更处理器（aboutToAppear 注册、aboutToDisappear 注销）。 */
   public handler: FqReaderSettingsHandler | null = null;
 }
@@ -21,6 +22,7 @@ export interface FqReaderSettingsHandler {
   changeTheme: (index: number) => void;
   changeFont: (index: number) => void;
   changeFlip: (index: number) => void;
+  changeShowParagraphComment: (on: boolean) => void;
 }
 
 export const fqReaderSettingsBus: FqReaderSettingsBus = new FqReaderSettingsBus();

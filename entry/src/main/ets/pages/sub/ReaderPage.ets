@@ -234,6 +234,7 @@ export struct ReaderPage {
   @Local themeIndex: number = 0;
   @Local flipIndex: number = 0;
   @Local fontIndex: number = 0;
+  @Local showParagraphComment: boolean = true;
   /** 当前章分页结果 / 邻章预载缓存（引用替换驱动翻页容器刷新）。 */
   @Local curLayout: FqChapterLayout | null = null;
   @Local prevLayout: FqChapterLayout | null = null;
@@ -328,6 +329,7 @@ export struct ReaderPage {
     this.themeIndex = settings.themeIndex;
     this.flipIndex = settings.flipIndex;
     this.fontIndex = settings.fontIndex;
+    this.showParagraphComment = settings.showParagraphComment;
     this.syncReaderColorMode();
     this.filesDir = getContext(this).filesDir;
     this.chapterPages = FqReaderStore.getChapterPages(this.bookId);
@@ -823,8 +825,11 @@ export struct ReaderPage {
     .backgroundColor(this.theme().background)
   }
 
-  /** 上下滚动段评气泡计数（本地书全 0）。 */
+  /** 上下滚动段评气泡计数（本地书全 0；段评开关关闭恒 0）。 */
   private verticalBubbleCount(item: FqVerticalTextItem): number {
+    if (!this.showParagraphComment) {
+      return 0;
+    }
     if (item.paraIndex < item.layout.commentCounts.length) {
       return item.layout.commentCounts[item.paraIndex];
     }
@@ -1136,7 +1141,10 @@ export struct ReaderPage {
   private layoutChapter(index: number, paragraphs: string[], counts: number[], paraIdx: number[]): FqChapterLayout {
     const metrics: FqReaderLayoutMetrics = this.cachedMetrics;
     const engine: FqPaginationEngine = new FqPaginationEngine(this.measureFn());
-    const layout: FqChapterLayout = engine.layout(index, paragraphs, metrics, counts);
+    // 段评关闭：分页引擎喂全零计数（气泡不参与装页），布局仍保留真实计数供开关回开复用
+    const engineCounts: number[] = this.showParagraphComment ? counts : this.zeroCounts(counts.length);
+    const layout: FqChapterLayout = engine.layout(index, paragraphs, metrics, engineCounts);
+    layout.commentCounts = counts.slice();
     layout.paraIdx = paraIdx.slice();
     return layout;
   }
@@ -2075,11 +2083,16 @@ export struct ReaderPage {
       },
       changeFont: (index: number): void => {
         this.changeFont(index);
-        fqReaderSettingsBus.fontIndex = this.fontIndex;
+    fqReaderSettingsBus.fontIndex = this.fontIndex;
+    fqReaderSettingsBus.showParagraphComment = this.showParagraphComment;
       },
       changeFlip: (index: number): void => {
         this.changeFlip(index);
         fqReaderSettingsBus.flipIndex = this.flipIndex;
+      },
+      changeShowParagraphComment: (on: boolean): void => {
+        this.changeShowParagraphComment(on);
+        fqReaderSettingsBus.showParagraphComment = this.showParagraphComment;
       },
     };
   }
@@ -2131,10 +2144,19 @@ export struct ReaderPage {
     this.applySettingChange(true);
   }
 
+  /** 段评显示开关：关闭后气泡不参与分页（保位重排），开启用布局缓存计数恢复。 */
+  private changeShowParagraphComment(on: boolean): void {
+    if (on === this.showParagraphComment) {
+      return;
+    }
+    this.showParagraphComment = on;
+    this.applySettingChange(true);
+  }
+
   private applySettingChange(needRelayout: boolean): void {
     this.syncReaderColorMode();
     FqReaderStore.saveSettings(this.fontSize, this.lineHeight, this.themeIndex, this.flipIndex,
-      this.fontIndex);
+      this.fontIndex, this.showParagraphComment);
     if (needRelayout) {
       this.relayoutKeepPosition();
     }

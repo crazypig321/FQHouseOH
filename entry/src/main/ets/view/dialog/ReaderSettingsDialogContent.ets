@@ -39,6 +39,8 @@ export struct ReaderSettingsDialogContent {
   @Param themeIndex: number = 0;
   @Param flipIndex: number = 0;
   @Param fontIndex: number = 0;
+  /** 段评显示开关（关闭后不显示段评气泡与计数）。 */
+  @Param showParagraphComment: boolean = true;
   /** 「跟随系统」色卡预览背景（当前生效主题背景）。 */
   @Param followThemeBg: string = '#F6F4EF';
   /** 「跟随系统」色卡预览字色（当前生效主题字色）。 */
@@ -48,6 +50,7 @@ export struct ReaderSettingsDialogContent {
   @Event themeChange: (index: number) => void = (_index: number): void => {};
   @Event fontChange: (index: number) => void = (_index: number): void => {};
   @Event flipChange: (index: number) => void = (_index: number): void => {};
+  @Event showParagraphCommentChange: (on: boolean) => void = (_on: boolean): void => {};
 
   build() {
     Column({ space: 16 }) {
@@ -181,6 +184,25 @@ export struct ReaderSettingsDialogContent {
               this.flipChange(index);
             })
         }, (label: string): string => label)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      Row({ space: 12 }) {
+        Text('段评')
+          .fontSize(14)
+          .fontColor(themeUtils.textColor)
+          .width(36)
+        Text(this.showParagraphComment ? '显示段评气泡与评论数' : '不显示段评气泡与评论数')
+          .fontSize(12)
+          .fontColor(themeUtils.terTextColor)
+          .layoutWeight(1)
+        Toggle({ type: ToggleType.Switch, isOn: this.showParagraphComment })
+          .selectedColor(appState.accentColor)
+          .switchPointColor(Color.White)
+          .onChange((isOn: boolean): void => {
+            this.showParagraphCommentChange(isOn);
+          })
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)

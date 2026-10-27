@@ -38,6 +38,8 @@ export class FqReaderSettings {
   comicFlipIndex: number = 0;
   /** 字体档位（FQ_FONT_OPTIONS 下标）：0 系统（跟随系统字体设置）/ 1 书宋 / 2 黑体。 */
   fontIndex: number = 0;
+  /** 段评显示开关（关闭后不显示段评气泡与计数，重新分页）。 */
+  showParagraphComment: boolean = true;
 }
 
 function fqClampFontSize(value: number): number {
@@ -114,6 +116,10 @@ export class FqReaderStore {
         const oldFont: number = FqReaderStore.settings.fontIndex;
         FqReaderStore.settings.fontIndex = oldFont === 0 ? 1 : (oldFont === 1 ? 2 : 0);
       }
+      const showParagraphComment: Object | undefined = rec['showParagraphComment'];
+      if (typeof showParagraphComment === 'boolean') {
+        FqReaderStore.settings.showParagraphComment = showParagraphComment;
+      }
     } catch (error) {
       // 损坏配置按默认处理
     }
@@ -124,12 +130,13 @@ export class FqReaderStore {
   }
 
   public static saveSettings(fontSize: number, lineHeight: number,
-    themeIndex: number, flipIndex: number, fontIndex: number): void {
+    themeIndex: number, flipIndex: number, fontIndex: number, showParagraphComment: boolean): void {
     FqReaderStore.settings.fontSize = fqClampFontSize(fontSize);
     FqReaderStore.settings.lineHeight = fqClampLineHeight(lineHeight);
     FqReaderStore.settings.themeIndex = Math.min(2, Math.max(-1, Math.trunc(themeIndex)));
     FqReaderStore.settings.flipIndex = Math.min(2, Math.max(0, Math.trunc(flipIndex)));
     FqReaderStore.settings.fontIndex = Math.max(0, Math.trunc(fontIndex));
+    FqReaderStore.settings.showParagraphComment = showParagraphComment;
     FqReaderStore.persistSettings();
   }
 
@@ -153,6 +160,7 @@ export class FqReaderStore {
     rec['flipIndex'] = FqReaderStore.settings.flipIndex;
     rec['comicFlipIndex'] = FqReaderStore.settings.comicFlipIndex;
     rec['fontIndex'] = FqReaderStore.settings.fontIndex;
+    rec['showParagraphComment'] = FqReaderStore.settings.showParagraphComment;
     try {
       pref.putSync(FQ_READER_KEY_SETTINGS, JSON.stringify(rec));
       pref.flush().catch((_error: BusinessError): void => {

@@ -244,6 +244,7 @@ struct Index {
         themeIndex: fqReaderSettingsBus.themeIndex,
         flipIndex: fqReaderSettingsBus.flipIndex,
         fontIndex: fqReaderSettingsBus.fontIndex,
+        showParagraphComment: fqReaderSettingsBus.showParagraphComment,
         followThemeBg: fqEffectiveReaderTheme(fqReaderSettingsBus.themeIndex, appState.isDark).background,
         followThemeFont: fqEffectiveReaderTheme(fqReaderSettingsBus.themeIndex, appState.isDark).fontColor,
         fontSizeChange: (delta: number): void => {
@@ -274,6 +275,12 @@ struct Index {
           const handler: FqReaderSettingsHandler | null = fqReaderSettingsBus.handler;
           if (handler !== null) {
             handler.changeFlip(index);
+          }
+        },
+        showParagraphCommentChange: (on: boolean): void => {
+          const handler: FqReaderSettingsHandler | null = fqReaderSettingsBus.handler;
+          if (handler !== null) {
+            handler.changeShowParagraphComment(on);
           }
         },
       })

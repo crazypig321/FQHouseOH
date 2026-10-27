@@ -160,11 +160,12 @@ export class FqBackupAppSettings {
   readonly readerFlipIndex: number;
   readonly readerComicFlipIndex: number;
   readonly readerFontIndex: number;
+  readonly readerShowParagraphComment: boolean;
 
   constructor(themeMode: number, themeColor: string, themeCustomColor: string,
     backgroundAudio: boolean, readerFontSize: number, readerLineHeight: number,
     readerThemeIndex: number, readerFlipIndex: number, readerComicFlipIndex: number,
-    readerFontIndex: number) {
+    readerFontIndex: number, readerShowParagraphComment: boolean) {
     this.themeMode = themeMode;
     this.themeColor = themeColor;
     this.themeCustomColor = themeCustomColor;
@@ -175,6 +176,7 @@ export class FqBackupAppSettings {
     this.readerFlipIndex = readerFlipIndex;
     this.readerComicFlipIndex = readerComicFlipIndex;
     this.readerFontIndex = readerFontIndex;
+    this.readerShowParagraphComment = readerShowParagraphComment;
   }
 }
 
@@ -328,7 +330,8 @@ export class FqLibraryBackup {
       readerSettings.themeIndex,
       readerSettings.flipIndex,
       readerSettings.comicFlipIndex,
-      readerSettings.fontIndex);
+      readerSettings.fontIndex,
+      readerSettings.showParagraphComment);
     return new FqLibraryBackupData(Date.now(), FqLibraryBackup.appVersion(),
       shelf, browse, listen, watched, reader, excluded, settings);
   }
@@ -418,6 +421,7 @@ export class FqLibraryBackup {
       settings['readerFlipIndex'] = data.settings.readerFlipIndex;
       settings['readerComicFlipIndex'] = data.settings.readerComicFlipIndex;
       settings['readerFontIndex'] = data.settings.readerFontIndex;
+      settings['readerShowParagraphComment'] = data.settings.readerShowParagraphComment;
       root['settings'] = settings;
     }
     const text: string = JSON.stringify(root);
@@ -596,6 +600,7 @@ export class FqLibraryBackup {
       if (readerLineHeight < 1.2) {
         throw new Error('备份字段 readerLineHeight 无效');
       }
+      const showParaRaw: Object | undefined = settingsRec['readerShowParagraphComment'];
       settings = new FqBackupAppSettings(themeMode, themeColor, themeCustomColor,
         settingsRec['backgroundAudio'] === true,
         readerFontSize,
@@ -603,7 +608,8 @@ export class FqLibraryBackup {
         fqBackupCheckRange(settingsRec, 'readerThemeIndex', -1, 2),
         fqBackupCheckRange(settingsRec, 'readerFlipIndex', 0, 2),
         fqBackupCheckRange(settingsRec, 'readerComicFlipIndex', 0, 2),
-        fqBackupCheckRange(settingsRec, 'readerFontIndex', 0, 8));
+        fqBackupCheckRange(settingsRec, 'readerFontIndex', 0, 8),
+        typeof showParaRaw === 'boolean' ? showParaRaw : true);
     }
     return new FqLibraryBackupData(createdAt, appVersion, shelf, browse, listen,
       watched, reader, excluded, settings);
@@ -649,7 +655,8 @@ export class FqLibraryBackup {
       FqAppSettingsStore.setThemeColor(settings.themeColor);
       FqAppSettingsStore.setBackgroundAudio(settings.backgroundAudio);
       FqReaderStore.saveSettings(settings.readerFontSize, settings.readerLineHeight,
-        settings.readerThemeIndex, settings.readerFlipIndex, settings.readerFontIndex);
+        settings.readerThemeIndex, settings.readerFlipIndex, settings.readerFontIndex,
+        settings.readerShowParagraphComment);
       FqReaderStore.saveComicFlip(settings.readerComicFlipIndex);
       settingsApplied = true;
     }
