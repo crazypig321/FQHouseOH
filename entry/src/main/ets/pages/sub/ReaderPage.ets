@@ -797,7 +797,8 @@ export struct ReaderPage {
               ? (this.theme().night ? FqColorUtils.withOpacity(appState.accentColor, 0.2) : FqColorUtils.withOpacity(appState.accentColor, 0.1)) : 'transparent')
             .borderRadius(this.verticalParaHighlighted(item) ? 6 : 0)
           }
-        }, (item: FqVerticalTextItem): string => `${item.chapterIndex}_${item.paraIndex}`)
+        }, (item: FqVerticalTextItem): string =>
+          `${item.chapterIndex}_${item.paraIndex}_${this.effFontSize()}_${this.effLineHeight()}_${this.effFontIndex()}`)
       }
       .width('100%')
       .layoutWeight(1)

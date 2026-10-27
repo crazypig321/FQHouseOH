@@ -34,11 +34,11 @@ export struct FqPageCanvas {
   }
 
   build() {
-    Column() {
+    Flex({ direction: FlexDirection.Column, justifyContent: FlexAlign.Center, alignItems: ItemAlign.Center }) {
       if (this.page !== null) {
         ForEach(this.page.fragments, (frag: FqPageFragment) => {
             Text(){
-              Span(frag.text)
+              Span(frag.text).layoutWeight(1)
               if (frag.showBubble && this.bubbleCount(frag) > 0) {
                 ImageSpan($r('app.media.ellipsis_message'))
                   .width(this.metrics.bubbleIconFp)
@@ -80,7 +80,7 @@ export struct FqPageCanvas {
     })
     .width('100%')
     .height('100%')
-    .alignItems(HorizontalAlign.Center)
+    //.alignItems(HorizontalAlign.Center)
     .backgroundColor(this.pageBgColor)
     .clip(true)
   }
