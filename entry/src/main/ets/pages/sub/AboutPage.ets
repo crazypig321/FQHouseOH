@@ -286,6 +286,7 @@ export struct AboutPage {
         .height(84)
         .borderRadius(22)
         .objectFit(ImageFit.Cover)
+        .draggable(false)
       Text('FQHouseOH')
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
