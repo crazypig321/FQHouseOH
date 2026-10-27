@@ -12,7 +12,8 @@ import { FqShelfItem, FqShelfStore } from './FqShelfStore';
 import { FqBrowseItem, FqBrowseStore } from './FqBrowseStore';
 import { FqListenRecord, FqAudioHistory } from './FqAudioHistory';
 import { FqWatchedMergeOutcome, FqWatchedProgress, FqWatchedStore } from './FqWatchedStore';
-import { FqReaderProgress, FqReaderSettings, FqReaderStore, fqDecodeReadRanges, fqEncodeReadRanges } from './FqReaderStore';
+import { FqReaderProgress, FqReaderSettings, FqReaderStore,
+  fqDecodeReadRanges, fqEncodeReadRanges, fqNormalizeThemeFontColor } from './FqReaderStore';
 import { FqAppSettingsStore } from './FqAppSettingsStore';
 import { fqAsArray, fqAsRecord, fqStr } from './FqJson';
 
@@ -23,6 +24,7 @@ const FQ_BACKUP_VERSION: number = 2;
 export const FQ_BACKUP_MAX_BYTES: number = 16 * 1024 * 1024;
 const FQ_BACKUP_MAX_RECORDS: number = 10000;
 const FQ_BACKUP_MAX_EPISODES: number = 100000;
+const FQ_BACKUP_MAX_THEMES: number = 50;
 const FQ_BACKUP_MAX_TIME: number = 8640000000000000;
 const FQ_BACKUP_MAX_TEXT: number = 8192;
 const FQ_BACKUP_KINDS: string[] = ['book', 'audio', 'manga', 'video', 'manju'];
@@ -148,6 +150,47 @@ export class FqBackupReaderProgress {
   }
 }
 
+/** 备份内自定义阅读主题：浅色/深色双模式参数白名单（背景图文件本体不进备份，恢复时按文件校验沙箱存在）。 */
+export class FqBackupCustomTheme {
+  readonly id: string;
+  readonly name: string;
+  readonly lightBgFile: string;
+  readonly lightFontColor: string;
+  readonly lightFontSize: number;
+  readonly lightFontIndex: number;
+  readonly lightLineHeight: number;
+  readonly darkBgFile: string;
+  readonly darkFontColor: string;
+  readonly darkFontSize: number;
+  readonly darkFontIndex: number;
+  readonly darkLineHeight: number;
+
+  constructor(id: string, name: string,
+    lightBgFile: string, lightFontColor: string, lightFontSize: number,
+    lightFontIndex: number, lightLineHeight: number,
+    darkBgFile: string, darkFontColor: string, darkFontSize: number,
+    darkFontIndex: number, darkLineHeight: number) {
+    this.id = id;
+    this.name = name;
+    this.lightBgFile = lightBgFile;
+    this.lightFontColor = lightFontColor;
+    this.lightFontSize = lightFontSize;
+    this.lightFontIndex = lightFontIndex;
+    this.lightLineHeight = lightLineHeight;
+    this.darkBgFile = darkBgFile;
+    this.darkFontColor = darkFontColor;
+    this.darkFontSize = darkFontSize;
+    this.darkFontIndex = darkFontIndex;
+    this.darkLineHeight = darkLineHeight;
+  }
+}
+
+/** 沙箱绝对路径 → 文件名（备份 bgFile 字段；空路径返回空串）。 */
+function fqBackupBaseName(path: string): string {
+  const slash: number = path.lastIndexOf('/');
+  return slash >= 0 ? path.substring(slash + 1) : path;
+}
+
 /** 备份内应用设置段：外观（深浅模式/主题色）+ 阅读偏好（字号/行距/主题/翻页/字体）。 */
 export class FqBackupAppSettings {
   readonly themeMode: number;
@@ -161,11 +204,16 @@ export class FqBackupAppSettings {
   readonly readerComicFlipIndex: number;
   readonly readerFontIndex: number;
   readonly readerShowParagraphComment: boolean;
+  /** 自定义阅读主题参数（旧备份缺省为空列表）。 */
+  readonly readerCustomThemes: FqBackupCustomTheme[];
+  /** 当前选中的自定义主题 id（旧备份缺省为空串）。 */
+  readonly readerCustomThemeId: string;
 
   constructor(themeMode: number, themeColor: string, themeCustomColor: string,
     backgroundAudio: boolean, readerFontSize: number, readerLineHeight: number,
     readerThemeIndex: number, readerFlipIndex: number, readerComicFlipIndex: number,
-    readerFontIndex: number, readerShowParagraphComment: boolean) {
+    readerFontIndex: number, readerShowParagraphComment: boolean,
+    readerCustomThemes: FqBackupCustomTheme[], readerCustomThemeId: string) {
     this.themeMode = themeMode;
     this.themeColor = themeColor;
     this.themeCustomColor = themeCustomColor;
@@ -177,6 +225,8 @@ export class FqBackupAppSettings {
     this.readerComicFlipIndex = readerComicFlipIndex;
     this.readerFontIndex = readerFontIndex;
     this.readerShowParagraphComment = readerShowParagraphComment;
+    this.readerCustomThemes = readerCustomThemes;
+    this.readerCustomThemeId = readerCustomThemeId;
   }
 }
 
@@ -320,6 +370,15 @@ export class FqLibraryBackup {
         fqEncodeReadRanges(FqReaderStore.getReadChapters(bookId))));
     }
     const readerSettings: FqReaderSettings = FqReaderStore.getSettings();
+    // 自定义阅读主题：只备份双模式参数（bgPath 取 basename），图片文件本体不进备份（16MB 上限）
+    const customThemes: FqBackupCustomTheme[] = [];
+    for (const theme of readerSettings.customThemes) {
+      customThemes.push(new FqBackupCustomTheme(theme.id, theme.name,
+        fqBackupBaseName(theme.lightBgPath), theme.lightFontColor, theme.lightFontSize,
+        theme.lightFontIndex, theme.lightLineHeight,
+        fqBackupBaseName(theme.darkBgPath), theme.darkFontColor, theme.darkFontSize,
+        theme.darkFontIndex, theme.darkLineHeight));
+    }
     const settings: FqBackupAppSettings = new FqBackupAppSettings(
       FqAppSettingsStore.getThemeMode(),
       FqAppSettingsStore.getThemeColor(),
@@ -331,7 +390,9 @@ export class FqLibraryBackup {
       readerSettings.flipIndex,
       readerSettings.comicFlipIndex,
       readerSettings.fontIndex,
-      readerSettings.showParagraphComment);
+      readerSettings.showParagraphComment,
+      customThemes,
+      readerSettings.customThemeId);
     return new FqLibraryBackupData(Date.now(), FqLibraryBackup.appVersion(),
       shelf, browse, listen, watched, reader, excluded, settings);
   }
@@ -422,6 +483,25 @@ export class FqLibraryBackup {
       settings['readerComicFlipIndex'] = data.settings.readerComicFlipIndex;
       settings['readerFontIndex'] = data.settings.readerFontIndex;
       settings['readerShowParagraphComment'] = data.settings.readerShowParagraphComment;
+      const customThemes: Object[] = [];
+      for (const theme of data.settings.readerCustomThemes) {
+        const themeRec: Record<string, Object> = {};
+        themeRec['id'] = theme.id;
+        themeRec['name'] = theme.name;
+        themeRec['lightBgFile'] = theme.lightBgFile;
+        themeRec['lightFontColor'] = theme.lightFontColor;
+        themeRec['lightFontSize'] = theme.lightFontSize;
+        themeRec['lightFontIndex'] = theme.lightFontIndex;
+        themeRec['lightLineHeight'] = theme.lightLineHeight;
+        themeRec['darkBgFile'] = theme.darkBgFile;
+        themeRec['darkFontColor'] = theme.darkFontColor;
+        themeRec['darkFontSize'] = theme.darkFontSize;
+        themeRec['darkFontIndex'] = theme.darkFontIndex;
+        themeRec['darkLineHeight'] = theme.darkLineHeight;
+        customThemes.push(themeRec);
+      }
+      settings['readerCustomThemes'] = customThemes;
+      settings['readerCustomThemeId'] = data.settings.readerCustomThemeId;
       root['settings'] = settings;
     }
     const text: string = JSON.stringify(root);
@@ -601,15 +681,122 @@ export class FqLibraryBackup {
         throw new Error('备份字段 readerLineHeight 无效');
       }
       const showParaRaw: Object | undefined = settingsRec['readerShowParagraphComment'];
+      // 自定义阅读主题段（旧 v2 备份无此字段：空列表 + 空选中 id，全量白名单校验）
+      const customThemes: FqBackupCustomTheme[] = [];
+      const themesRaw: Object | undefined = settingsRec['readerCustomThemes'];
+      if (themesRaw !== undefined) {
+        const themesList: Object[] | null = fqAsArray(themesRaw);
+        if (themesList === null || themesList.length > FQ_BACKUP_MAX_THEMES) {
+          throw new Error('备份自定义主题段格式无效');
+        }
+        const themeIds: Set<string> = new Set<string>();
+        for (const themeValue of themesList) {
+          const themeRec: Record<string, Object> | null = fqAsRecord(themeValue);
+          if (themeRec === null) {
+            throw new Error('备份自定义主题格式无效');
+          }
+          const themeId: string = fqBackupCheckId(fqStr(themeRec, 'id'));
+          if (themeIds.has(themeId)) {
+            throw new Error('备份中有重复的自定义主题');
+          }
+          themeIds.add(themeId);
+          let lightBgFile: string = fqStr(themeRec, 'lightBgFile');
+          let darkBgFile: string = fqStr(themeRec, 'darkBgFile');
+          let lightFontColor: string = '';
+          let lightFontSize: number = 0;
+          let lightFontIndex: number = -1;
+          let lightLineHeight: number = 0;
+          let darkFontColor: string = '';
+          let darkFontSize: number = 0;
+          let darkFontIndex: number = -1;
+          let darkLineHeight: number = 0;
+          if (lightBgFile.length === 0 && darkBgFile.length === 0) {
+            // 旧版单模式备份（bgFile + dark 标记）：按 dark 路由到对应模式
+            const legacyBgFile: string = fqStr(themeRec, 'bgFile');
+            if (legacyBgFile.length === 0) {
+              throw new Error('备份字段 bgFile 无效');
+            }
+            const legacyDark: boolean = themeRec['dark'] === true;
+            if (legacyDark) {
+              darkBgFile = legacyBgFile;
+            } else {
+              lightBgFile = legacyBgFile;
+            }
+            const legacyFontColor: string = fqNormalizeThemeFontColor(fqStr(themeRec, 'fontColor'));
+            const legacyFontSize: number = fqBackupCheckInt(themeRec, 'fontSize', 32);
+            if (legacyFontSize !== 0 && legacyFontSize < 12) {
+              throw new Error('备份字段 fontSize 无效');
+            }
+            const legacyLineHeight: number = fqBackupCheckNumber(themeRec, 'lineHeight', 2.6);
+            if (legacyLineHeight !== 0 && legacyLineHeight < 1.2) {
+              throw new Error('备份字段 lineHeight 无效');
+            }
+            const legacyFontIndex: number = fqBackupCheckRange(themeRec, 'fontIndex', -1, 8);
+            if (legacyDark) {
+              darkFontColor = legacyFontColor;
+              darkFontSize = legacyFontSize;
+              darkFontIndex = legacyFontIndex;
+              darkLineHeight = legacyLineHeight;
+            } else {
+              lightFontColor = legacyFontColor;
+              lightFontSize = legacyFontSize;
+              lightFontIndex = legacyFontIndex;
+              lightLineHeight = legacyLineHeight;
+            }
+          } else {
+            lightFontColor = fqNormalizeThemeFontColor(fqStr(themeRec, 'lightFontColor'));
+            lightFontSize = fqBackupCheckInt(themeRec, 'lightFontSize', 32);
+            if (lightFontSize !== 0 && lightFontSize < 12) {
+              throw new Error('备份字段 lightFontSize 无效');
+            }
+            lightFontIndex = fqBackupCheckRange(themeRec, 'lightFontIndex', -1, 8);
+            lightLineHeight = fqBackupCheckNumber(themeRec, 'lightLineHeight', 2.6);
+            if (lightLineHeight !== 0 && lightLineHeight < 1.2) {
+              throw new Error('备份字段 lightLineHeight 无效');
+            }
+            darkFontColor = fqNormalizeThemeFontColor(fqStr(themeRec, 'darkFontColor'));
+            darkFontSize = fqBackupCheckInt(themeRec, 'darkFontSize', 32);
+            if (darkFontSize !== 0 && darkFontSize < 12) {
+              throw new Error('备份字段 darkFontSize 无效');
+            }
+            darkFontIndex = fqBackupCheckRange(themeRec, 'darkFontIndex', -1, 8);
+            darkLineHeight = fqBackupCheckNumber(themeRec, 'darkLineHeight', 2.6);
+            if (darkLineHeight !== 0 && darkLineHeight < 1.2) {
+              throw new Error('备份字段 darkLineHeight 无效');
+            }
+          }
+          if (lightBgFile.length > 0 && (lightBgFile.length > 128 || lightBgFile.indexOf('/') >= 0
+            || lightBgFile.indexOf('\\') >= 0)) {
+            throw new Error('备份字段 lightBgFile 无效');
+          }
+          if (darkBgFile.length > 0 && (darkBgFile.length > 128 || darkBgFile.indexOf('/') >= 0
+            || darkBgFile.indexOf('\\') >= 0)) {
+            throw new Error('备份字段 darkBgFile 无效');
+          }
+          if (lightBgFile.length === 0 && darkBgFile.length === 0) {
+            throw new Error('备份字段 bgFile 无效');
+          }
+          customThemes.push(new FqBackupCustomTheme(themeId,
+            fqBackupCheckText(themeRec, 'name'),
+            lightBgFile, lightFontColor, lightFontSize, lightFontIndex, lightLineHeight,
+            darkBgFile, darkFontColor, darkFontSize, darkFontIndex, darkLineHeight));
+        }
+      }
+      const customThemeId: string = fqStr(settingsRec, 'readerCustomThemeId');
+      if (customThemeId.length > 0 && !FQ_BACKUP_ID_PATTERN.test(customThemeId)) {
+        throw new Error('备份字段 readerCustomThemeId 无效');
+      }
       settings = new FqBackupAppSettings(themeMode, themeColor, themeCustomColor,
         settingsRec['backgroundAudio'] === true,
         readerFontSize,
         readerLineHeight,
-        fqBackupCheckRange(settingsRec, 'readerThemeIndex', -1, 2),
+        fqBackupCheckRange(settingsRec, 'readerThemeIndex', -1, 3),
         fqBackupCheckRange(settingsRec, 'readerFlipIndex', 0, 2),
         fqBackupCheckRange(settingsRec, 'readerComicFlipIndex', 0, 2),
         fqBackupCheckRange(settingsRec, 'readerFontIndex', 0, 8),
-        typeof showParaRaw === 'boolean' ? showParaRaw : true);
+        typeof showParaRaw === 'boolean' ? showParaRaw : true,
+        customThemes,
+        customThemeId);
     }
     return new FqLibraryBackupData(createdAt, appVersion, shelf, browse, listen,
       watched, reader, excluded, settings);
@@ -658,6 +845,18 @@ export class FqLibraryBackup {
         settings.readerThemeIndex, settings.readerFlipIndex, settings.readerFontIndex,
         settings.readerShowParagraphComment);
       FqReaderStore.saveComicFlip(settings.readerComicFlipIndex);
+      // 自定义阅读主题：按模式校验背景图文件仍在本机沙箱时重建条目（跨设备图片缺失自动降级/跳过）
+      for (const theme of settings.readerCustomThemes) {
+        FqReaderStore.mergeCustomTheme(theme.id, theme.name,
+          theme.lightBgFile, theme.lightFontColor, theme.lightFontSize,
+          theme.lightFontIndex, theme.lightLineHeight,
+          theme.darkBgFile, theme.darkFontColor, theme.darkFontSize,
+          theme.darkFontIndex, theme.darkLineHeight);
+      }
+      if (settings.readerCustomThemeId.length > 0
+        && FqReaderStore.hasCustomTheme(settings.readerCustomThemeId)) {
+        FqReaderStore.selectCustomTheme(settings.readerCustomThemeId);
+      }
       settingsApplied = true;
     }
     return new FqLibraryBackupRestoreResult(shelfAdded, browseAdded, listenAdded,

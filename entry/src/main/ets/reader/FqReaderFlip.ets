@@ -45,6 +45,9 @@ export struct FqReaderFlip {
   @Param footerZoneVp: number = 20;
   /** 页底色（槽位三区背景，与仿真截图底色一致）。 */
   @Param pageBgColor: string = '#F6F4EF';
+  /** 页背景图（file:// URI，空 = 纯色）：自定义背景主题时槽位自绘图片垫底
+   *  （仿真模式下一页常驻屏内垫底，纯透明背景会透出下页文字，须各槽位自绘遮盖）。 */
+  @Param bgImage: string = '';
   /** 正文渲染回调：slot -1 = 上一页 / 0 = 当前页 / 1 = 下一页。 */
   @BuilderParam pageRenderer: (slot: number) => void;
   /** 眉页 / 眉脚渲染回调（随槽位三区渲染，仿真截图含眉页眉脚）。 */
@@ -615,35 +618,46 @@ export struct FqReaderFlip {
     });
   }
 
-  /** 槽位三区：眉页 / 正文 / 眉脚（仿真截图随页卷曲）。
+  /** 槽位三区：背景（图片或纯色）/ 眉页 / 正文 / 眉脚（仿真截图随页卷曲）。
    *  参数为恒定槽位号（@Builder 按值传参，参数捕获后不换绑）；
    *  槽位↔物理层固定绑定，槽位页数据变化时画布经 @Monitor 全量刷新。 */
   @Builder
   private slotContent(slot: number) {
-    Column() {
-      Column() {
-        this.headerRenderer(slot)
+    Stack() {
+      if (this.bgImage.length > 0) {
+        Image(this.bgImage)
+          .objectFit(ImageFit.Cover)
+          .width('100%')
+          .height('100%')
+          .draggable(false)
       }
-      .width('100%')
-      .height(this.headerZoneVp)
-      .justifyContent(FlexAlign.End)
+      Column() {
+        Column() {
+          this.headerRenderer(slot)
+        }
+        .width('100%')
+        .height(this.headerZoneVp)
+        .justifyContent(FlexAlign.End)
 
-      Column() {
-        this.pageRenderer(slot)
-      }
-      .width('100%')
-      .layoutWeight(1)
+        Column() {
+          this.pageRenderer(slot)
+        }
+        .width('100%')
+        .layoutWeight(1)
 
-      Column() {
-        this.footerRenderer(slot)
+        Column() {
+          this.footerRenderer(slot)
+        }
+        .width('100%')
+        .height(this.footerZoneVp)
+        .justifyContent(FlexAlign.Start)
       }
       .width('100%')
-      .height(this.footerZoneVp)
-      .justifyContent(FlexAlign.Start)
+      .height('100%')
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(this.pageBgColor)
+    .backgroundColor(this.bgImage.length > 0 ? 'transparent' : this.pageBgColor)
   }
 
   build() {

@@ -12,6 +12,7 @@ import { MainTabPagesBuilder, PageMapBuilder } from '../view/FqAppPages';
 import { DialogManager } from '../utils/DialogUtils';
 import { FqReaderSettingsHandler, fqReaderSettingsBus } from '../core/FqReaderSettingsBus';
 import { fqEffectiveReaderTheme, ReaderSettingsDialogContent } from '../view/dialog/ReaderSettingsDialogContent';
+import { ReaderThemeEditorContent } from '../view/dialog/ReaderThemeEditorContent';
 import { FqComicSettingsHandler, fqComicSettingsBus } from '../core/FqComicSettingsBus';
 import { ComicSettingsDialogContent } from '../view/dialog/ComicSettingsDialogContent';
 import { WebDavBackupListDialogContent } from '../view/dialog/WebDavBackupListDialogContent';
@@ -51,6 +52,8 @@ struct Index {
     DialogManager.Register((): void => {
       if (DialogManager.dialogChangeKey === '阅读设置' || DialogManager.dialogChangeKey === '漫画设置') {
         this.settingsDialog.open()
+      } else if (DialogManager.dialogChangeKey === '自定义主题编辑') {
+        this.readerThemeEditorDialog.open()
       } else {
         this.dataDialog.open()
       }
@@ -59,6 +62,8 @@ struct Index {
     }, (): void => {
       if (DialogManager.dialogChangeKey === '阅读设置' || DialogManager.dialogChangeKey === '漫画设置') {
         this.settingsDialog.close()
+      } else if (DialogManager.dialogChangeKey === '自定义主题编辑') {
+        this.readerThemeEditorDialog.close()
       } else {
         this.dataDialog.close()
       }
@@ -229,6 +234,24 @@ struct Index {
     },
   });
 
+  /** 「自定义主题编辑」弹窗：叠加于「阅读设置」之上的独立宿主（保存/删除经 DialogManager 分发）。 */
+  private readerThemeEditorDialog: CustomDialogController = new CustomDialogController({
+    builder: CustomContentDialog({
+      primaryTitle: DialogManager.ReaderThemeEditorTitle(),
+      contentBuilder: (): void => {
+        this.DialogContentBuilder('自定义主题编辑')
+      },
+      buttons: DialogManager.DialogButtons('自定义主题编辑'),
+      contentAreaPadding: { top: 18, bottom: 12, left: 22, right: 22 },
+    }),
+    onWillDismiss: (dialog: DismissDialogAction): void => {
+      dialog.dismiss()
+    },
+    onWillDisappear: (): void => {
+      DialogManager.ClearReaderThemeEditor();
+    },
+  });
+
   /** 弹窗中间自定义组件（按 DialogManager 标识分发）。 */
   @Builder
   DialogContentBuilder(key: string) {
@@ -245,6 +268,8 @@ struct Index {
         flipIndex: fqReaderSettingsBus.flipIndex,
         fontIndex: fqReaderSettingsBus.fontIndex,
         showParagraphComment: fqReaderSettingsBus.showParagraphComment,
+        customThemes: fqReaderSettingsBus.customThemes,
+        customThemeId: fqReaderSettingsBus.customThemeId,
         followThemeBg: fqEffectiveReaderTheme(fqReaderSettingsBus.themeIndex, appState.isDark).background,
         followThemeFont: fqEffectiveReaderTheme(fqReaderSettingsBus.themeIndex, appState.isDark).fontColor,
         fontSizeChange: (delta: number): void => {
@@ -283,7 +308,27 @@ struct Index {
             handler.changeShowParagraphComment(on);
           }
         },
+        addCustomThemeChange: (): void => {
+          const handler: FqReaderSettingsHandler | null = fqReaderSettingsBus.handler;
+          if (handler !== null) {
+            handler.pickCustomTheme();
+          }
+        },
+        selectCustomThemeChange: (id: string): void => {
+          const handler: FqReaderSettingsHandler | null = fqReaderSettingsBus.handler;
+          if (handler !== null) {
+            handler.selectCustomTheme(id);
+          }
+        },
+        editCustomThemeChange: (id: string): void => {
+          const handler: FqReaderSettingsHandler | null = fqReaderSettingsBus.handler;
+          if (handler !== null) {
+            handler.editCustomTheme(id);
+          }
+        },
       })
+    } else if (key === '自定义主题编辑') {
+      ReaderThemeEditorContent()
     } else if (key === '漫画设置') {
       ComicSettingsDialogContent({
         comicFlipIndex: fqComicSettingsBus.comicFlipIndex,

@@ -5,7 +5,8 @@
  * - 全部 preferences KV：浏览 / 搜索 / 收听 / 观看记录、阅读统计、书架收藏、阅读进度与阅读设置、
  *   应用设置（深色模式 / 后台播放 / 代理下载）、首页缓存、剧集 / 听书 / 漫画缓存索引、本地书籍索引；
  * - filesDir 下各数据目录：chapter_cache（章节缓存）、detail_cache（详情缓存）、home_feed_cache（首页流缓存）、
- *   offline_video（剧集离线）、offline_audio（听书离线）、offline_comic（漫画离线）、local_books（本地书籍文件）；
+ *   offline_video（剧集离线）、offline_audio（听书离线）、offline_comic（漫画离线）、local_books（本地书籍文件）、
+ *   fq_reader_bg（自定义阅读背景图）；
  * - 沙箱 cacheDir 临时缓存（更新包中转等）。
  *
  * 保留（白名单式删除，未列入一律不动）：
@@ -52,6 +53,7 @@ const FQ_DATA_DIR_NAMES: string[] = [
   'offline_audio',
   'offline_comic',
   'local_books',
+  'fq_reader_bg',
 ];
 
 export class FqDataCleaner {

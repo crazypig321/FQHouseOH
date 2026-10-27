@@ -7,7 +7,8 @@
 import preferences from '@ohos.data.preferences';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { fqAsRecord, fqAsArray, fqKeys } from './FqJson';
+import { fileIo } from '@kit.CoreFileKit';
+import { fqAsRecord, fqAsArray, fqKeys, fqStr, fqNum } from './FqJson';
 
 const FQ_READER_STORE_NAME: string = 'fq_reader';
 const FQ_READER_KEY_SETTINGS: string = 'settings';
@@ -30,7 +31,7 @@ export class FqReaderProgress {
 export class FqReaderSettings {
   fontSize: number = 19;
   lineHeight: number = 1.9;
-  /** -1 跟随系统深浅色 / 0 纸白 / 1 米黄 / 2 夜间。 */
+  /** -1 跟随系统深浅色 / 0 纸白 / 1 米黄 / 2 夜间 / 3 自定义背景图（customThemeId 指定）。 */
   themeIndex: number = -1;
   /** 0 仿真翻页 / 1 横滑翻页 / 2 上下滚动。 */
   flipIndex: number = 0;
@@ -40,6 +41,78 @@ export class FqReaderSettings {
   fontIndex: number = 0;
   /** 段评显示开关（关闭后不显示段评气泡与计数，重新分页）。 */
   showParagraphComment: boolean = true;
+  /** 自定义阅读主题列表（背景图 + 独立排版参数；themeIndex=3 生效）。 */
+  customThemes: FqCustomReaderTheme[] = [];
+  /** 当前选中的自定义主题 id（themeIndex=3 时生效；空 = 无选中）。 */
+  customThemeId: string = '';
+}
+
+/** 自定义阅读主题：浅色/深色双模式（各配背景图 + 独立排版参数，0/-1/空 = 跟随全局阅读设置）。 */
+export class FqCustomReaderTheme {
+  id: string = '';
+  name: string = '自定义';
+  /** 浅色模式背景图沙箱绝对路径（空 = 未设置浅色模式）。 */
+  lightBgPath: string = '';
+  /** 浅色模式正文字色（空 = 默认墨黑 #1F2329）。 */
+  lightFontColor: string = '';
+  /** 浅色模式字号（0 = 跟随全局）。 */
+  lightFontSize: number = 0;
+  /** 浅色模式字体档位（-1 = 跟随全局）。 */
+  lightFontIndex: number = -1;
+  /** 浅色模式行距（0 = 跟随全局）。 */
+  lightLineHeight: number = 0;
+  /** 深色模式背景图沙箱绝对路径（空 = 未设置深色模式）。 */
+  darkBgPath: string = '';
+  /** 深色模式正文字色（空 = 默认夜间灰 #9AA0A6）。 */
+  darkFontColor: string = '';
+  /** 深色模式字号（0 = 跟随全局）。 */
+  darkFontSize: number = 0;
+  /** 深色模式字体档位（-1 = 跟随全局）。 */
+  darkFontIndex: number = -1;
+  /** 深色模式行距（0 = 跟随全局）。 */
+  darkLineHeight: number = 0;
+}
+
+/** 双模式主题当前应使用的模式：仅设深色图 → 深；仅设浅色图 → 浅；双设 → systemDark。 */
+export function fqCustomThemeUseDark(theme: FqCustomReaderTheme, systemDark: boolean): boolean {
+  if (theme.darkBgPath.length === 0) {
+    return false;
+  }
+  if (theme.lightBgPath.length === 0) {
+    return true;
+  }
+  return systemDark;
+}
+
+/** 字色规范化：仅收 6 位 #RRGGBB（8 位视为 #AARRGGBB 取 RGB 段），非法返回空串。 */
+export function fqNormalizeThemeFontColor(value: string): string {
+  const text: string = value.trim();
+  if (/^#[0-9A-Fa-f]{6}$/.test(text)) {
+    return text;
+  }
+  if (/^#[0-9A-Fa-f]{8}$/.test(text)) {
+    return `#${text.substring(3)}`;
+  }
+  return '';
+}
+
+function fqClampThemeName(value: string): string {
+  const text: string = value.trim().substring(0, 12);
+  return text.length > 0 ? text : '自定义';
+}
+
+function fqClampThemeFontSize(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+  return fqClampFontSize(value);
+}
+
+function fqClampThemeLineHeight(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+  return fqClampLineHeight(value);
 }
 
 function fqClampFontSize(value: number): number {
@@ -53,8 +126,10 @@ function fqClampLineHeight(value: number): number {
 export class FqReaderStore {
   private static pref: preferences.Preferences | null = null;
   private static settings: FqReaderSettings = new FqReaderSettings();
+  private static filesDir: string = '';
 
   public static init(context: common.Context): void {
+    FqReaderStore.filesDir = context.filesDir;
     if (FqReaderStore.pref !== null) {
       return;
     }
@@ -92,7 +167,7 @@ export class FqReaderStore {
       }
       const themeIndex: Object | undefined = rec['themeIndex'];
       if (typeof themeIndex === 'number') {
-        FqReaderStore.settings.themeIndex = Math.min(2, Math.max(-1, Math.trunc(themeIndex)));
+        FqReaderStore.settings.themeIndex = Math.min(3, Math.max(-1, Math.trunc(themeIndex)));
       }
       // 旧版本数据（无版本号）迁移：主题重置为跟随系统（旧版无跟随档，存值语义已变化）
       const version: Object | undefined = rec['v'];
@@ -120,6 +195,46 @@ export class FqReaderStore {
       if (typeof showParagraphComment === 'boolean') {
         FqReaderStore.settings.showParagraphComment = showParagraphComment;
       }
+      // 旧版单张自定义背景（v4 及以前 customBgPath）迁移为自定义主题列表首项
+      const customBgPath: Object | undefined = rec['customBgPath'];
+      if (typeof customBgPath === 'string' && customBgPath.length > 0
+        && FqReaderStore.settings.customThemes.length === 0) {
+        const migrated: FqCustomReaderTheme = new FqCustomReaderTheme();
+        migrated.id = `ct${Date.now()}`;
+        migrated.name = '自定义';
+        migrated.lightBgPath = customBgPath;
+        FqReaderStore.settings.customThemes.push(migrated);
+        if (FqReaderStore.settings.themeIndex === 3) {
+          FqReaderStore.settings.customThemeId = migrated.id;
+        }
+      }
+      // 自定义主题列表（JSON 数组，字段逐条校验，坏条目跳过）
+      const customThemesRaw: Object | undefined = rec['customThemes'];
+      if (typeof customThemesRaw === 'string' && customThemesRaw.length > 0) {
+        try {
+          const parsedThemes: Object | null = JSON.parse(customThemesRaw);
+          const themeArray: Object[] | null = fqAsArray(parsedThemes);
+          if (themeArray !== null) {
+            const ids: Set<string> = new Set<string>();
+            const themes: FqCustomReaderTheme[] = [];
+            for (const item of themeArray) {
+              const entry: FqCustomReaderTheme | null = FqReaderStore.decodeCustomTheme(item);
+              if (entry === null || ids.has(entry.id)) {
+                continue;
+              }
+              ids.add(entry.id);
+              themes.push(entry);
+            }
+            FqReaderStore.settings.customThemes = themes;
+          }
+        } catch (error) {
+          // 列表损坏按空处理
+        }
+      }
+      const customThemeId: Object | undefined = rec['customThemeId'];
+      if (typeof customThemeId === 'string') {
+        FqReaderStore.settings.customThemeId = customThemeId;
+      }
     } catch (error) {
       // 损坏配置按默认处理
     }
@@ -133,7 +248,7 @@ export class FqReaderStore {
     themeIndex: number, flipIndex: number, fontIndex: number, showParagraphComment: boolean): void {
     FqReaderStore.settings.fontSize = fqClampFontSize(fontSize);
     FqReaderStore.settings.lineHeight = fqClampLineHeight(lineHeight);
-    FqReaderStore.settings.themeIndex = Math.min(2, Math.max(-1, Math.trunc(themeIndex)));
+    FqReaderStore.settings.themeIndex = Math.min(3, Math.max(-1, Math.trunc(themeIndex)));
     FqReaderStore.settings.flipIndex = Math.min(2, Math.max(0, Math.trunc(flipIndex)));
     FqReaderStore.settings.fontIndex = Math.max(0, Math.trunc(fontIndex));
     FqReaderStore.settings.showParagraphComment = showParagraphComment;
@@ -146,14 +261,337 @@ export class FqReaderStore {
     FqReaderStore.persistSettings();
   }
 
-  /** 设置整体落盘（记录 v:4，含小说与漫画全部字段）。 */
+  /** 自定义主题条目解析（JSON 记录 → 模型；id 缺失或无任何背景图返回 null，参数越界钳制）。
+   *  兼容旧版单模式条目（bgPath + dark 标记）：按 dark 路由到对应模式的图与参数。 */
+  private static decodeCustomTheme(item: Object): FqCustomReaderTheme | null {
+    const rec: Record<string, Object> | null = fqAsRecord(item);
+    if (rec === null) {
+      return null;
+    }
+    const id: string = fqStr(rec, 'id');
+    if (id.trim().length === 0) {
+      return null;
+    }
+    const lightBgPath: string = fqStr(rec, 'lightBgPath');
+    const darkBgPath: string = fqStr(rec, 'darkBgPath');
+    const legacyBgPath: string = fqStr(rec, 'bgPath');
+    if (lightBgPath.length === 0 && darkBgPath.length === 0 && legacyBgPath.length === 0) {
+      return null;
+    }
+    const entry: FqCustomReaderTheme = new FqCustomReaderTheme();
+    entry.id = id.trim();
+    entry.name = fqClampThemeName(fqStr(rec, 'name'));
+    if (lightBgPath.length === 0 && darkBgPath.length === 0) {
+      const legacyDark: boolean = rec['dark'] === true;
+      if (legacyDark) {
+        entry.darkBgPath = legacyBgPath;
+      } else {
+        entry.lightBgPath = legacyBgPath;
+      }
+      const legacyFontColor: string = fqNormalizeThemeFontColor(fqStr(rec, 'fontColor'));
+      const legacyFontSize: number = fqClampThemeFontSize(fqNum(rec, 'fontSize'));
+      const legacyFontIndexRaw: number = fqNum(rec, 'fontIndex');
+      const legacyFontIndex: number = Number.isFinite(legacyFontIndexRaw) && legacyFontIndexRaw >= -1
+        ? Math.trunc(legacyFontIndexRaw) : -1;
+      const legacyLineHeight: number = fqClampThemeLineHeight(fqNum(rec, 'lineHeight'));
+      if (legacyDark) {
+        entry.darkFontColor = legacyFontColor;
+        entry.darkFontSize = legacyFontSize;
+        entry.darkFontIndex = legacyFontIndex;
+        entry.darkLineHeight = legacyLineHeight;
+      } else {
+        entry.lightFontColor = legacyFontColor;
+        entry.lightFontSize = legacyFontSize;
+        entry.lightFontIndex = legacyFontIndex;
+        entry.lightLineHeight = legacyLineHeight;
+      }
+    } else {
+      entry.lightBgPath = lightBgPath;
+      entry.darkBgPath = darkBgPath;
+      entry.lightFontColor = fqNormalizeThemeFontColor(fqStr(rec, 'lightFontColor'));
+      entry.lightFontSize = fqClampThemeFontSize(fqNum(rec, 'lightFontSize'));
+      const lightFontIndexRaw: number = fqNum(rec, 'lightFontIndex');
+      entry.lightFontIndex = Number.isFinite(lightFontIndexRaw) && lightFontIndexRaw >= -1
+        ? Math.trunc(lightFontIndexRaw) : -1;
+      entry.lightLineHeight = fqClampThemeLineHeight(fqNum(rec, 'lightLineHeight'));
+      entry.darkFontColor = fqNormalizeThemeFontColor(fqStr(rec, 'darkFontColor'));
+      entry.darkFontSize = fqClampThemeFontSize(fqNum(rec, 'darkFontSize'));
+      const darkFontIndexRaw: number = fqNum(rec, 'darkFontIndex');
+      entry.darkFontIndex = Number.isFinite(darkFontIndexRaw) && darkFontIndexRaw >= -1
+        ? Math.trunc(darkFontIndexRaw) : -1;
+      entry.darkLineHeight = fqClampThemeLineHeight(fqNum(rec, 'darkLineHeight'));
+    }
+    return entry;
+  }
+
+  /** 主题草稿参数净化（名称/字色/字号/字体/行距钳制；背景图路径原样透传）。 */
+  private static sanitizeTheme(draft: FqCustomReaderTheme): FqCustomReaderTheme {
+    const entry: FqCustomReaderTheme = new FqCustomReaderTheme();
+    entry.name = fqClampThemeName(draft.name);
+    entry.lightBgPath = draft.lightBgPath;
+    entry.lightFontColor = fqNormalizeThemeFontColor(draft.lightFontColor);
+    entry.lightFontSize = fqClampThemeFontSize(draft.lightFontSize);
+    entry.lightFontIndex = draft.lightFontIndex >= -1 ? Math.trunc(draft.lightFontIndex) : -1;
+    entry.lightLineHeight = fqClampThemeLineHeight(draft.lightLineHeight);
+    entry.darkBgPath = draft.darkBgPath;
+    entry.darkFontColor = fqNormalizeThemeFontColor(draft.darkFontColor);
+    entry.darkFontSize = fqClampThemeFontSize(draft.darkFontSize);
+    entry.darkFontIndex = draft.darkFontIndex >= -1 ? Math.trunc(draft.darkFontIndex) : -1;
+    entry.darkLineHeight = fqClampThemeLineHeight(draft.darkLineHeight);
+    return entry;
+  }
+
+  /** 图片导入序号（同一毫秒内多次选图去重）。 */
+  private static themeImportSeq: number = 0;
+
+  /**
+   * 系统图库选图 URI → 拷入沙箱 fq_reader_bg/ct{时间戳}_{序号}.{ext}（不落条目）。
+   * 先写临时文件再原子改名，失败不产生脏文件；返回沙箱绝对路径（失败返回空串）。
+   */
+  public static importThemeImage(uri: string): string {
+    const filesDir: string = FqReaderStore.filesDir;
+    if (filesDir.length === 0 || uri.length === 0) {
+      return '';
+    }
+    let ext: string = 'jpg';
+    const dot: number = uri.lastIndexOf('.');
+    const slash: number = uri.lastIndexOf('/');
+    if (dot > slash && dot < uri.length - 1) {
+      const raw: string = uri.substring(dot + 1).toLowerCase();
+      if (raw === 'png' || raw === 'gif' || raw === 'webp' || raw === 'bmp' || raw === 'heic') {
+        ext = raw;
+      }
+    }
+    FqReaderStore.themeImportSeq += 1;
+    const name: string = `ct${Date.now()}_${FqReaderStore.themeImportSeq}`;
+    const dir: string = `${filesDir}/fq_reader_bg`;
+    const target: string = `${dir}/${name}.${ext}`;
+    const tmp: string = `${dir}/${name}_new.${ext}`;
+    let src: fileIo.File | null = null;
+    try {
+      try {
+        fileIo.mkdirSync(dir);
+      } catch (error) {
+        // 目录已存在
+      }
+      src = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
+      let dst: fileIo.File | null = null;
+      try {
+        dst = fileIo.openSync(tmp, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+        fileIo.copyFileSync(src.fd, dst.fd);
+      } finally {
+        if (dst !== null) {
+          fileIo.closeSync(dst);
+        }
+      }
+      fileIo.closeSync(src);
+      src = null;
+    } catch (error) {
+      if (src !== null) {
+        try {
+          fileIo.closeSync(src);
+        } catch (closeError) {
+          // 忽略关闭失败
+        }
+      }
+      try {
+        fileIo.unlinkSync(tmp);
+      } catch (cleanError) {
+        // 忽略清理失败
+      }
+      return '';
+    }
+    try {
+      try {
+        fileIo.unlinkSync(target);
+      } catch (unlinkError) {
+        // 目标不存在属正常
+      }
+      fileIo.renameSync(tmp, target);
+    } catch (error) {
+      try {
+        fileIo.unlinkSync(tmp);
+      } catch (unlinkError) {
+        // 忽略清理失败
+      }
+      return '';
+    }
+    return target;
+  }
+
+  /** 新建自定义主题（draft 需至少一张背景图）；返回新条目（失败返回 null）。 */
+  public static createCustomTheme(draft: FqCustomReaderTheme): FqCustomReaderTheme | null {
+    if (draft.lightBgPath.length === 0 && draft.darkBgPath.length === 0) {
+      return null;
+    }
+    const entry: FqCustomReaderTheme = FqReaderStore.sanitizeTheme(draft);
+    entry.id = `ct${Date.now()}`;
+    if (FqReaderStore.hasCustomTheme(entry.id)) {
+      return null;
+    }
+    FqReaderStore.settings.customThemes = FqReaderStore.settings.customThemes.concat([entry]);
+    FqReaderStore.persistSettings();
+    return entry;
+  }
+
+  /** 保存自定义主题编辑结果（全量替换，含双模式背景图路径）；条目不存在返回 false。 */
+  public static updateCustomTheme(id: string, draft: FqCustomReaderTheme): boolean {
+    const next: FqCustomReaderTheme[] = [];
+    let found: boolean = false;
+    for (const item of FqReaderStore.settings.customThemes) {
+      if (item.id === id) {
+        const updated: FqCustomReaderTheme = FqReaderStore.sanitizeTheme(draft);
+        updated.id = item.id;
+        next.push(updated);
+        found = true;
+      } else {
+        next.push(item);
+      }
+    }
+    if (!found) {
+      return false;
+    }
+    FqReaderStore.settings.customThemes = next;
+    FqReaderStore.persistSettings();
+    return true;
+  }
+
+  /** 编辑弹窗名称实时写回：仅更新名称与排版参数，双模式背景图路径保持条目现值
+   *  （编辑中未保存的新导入不落盘，取消时由编辑弹窗清理）。 */
+  public static updateCustomThemeParams(id: string, draft: FqCustomReaderTheme): boolean {
+    const next: FqCustomReaderTheme[] = [];
+    let found: boolean = false;
+    for (const item of FqReaderStore.settings.customThemes) {
+      if (item.id === id) {
+        const updated: FqCustomReaderTheme = FqReaderStore.sanitizeTheme(draft);
+        updated.id = item.id;
+        updated.lightBgPath = item.lightBgPath;
+        updated.darkBgPath = item.darkBgPath;
+        next.push(updated);
+        found = true;
+      } else {
+        next.push(item);
+      }
+    }
+    if (!found) {
+      return false;
+    }
+    FqReaderStore.settings.customThemes = next;
+    FqReaderStore.persistSettings();
+    return true;
+  }
+
+  /** 删除自定义主题（连同双模式背景图文件；若为当前选中同时清空 customThemeId）。 */
+  public static removeCustomTheme(id: string): boolean {
+    const list: FqCustomReaderTheme[] = FqReaderStore.settings.customThemes;
+    const next: FqCustomReaderTheme[] = [];
+    let found: boolean = false;
+    for (const item of list) {
+      if (item.id === id) {
+        found = true;
+        try {
+          fileIo.unlinkSync(item.lightBgPath);
+        } catch (unlinkError) {
+          // 文件可能已被清理
+        }
+        try {
+          fileIo.unlinkSync(item.darkBgPath);
+        } catch (unlinkError) {
+          // 文件可能已被清理
+        }
+      } else {
+        next.push(item);
+      }
+    }
+    if (!found) {
+      return false;
+    }
+    FqReaderStore.settings.customThemes = next;
+    if (FqReaderStore.settings.customThemeId === id) {
+      FqReaderStore.settings.customThemeId = '';
+    }
+    FqReaderStore.persistSettings();
+    return true;
+  }
+
+  /** 选中自定义主题（themeIndex 由调用方切换到 3）。 */
+  public static selectCustomTheme(id: string): void {
+    FqReaderStore.settings.customThemeId = id;
+    FqReaderStore.persistSettings();
+  }
+
+  /** 备份恢复合并：按模式校验背景图文件仍在本机沙箱时重建条目
+   *  （单模式缺图自动降级为只保留另一模式，双模式图均缺失跳过）。 */
+  public static mergeCustomTheme(id: string, name: string,
+    lightBgFile: string, lightFontColor: string, lightFontSize: number,
+    lightFontIndex: number, lightLineHeight: number,
+    darkBgFile: string, darkFontColor: string, darkFontSize: number,
+    darkFontIndex: number, darkLineHeight: number): boolean {
+    const cleanId: string = id.trim();
+    if (cleanId.length === 0) {
+      return false;
+    }
+    for (const item of FqReaderStore.settings.customThemes) {
+      if (item.id === cleanId) {
+        return false;
+      }
+    }
+    const entry: FqCustomReaderTheme = new FqCustomReaderTheme();
+    entry.id = cleanId;
+    entry.name = fqClampThemeName(name);
+    if (FqReaderStore.themeBgFileExists(lightBgFile)) {
+      entry.lightBgPath = `${FqReaderStore.filesDir}/fq_reader_bg/${lightBgFile.trim()}`;
+      entry.lightFontColor = fqNormalizeThemeFontColor(lightFontColor);
+      entry.lightFontSize = fqClampThemeFontSize(lightFontSize);
+      entry.lightFontIndex = lightFontIndex >= -1 ? Math.trunc(lightFontIndex) : -1;
+      entry.lightLineHeight = fqClampThemeLineHeight(lightLineHeight);
+    }
+    if (FqReaderStore.themeBgFileExists(darkBgFile)) {
+      entry.darkBgPath = `${FqReaderStore.filesDir}/fq_reader_bg/${darkBgFile.trim()}`;
+      entry.darkFontColor = fqNormalizeThemeFontColor(darkFontColor);
+      entry.darkFontSize = fqClampThemeFontSize(darkFontSize);
+      entry.darkFontIndex = darkFontIndex >= -1 ? Math.trunc(darkFontIndex) : -1;
+      entry.darkLineHeight = fqClampThemeLineHeight(darkLineHeight);
+    }
+    if (entry.lightBgPath.length === 0 && entry.darkBgPath.length === 0) {
+      return false;
+    }
+    FqReaderStore.settings.customThemes = FqReaderStore.settings.customThemes.concat([entry]);
+    FqReaderStore.persistSettings();
+    return true;
+  }
+
+  /** 备份背景图文件是否仍在本机沙箱（fq_reader_bg/ 下）。 */
+  private static themeBgFileExists(fileName: string): boolean {
+    const clean: string = fileName.trim();
+    if (clean.length === 0 || clean.indexOf('/') >= 0 || clean.indexOf('\\') >= 0) {
+      return false;
+    }
+    try {
+      return fileIo.accessSync(`${FqReaderStore.filesDir}/fq_reader_bg/${clean}`);
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /** 是否存在指定 id 的自定义主题。 */
+  public static hasCustomTheme(id: string): boolean {
+    for (const item of FqReaderStore.settings.customThemes) {
+      if (item.id === id) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** 设置整体落盘（记录 v:5，含小说与漫画全部字段及自定义主题列表）。 */
   private static persistSettings(): void {
     const pref: preferences.Preferences | null = FqReaderStore.pref;
     if (pref === null) {
       return;
     }
     const rec: Record<string, Object> = {};
-    rec['v'] = 4;
+    rec['v'] = 5;
     rec['fontSize'] = FqReaderStore.settings.fontSize;
     rec['lineHeight'] = FqReaderStore.settings.lineHeight;
     rec['themeIndex'] = FqReaderStore.settings.themeIndex;
@@ -161,6 +599,25 @@ export class FqReaderStore {
     rec['comicFlipIndex'] = FqReaderStore.settings.comicFlipIndex;
     rec['fontIndex'] = FqReaderStore.settings.fontIndex;
     rec['showParagraphComment'] = FqReaderStore.settings.showParagraphComment;
+    const themes: Record<string, Object>[] = [];
+    for (const item of FqReaderStore.settings.customThemes) {
+      const themeRec: Record<string, Object> = {};
+      themeRec['id'] = item.id;
+      themeRec['name'] = item.name;
+      themeRec['lightBgPath'] = item.lightBgPath;
+      themeRec['lightFontColor'] = item.lightFontColor;
+      themeRec['lightFontSize'] = item.lightFontSize;
+      themeRec['lightFontIndex'] = item.lightFontIndex;
+      themeRec['lightLineHeight'] = item.lightLineHeight;
+      themeRec['darkBgPath'] = item.darkBgPath;
+      themeRec['darkFontColor'] = item.darkFontColor;
+      themeRec['darkFontSize'] = item.darkFontSize;
+      themeRec['darkFontIndex'] = item.darkFontIndex;
+      themeRec['darkLineHeight'] = item.darkLineHeight;
+      themes.push(themeRec);
+    }
+    rec['customThemes'] = JSON.stringify(themes);
+    rec['customThemeId'] = FqReaderStore.settings.customThemeId;
     try {
       pref.putSync(FQ_READER_KEY_SETTINGS, JSON.stringify(rec));
       pref.flush().catch((_error: BusinessError): void => {

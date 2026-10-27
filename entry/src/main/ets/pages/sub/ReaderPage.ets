@@ -25,7 +25,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { HdsAnimationMode, HdsTabsController, TitleBarContentOptions } from '@kit.UIDesignKit';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { FqChapter, fqFormatCountInt, fqKindToTab } from '../../model/FqModels';
-import { FqReaderProgress, FqReaderStore } from '../../core/FqReaderStore';
+import { FqReaderProgress, FqReaderStore, FqCustomReaderTheme, fqCustomThemeUseDark } from '../../core/FqReaderStore';
 import { FqAppSettingsStore, FQ_THEME_DARK, FQ_THEME_LIGHT } from '../../core/FqAppSettingsStore';
 import { FqReadStatsStore } from '../../core/FqReadStatsStore';
 import { FqLocalBookStore } from '../../core/FqLocalBookStore';
@@ -235,6 +235,9 @@ export struct ReaderPage {
   @Local flipIndex: number = 0;
   @Local fontIndex: number = 0;
   @Local showParagraphComment: boolean = true;
+  /** 自定义阅读主题列表（themeIndex=3 时经 customThemeId 选定生效条目）。 */
+  @Local customThemes: FqCustomReaderTheme[] = [];
+  @Local customThemeId: string = '';
   /** 当前章分页结果 / 邻章预载缓存（引用替换驱动翻页容器刷新）。 */
   @Local curLayout: FqChapterLayout | null = null;
   @Local prevLayout: FqChapterLayout | null = null;
@@ -330,6 +333,8 @@ export struct ReaderPage {
     this.flipIndex = settings.flipIndex;
     this.fontIndex = settings.fontIndex;
     this.showParagraphComment = settings.showParagraphComment;
+    this.customThemes = settings.customThemes;
+    this.customThemeId = settings.customThemeId;
     this.syncReaderColorMode();
     this.filesDir = getContext(this).filesDir;
     this.chapterPages = FqReaderStore.getChapterPages(this.bookId);
@@ -410,6 +415,14 @@ export struct ReaderPage {
       backPressed: (): boolean => this.handleBackPressed(),
     }) {
       Stack() {
+        // 自定义背景图（主题档 3）：垫底全幅 Cover，正文层背景透明承接
+        if (this.hasCustomBg()) {
+          Image(`file://${this.customBgPathOf()}`)
+            .objectFit(ImageFit.Cover)
+            .width('100%')
+            .height('100%')
+            .draggable(false)
+        }
         if (this.flipIndex === 2) {
           this.VerticalBody()
         } else {
@@ -419,7 +432,8 @@ export struct ReaderPage {
             hasNext: this.flipHasNext(),
             headerZoneVp: this.cachedMetrics.headerZoneVp,
             footerZoneVp: this.cachedMetrics.footerZoneVp,
-            pageBgColor: this.theme().background,
+            pageBgColor: this.pageBg(),
+            bgImage: this.hasCustomBg() ? `file://${this.customBgPathOf()}` : '',
             pageRenderer: (slot: number): void => {
               this.pageOf(slot);
             },
@@ -464,7 +478,7 @@ export struct ReaderPage {
           .width('100%')
           .height('100%')
           .justifyContent(FlexAlign.Center)
-          .backgroundColor(this.theme().background)
+          .backgroundColor(this.pageBg())
         } else if (this.errorMsg.length > 0) {
           Column({ space: 12 }) {
             Text(this.errorMsg)
@@ -479,7 +493,7 @@ export struct ReaderPage {
           .width('100%')
           .height('100%')
           .justifyContent(FlexAlign.Center)
-          .backgroundColor(this.theme().background)
+          .backgroundColor(this.pageBg())
         }
 
         if (this.menuVisible) {
@@ -567,8 +581,8 @@ export struct ReaderPage {
     FqPageCanvas({
       page: this.pageForSlot(slot),
       metrics: this.cachedMetrics,
-      fontColor: this.theme().fontColor,
-      pageBgColor: this.theme().background,
+      fontColor: this.effFontColor(),
+      pageBgColor: this.pageBg(),
       commentCounts: this.layoutForSlot(slot)?.commentCounts ?? [],
       fontFamily: this.readerFontFamily,
       highlightParaIndex: this.slotHighlightPara(slot),
@@ -585,14 +599,14 @@ export struct ReaderPage {
     if (!this.menuVisible && this.pageForSlot(slot) !== null) {
       Row({ space: 5 }) {
         Text(this.slotHeaderLabel(slot))
-          .fontColor(this.theme().fontColor)
+          .fontColor(this.effFontColor())
           .fontSize(14)
           .opacity(0.5)
           .fontFamily(this.readerFontFamily)
           .maxLines(1)
         if (this.slotHeaderName(slot).length > 0) {
           Text(this.slotHeaderName(slot))
-            .fontColor(this.theme().fontColor)
+            .fontColor(this.effFontColor())
             .fontSize(14)
             .opacity(0.5)
             .fontFamily(this.readerFontFamily)
@@ -618,18 +632,18 @@ export struct ReaderPage {
     if (!this.menuVisible && this.pageForSlot(slot) !== null) {
       Row({ space: 5 }) {
         Text(this.footerClock)
-          .fontColor(this.theme().fontColor)
+          .fontColor(this.effFontColor())
           .fontSize(12)
           .opacity(0.5)
           .fontFamily(this.readerFontFamily)
           .maxLines(1)
         SymbolGlyph(this.batteryIcon())
           .fontSize(14)
-          .fontColor([this.theme().fontColor])
+          .fontColor([this.effFontColor()])
           .opacity(0.5)
         Blank()
         Text(this.slotFooterPages(slot))
-          .fontColor(this.theme().fontColor)
+          .fontColor(this.effFontColor())
           .fontSize(12)
           .opacity(0.5)
           .fontFamily(this.readerFontFamily)
@@ -764,7 +778,7 @@ export struct ReaderPage {
               .fontWeight(item.paraIndex === 0 ? FontWeight.Bold : FontWeight.Normal)
               .lineHeight(item.paraIndex === 0 ? this.cachedMetrics.titleLineFp
                 : this.cachedMetrics.lineHeightFp)
-              .fontColor(this.theme().fontColor)
+              .fontColor(this.effFontColor())
               .fontFamily(this.readerFontFamily)
               .textAlign(TextAlign.JUSTIFY)
               .width('100%')
@@ -822,7 +836,7 @@ export struct ReaderPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(this.theme().background)
+    .backgroundColor(this.pageBg())
   }
 
   /** 上下滚动段评气泡计数（本地书全 0；段评开关关闭恒 0）。 */
@@ -981,26 +995,26 @@ export struct ReaderPage {
     metrics.contentBottomVp = contentBottomVp;
     metrics.headerZoneVp = headerZoneVp;
     metrics.footerZoneVp = footerZoneVp;
-    metrics.fontSizeFp = this.fontSize;
-    metrics.lineHeightFp = Math.round(this.fontSize * this.lineHeight * 10) / 10;
-    metrics.fontSizePx = this.fontSize * textDensity;
+    metrics.fontSizeFp = this.effFontSize();
+    metrics.lineHeightFp = Math.round(this.effFontSize() * this.effLineHeight() * 10) / 10;
+    metrics.fontSizePx = this.effFontSize() * textDensity;
     // 渲染 .lineHeight(lineHeightFp)：px 必须由取整后的 fp 值换算，装页与渲染逐行严格一致
     metrics.lineHeightPx = metrics.lineHeightFp * textDensity;
-    const gapVp: number = Math.max(6, Math.round(this.fontSize * 0.5));
+    const gapVp: number = Math.max(6, Math.round(this.effFontSize() * 0.5));
     metrics.paraGapVp = gapVp;
     metrics.paraGapPx = gapVp * density;
-    metrics.titleFontFp = Math.round(this.fontSize * 1.26);
-    metrics.titleLineFp = Math.round(this.fontSize * 1.26 * 1.4);
+    metrics.titleFontFp = Math.round(this.effFontSize() * 1.26);
+    metrics.titleLineFp = Math.round(this.effFontSize() * 1.26 * 1.4);
     metrics.titleLinePx = metrics.titleLineFp * textDensity;
-    const titleTopVp: number = Math.max(4, Math.round(this.fontSize * 0.4));
+    const titleTopVp: number = Math.max(4, Math.round(this.effFontSize() * 0.4));
     metrics.titleTopVp = titleTopVp;
     metrics.titleTopPx = titleTopVp * density;
-    const titleBottomVp: number = Math.max(8, Math.round(this.fontSize * 0.7));
+    const titleBottomVp: number = Math.max(8, Math.round(this.effFontSize() * 0.7));
     metrics.titleBottomVp = titleBottomVp;
     metrics.titleBottomPx = titleBottomVp * density;
     // 段评气泡随正文字号等比缩放（基准 19fp）：
     // 字号缩小/系统字体放大时胶囊不再以固定高度撑破行高（页底切行的根因之一）
-    const bubbleScale: number = Math.max(0.55, this.fontSize / 19);
+    const bubbleScale: number = Math.max(0.55, this.effFontSize() / 19);
     metrics.textDensity = textDensity;
     metrics.bubbleScale = bubbleScale;
     metrics.bubbleIconFp = Math.max(10, Math.round( 24 * bubbleScale));
@@ -1270,6 +1284,15 @@ export struct ReaderPage {
   onSystemDarkChange(): void {
     if (this.themeIndex === -1) {
       this.applySettingChange(false);
+      return;
+    }
+    // 双模式自定义主题：系统深浅翻转 → 变体切换（背景图/排版参数可能变化，保位重排）
+    if (this.themeIndex === 3) {
+      const custom: FqCustomReaderTheme | null = this.activeCustomTheme();
+      if (custom !== null && custom.lightBgPath.length > 0 && custom.darkBgPath.length > 0) {
+        void this.applyThemeSelection((): void => {
+        });
+      }
     }
   }
 
@@ -1558,14 +1581,118 @@ export struct ReaderPage {
     });
   }
 
-  /** 实际生效的主题下标：-1 跟随应用深浅模式（深 → 夜间，浅 → 纸白；
-   *  应用档位跟随系统时随系统）。 */
+  /** 实际生效的主题下标：-1 跟随应用深浅模式（深 → 夜间，浅 → 纸白）；
+   *  3 自定义背景图字色同样随深浅；应用档位跟随系统时随系统。 */
   private effectiveThemeIndex(): number {
-    return this.themeIndex === -1 ? (this.systemDark ? 2 : 0) : this.themeIndex;
+    return this.themeIndex === -1 || this.themeIndex === 3
+      ? (this.systemDark ? 2 : 0)
+      : this.themeIndex;
   }
 
   private theme(): FqReaderTheme {
     return FQ_READER_THEMES[this.effectiveThemeIndex()] ?? FQ_READER_THEMES[0];
+  }
+
+  /** 当前生效的自定义主题条目（主题档 3 且 id 匹配；未选中/未找到返回 null）。 */
+  private activeCustomTheme(): FqCustomReaderTheme | null {
+    if (this.themeIndex !== 3) {
+      return null;
+    }
+    for (const item of this.customThemes) {
+      if (item.id === this.customThemeId) {
+        return item;
+      }
+    }
+    return null;
+  }
+
+  /** 当前生效自定义主题的背景图路径（按应生效模式取，无返回空串）。 */
+  private customBgPathOf(): string {
+    const entry: FqCustomReaderTheme | null = this.activeCustomTheme();
+    if (entry === null) {
+      return '';
+    }
+    return this.usingDarkVariant() ? entry.darkBgPath : entry.lightBgPath;
+  }
+
+  /** 自定义图片背景生效中（主题档 3 且选中条目存在）。 */
+  private hasCustomBg(): boolean {
+    return this.activeCustomTheme() !== null;
+  }
+
+  /** 阅读基础深浅（未计阅读主题锁色）：应用强制深/浅取对应，跟随系统取系统深浅。 */
+  private readerBaseDark(): boolean {
+    const mode: number = FqAppSettingsStore.getThemeMode();
+    if (mode === FQ_THEME_DARK) {
+      return true;
+    }
+    if (mode === FQ_THEME_LIGHT) {
+      return false;
+    }
+    return appState.isDark;
+  }
+
+  /** 双模式主题当前应使用的模式：仅设深色图 → 深；仅设浅色图 → 浅；双设 → 阅读基础深浅。 */
+  private usingDarkVariant(): boolean {
+    const entry: FqCustomReaderTheme | null = this.activeCustomTheme();
+    if (entry === null) {
+      return false;
+    }
+    return fqCustomThemeUseDark(entry, this.readerBaseDark());
+  }
+
+  /** 正文层背景色：图片背景时透明（由根 Stack 底层背景图承接），否则主题背景色。 */
+  private pageBg(): string {
+    return this.hasCustomBg() ? 'transparent' : this.theme().background;
+  }
+
+  /** 生效正文字号：自定义主题当前模式覆盖（>0）优先，否则全局字号。 */
+  private effFontSize(): number {
+    const entry: FqCustomReaderTheme | null = this.activeCustomTheme();
+    if (entry !== null) {
+      const size: number = this.usingDarkVariant() ? entry.darkFontSize : entry.lightFontSize;
+      if (size > 0) {
+        return size;
+      }
+    }
+    return this.fontSize;
+  }
+
+  /** 生效行距：自定义主题当前模式覆盖（>0）优先，否则全局行距。 */
+  private effLineHeight(): number {
+    const entry: FqCustomReaderTheme | null = this.activeCustomTheme();
+    if (entry !== null) {
+      const value: number = this.usingDarkVariant() ? entry.darkLineHeight : entry.lightLineHeight;
+      if (value > 0) {
+        return value;
+      }
+    }
+    return this.lineHeight;
+  }
+
+  /** 生效字体档位：自定义主题当前模式覆盖（>=0）优先，否则全局档位。 */
+  private effFontIndex(): number {
+    const entry: FqCustomReaderTheme | null = this.activeCustomTheme();
+    if (entry !== null) {
+      const index: number = this.usingDarkVariant() ? entry.darkFontIndex : entry.lightFontIndex;
+      if (index >= 0) {
+        return index;
+      }
+    }
+    return this.fontIndex;
+  }
+
+  /** 生效正文字色：自定义主题当前模式覆盖（非空）优先，否则模式预设色（浅墨黑/深夜间灰）。 */
+  private effFontColor(): string {
+    const entry: FqCustomReaderTheme | null = this.activeCustomTheme();
+    if (entry !== null) {
+      const color: string = this.usingDarkVariant() ? entry.darkFontColor : entry.lightFontColor;
+      if (color.length > 0) {
+        return color;
+      }
+      return this.usingDarkVariant() ? '#9AA0A6' : '#1F2329';
+    }
+    return this.theme().fontColor;
   }
 
   /** 上次已锁定的应用色彩模式（去重，避免重复 setColorMode/刷新）。 */
@@ -1587,13 +1714,29 @@ export struct ReaderPage {
    * 将应用色彩模式锁定为与生效阅读主题一致：阅读页内系统色 chrome（标题栏/工具栏/
    * 设置弹窗卡片/半模态）随阅读主题渲染，避免系统深色 + 浅色主题时白字不可读
    * （或系统浅色 + 夜间主题时黑字不可读）。「跟随」主题不锁定，沿用设置页深浅模式
-   * （应用强制深/浅时随应用，跟随系统时随系统），保证跟随档与全局设置一致。
+   * （应用强制深/浅时随应用，跟随系统时随系统），保证跟随档与全局设置一致；
+   * 自定义背景图主题按应生效模式锁定（浅色图 → 浅色工具栏，深色图 → 深色工具栏）；
+   * 双模式齐备且应用跟随系统时不锁定（变体随系统切换，chrome 同步跟随）。
    */
   private syncReaderColorMode(): void {
-    const mode: ConfigurationConstant.ColorMode = this.themeIndex === -1
-      ? this.appColorMode()
-      : (this.theme().night ? ConfigurationConstant.ColorMode.COLOR_MODE_DARK
-        : ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT);
+    const custom: FqCustomReaderTheme | null = this.activeCustomTheme();
+    let mode: ConfigurationConstant.ColorMode;
+    if (this.themeIndex === -1) {
+      mode = this.appColorMode();
+    } else if (this.themeIndex === 3 && custom !== null) {
+      const appMode: number = FqAppSettingsStore.getThemeMode();
+      const followSystem: boolean = appMode !== FQ_THEME_DARK && appMode !== FQ_THEME_LIGHT;
+      if (followSystem && custom.lightBgPath.length > 0 && custom.darkBgPath.length > 0) {
+        mode = ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET;
+      } else {
+        mode = this.usingDarkVariant()
+          ? ConfigurationConstant.ColorMode.COLOR_MODE_DARK
+          : ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT;
+      }
+    } else {
+      mode = this.theme().night ? ConfigurationConstant.ColorMode.COLOR_MODE_DARK
+        : ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT;
+    }
     if (this.appliedColorMode === mode) {
       return;
     }
@@ -1982,12 +2125,13 @@ export struct ReaderPage {
    *  副本完整性校验（大小与源一致）：拷贝中断/损坏时删除重拷，
    *  避免注册坏文件后渲染静默回退系统字体（书宋回退问题）。 */
   private async prepareReaderFont(): Promise<void> {
-    const option: FqFontOption | undefined = FQ_FONT_OPTIONS[this.fontIndex];
+    const effIndex: number = this.effFontIndex();
+    const option: FqFontOption | undefined = FQ_FONT_OPTIONS[effIndex];
     if (option === undefined) {
       this.readerFontFamily = '';
       return;
     }
-    const target: string = `${this.filesDir}/fq_reader2_font_${this.fontIndex}.ttf`;
+    const target: string = `${this.filesDir}/fq_reader2_font_${effIndex}.ttf`;
     try {
       if (!ReaderPage.fontCopyValid(target, option.candidates)) {
         ReaderPage.deleteFileQuietly(target);
@@ -2067,6 +2211,9 @@ export struct ReaderPage {
     fqReaderSettingsBus.themeIndex = this.themeIndex;
     fqReaderSettingsBus.flipIndex = this.flipIndex;
     fqReaderSettingsBus.fontIndex = this.fontIndex;
+    fqReaderSettingsBus.showParagraphComment = this.showParagraphComment;
+    fqReaderSettingsBus.customThemes = this.customThemes;
+    fqReaderSettingsBus.customThemeId = this.customThemeId;
     fqReaderSettingsBus.handler = {
       changeFontSize: (delta: number): void => {
         this.changeFontSize(delta);
@@ -2077,14 +2224,11 @@ export struct ReaderPage {
         fqReaderSettingsBus.lineHeight = this.lineHeight;
       },
       changeTheme: (index: number): void => {
-        this.themeIndex = index;
-        this.applySettingChange(false);
-        fqReaderSettingsBus.themeIndex = this.themeIndex;
+        this.changeThemePreset(index);
       },
       changeFont: (index: number): void => {
         this.changeFont(index);
-    fqReaderSettingsBus.fontIndex = this.fontIndex;
-    fqReaderSettingsBus.showParagraphComment = this.showParagraphComment;
+        fqReaderSettingsBus.fontIndex = this.fontIndex;
       },
       changeFlip: (index: number): void => {
         this.changeFlip(index);
@@ -2094,7 +2238,204 @@ export struct ReaderPage {
         this.changeShowParagraphComment(on);
         fqReaderSettingsBus.showParagraphComment = this.showParagraphComment;
       },
+      pickCustomTheme: (): void => {
+        this.addCustomTheme();
+      },
+      selectCustomTheme: (id: string): void => {
+        this.selectCustomTheme(id);
+      },
+      editCustomTheme: (id: string): void => {
+        this.openCustomThemeEditor(id);
+      },
     };
+  }
+
+  /** 切换预设主题（-1 跟随 / 0 纸白 / 1 米黄 / 2 夜间）：生效排版参数变化时保位重排。 */
+  private changeThemePreset(index: number): void {
+    if (index < -1 || index > 2 || index === this.themeIndex) {
+      return;
+    }
+    void this.applyThemeSelection((): void => {
+      this.themeIndex = index;
+    });
+  }
+
+  /** 选中自定义主题（主题档 3，持久化选中 id）：生效排版参数变化时保位重排。 */
+  private selectCustomTheme(id: string): void {
+    if (this.themeIndex === 3 && this.customThemeId === id) {
+      return;
+    }
+    void this.applyThemeSelection((): void => {
+      this.customThemeId = id;
+      this.themeIndex = 3;
+      FqReaderStore.selectCustomTheme(id);
+    });
+  }
+
+  /** 主题切换统一收口：先记生效排版参数基线 → 应用变更 → 字体档变化重备字体、参数变化保位重排。 */
+  private async applyThemeSelection(mutate: () => void): Promise<void> {
+    const beforeFontIndex: number = this.effFontIndex();
+    const beforeMetricsKey: string = `${this.effFontSize()}_${this.effLineHeight()}`;
+    mutate();
+    const fontChanged: boolean = this.effFontIndex() !== beforeFontIndex;
+    if (fontChanged) {
+      await this.prepareReaderFont();
+    }
+    this.applySettingChange(fontChanged
+      || `${this.effFontSize()}_${this.effLineHeight()}` !== beforeMetricsKey);
+    fqReaderSettingsBus.themeIndex = this.themeIndex;
+    fqReaderSettingsBus.customThemeId = this.customThemeId;
+  }
+
+  /** 新建自定义主题：打开编辑弹窗新建模式（图片位点击选图，保存经回调流）。 */
+  private addCustomTheme(): void {
+    DialogManager.ShowReaderThemeEditor(null,
+      (draft: FqCustomReaderTheme): void => {
+        void this.saveCustomThemeDraft(draft);
+      },
+      (_editId: string): void => {
+      },
+      (_editId: string, _name: string): void => {
+      });
+  }
+
+  /** 打开自定义主题编辑弹窗（双模式参数；保存/删除经回调流）。 */
+  private openCustomThemeEditor(id: string): void {
+    let editing: FqCustomReaderTheme | null = null;
+    for (const item of this.customThemes) {
+      if (item.id === id) {
+        editing = item;
+        break;
+      }
+    }
+    if (editing === null) {
+      return;
+    }
+    DialogManager.ShowReaderThemeEditor(editing,
+      (draft: FqCustomReaderTheme): void => {
+        void this.saveCustomThemeDraft(draft);
+      },
+      (editId: string): void => {
+        this.confirmRemoveCustomTheme(editId);
+      },
+      (editId: string, name: string): void => {
+        this.liveThemeName(editId, name);
+      });
+  }
+
+  /** 由编辑弹窗静态值组装双模式草稿（保存/实时写回共用）。 */
+  private buildEditorDraft(): FqCustomReaderTheme {
+    const draft: FqCustomReaderTheme = new FqCustomReaderTheme();
+    draft.name = DialogManager.readerThemeName;
+    draft.lightBgPath = DialogManager.readerThemeLightBg;
+    draft.lightFontColor = DialogManager.readerThemeLightFontColor;
+    draft.lightFontSize = DialogManager.readerThemeLightFontSize;
+    draft.lightFontIndex = DialogManager.readerThemeLightFontIndex;
+    draft.lightLineHeight = DialogManager.readerThemeLightLineHeight;
+    draft.darkBgPath = DialogManager.readerThemeDarkBg;
+    draft.darkFontColor = DialogManager.readerThemeDarkFontColor;
+    draft.darkFontSize = DialogManager.readerThemeDarkFontSize;
+    draft.darkFontIndex = DialogManager.readerThemeDarkFontIndex;
+    draft.darkLineHeight = DialogManager.readerThemeDarkLineHeight;
+    return draft;
+  }
+
+  /** 编辑中名称实时写回：设置弹窗主题行标签即时跟随（背景图路径保持条目现值，
+   *  编辑中未保存的新导入不落盘，其余参数随输入即刻生效）。 */
+  private liveThemeName(id: string, name: string): void {
+    const trimmed: string = name.trim();
+    if (trimmed.length === 0) {
+      return;
+    }
+    const draft: FqCustomReaderTheme = this.buildEditorDraft();
+    draft.id = id;
+    draft.name = trimmed;
+    if (!FqReaderStore.updateCustomThemeParams(id, draft)) {
+      return;
+    }
+    this.customThemes = FqReaderStore.getSettings().customThemes;
+    fqReaderSettingsBus.customThemes = this.customThemes;
+  }
+
+  /** 保存自定义主题编辑草稿：新建追加并选中新主题 / 编辑原位替换（被换下的旧图回收）；
+   *  当前生效主题排版参数变化时保位重排。 */
+  private async saveCustomThemeDraft(draft: FqCustomReaderTheme): Promise<void> {
+    if (draft.lightBgPath.length === 0 && draft.darkBgPath.length === 0) {
+      promptAction.showToast({ message: '请至少选择一张背景图', duration: 2000 });
+      return;
+    }
+    if (draft.id.length === 0) {
+      const created: FqCustomReaderTheme | null = FqReaderStore.createCustomTheme(draft);
+      if (created === null) {
+        promptAction.showToast({ message: '主题保存失败，请重试', duration: 2000 });
+        return;
+      }
+      DialogManager.SettleReaderThemeBgImports();
+      this.customThemes = FqReaderStore.getSettings().customThemes;
+      fqReaderSettingsBus.customThemes = this.customThemes;
+      this.selectCustomTheme(created.id);
+      return;
+    }
+    const active: boolean = this.themeIndex === 3 && this.customThemeId === draft.id;
+    const beforeFontIndex: number = this.effFontIndex();
+    const beforeMetricsKey: string = `${this.effFontSize()}_${this.effLineHeight()}`;
+    let replacedLight: string = '';
+    let replacedDark: string = '';
+    for (const item of this.customThemes) {
+      if (item.id === draft.id) {
+        replacedLight = item.lightBgPath !== draft.lightBgPath ? item.lightBgPath : '';
+        replacedDark = item.darkBgPath !== draft.darkBgPath ? item.darkBgPath : '';
+        break;
+      }
+    }
+    if (!FqReaderStore.updateCustomTheme(draft.id, draft)) {
+      return;
+    }
+    DialogManager.SettleReaderThemeBgImports();
+    if (replacedLight.length > 0) {
+      try {
+        fileIo.unlinkSync(replacedLight);
+      } catch (unlinkError) {
+        // 文件可能已被清理
+      }
+    }
+    if (replacedDark.length > 0) {
+      try {
+        fileIo.unlinkSync(replacedDark);
+      } catch (unlinkError) {
+        // 文件可能已被清理
+      }
+    }
+    this.customThemes = FqReaderStore.getSettings().customThemes;
+    fqReaderSettingsBus.customThemes = this.customThemes;
+    if (!active) {
+      return;
+    }
+    const fontChanged: boolean = this.effFontIndex() !== beforeFontIndex;
+    if (fontChanged) {
+      await this.prepareReaderFont();
+    }
+    this.applySettingChange(fontChanged
+      || `${this.effFontSize()}_${this.effLineHeight()}` !== beforeMetricsKey);
+  }
+
+  /** 删除自定义主题：确认弹窗 → 删条目与背景图 → 删除的是当前主题时回退跟随系统并保位重排。 */
+  private confirmRemoveCustomTheme(id: string): void {
+    DialogManager.ShowConfirm('删除自定义主题', '将删除该主题及其背景图，删除后不可恢复', '删除', (): void => {
+      const wasActive: boolean = this.themeIndex === 3 && this.customThemeId === id;
+      if (!FqReaderStore.removeCustomTheme(id)) {
+        return;
+      }
+      this.customThemes = FqReaderStore.getSettings().customThemes;
+      fqReaderSettingsBus.customThemes = this.customThemes;
+      fqReaderSettingsBus.customThemeId = FqReaderStore.getSettings().customThemeId;
+      if (wasActive) {
+        void this.applyThemeSelection((): void => {
+          this.customThemeId = '';
+          this.themeIndex = -1;
+        });
+      }
+    });
   }
 
   /** 切换翻页方式：0 仿真 / 1 横滑 / 2 上下滚动（进出上下滚动时迁移阅读位置）。 */

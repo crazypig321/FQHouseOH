@@ -37,7 +37,6 @@ export struct FqPageCanvas {
     Column() {
       if (this.page !== null) {
         ForEach(this.page.fragments, (frag: FqPageFragment) => {
-          Column() {
             Text(){
               Span(frag.text)
               if (frag.showBubble && this.bubbleCount(frag) > 0) {
@@ -54,6 +53,9 @@ export struct FqPageCanvas {
                   .fontSize(this.metrics.bubbleTextFp)
                   .fontColor($r('sys.color.icon_tertiary'))
                   .fontFamily(this.fontFamily)
+                  .onClick(() => {
+                    this.onBubbleTap(frag.paraIndex);
+                  })
               }
             }
             .fontSize(frag.isTitle ? this.metrics.titleFontFp : this.metrics.fontSizeFp)
@@ -61,14 +63,11 @@ export struct FqPageCanvas {
             .lineHeight(frag.isTitle ? this.metrics.titleLineFp : this.metrics.lineHeightFp)
             .fontColor(this.fontColor)
             .fontFamily(this.fontFamily)
-            .textAlign(TextAlign.JUSTIFY)
+            .textAlign(TextAlign.Start)
             .width('100%')
             .margin({ top: this.topMarginVp(frag), bottom: frag.isTitle ? this.metrics.titleBottomVp : 0 })
-          }
-          .alignItems(HorizontalAlign.Center)
-          .width('100%')
-          .backgroundColor(this.paraHighlighted(frag) ? this.highlightColor : 'transparent')
-          .borderRadius(this.paraHighlighted(frag) ? 6 : 0)
+            .borderRadius(this.paraHighlighted(frag) ? 6 : 0)
+            .backgroundColor(this.paraHighlighted(frag) ? this.highlightColor : 'transparent')
         }, (frag: FqPageFragment): string =>
           `f_${frag.paraIndex}_${frag.startChar}_${frag.endChar}_${frag.showBubble ? 1 : 0}_${this.bubbleCount(frag)}_${frag.text.length}`)
       }
