@@ -136,6 +136,16 @@ export class FqVerticalPageSource implements IDataSource {
       listener.onDataReloaded();
     }
   }
+
+  /** 整批替换（onDataReloaded 单次通知）。重排/换字号须走本方法而非 reset+append：
+   *  空表 reload 后紧跟 onDataAdd 风暴时 LazyForEach 按索引命中旧键缓存不重建子组件
+   *  （faqs-arkui-683，实测改字号不刷新根因）；整批就位后单次 reload 会重取键值重建。 */
+  replaceAll(items: FqVerticalTextItem[]): void {
+    this.items = items.slice();
+    for (const listener of this.listeners) {
+      listener.onDataReloaded();
+    }
+  }
 }
 
 /** 段评懒加载数据源（List + LazyForEach；续拉按 comment_id 去重，重置整体通知）。 */
@@ -268,8 +278,10 @@ export struct ReaderPage {
   private loadToken: number = 0;
   private clockTimer: number = -1;
   private titleBarOp: TitleBarContentOptions | undefined = undefined;
-  /** 排版几何缓存（重排/开章时重建，渲染期间引用稳定）。 */
-  private cachedMetrics: FqReaderLayoutMetrics = new FqReaderLayoutMetrics();
+  /** 排版几何缓存（重排/开章时重建，渲染期间引用稳定）。
+   *  @Local：重赋值驱动眉页/眉脚区高、FqPageCanvas metrics、上下滚动条目字号等
+   *  读取处即时重渲染（普通字段不建依赖，避让区/字号变化曾不传播）。 */
+  @Local cachedMetrics: FqReaderLayoutMetrics = new FqReaderLayoutMetrics();
   /** 各章实测页数与冻结估算（整书页码，对齐 ReaderPage 行为）。 */
   private chapterPages: Map<number, number> = new Map();
   private chapterEstimate: Map<number, number> = new Map();
@@ -881,17 +893,20 @@ export struct ReaderPage {
   /** 上下滚动模式重建：当前章段落入源并定位（startPara 章内段下标）。 */
   private buildVertical(startPara: number): void {
     const layout: FqChapterLayout | null = this.curLayout;
-    this.verticalSource.reset();
     this.verticalEndedToastOnce = false;
     if (layout === null || layout.paragraphs.length === 0) {
+      this.verticalSource.reset();
       return;
     }
-    this.verticalPositioning = true;
+    const items: FqVerticalTextItem[] = [];
     for (let i: number = 0; i < layout.paragraphs.length; i++) {
-      this.verticalSource.append(new FqVerticalTextItem(layout.chapterIndex, i, layout));
+      items.push(new FqVerticalTextItem(layout.chapterIndex, i, layout));
     }
+    this.verticalSource.replaceAll(items);
+    hilog.info(0x0001, 'FqM', `buildVertical startPara=${startPara} items=${items.length} fontSize=${this.effFontSize()}`);
     const target: number = Math.min(Math.max(0, startPara), layout.paragraphs.length - 1);
     this.verticalCurPara = target;
+    this.verticalPositioning = true;
     setTimeout((): void => {
       this.verticalPositioning = false;
       if (this.verticalSource.totalCount() > target) {

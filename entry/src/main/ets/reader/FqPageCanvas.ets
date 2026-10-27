@@ -34,11 +34,11 @@ export struct FqPageCanvas {
   }
 
   build() {
-    Flex({ direction: FlexDirection.Column, justifyContent: FlexAlign.Center, alignItems: ItemAlign.Center }) {
+    Flex({ direction: FlexDirection.Column, justifyContent: FlexAlign.Start, alignItems: ItemAlign.Center }) {
       if (this.page !== null) {
         ForEach(this.page.fragments, (frag: FqPageFragment) => {
             Text(){
-              Span(frag.text).layoutWeight(1)
+              Span(frag.text)
               if (frag.showBubble && this.bubbleCount(frag) > 0) {
                 ImageSpan($r('app.media.ellipsis_message'))
                   .width(this.metrics.bubbleIconFp)
@@ -63,7 +63,8 @@ export struct FqPageCanvas {
             .lineHeight(frag.isTitle ? this.metrics.titleLineFp : this.metrics.lineHeightFp)
             .fontColor(this.fontColor)
             .fontFamily(this.fontFamily)
-            .textAlign(TextAlign.Start)
+            // 两端对齐对齐上下滚动模式正文（禁则短行拉伸补齐右边，消除右侧缺口）
+            .textAlign(TextAlign.JUSTIFY)
             .width('100%')
             .margin({ top: this.topMarginVp(frag), bottom: frag.isTitle ? this.metrics.titleBottomVp : 0 })
             .borderRadius(this.paraHighlighted(frag) ? 6 : 0)

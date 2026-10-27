@@ -7,10 +7,11 @@
  *       按页高装页（行高/段前距/章题上下距计入；段评气泡优先行内化拼在末行后，
  *       放不下时窄列重排末行或回退独立气泡行）→
  *       输出 FqReaderPageData[]（片段 + 行集合 + 气泡命中区 + 页首位置）。
- * 渲染约定：渲染端逐行独立 Text（.maxLines(1)），行内容即引擎切好的行，
- * 断行零分歧；measureText 仅支持 HarmonyOS Sans（自定义字体名会被忽略），
- * 自定义阅读字体时测量回调由 ReaderPage 以「全角 1em 步进 + 半角系统测量」
- * 合成，使满行测量与渲染一致，杜绝满行末字被 maxLines(1) 裁掉。
+ * 渲染约定：渲染端按片段 Text 自然换行 + TextAlign.JUSTIFY（对齐上下滚动模式正文），
+ * 引擎断行仅作装页行数记账；断行预算扣一个全角字宽安全余量，
+ * 使 Text 自然换行行数恒 ≤ 引擎计数，页内容不超高（页底被裁根因）。
+ * measureText 仅支持 HarmonyOS Sans（自定义字体名会被忽略），
+ * 自定义阅读字体时测量回调由 ReaderPage 以「全角 1em 步进 + 半角系统测量」合成。
  */
 
 import { FqChapterLayout, FqPageBubble, FqPageFragment, FqReaderLayoutMetrics,
@@ -47,7 +48,9 @@ export class FqPaginationEngine {
   }
 
   /** 段落断行：单字符宽度缓存累加（O(N) 快，调字号重排不卡顿），累加超宽时整行实测验证
-   * （含标点压缩），使断行行数与 Text 自然换行一致（减少页底留空）；禁则回退。 */
+   * （含标点压缩），使断行行数与 Text 自然换行一致（减少页底留空）；禁则回退。
+   * 安全余量：行预算扣一个全角字宽——渲染端 Text 自然换行容量恒 ≥ 引擎行容量，
+   * 渲染行数 ≤ 引擎计数，页内容永不超高（FqPageCanvas 顶部对齐+clip 下页底溢出根因）。 */
   private splitLines(text: string, firstMaxW: number, restMaxW: number,
     fontFp: number, weight: string): string[] {
     // 码点切字符（代理对合并，emoji 安全）
@@ -65,14 +68,16 @@ export class FqPaginationEngine {
       chars.push(text.charAt(pos));
     }
     const lines: string[] = [];
+    // 行预算 = 内容宽 - 一个全角字宽（保守容量：Text 自然换行行数不超引擎计数）
+    const safetyPx: number = this.measureFn('汉', fontFp, weight);
     let cur: string = '';
     let curW: number = 0;
-    let maxW: number = firstMaxW;
+    let maxW: number = firstMaxW - safetyPx;
     for (let index: number = 0; index < chars.length; index++) {
       const ch: string = chars[index];
       const w: number = this.charWidth(ch, fontFp, weight);
       if (cur.length > 0 && curW + w > maxW) {
-        // 累加超宽：整行实测验证（含标点压缩），若整行仍 <= maxW 则继续放（标点压缩省空间）
+        // 累加超宽：整行实测验证（含标点压缩），若整行仍 <= 预算则继续放（标点压缩省空间）
         if (this.measureFn(cur + ch, fontFp, weight) <= maxW) {
           cur += ch;
           curW += w;
@@ -94,7 +99,7 @@ export class FqPaginationEngine {
         lines.push(cur.substring(0, cut));
         cur = cur.substring(cut) + ch;
         curW = this.measureFn(cur, fontFp, weight);
-        maxW = restMaxW;
+        maxW = restMaxW - safetyPx;
       } else {
         cur += ch;
         curW += w;
@@ -176,7 +181,9 @@ export class FqPaginationEngine {
         const count: number = commentCounts[para];
         const bubbleW: number = this.bubbleWidthPx(metrics, count);
         const lastLineW: number = this.measureFn(lines[lines.length - 1], fontFp, weight);
-        const inline: boolean = lastLineW + bubbleW <= metrics.contentWidthPx;
+        // 判定预算与断行同扣全角字宽余量：自然换行末行可略宽于引擎末行，须保守判放不下
+        const inline: boolean = lastLineW + bubbleW
+          <= metrics.contentWidthPx - this.measureFn('汉', fontFp, weight);
         const charge: number = inline ? 0 : lineH;
         if (!inline && page.fragments.length > 0 && used + charge > contentH) {
           pages.push(page);
