@@ -8,6 +8,7 @@
 
 import { ButtonOptions } from '@kit.ArkUI';
 import { appState } from '../entryability/AppState';
+import { FqWebDavBackupEntry } from '../core/FqWebDav';
 
 /** 公共弹窗管理器：弹窗标识/宿主动作/生命周期回调的静态集散地。 */
 export class DialogManager {
@@ -34,6 +35,20 @@ export class DialogManager {
   public static customColorPicked: string = '#FF7A3D';
   /** 自定义颜色弹窗确认回调（确认后执行并回传所选色；取消/关闭不触发）。 */
   private static customColorConfirmCallback: ((hex: string) => void) | null = null;
+
+  // ===== WebDAV 备份选择弹窗参数（打开前由调用方赋值，弹窗关闭后自动清空） =====
+  /** 远端备份条目列表。 */
+  public static webdavBackupEntries: FqWebDavBackupEntry[] = [];
+  /** 当前选中条目下标。 */
+  public static webdavBackupIndex: number = 0;
+  /** 选中确认回调（回传备份文件名；取消/关闭不触发）。 */
+  private static webdavBackupPick: ((fileName: string) => void) | null = null;
+
+  // ===== WebDAV 备份保留数量弹窗参数（打开前由调用方赋值，弹窗关闭后自动清空） =====
+  /** 保留数量输入文本。 */
+  public static webdavCountValue: string = '';
+  /** 保留数量确认回调（回传 1-50 整数；取消/关闭不触发）。 */
+  private static webdavCountConfirm: ((count: number) => void) | null = null;
 
   // ===== 宿主注册动作（由持有 CustomDialogController 的页面注入） =====
   private static opener: (() => void) | null = null;
@@ -97,6 +112,21 @@ export class DialogManager {
     DialogManager.OpenDialog('自定义颜色');
   }
 
+  /** WebDAV 远端备份选择弹窗：entries 远端备份列表（新在前），onPick 选中确认后回传备份文件名。 */
+  public static SelectWebDavBackup(entries: FqWebDavBackupEntry[], onPick: (fileName: string) => void): void {
+    DialogManager.webdavBackupEntries = entries;
+    DialogManager.webdavBackupIndex = 0;
+    DialogManager.webdavBackupPick = onPick;
+    DialogManager.OpenDialog('选择WebDAV备份');
+  }
+
+  /** WebDAV 备份保留数量弹窗：current 当前值，onConfirm 确认后回传 1-50 整数。 */
+  public static InputWebDavBackupCount(current: number, onConfirm: (count: number) => void): void {
+    DialogManager.webdavCountValue = current.toString();
+    DialogManager.webdavCountConfirm = onConfirm;
+    DialogManager.OpenDialog('备份保留数量');
+  }
+
   /** 弹窗标题（宿主渲染时读取）。 */
   public static DialogTitle(key: string): ResourceStr {
     if (key === '通用确认') {
@@ -105,12 +135,19 @@ export class DialogManager {
     if (key === '自定义颜色') {
       return '自定义颜色';
     }
+    if (key === '选择WebDAV备份') {
+      return '选择备份文件';
+    }
+    if (key === '备份保留数量') {
+      return '备份保留数量';
+    }
     return '';
   }
 
   /** 弹窗底部按钮（宿主渲染时读取；CustomContentDialog 点击按钮后自动关闭）。 */
   public static DialogButtons(key: string): Array<ButtonOptions> {
-    if (key === '通用确认' || key === '自定义颜色') {
+    if (key === '通用确认' || key === '自定义颜色' ||
+      key === '选择WebDAV备份' || key === '备份保留数量') {
       const cancel: ButtonOptions = {
         value: '取消',
         fontColor: appState.accentColor,
@@ -118,8 +155,16 @@ export class DialogManager {
         action: (): void => {
         }
       };
+      let confirmLabel: string = '确认';
+      if (key === '通用确认') {
+        confirmLabel = DialogManager.confirmLabel;
+      } else if (key === '选择WebDAV备份') {
+        confirmLabel = '恢复';
+      } else if (key === '备份保留数量') {
+        confirmLabel = '确定';
+      }
       const confirm: ButtonOptions = {
-        value: key === '通用确认' ? DialogManager.confirmLabel : '确认',
+        value: confirmLabel,
         fontColor: Color.White,
         background: appState.accentColor,
         buttonStyle: ButtonStyleMode.TEXTUAL,
@@ -146,6 +191,25 @@ export class DialogManager {
         cb(DialogManager.customColorPicked);
       }
     }
+    if (key === '选择WebDAV备份') {
+      const index: number = DialogManager.webdavBackupIndex;
+      const entries: FqWebDavBackupEntry[] = DialogManager.webdavBackupEntries;
+      const pick: ((fileName: string) => void) | null = DialogManager.webdavBackupPick;
+      if (index >= 0 && index < entries.length && pick !== null) {
+        pick(entries[index].fileName);
+      }
+    }
+    if (key === '备份保留数量') {
+      const count: number = parseInt(DialogManager.webdavCountValue, 10);
+      if (Number.isNaN(count) || count < 1 || count > 50) {
+        DialogManager.Toast('请输入 1-50 之间的整数');
+        return;
+      }
+      const cb: ((value: number) => void) | null = DialogManager.webdavCountConfirm;
+      if (cb !== null) {
+        cb(count);
+      }
+    }
   }
 
   /** 弹窗消失清理（宿主 onWillDisappear 调用）：清标识、触发一次性关闭回调。 */
@@ -166,6 +230,17 @@ export class DialogManager {
       DialogManager.customColorInitial = '#FF7A3D';
       DialogManager.customColorPicked = '#FF7A3D';
       DialogManager.customColorConfirmCallback = null;
+    }
+    // WebDAV 备份选择弹窗参数一次性，关闭后清理
+    if (key === '选择WebDAV备份') {
+      DialogManager.webdavBackupEntries = [];
+      DialogManager.webdavBackupIndex = 0;
+      DialogManager.webdavBackupPick = null;
+    }
+    // WebDAV 备份保留数量弹窗参数一次性，关闭后清理
+    if (key === '备份保留数量') {
+      DialogManager.webdavCountValue = '';
+      DialogManager.webdavCountConfirm = null;
     }
     const cb: (() => void) | null = DialogManager.onDialogClosed;
     DialogManager.onDialogClosed = null;

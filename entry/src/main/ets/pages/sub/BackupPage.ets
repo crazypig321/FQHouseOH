@@ -8,9 +8,10 @@
  */
 
 import { CommonNav } from '../../view/CommonNav';
-import { FqTitleBarOptions } from '../../model/FqNavModels';
+import { FqTitleBarOptions, ROUTE_WEBDAV } from '../../model/FqNavModels';
 import { FqColorUtils } from '../../utils/FqColorUtils';
 import { DialogManager } from '../../utils/DialogUtils';
+import { NavPathUtils } from '../../utils/NavPathUtils';
 import { appState } from '../../entryability/AppState';
 import { fqExportTextFile } from '../../core/FqCacheExport';
 import {
@@ -100,6 +101,11 @@ export struct BackupPage {
             this.ActionRow($r('sys.symbol.doc_plaintext'), '#FF10B981', '从备份恢复',
               this.preview === null ? '选择备份文件，预览后再合并' : '重新选择其他备份', (): void => {
                 this.runImport();
+              })
+            this.RowDivider()
+            this.ActionRow($r('sys.symbol.cloud'), '#FF8B5CF6', 'WebDAV 备份与恢复',
+              '通过 WebDAV 服务器云端备份与恢复', (): void => {
+                NavPathUtils.push(ROUTE_WEBDAV);
               })
           }
         }

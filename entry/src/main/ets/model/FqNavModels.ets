@@ -38,6 +38,8 @@ export const ROUTE_CACHED_COMICS: string = 'cachedComics';
 export const ROUTE_LOGS: string = 'logs';
 /** 备份与恢复页（设置-数据-备份与恢复，书架/记录跨设备迁移）。 */
 export const ROUTE_BACKUP: string = 'backup';
+/** WebDAV 备份与恢复页（备份与恢复-WebDAV，云端备份/恢复）。 */
+export const ROUTE_WEBDAV: string = 'webdav';
 
 /** 详情页跳转参数（push 前由来源页赋值，详情页 aboutToAppear 读取）。 */
 export class DetailNavParams {

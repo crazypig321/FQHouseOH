@@ -36,6 +36,8 @@ import { FqAudioCacheStore } from '../core/FqAudioCacheStore';
 import { fqAudioDownloader } from '../core/FqAudioDownloader';
 import { FqComicCacheStore } from '../core/FqComicCacheStore';
 import { fqComicDownloader } from '../core/FqComicDownloader';
+import { FqWebDavConfigStore } from '../core/FqWebDavConfigStore';
+import { FqWebDav } from '../core/FqWebDav';
 import { appState } from './AppState';
 import { themeUtils } from '../utils/ThemeUtils';
 
@@ -72,6 +74,8 @@ export default class EntryAbility extends UIAbility {
     // 漫画离线缓存（图片列表秒开 + 整话离线）初始化
     FqComicCacheStore.init(this.context);
     fqComicDownloader.init(this.context);
+    // WebDAV 备份配置（备份与恢复-WebDAV）初始化
+    FqWebDavConfigStore.init(this.context);
     FqBackend.get().start(this.context).catch((error: Object): void => {
       hilog.error(DOMAIN, 'FqBackend', 'backend start failed: %{public}s', `${error}`);
     });
@@ -79,6 +83,8 @@ export default class EntryAbility extends UIAbility {
 
   onDestroy(): void {
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onDestroy');
+    // 退出时自动备份（WebDAV 开关开启 + 已配置 + 可达时执行，静默失败）
+    FqWebDav.backupOnExit();
     fqAudioSession.close();
   }
 

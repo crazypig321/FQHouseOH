@@ -14,6 +14,8 @@ import { FqReaderSettingsHandler, fqReaderSettingsBus } from '../core/FqReaderSe
 import { fqEffectiveReaderTheme, ReaderSettingsDialogContent } from '../view/dialog/ReaderSettingsDialogContent';
 import { FqComicSettingsHandler, fqComicSettingsBus } from '../core/FqComicSettingsBus';
 import { ComicSettingsDialogContent } from '../view/dialog/ComicSettingsDialogContent';
+import { WebDavBackupListDialogContent } from '../view/dialog/WebDavBackupListDialogContent';
+import { WebDavBackupCountDialogContent } from '../view/dialog/WebDavBackupCountDialogContent';
 import { FqPlaybackBall } from '../view/FqPlaybackBall';
 import { FqSheetOptions } from '../view/sheet/CommonSheet';
 import { FqChangelogSheet } from '../view/sheet/FqChangelogSheet';
@@ -297,6 +299,10 @@ struct Index {
       })
       .width('100%')
       .height(320)
+    } else if (key === '选择WebDAV备份') {
+      WebDavBackupListDialogContent()
+    } else if (key === '备份保留数量') {
+      WebDavBackupCountDialogContent()
     }
   }
 }
