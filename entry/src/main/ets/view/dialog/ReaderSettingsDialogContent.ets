@@ -334,7 +334,7 @@ export struct ReaderSettingsDialogContent {
         .width(34)
         .height(34)
         .borderRadius(17)
-        .backgroundColor(appState.isDark ? '#2A2D30' : '#E8E2D4')
+        .backgroundColor($r('app.color.reader_chip_bg'))
         .border({
           width: 1,
           color: themeUtils.terTextColor,
@@ -364,7 +364,7 @@ export struct ReaderSettingsDialogContent {
       .height(34)
       .borderRadius(17)
       .textAlign(TextAlign.Center)
-      .backgroundColor(appState.isDark ? '#2A2D30' : '#E8E2D4')
+      .backgroundColor($r('app.color.reader_chip_bg'))
       .onClick((): void => {
         action();
       })

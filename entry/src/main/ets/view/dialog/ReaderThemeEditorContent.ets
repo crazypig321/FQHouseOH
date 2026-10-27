@@ -15,6 +15,7 @@ import { fqNormalizeThemeFontColor, FqReaderStore } from '../../core/FqReaderSto
 import { FQ_FONT_OPTIONS, FqFontOption } from '../../core/FqOnlineParser';
 import { appState } from '../../entryability/AppState';
 import { themeUtils } from '../../utils/ThemeUtils';
+import { rowImmersiveModifier } from '../../utils/ModifierUtils';
 
 /** 编辑弹窗预设字色（配合自定义背景：深色 4 档 + 浅色 1 档）。 */
 const FQ_EDITOR_FONT_COLORS: string[] = ['#1F2329', '#5B4636', '#33506B', '#3D5A4C', '#E8E6E1'];
@@ -52,38 +53,46 @@ export struct ReaderThemeEditorContent {
 
   build() {
     Column({ space: 14 }) {
-      Row({ space: 0 }) {
-        Text('浅色模式')
-          .fontSize(13)
-          .fontWeight(this.editorMode === 0 ? FontWeight.Medium : FontWeight.Normal)
-          .fontColor(this.editorMode === 0 ? '#FFFFFF' : themeUtils.textColor)
-          .textAlign(TextAlign.Center)
-          .height(32)
-          .layoutWeight(1)
-          .backgroundColor(this.editorMode === 0 ? appState.accentColor : 'transparent')
-          .borderRadius(10)
-          .onClick((): void => {
-            this.editorMode = 0;
-          })
-        Text('深色模式')
-          .fontSize(13)
-          .fontWeight(this.editorMode === 1 ? FontWeight.Medium : FontWeight.Normal)
-          .fontColor(this.editorMode === 1 ? '#FFFFFF' : themeUtils.textColor)
-          .textAlign(TextAlign.Center)
-          .height(32)
-          .layoutWeight(1)
-          .backgroundColor(this.editorMode === 1 ? appState.accentColor : 'transparent')
-          .borderRadius(10)
-          .onClick((): void => {
-            this.editorMode = 1;
-          })
+      Row() {
+        Stack({ alignContent: Alignment.Start }) {
+          Row()
+            .width('50%')
+            .height(34)
+            .borderRadius(8)
+            .layoutGravity(this.editorMode === 0 ? LocalizedAlignment.START : LocalizedAlignment.END)// stack组件中子组件对齐位置
+            .backgroundColor($r('sys.color.comp_background_list_card'))
+
+          Row() {
+            Text('浅色模式')
+              .fontSize(13)
+              .fontWeight(this.editorMode === 0 ? FontWeight.Bold : FontWeight.Normal)
+              .fontColor(this.editorMode === 0 ? appState.accentColor : $r('sys.color.font_tertiary'))
+              .height(26)
+              .layoutWeight(1)
+              .textAlign(TextAlign.Center)
+              .onClick((): void => {
+                this.switchEditorMode(0);
+              })
+            Text('深色模式')
+              .fontSize(13)
+              .fontWeight(this.editorMode === 1 ? FontWeight.Bold : FontWeight.Normal)
+              .fontColor(this.editorMode === 1 ? appState.accentColor : $r('sys.color.font_tertiary'))
+              .height(26)
+              .layoutWeight(1)
+              .textAlign(TextAlign.Center)
+              .onClick((): void => {
+                this.switchEditorMode(1);
+              })
+          }
+          .width('100%')
+        }
+        .width('100%')
+        .borderRadius(10)
+        .backgroundColor($r('app.color.reader_chip_bg'))
+        .padding(3)
       }
       .width('100%')
-      .height(32)
-      .borderRadius(10)
-      .backgroundColor(appState.isDark ? '#2A2D30' : '#E8E2D4')
-      .padding({ left: 3, right: 3 })
-      .alignItems(VerticalAlign.Center)
+      .justifyContent(FlexAlign.Center)
 
       Row({ space: 10 }) {
         Column({ space: 3 }) {
@@ -100,7 +109,7 @@ export struct ReaderThemeEditorContent {
               .width(40)
               .height(40)
               .borderRadius(8)
-              .backgroundColor(appState.isDark ? '#2A2D30' : '#E8E2D4')
+              .backgroundColor($r('app.color.reader_chip_bg'))
               .border({
                 width: 1,
                 color: themeUtils.terTextColor,
@@ -125,7 +134,7 @@ export struct ReaderThemeEditorContent {
             .fontSize(14)
             .fontColor(themeUtils.textColor)
             .placeholderColor(themeUtils.terTextColor)
-            .backgroundColor(appState.isDark ? '#2A2D30' : '#E8E2D4')
+            .backgroundColor($r('app.color.reader_chip_bg'))
             .borderRadius(10)
             .onChange((value: string): void => {
               this.editorName = value;
@@ -152,7 +161,7 @@ export struct ReaderThemeEditorContent {
             .width(24)
             .height(24)
             .borderRadius(12)
-            .backgroundColor(appState.isDark ? '#2A2D30' : '#E8E2D4')
+            .backgroundColor($r('app.color.reader_chip_bg'))
             .border({
               width: this.curFontColor().length === 0 ? 2 : 1,
               color: this.curFontColor().length === 0 ? appState.accentColor : themeUtils.terTextColor,
@@ -198,7 +207,7 @@ export struct ReaderThemeEditorContent {
           .height(24)
           .borderRadius(12)
           .backgroundColor(this.isCustomPickedColor() ? this.curFontColor()
-            : (appState.isDark ? '#2A2D30' : '#E8E2D4'))
+            : $r('app.color.reader_chip_bg'))
           .border({
             width: this.isCustomPickedColor() ? 2 : 1,
             color: this.isCustomPickedColor() ? appState.accentColor : themeUtils.terTextColor,
@@ -243,7 +252,7 @@ export struct ReaderThemeEditorContent {
           .height(28)
           .borderRadius(14)
           .textAlign(TextAlign.Center)
-          .backgroundColor(appState.isDark ? '#2A2D30' : '#E8E2D4')
+          .backgroundColor($r('app.color.reader_chip_bg'))
           .onClick((): void => {
             this.stepCurFontSize(-1);
           })
@@ -260,7 +269,7 @@ export struct ReaderThemeEditorContent {
           .height(28)
           .borderRadius(14)
           .textAlign(TextAlign.Center)
-          .backgroundColor(appState.isDark ? '#2A2D30' : '#E8E2D4')
+          .backgroundColor($r('app.color.reader_chip_bg'))
           .onClick((): void => {
             this.stepCurFontSize(1);
           })
@@ -290,7 +299,7 @@ export struct ReaderThemeEditorContent {
           .height(28)
           .borderRadius(14)
           .textAlign(TextAlign.Center)
-          .backgroundColor(appState.isDark ? '#2A2D30' : '#E8E2D4')
+          .backgroundColor($r('app.color.reader_chip_bg'))
           .onClick((): void => {
             this.stepCurLineHeight(-0.1);
           })
@@ -307,7 +316,7 @@ export struct ReaderThemeEditorContent {
           .height(28)
           .borderRadius(14)
           .textAlign(TextAlign.Center)
-          .backgroundColor(appState.isDark ? '#2A2D30' : '#E8E2D4')
+          .backgroundColor($r('app.color.reader_chip_bg'))
           .onClick((): void => {
             this.stepCurLineHeight(0.1);
           })
@@ -383,6 +392,16 @@ export struct ReaderThemeEditorContent {
   /** 当前模式行距。 */
   private curLineHeight(): number {
     return this.editorMode === 0 ? this.editorLightLineHeight : this.editorDarkLineHeight;
+  }
+
+  /** 切换浅色/深色编辑模式（滑块位移动画）。 */
+  private switchEditorMode(mode: number): void {
+    if (this.editorMode === mode) {
+      return;
+    }
+    this.getUIContext().animateTo({ duration: 250, curve: Curve.EaseInOut }, (): void => {
+      this.editorMode = mode;
+    });
   }
 
   /** 图片位点击选图：图库选图 → 拷入沙箱 → 记入未保存清单 → 预览当前模式。 */

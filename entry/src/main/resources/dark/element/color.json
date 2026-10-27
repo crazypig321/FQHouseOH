@@ -35,6 +35,10 @@
     {
       "name": "theme_color_red",
       "value": "#FF7373"
+    },
+    {
+      "name": "reader_chip_bg",
+      "value": "#2A2D30"
     }
   ]
 }
