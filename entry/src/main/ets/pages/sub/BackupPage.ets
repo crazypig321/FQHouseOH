@@ -8,7 +8,7 @@
  */
 
 import { CommonNav } from '../../view/CommonNav';
-import { FqTitleBarOptions, ROUTE_WEBDAV } from '../../model/FqNavModels';
+import { FqTitleBarOptions, ROUTE_WEBDAV, ROUTE_FANQIE_IMPORT } from '../../model/FqNavModels';
 import { FqColorUtils } from '../../utils/FqColorUtils';
 import { DialogManager } from '../../utils/DialogUtils';
 import { NavPathUtils } from '../../utils/NavPathUtils';
@@ -110,6 +110,18 @@ export struct BackupPage {
           }
         }
 
+        ListItem() {
+          this.SectionHeader('其他来源')
+        }
+        ListItem() {
+          FqBackupCard() {
+            this.ActionRow($r('sys.symbol.book_pages'), '#FFF97316', '导入番茄书架',
+              '从番茄账号读取书架与阅读进度，合并到本机', (): void => {
+                NavPathUtils.push(ROUTE_FANQIE_IMPORT);
+              })
+          }
+        }
+
         if (this.preview !== null) {
           ListItem() {
             this.SectionHeader('恢复预览')
@@ -163,8 +175,8 @@ export struct BackupPage {
                 .fontWeight(FontWeight.Medium)
                 .fontColor($r('sys.color.font_primary'))
                 .width('100%')
-              Text(`包含书架收藏、浏览记录、收听进度、阅读进度与已看剧集（含续播进度）。\n\n` +
-                '不含本地 TXT 书籍、下载缓存、阅读时长统计、搜索历史与应用设置，这些需要另行保留。\n\n' +
+              Text(`包含书架收藏、浏览记录、收听进度、阅读进度、已看剧集（含续播进度）与外观、阅读设置。\n\n` +
+                '不含本地 TXT 书籍、下载缓存、阅读时长统计与搜索历史，这些需要另行保留。\n\n' +
                 `导出的备份保存在 ${FQ_BACKUP_DIR_TEXT} 目录，可跨设备传输；` +
                 '恢复采用合并方式，只补充缺失记录，不会覆盖本机已有数据，可重复导入。')
                 .fontSize(13)
@@ -193,7 +205,7 @@ export struct BackupPage {
     }
     DialogManager.ShowConfirm('导出备份',
       `备份将保存到 ${FQ_BACKUP_DIR_TEXT} 目录，包含书架收藏、浏览记录、收听进度、` +
-      '阅读进度与已看剧集。将文件传到新设备，在本页选择导入即可恢复。',
+      '阅读进度、已看剧集与外观、阅读设置。将文件传到新设备，在本页选择导入即可恢复。',
       '导出', (): void => {
         this.runExport();
       });
@@ -272,9 +284,13 @@ export struct BackupPage {
     try {
       const result: FqLibraryBackupRestoreResult = FqLibraryBackup.restore(data);
       this.preview = null;
-      this.message = `恢复完成：新增收藏 ${result.shelfAdded} 条、浏览 ${result.browseAdded} 条、` +
+      let summary: string = `恢复完成：新增收藏 ${result.shelfAdded} 条、浏览 ${result.browseAdded} 条、` +
         `收听 ${result.listenAdded} 条、阅读进度 ${result.readerAdded} 本、` +
         `已看剧集 ${result.episodesAdded} 集。\n本机已有记录保持不变，可重复导入。`;
+      if (result.settingsApplied) {
+        summary += '\n外观与阅读设置已同步。';
+      }
+      this.message = summary;
     } catch (error) {
       this.messageIsError = true;
       this.message = '恢复未完成，部分记录可能已写入。可重试同一文件，已存在的数据会保留。';

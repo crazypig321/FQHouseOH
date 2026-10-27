@@ -6,7 +6,7 @@
  * 批量多选以 appState.isBatchMode 为单一数据源（Index 返回手势退出多选、主 TabBar 显隐共享）。
  */
 
-import { ROUTE_DETAIL, ROUTE_READER2, ROUTE_CACHED_BOOKS, DetailNavParams, ReaderNavParams } from '../model/FqNavModels';
+import { ROUTE_DETAIL, ROUTE_READER2, ROUTE_CACHE_MANAGE, DetailNavParams, ReaderNavParams } from '../model/FqNavModels';
 import { CommonNav, titleBarOf } from '../view/CommonNav';
 import { CommonSearch, CommonBlur } from '../view/CommonCom';
 import { FqMenu, FqMenuItem } from '../view/CommonMenu';
@@ -476,7 +476,7 @@ export struct ShelfPage {
     offlineItem.label = '离线缓存';
     offlineItem.onAction = (): void => {
       FqMenu.dismiss();
-      NavPathUtils.push(ROUTE_CACHED_BOOKS);
+      NavPathUtils.push(ROUTE_CACHE_MANAGE);
     };
     items.push(offlineItem);
 

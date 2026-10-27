@@ -42,6 +42,8 @@ export const ROUTE_LOGS: string = 'logs';
 export const ROUTE_BACKUP: string = 'backup';
 /** WebDAV 备份与恢复页（备份与恢复-WebDAV，云端备份/恢复）。 */
 export const ROUTE_WEBDAV: string = 'webdav';
+/** 导入番茄书架页（备份与恢复-其他来源，网页登录采集后合并到本机）。 */
+export const ROUTE_FANQIE_IMPORT: string = 'fanqieImport';
 
 /** 详情页跳转参数（push 前由来源页赋值，详情页 aboutToAppear 读取）。 */
 export class DetailNavParams {
@@ -138,10 +140,13 @@ export class ComicNavParams {
  * 标题 + 右上角单个自定义图标菜单（听视频页语速菜单等）。
  */
 export function FqTitleBarMenuOptions(mainTitle: ResourceStr, menuIcon: Resource,
-  menuLabel: string, menuAction: () => void): TitleBarContentOptions {
+  menuLabel: string, menuAction: () => void, subTitle?: ResourceStr): TitleBarContentOptions {
   const title: HdsNavigationTitle = {
     mainTitle: mainTitle,
   };
+  if (subTitle !== undefined) {
+    title.subTitle = subTitle;
+  }
   const menus: HdsNavigationMenuItemOptions[] = [{
     content: {
       icon: menuIcon,

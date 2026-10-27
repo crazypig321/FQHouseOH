@@ -12,11 +12,13 @@ import { FqShelfItem, FqShelfStore } from './FqShelfStore';
 import { FqBrowseItem, FqBrowseStore } from './FqBrowseStore';
 import { FqListenRecord, FqAudioHistory } from './FqAudioHistory';
 import { FqWatchedMergeOutcome, FqWatchedProgress, FqWatchedStore } from './FqWatchedStore';
-import { FqReaderProgress, FqReaderStore, fqDecodeReadRanges, fqEncodeReadRanges } from './FqReaderStore';
+import { FqReaderProgress, FqReaderSettings, FqReaderStore, fqDecodeReadRanges, fqEncodeReadRanges } from './FqReaderStore';
+import { FqAppSettingsStore } from './FqAppSettingsStore';
 import { fqAsArray, fqAsRecord, fqStr } from './FqJson';
 
 const FQ_BACKUP_FORMAT: string = 'fqhouse.library-backup';
-const FQ_BACKUP_VERSION: number = 1;
+/** 备份格式版本：v2 起包含应用设置段（外观/阅读偏好）；decode 兼容 v1（无设置段）。 */
+const FQ_BACKUP_VERSION: number = 2;
 /** 备份文件体积上限（导入侧文件大小检查用）。 */
 export const FQ_BACKUP_MAX_BYTES: number = 16 * 1024 * 1024;
 const FQ_BACKUP_MAX_RECORDS: number = 10000;
@@ -26,6 +28,11 @@ const FQ_BACKUP_MAX_TEXT: number = 8192;
 const FQ_BACKUP_KINDS: string[] = ['book', 'audio', 'manga', 'video', 'manju'];
 const FQ_BACKUP_ID_PATTERN: RegExp = /^[A-Za-z0-9_-]{1,128}$/;
 const FQ_BACKUP_HTTPS_PREFIX: RegExp = /^https?:\/\/[^/\s]+/;
+/** 主题色 key 白名单（与 FqAppSettingsStore 主题色档位一致）。 */
+const FQ_BACKUP_THEME_COLORS: string[] =
+  ['', 'orange', 'gold', 'green', 'teal', 'blue', 'violet', 'pink', 'red', 'custom'];
+/** 自定义主题色 hex 校验（#RRGGBB / #AARRGGBB）。 */
+const FQ_BACKUP_HEX_COLOR: RegExp = /^#[0-9A-Fa-f]{6,8}$/;
 
 /** 封面可移植化：仅保留 http(s) 且有主机名的网络地址，其余（本地路径/沙箱 uri）清空。 */
 function fqBackupPortableCover(cover: string): string {
@@ -70,6 +77,16 @@ function fqBackupCheckInt(rec: Record<string, Object>, key: string, max: number)
 function fqBackupCheckNumber(rec: Record<string, Object>, key: string, max: number): number {
   const raw: Object | undefined = rec[key];
   if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0 || raw > max) {
+    throw new Error(`备份字段 ${key} 无效`);
+  }
+  return raw;
+}
+
+/** 整数区间校验（支持负值下界，如阅读主题 -1 跟随系统）。 */
+function fqBackupCheckRange(rec: Record<string, Object>, key: string, min: number, max: number): number {
+  const raw: Object | undefined = rec[key];
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < min || raw > max ||
+    Math.trunc(raw) !== raw) {
     throw new Error(`备份字段 ${key} 无效`);
   }
   return raw;
@@ -131,6 +148,36 @@ export class FqBackupReaderProgress {
   }
 }
 
+/** 备份内应用设置段：外观（深浅模式/主题色）+ 阅读偏好（字号/行距/主题/翻页/字体）。 */
+export class FqBackupAppSettings {
+  readonly themeMode: number;
+  readonly themeColor: string;
+  readonly themeCustomColor: string;
+  readonly backgroundAudio: boolean;
+  readonly readerFontSize: number;
+  readonly readerLineHeight: number;
+  readonly readerThemeIndex: number;
+  readonly readerFlipIndex: number;
+  readonly readerComicFlipIndex: number;
+  readonly readerFontIndex: number;
+
+  constructor(themeMode: number, themeColor: string, themeCustomColor: string,
+    backgroundAudio: boolean, readerFontSize: number, readerLineHeight: number,
+    readerThemeIndex: number, readerFlipIndex: number, readerComicFlipIndex: number,
+    readerFontIndex: number) {
+    this.themeMode = themeMode;
+    this.themeColor = themeColor;
+    this.themeCustomColor = themeCustomColor;
+    this.backgroundAudio = backgroundAudio;
+    this.readerFontSize = readerFontSize;
+    this.readerLineHeight = readerLineHeight;
+    this.readerThemeIndex = readerThemeIndex;
+    this.readerFlipIndex = readerFlipIndex;
+    this.readerComicFlipIndex = readerComicFlipIndex;
+    this.readerFontIndex = readerFontIndex;
+  }
+}
+
 /** 采集/解析完成并通过校验的备份数据。 */
 export class FqLibraryBackupData {
   readonly createdAt: number;
@@ -141,10 +188,13 @@ export class FqLibraryBackupData {
   readonly watched: FqBackupWatched[];
   readonly reader: FqBackupReaderProgress[];
   readonly excludedLocalRecords: number;
+  /** 应用设置段（v1 备份无此段时为 null，恢复时跳过）。 */
+  readonly settings: FqBackupAppSettings | null;
 
   constructor(createdAt: number, appVersion: string, shelf: FqShelfItem[],
     browse: FqBrowseItem[], listen: FqListenRecord[], watched: FqBackupWatched[],
-    reader: FqBackupReaderProgress[], excludedLocalRecords: number) {
+    reader: FqBackupReaderProgress[], excludedLocalRecords: number,
+    settings: FqBackupAppSettings | null) {
     this.createdAt = createdAt;
     this.appVersion = appVersion;
     this.shelf = shelf;
@@ -153,6 +203,7 @@ export class FqLibraryBackupData {
     this.watched = watched;
     this.reader = reader;
     this.excludedLocalRecords = excludedLocalRecords;
+    this.settings = settings;
   }
 
   /** 已看集总数（预览统计用）。 */
@@ -173,15 +224,19 @@ export class FqLibraryBackupRestoreResult {
   readonly readerAdded: number;
   readonly episodesAdded: number;
   readonly progressAdded: number;
+  /** 应用设置段是否已随恢复应用（v1 备份无设置段时为 false）。 */
+  readonly settingsApplied: boolean;
 
   constructor(shelfAdded: number, browseAdded: number, listenAdded: number,
-    readerAdded: number, episodesAdded: number, progressAdded: number) {
+    readerAdded: number, episodesAdded: number, progressAdded: number,
+    settingsApplied: boolean) {
     this.shelfAdded = shelfAdded;
     this.browseAdded = browseAdded;
     this.listenAdded = listenAdded;
     this.readerAdded = readerAdded;
     this.episodesAdded = episodesAdded;
     this.progressAdded = progressAdded;
+    this.settingsApplied = settingsApplied;
   }
 }
 
@@ -262,8 +317,20 @@ export class FqLibraryBackup {
       reader.push(new FqBackupReaderProgress(bookId, progress.chapterIndex, progress.domPos,
         fqEncodeReadRanges(FqReaderStore.getReadChapters(bookId))));
     }
+    const readerSettings: FqReaderSettings = FqReaderStore.getSettings();
+    const settings: FqBackupAppSettings = new FqBackupAppSettings(
+      FqAppSettingsStore.getThemeMode(),
+      FqAppSettingsStore.getThemeColor(),
+      FqAppSettingsStore.getThemeCustomColor(),
+      FqAppSettingsStore.isBackgroundAudio(),
+      readerSettings.fontSize,
+      readerSettings.lineHeight,
+      readerSettings.themeIndex,
+      readerSettings.flipIndex,
+      readerSettings.comicFlipIndex,
+      readerSettings.fontIndex);
     return new FqLibraryBackupData(Date.now(), FqLibraryBackup.appVersion(),
-      shelf, browse, listen, watched, reader, excluded);
+      shelf, browse, listen, watched, reader, excluded, settings);
   }
 
   /** 序列化为备份 JSON 文本（体积超限抛错）。 */
@@ -339,6 +406,20 @@ export class FqLibraryBackup {
       reader.push(rec);
     }
     root['reader'] = reader;
+    if (data.settings !== null) {
+      const settings: Record<string, Object> = {};
+      settings['themeMode'] = data.settings.themeMode;
+      settings['themeColor'] = data.settings.themeColor;
+      settings['themeCustomColor'] = data.settings.themeCustomColor;
+      settings['backgroundAudio'] = data.settings.backgroundAudio;
+      settings['readerFontSize'] = data.settings.readerFontSize;
+      settings['readerLineHeight'] = data.settings.readerLineHeight;
+      settings['readerThemeIndex'] = data.settings.readerThemeIndex;
+      settings['readerFlipIndex'] = data.settings.readerFlipIndex;
+      settings['readerComicFlipIndex'] = data.settings.readerComicFlipIndex;
+      settings['readerFontIndex'] = data.settings.readerFontIndex;
+      root['settings'] = settings;
+    }
     const text: string = JSON.stringify(root);
     if (fqBackupUtf8Length(text) > FQ_BACKUP_MAX_BYTES) {
       throw new Error('备份数据超过 16 MB');
@@ -362,7 +443,9 @@ export class FqLibraryBackup {
     if (root === null) {
       throw new Error('文件不是有效的 UTF-8 JSON 备份');
     }
-    if (fqStr(root, 'format') !== FQ_BACKUP_FORMAT || root['version'] !== FQ_BACKUP_VERSION) {
+    const versionRaw: Object | undefined = root['version'];
+    if (fqStr(root, 'format') !== FQ_BACKUP_FORMAT ||
+      (versionRaw !== 1 && versionRaw !== 2)) {
       throw new Error('不是受支持的备份文件，请使用本应用导出的备份');
     }
     const createdAt: number = fqBackupCheckInt(root, 'createdAt', FQ_BACKUP_MAX_TIME);
@@ -488,8 +571,42 @@ export class FqLibraryBackup {
     if (root['excludedLocalRecords'] !== undefined) {
       excluded = fqBackupCheckInt(root, 'excludedLocalRecords', 2147483647);
     }
+    // 应用设置段：v1 备份无此段（settings 为 null，恢复时跳过）；v2 起必有且全量校验。
+    let settings: FqBackupAppSettings | null = null;
+    const settingsRaw: Object | undefined = root['settings'];
+    if (settingsRaw !== undefined) {
+      const settingsRec: Record<string, Object> | null = fqAsRecord(settingsRaw);
+      if (settingsRec === null) {
+        throw new Error('备份设置段格式无效');
+      }
+      const themeMode: number = fqBackupCheckInt(settingsRec, 'themeMode', 2);
+      const themeColor: string = fqStr(settingsRec, 'themeColor');
+      if (FQ_BACKUP_THEME_COLORS.indexOf(themeColor) < 0) {
+        throw new Error('备份字段 themeColor 无效');
+      }
+      const themeCustomColor: string = fqStr(settingsRec, 'themeCustomColor');
+      if (!FQ_BACKUP_HEX_COLOR.test(themeCustomColor)) {
+        throw new Error('备份字段 themeCustomColor 无效');
+      }
+      const readerFontSize: number = fqBackupCheckInt(settingsRec, 'readerFontSize', 32);
+      if (readerFontSize < 12) {
+        throw new Error('备份字段 readerFontSize 无效');
+      }
+      const readerLineHeight: number = fqBackupCheckNumber(settingsRec, 'readerLineHeight', 2.6);
+      if (readerLineHeight < 1.2) {
+        throw new Error('备份字段 readerLineHeight 无效');
+      }
+      settings = new FqBackupAppSettings(themeMode, themeColor, themeCustomColor,
+        settingsRec['backgroundAudio'] === true,
+        readerFontSize,
+        readerLineHeight,
+        fqBackupCheckRange(settingsRec, 'readerThemeIndex', -1, 2),
+        fqBackupCheckRange(settingsRec, 'readerFlipIndex', 0, 2),
+        fqBackupCheckRange(settingsRec, 'readerComicFlipIndex', 0, 2),
+        fqBackupCheckRange(settingsRec, 'readerFontIndex', 0, 8));
+    }
     return new FqLibraryBackupData(createdAt, appVersion, shelf, browse, listen,
-      watched, reader, excluded);
+      watched, reader, excluded, settings);
   }
 
   /** 合并恢复到本机（只补缺失，绝不覆盖本机已有记录）。 */
@@ -523,8 +640,21 @@ export class FqLibraryBackup {
         readerAdded++;
       }
     }
+    // 应用设置段：深浅模式/主题色/后台播放 + 阅读偏好即时应用（v1 备份无此段跳过）。
+    let settingsApplied: boolean = false;
+    if (data.settings !== null) {
+      const settings: FqBackupAppSettings = data.settings;
+      FqAppSettingsStore.setThemeCustomColor(settings.themeCustomColor);
+      FqAppSettingsStore.setThemeMode(settings.themeMode);
+      FqAppSettingsStore.setThemeColor(settings.themeColor);
+      FqAppSettingsStore.setBackgroundAudio(settings.backgroundAudio);
+      FqReaderStore.saveSettings(settings.readerFontSize, settings.readerLineHeight,
+        settings.readerThemeIndex, settings.readerFlipIndex, settings.readerFontIndex);
+      FqReaderStore.saveComicFlip(settings.readerComicFlipIndex);
+      settingsApplied = true;
+    }
     return new FqLibraryBackupRestoreResult(shelfAdded, browseAdded, listenAdded,
-      readerAdded, episodesAdded, progressAdded);
+      readerAdded, episodesAdded, progressAdded, settingsApplied);
   }
 
   /** 当前应用版本号（备份元信息；获取失败返回空串）。 */

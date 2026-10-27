@@ -262,6 +262,51 @@ export class FqBackend {
     }
   }
 
+  /**
+   * POST 并解析 JSON（账号采集类端点；requestId 由调用方管理，可用 fq.cancel 取消）。
+   * 非透传响应语义：非 200 时后端返回 {success:false, error}，透出其中错误消息。
+   */
+  public postJson(requestId: string, path: string, bodyText: string,
+    timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<Record<string, Object>> {
+    return this.acquire((): Promise<Record<string, Object>> =>
+      this.fetchPostJson(requestId, path, bodyText, timeoutMs));
+  }
+
+  private async fetchPostJson(requestId: string, path: string, bodyText: string,
+    timeoutMs: number): Promise<Record<string, Object>> {
+    try {
+      const body: Uint8Array = new util.TextEncoder().encodeInto(bodyText);
+      const resp: FqBridgeResponse = await fq.request(requestId, 'POST', path, '', body, timeoutMs);
+      const status: number = resp.status;
+      if (status === 499) {
+        throw new FqRequestError('请求已取消', 499);
+      }
+      if (status !== 200) {
+        const text: string = this.decodeText(resp.body);
+        const payload: Record<string, Object> | null = fqParseObject(text);
+        if (payload !== null) {
+          const errorRaw: Object | undefined = payload['error'];
+          if (typeof errorRaw === 'string' && errorRaw.length > 0) {
+            throw new FqRequestError(errorRaw, status);
+          }
+        }
+        throw new FqRequestError(`后端错误(${status})`, status);
+      }
+      const text: string = this.decodeText(resp.body);
+      const payload: Record<string, Object> | null = fqParseObject(text);
+      if (payload === null) {
+        throw new FqRequestError('响应不是有效 JSON', status);
+      }
+      return payload;
+    } catch (error) {
+      const status: number = error instanceof FqRequestError ? error.statusCode : -1;
+      if (status !== 499) {
+        FqLog.w('backend', `POST ${path} 失败: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      throw error instanceof Error ? error : new Error(String(error));
+    }
+  }
+
   private decodeText(data: ArrayBuffer): string {
     const decoder: util.TextDecoder = util.TextDecoder.create('utf-8');
     return decoder.decodeWithStream(new Uint8Array(data));

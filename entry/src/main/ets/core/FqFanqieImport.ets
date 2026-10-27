@@ -871,7 +871,7 @@ export class FqFanqieCaptureStore {
     const text: string = capture.encode();
     const path: string = `${context.filesDir}/${FqFanqieCaptureStore.FILE_NAME}`;
     const file: fileIo.File = fileIo.openSync(path,
-      fileIo.OpenMode.READ_ONLY | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+      fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
     try {
       fileIo.writeSync(file.fd, text);
     } finally {
