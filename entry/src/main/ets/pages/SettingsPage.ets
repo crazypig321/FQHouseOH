@@ -2,7 +2,7 @@
  * 应用设置页（主 Tab 第四页 + 我的-应用设置入口共用，@Param isTab 区分）：
  * - 外观：深色模式（跟随系统/浅色/深色，FqMenu 档位直选，即时生效）；
  * - 播放：开启后台播放开关（开=支持后台播放，关=无法后台播放）；
- * - 数据：章节缓存/剧集缓存入口、备份与恢复入口、清除所有数据（确认弹窗提示重启，清全部 KV/缓存/设置后 restartApp）；
+ * - 数据：缓存与管理入口、备份与恢复入口、清除所有数据（确认弹窗提示重启，清全部 KV/缓存/设置后 restartApp）；
  * - 服务：本地后端地址展示（点击浏览器打开 + 刷新按钮）；
  * - 关于：关于我们入口。
  */
@@ -12,7 +12,7 @@ import { FqMenu, FqMenuItem } from '../view/CommonMenu';
 import { CommonLoading } from '../view/CommonCom';
 import { common, Want } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { FqTitleBarOptions, ROUTE_ABOUT, ROUTE_CACHED_BOOKS, ROUTE_CACHED_DRAMAS, ROUTE_CACHED_AUDIO, ROUTE_CACHED_COMICS, ROUTE_LOGS, ROUTE_BACKUP } from '../model/FqNavModels';
+import { FqTitleBarOptions, ROUTE_ABOUT, ROUTE_CACHE_MANAGE, ROUTE_LOGS, ROUTE_BACKUP } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import {
   FQ_THEME_DARK,
@@ -97,24 +97,9 @@ export struct SettingsPage {
 
           this.SectionHeader('数据')
           FqSettingsCard() {
-            this.SettingRow($r('sys.symbol.book'), '#FF3B82F6', '章节缓存', '已下载的书籍章节', '', true,
+            this.SettingRow($r('sys.symbol.externaldrive'), '#FF3B82F6', '缓存与管理', '章节 / 剧集 / 听书 / 漫画离线缓存', '', true,
               (): void => {
-                NavPathUtils.push(ROUTE_CACHED_BOOKS);
-              })
-            this.RowDivider()
-            this.SettingRow($r('sys.symbol.film'), '#FFEF5038', '剧集缓存', '已下载的剧集视频', '', true,
-              (): void => {
-                NavPathUtils.push(ROUTE_CACHED_DRAMAS);
-              })
-            this.RowDivider()
-            this.SettingRow($r('sys.symbol.waveform_headphones'), '#FF10B981', '听书缓存', '已下载的听书音频', '', true,
-              (): void => {
-                NavPathUtils.push(ROUTE_CACHED_AUDIO);
-              })
-            this.RowDivider()
-            this.SettingRow($r('sys.symbol.picture'), '#FF0EA5E9', '漫画缓存', '已下载的漫画图片', '', true,
-              (): void => {
-                NavPathUtils.push(ROUTE_CACHED_COMICS);
+                NavPathUtils.push(ROUTE_CACHE_MANAGE);
               })
             this.RowDivider()
             this.SettingRow($r('sys.symbol.archivebox'), '#FFF59E0B', '备份与恢复', '导出或恢复收藏、进度与已看剧集', '', true,

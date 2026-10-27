@@ -34,6 +34,8 @@ export const ROUTE_CACHED_DRAMAS: string = 'cachedDramas';
 export const ROUTE_CACHED_AUDIO: string = 'cachedAudio';
 /** 漫画缓存页（设置-漫画缓存，离线漫画管理）。 */
 export const ROUTE_CACHED_COMICS: string = 'cachedComics';
+/** 缓存与管理页（设置-数据-缓存与管理，四类离线缓存入口集中管理）。 */
+export const ROUTE_CACHE_MANAGE: string = 'cacheManage';
 /** 日志页（设置-服务-日志，应用/核心运行日志查看）。 */
 export const ROUTE_LOGS: string = 'logs';
 /** 备份与恢复页（设置-数据-备份与恢复，书架/记录跨设备迁移）。 */
