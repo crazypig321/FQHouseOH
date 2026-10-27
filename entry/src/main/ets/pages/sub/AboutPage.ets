@@ -199,7 +199,7 @@ export struct AboutPage {
       .scrollBar(BarState.Off)
       .edgeEffect(EdgeEffect.Spring)
       .contentStartOffset(appState.topRect + FQ_ABOUT_TOP_INSET)
-      .contentEndOffset(appState.bottomRect + FQ_ABOUT_BOTTOM_INSET)
+      .contentEndOffset(appState.bottomRect)
       .bindSheet(this.sheetVisible, this.ActiveSheetBuilder(),
         FqSheetOptions((): void => {
           this.closeSheet();

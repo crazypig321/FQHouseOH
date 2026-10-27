@@ -390,14 +390,12 @@ export struct LogsPage {
           .layoutWeight(1)
           .scrollBar(BarState.Off)
           .edgeEffect(EdgeEffect.Spring)
+          .contentEndOffset(appState.bottomRect)
         }
       }
       .width('100%')
       .height('100%')
-      .padding({
-        top: appState.topRect + FQ_LOG_TOP_INSET,
-        bottom: appState.bottomRect + 16,
-      })
+      .padding({ top: appState.topRect + FQ_LOG_TOP_INSET, })
       .bindSheet(this.actionsVisible, this.ActionsSheetBuilder(),
         FqSheetOptions((): void => {
           this.closeActions();

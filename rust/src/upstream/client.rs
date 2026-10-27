@@ -225,6 +225,16 @@ impl UpstreamClient {
         self.do_with_device_inner(req, Some(body_limit)).await
     }
 
+    /// Swaps the pooled device `device_id` for a freshly registered one.
+    ///
+    /// Endpoint-level escape hatch for upstream answers that arrive as HTTP
+    /// 200 yet mark the device as unusable (the manga content API answers
+    /// `content:"Invalid"`), which the device-failure loop in
+    /// [UpstreamClient::do_with_device_inner] cannot see.
+    pub async fn replace_failed_device(&self, device_id: &str) -> Result<Device, String> {
+        self.pool.replace_failed(device_id).await
+    }
+
     async fn do_with_device_inner(
         &self,
         req: &UpstreamRequest,

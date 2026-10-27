@@ -79,24 +79,42 @@ fn parse_content_meta(raw: &[u8]) -> ApiResult<MangaContentMeta> {
 }
 
 /// Manga.getContent: fetch and AES-128-CBC decrypt the chapter body.
+///
+/// An upstream-invalid device answers HTTP 200 with `content:"Invalid"`
+/// instead of the chapter body. Swap such a device for a fresh registration
+/// and retry, mirroring the client's device-failure loop (client.rs), which
+/// only covers transport- and auth-level device failures.
 async fn get_content(ctx: &Ctx, item_id: &str, q: &Params) -> ApiResult<String> {
     let api_type = default_val(&q.get_str("api_type"), "full");
-    let (raw, dev) = Upstream::new(ctx.up.clone())
-        .raw_with_device(&UpstreamRequestSpec {
-            mode: UpstreamMode::DeviceSigned,
-            raw_url: Some(build_content_url(item_id, &api_type)),
-            headers: dragon_read_headers(),
-            ..Default::default()
-        })
-        .await?;
+    const MAX_DEVICE_SWAPS: usize = 5;
+    let mut swaps = 0usize;
+    loop {
+        let (raw, dev) = Upstream::new(ctx.up.clone())
+            .raw_with_device(&UpstreamRequestSpec {
+                mode: UpstreamMode::DeviceSigned,
+                raw_url: Some(build_content_url(item_id, &api_type)),
+                headers: dragon_read_headers(),
+                ..Default::default()
+            })
+            .await?;
 
-    let resp = parse_content_meta(&raw)?;
-    if resp.data.content.is_empty() {
-        return Err(ApiError::Internal("API响应中缺少content字段".to_string()));
+        let resp = parse_content_meta(&raw)?;
+        if resp.data.content == "Invalid" && swaps < MAX_DEVICE_SWAPS {
+            swaps += 1;
+            log::warn!(
+                "manga content Invalid item_id={item_id} dev={}; replacing device ({swaps}/{MAX_DEVICE_SWAPS})",
+                dev.device_id
+            );
+            let _ = ctx.up.replace_failed_device(&dev.device_id).await;
+            continue;
+        }
+        if resp.data.content.is_empty() {
+            return Err(ApiError::Internal("API响应中缺少content字段".to_string()));
+        }
+        let plain = crate::crypto::decrypt_upstream(&resp.data.content, &dev.secret_key)
+            .map_err(|e| ApiError::Internal(format!("decrypt content: {e}")))?;
+        return Ok(String::from_utf8_lossy(&plain).into_owned());
     }
-    let plain = crate::crypto::decrypt_upstream(&resp.data.content, &dev.secret_key)
-        .map_err(|e| ApiError::Internal(format!("decrypt content: {e}")))?;
-    Ok(String::from_utf8_lossy(&plain).into_owned())
 }
 
 /// Manga.fallbackFromBookDetail.
