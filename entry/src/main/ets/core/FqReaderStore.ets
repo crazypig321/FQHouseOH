@@ -7,7 +7,7 @@
 import preferences from '@ohos.data.preferences';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { fqAsRecord, fqKeys } from './FqJson';
+import { fqAsRecord, fqAsArray, fqKeys } from './FqJson';
 
 const FQ_READER_STORE_NAME: string = 'fq_reader';
 const FQ_READER_KEY_SETTINGS: string = 'settings';
@@ -306,10 +306,29 @@ export class FqReaderStore {
       // 忽略写入失败
     }
   }
+
+  /** 全部有阅读进度的书 id（备份导出用）。 */
+  public static progressBookIds(): string[] {
+    const result: string[] = [];
+    const pref: preferences.Preferences | null = FqReaderStore.pref;
+    if (pref === null) {
+      return result;
+    }
+    const all: Record<string, Object> | null = fqAsRecord(pref.getAllSync());
+    if (all === null) {
+      return result;
+    }
+    for (const key of Object.keys(all)) {
+      if (key.startsWith(FQ_READER_KEY_PROGRESS)) {
+        result.push(key.substring(FQ_READER_KEY_PROGRESS.length));
+      }
+    }
+    return result;
+  }
 }
 
 /** 已读章节区间串编码：连续下标合并为 "a-b"，单值 "a"，逗号连接。 */
-function fqEncodeReadRanges(chapters: Set<number>): string {
+export function fqEncodeReadRanges(chapters: Set<number>): string {
   const indices: number[] = [];
   chapters.forEach((value: number): void => {
     if (value >= 0) {
@@ -331,7 +350,7 @@ function fqEncodeReadRanges(chapters: Set<number>): string {
 }
 
 /** 已读章节区间串解码："a-b,c" → 下标集合；越界/非法片段跳过。 */
-function fqDecodeReadRanges(text: string): Set<number> {
+export function fqDecodeReadRanges(text: string): Set<number> {
   const result: Set<number> = new Set();
   if (text.trim().length === 0) {
     return result;

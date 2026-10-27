@@ -21,6 +21,11 @@ import { display, mediaquery, window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { FqBackend } from '../core/FqBackend';
 import { fqAudioSession } from '../core/FqAudioSession';
+import { FqShelfStore } from '../core/FqShelfStore';
+import { FqBrowseStore } from '../core/FqBrowseStore';
+import { FqAudioHistory } from '../core/FqAudioHistory';
+import { FqWatchedStore } from '../core/FqWatchedStore';
+import { FqReaderStore } from '../core/FqReaderStore';
 import { FqReadStatsStore } from '../core/FqReadStatsStore';
 import { FqLocalBookStore } from '../core/FqLocalBookStore';
 import { FqAppSettingsStore } from '../core/FqAppSettingsStore';
@@ -48,6 +53,13 @@ export default class EntryAbility extends UIAbility {
     fqAudioSession.init(this.context);
     FqReadStatsStore.init(this.context);
     FqLocalBookStore.init(this.context);
+    // 书架/浏览/听书/已看/阅读进度：启动即初始化（备份导出需枚举全量数据，
+    // 此前仅子页面各自 init，直达备份页导出会因未初始化而漏采）
+    FqShelfStore.init(this.context);
+    FqBrowseStore.init(this.context);
+    FqAudioHistory.init(this.context);
+    FqWatchedStore.init(this.context);
+    FqReaderStore.init(this.context);
     // 应用设置（深色模式恢复 + 后台保活开关）初始化
     FqAppSettingsStore.init(this.context);
     // 章节缓存/剧集缓存（阅读即缓存 + 离线播放）初始化

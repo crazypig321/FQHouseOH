@@ -4,7 +4,7 @@
  * - PageMapBuilder：二级路由页（Navigation.navDestination 单 builder 页表）
  */
 
-import { ROUTE_DETAIL, ROUTE_RANK, ROUTE_READER2, ROUTE_SEARCH, ROUTE_AUTHOR, ROUTE_LISTEN, ROUTE_PLAYER, ROUTE_COMIC, ROUTE_LISTEN_VIDEO, ROUTE_ABOUT, ROUTE_CACHED_BOOKS, ROUTE_CACHED_DRAMAS, ROUTE_CACHED_AUDIO, ROUTE_CACHED_COMICS, ROUTE_LOGS } from '../model/FqNavModels';
+import { ROUTE_DETAIL, ROUTE_RANK, ROUTE_READER2, ROUTE_SEARCH, ROUTE_AUTHOR, ROUTE_LISTEN, ROUTE_PLAYER, ROUTE_COMIC, ROUTE_LISTEN_VIDEO, ROUTE_ABOUT, ROUTE_CACHED_BOOKS, ROUTE_CACHED_DRAMAS, ROUTE_CACHED_AUDIO, ROUTE_CACHED_COMICS, ROUTE_LOGS, ROUTE_BACKUP } from '../model/FqNavModels';
 import { MENU_CONFIG, MenuItem, tabBarSymbolOf } from '../model/FqTabsModels';
 import { HomePage } from '../pages/HomePage';
 import { ShelfPage } from '../pages/ShelfPage';
@@ -25,6 +25,7 @@ import { CachedDramasPage } from '../pages/sub/CachedDramasPage';
 import { CachedAudioPage } from '../pages/sub/CachedAudioPage';
 import { CachedComicsPage } from '../pages/sub/CachedComicsPage';
 import { LogsPage } from '../pages/sub/LogsPage';
+import { BackupPage } from '../pages/sub/BackupPage';
 import { appState } from '../entryability/AppState';
 
 function tabBarOf(item: MenuItem): BottomTabBarStyle {
@@ -86,5 +87,7 @@ export function PageMapBuilder(name: string) {
     CachedComicsPage()
   } else if (name === ROUTE_LOGS) {
     LogsPage()
+  } else if (name === ROUTE_BACKUP) {
+    BackupPage()
   }
 }

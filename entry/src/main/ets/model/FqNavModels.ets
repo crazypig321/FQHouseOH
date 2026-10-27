@@ -36,6 +36,8 @@ export const ROUTE_CACHED_AUDIO: string = 'cachedAudio';
 export const ROUTE_CACHED_COMICS: string = 'cachedComics';
 /** 日志页（设置-服务-日志，应用/核心运行日志查看）。 */
 export const ROUTE_LOGS: string = 'logs';
+/** 备份与恢复页（设置-数据-备份与恢复，书架/记录跨设备迁移）。 */
+export const ROUTE_BACKUP: string = 'backup';
 
 /** 详情页跳转参数（push 前由来源页赋值，详情页 aboutToAppear 读取）。 */
 export class DetailNavParams {

@@ -127,6 +127,35 @@ export class FqBrowseStore {
     fqStoreBus.browseVersion++;
   }
 
+  /** 合并恢复的浏览记录（只补缺失 id，按访问时间倒序重排，容量上限 100）；返回新增条数。 */
+  public static mergeItems(items: FqBrowseItem[]): number {
+    const existing: Set<string> = new Set<string>();
+    for (const entry of FqBrowseStore.items) {
+      existing.add(entry.id);
+    }
+    let added: number = 0;
+    const merged: FqBrowseItem[] = [];
+    for (const entry of FqBrowseStore.items) {
+      merged.push(entry);
+    }
+    for (const item of items) {
+      if (item.id.length === 0 || existing.has(item.id)) {
+        continue;
+      }
+      existing.add(item.id);
+      merged.push(item);
+      added++;
+    }
+    if (added > 0) {
+      merged.sort((a: FqBrowseItem, b: FqBrowseItem): number => b.visitedAt - a.visitedAt);
+      FqBrowseStore.items = merged.length > FQ_BROWSE_MAX_ITEMS
+        ? merged.slice(0, FQ_BROWSE_MAX_ITEMS) : merged;
+      FqBrowseStore.persist();
+      fqStoreBus.browseVersion++;
+    }
+    return added;
+  }
+
   private static persist(): void {
     const pref: preferences.Preferences | null = FqBrowseStore.pref;
     if (pref === null) {

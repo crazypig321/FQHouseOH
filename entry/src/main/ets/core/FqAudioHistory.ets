@@ -109,6 +109,31 @@ export class FqAudioHistory {
     FqAudioHistory.persist();
   }
 
+  /** 全部收听记录（备份导出用）。 */
+  public static all(): FqListenRecord[] {
+    const result: FqListenRecord[] = [];
+    FqAudioHistory.records.forEach((record: FqListenRecord): void => {
+      result.push(record);
+    });
+    return result;
+  }
+
+  /** 合并恢复的收听记录（只补缺失 bookId，一次落盘）；返回新增条数。 */
+  public static mergeRecords(records: FqListenRecord[]): number {
+    let added: number = 0;
+    for (const record of records) {
+      if (record.bookId.length === 0 || FqAudioHistory.records.has(record.bookId)) {
+        continue;
+      }
+      FqAudioHistory.records.set(record.bookId, record);
+      added++;
+    }
+    if (added > 0) {
+      FqAudioHistory.persist();
+    }
+    return added;
+  }
+
   /** 清空全部收听历史（设置-清空历史）。 */
   public static clear(): void {
     FqAudioHistory.records.clear();
