@@ -156,7 +156,7 @@ export struct SettingsPage {
       const item: FqMenuItem = new FqMenuItem();
       item.label = FQ_THEME_LABELS[mode];
       if (mode === this.themeMode) {
-        item.endIcon = $r('sys.symbol.checkmark_circle_fill');
+        item.endIcon = $r('sys.symbol.checkmark');
       }
       const picked: number = mode;
       item.onAction = (): void => {
