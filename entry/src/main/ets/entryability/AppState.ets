@@ -42,6 +42,13 @@ export class AppState {
   /** 系统当前是否深色模式（EntryAbility 启动与 onConfigurationUpdate 同步） */
   @Trace isDark: boolean = false;
 
+  /** 主题色 key（外观设置；'' = 跟随系统，默认 'orange' 番茄橙；持久化于 FqAppSettingsStore） */
+  @Trace themeColorKey: string = 'orange';
+
+  /** 全局主题色（所有高亮 / 选中 / 强调色统一引用；资源定义深浅自适应，
+   *  半透明变体经 FqColorUtils.withOpacity(appState.accentColor, x) 派生） */
+  @Trace accentColor: ResourceColor = $r('app.color.theme_color_orange');
+
   /** 主 Ability 上下文（EntryAbility 注入：退出应用 terminateSelf 用）。 */
   public abilityContext: common.UIAbilityContext | null = null;
 

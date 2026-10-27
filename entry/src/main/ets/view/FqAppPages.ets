@@ -25,12 +25,11 @@ import { CachedDramasPage } from '../pages/sub/CachedDramasPage';
 import { CachedAudioPage } from '../pages/sub/CachedAudioPage';
 import { CachedComicsPage } from '../pages/sub/CachedComicsPage';
 import { LogsPage } from '../pages/sub/LogsPage';
-
-const TAB_ACCENT: string = '#FF7A3D';
+import { appState } from '../entryability/AppState';
 
 function tabBarOf(item: MenuItem): BottomTabBarStyle {
   const style: BottomTabBarStyle = new BottomTabBarStyle(tabBarSymbolOf(item), item.label);
-  style.labelStyle({ selectedColor: TAB_ACCENT });
+  style.labelStyle({ selectedColor: appState.accentColor });
   return style;
 }
 

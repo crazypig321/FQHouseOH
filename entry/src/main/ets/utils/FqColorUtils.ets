@@ -7,7 +7,8 @@
  *   在 build 属性表达式中调用时，模式切换会触发表达式重新求值、
  *   按新模式重解析资源色，避免字符串冻结首次解析值。
  *   注意：仅在 build 表达式内使用才有此响应；存入普通变量不跟随刷新。
- * 用法：FqColorUtils.withOpacity(FQ_ACCENT, 0.4)
+ * - tint：向白色混合派生浅色（渐变止点等）；同样支持资源色与深浅自适应。
+ * 用法：FqColorUtils.withOpacity(appState.accentColor, 0.4)
  */
 
 import { appState } from '../entryability/AppState';
@@ -15,31 +16,52 @@ import { appState } from '../entryability/AppState';
 export class FqColorUtils {
   /** 主入口：color 叠加 opacity（0-1）透明度，返回 '#AARRGGBB' 字符串颜色。 */
   static withOpacity(color: ResourceColor, opacity: number): ResourceColor {
+    const rgb: number = FqColorUtils.resolveRgb(color);
+    if (rgb < 0) {
+      return color;
+    }
     const alpha: number = FqColorUtils.alphaFromOpacity(opacity);
+    return FqColorUtils.toArgbString(alpha, rgb);
+  }
+
+  /** 向白色混合（ratio 0-1，越大越浅）：派生浅色渐变止点（如会员卡渐变浅端）。 */
+  static tint(color: ResourceColor, ratio: number): ResourceColor {
+    const rgb: number = FqColorUtils.resolveRgb(color);
+    if (rgb < 0) {
+      return color;
+    }
+    const oldR: number = (rgb >> 16) & 0xFF;
+    const oldG: number = (rgb >> 8) & 0xFF;
+    const oldB: number = rgb & 0xFF;
+    const newR: number = Math.round(oldR + (255 - oldR) * ratio);
+    const newG: number = Math.round(oldG + (255 - oldG) * ratio);
+    const newB: number = Math.round(oldB + (255 - oldB) * ratio);
+    return FqColorUtils.toArgbString(255, (newR << 16) | (newG << 8) | newB);
+  }
+
+  /** 解析任意 ResourceColor → 0xRRGGBB（无法解析返回 -1）。
+   *  Resource 路径读取 appState.isDark（@Trace）建立响应式依赖——深浅模式切换时
+   *  build 中的调用表达式重新求值，getColorSync 按新配置重解析出新模式颜色。 */
+  private static resolveRgb(color: ResourceColor): number {
     if (typeof color === 'number') {
-      // Color 枚举 / 数字颜色：取低 24 位 RGB，替换 alpha
-      return FqColorUtils.toArgbString(alpha, color & 0xFFFFFF);
+      // Color 枚举 / 数字颜色：取低 24 位 RGB
+      return color & 0xFFFFFF;
     }
     if (typeof color === 'string') {
-      const rgb: number = FqColorUtils.rgbFromString(color);
-      if (rgb >= 0) {
-        return FqColorUtils.toArgbString(alpha, rgb);
-      }
-      return color;
+      return FqColorUtils.rgbFromString(color);
     }
-    // Resource（$r）：同步解析 color 资源数值；
-    // 读取 isDark（@Trace）建立依赖——深浅模式切换时 build 中的调用表达式
-    // 重新求值，getColorSync 按新配置重解析出新模式颜色（两支取值一致）
+    // Resource（$r）：同步解析 color 资源数值
     const context = appState.abilityContext;
     if (context === null) {
-      return color;
+      return -1;
     }
     try {
       const value: number = context.resourceManager.getColorSync(color.id);
+      // 读取 isDark（@Trace）建立依赖：深浅切换时 build 表达式重新求值
       const rgb: number = appState.isDark ? (value & 0xFFFFFF) : (value & 0xFFFFFF);
-      return FqColorUtils.toArgbString(alpha, rgb);
+      return rgb;
     } catch (error) {
-      return color;
+      return -1;
     }
   }
 

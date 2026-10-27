@@ -7,6 +7,7 @@
   "license": "",
   "dependencies": {
     "libfqapi_napi.so": "file:./src/main/cpp/types/libfqapi_napi",
-    "@mpv-ohos/mpv-arkts": "@module:mpv"
+    "@mpv-ohos/mpv-arkts": "@module:mpv",
+    "@keke/color-picker": "1.0.4"
   }
 }

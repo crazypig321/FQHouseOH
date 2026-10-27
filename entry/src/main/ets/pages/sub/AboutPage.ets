@@ -11,7 +11,6 @@
 
 import { CommonNav } from '../../view/CommonNav';
 import { CommonSheet, FqSheetOptions } from '../../view/sheet/CommonSheet';
-import { FQ_ACCENT } from '../../view/CommonCom';
 import { FqTitleBarOptions } from '../../model/FqNavModels';
 import { bundleManager, common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -313,7 +312,7 @@ export struct AboutPage {
         .width(3.5)
         .height(15)
         .borderRadius(2)
-        .backgroundColor(FQ_ACCENT)
+        .backgroundColor(appState.accentColor)
       Text(title)
         .fontSize(16)
         .fontWeight(FontWeight.Bold)
@@ -376,7 +375,7 @@ export struct AboutPage {
       }
       if (item.showSwitch) {
         Toggle({ type: ToggleType.Switch, isOn: this.proxyDownload })
-          .selectedColor(FQ_ACCENT)
+          .selectedColor(appState.accentColor)
           .onChange((isOn: boolean): void => {
             this.proxyDownload = isOn;
             FqAppSettingsStore.setUpdateProxyDownload(isOn);
@@ -454,7 +453,7 @@ export struct AboutPage {
         ListItem() {
           Text(FQ_GPL_URL)
             .fontSize(13)
-            .fontColor(FQ_ACCENT)
+            .fontColor(appState.accentColor)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .onClick((): void => {
@@ -562,10 +561,10 @@ export struct AboutPage {
                       .fontColor($r('sys.color.font_primary'))
                     Text(entry.license)
                       .fontSize(10.5)
-                      .fontColor(FQ_ACCENT)
+                      .fontColor(appState.accentColor)
                       .padding({ left: 8, right: 8, top: 2, bottom: 2 })
                       .borderRadius(8)
-                      .backgroundColor(FqColorUtils.withOpacity(FQ_ACCENT, 0.12))
+                      .backgroundColor(FqColorUtils.withOpacity(appState.accentColor, 0.12))
                   }
                   Text(entry.desc)
                     .fontSize(11.5)

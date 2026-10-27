@@ -8,7 +8,7 @@
 
 import { CommonNav } from '../view/CommonNav';
 import { CommonSheet, FqSheetOptions } from '../view/sheet/CommonSheet';
-import { FQ_ACCENT, RefreshOverlay } from '../view/CommonCom';
+import { RefreshOverlay } from '../view/CommonCom';
 import {
   DetailNavParams,
   FqTitleBarOptions,
@@ -190,7 +190,7 @@ struct FqStatsCard {
           .width(3.5)
           .height(15)
           .borderRadius(2)
-          .backgroundColor(FQ_ACCENT)
+          .backgroundColor(appState.accentColor)
         Column({ space: 3 }) {
           Text(this.title)
             .fontSize(16)
@@ -406,15 +406,15 @@ export struct ProfilePage {
       return $r('sys.color.comp_background_tertiary');
     }
     if (minutes < 10) {
-      return FqColorUtils.withOpacity(FQ_ACCENT, 0.2);
+      return FqColorUtils.withOpacity(appState.accentColor, 0.2);
     }
     if (minutes < 30) {
-      return FqColorUtils.withOpacity(FQ_ACCENT, 0.45);
+      return FqColorUtils.withOpacity(appState.accentColor, 0.45);
     }
     if (minutes < 60) {
-      return FqColorUtils.withOpacity(FQ_ACCENT, 0.7);
+      return FqColorUtils.withOpacity(appState.accentColor, 0.7);
     }
-    return FQ_ACCENT;
+    return appState.accentColor;
   }
 
   build() {
@@ -488,7 +488,7 @@ export struct ProfilePage {
       .borderRadius(16)
       .linearGradient({
         angle: 180,
-        colors: [['#FFFFB199', 0], ['#FFFF7A3D', 1]],
+        colors: [[FqColorUtils.tint(appState.accentColor, 0.4), 0], [appState.accentColor, 1]],
       })
 
       Column({ space: 4 }) {
@@ -573,7 +573,7 @@ export struct ProfilePage {
         .width(3.5)
         .height(15)
         .borderRadius(2)
-        .backgroundColor(FQ_ACCENT)
+        .backgroundColor(appState.accentColor)
       Text(title)
         .fontSize(16)
         .fontWeight(FontWeight.Bold)
@@ -798,10 +798,10 @@ export struct ProfilePage {
           Text('查看全部')
             .fontSize(12.5)
             .fontWeight(FontWeight.Medium)
-            .fontColor(FQ_ACCENT)
+            .fontColor(appState.accentColor)
           SymbolGlyph($r('sys.symbol.chevron_right'))
             .fontSize(11)
-            .fontColor([FQ_ACCENT])
+            .fontColor([appState.accentColor])
         }
         .padding({ top: 10 })
         .width('100%')
@@ -820,7 +820,7 @@ export struct ProfilePage {
       Text(`${index + 1}`)
         .fontSize(index < 3 ? 15 : 13)
         .fontWeight(FontWeight.Bold)
-        .fontColor(index < 3 ? FQ_ACCENT : $r('sys.color.font_secondary'))
+        .fontColor(index < 3 ? appState.accentColor : $r('sys.color.font_secondary'))
         .width(20)
         .textAlign(TextAlign.Center)
       this.EntryCover(item, 32, 44)

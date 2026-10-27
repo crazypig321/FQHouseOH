@@ -4,7 +4,6 @@
  * 字号/行距/主题/字体/翻页五行；当前值经 @Param 注入、变更经 @Event 回调宿主页；
  * 配色跟随系统深浅色（弹窗卡片为系统色），阅读主题常量集中于此导出供宿主页共用。
  */
-import { FQ_ACCENT } from '../CommonCom';
 import { FQ_FONT_OPTIONS, FqFontOption } from '../../core/FqOnlineParser';
 import { appState } from '../../entryability/AppState';
 import { themeUtils } from '../../utils/ThemeUtils';
@@ -109,7 +108,7 @@ export struct ReaderSettingsDialogContent {
           .backgroundColor(this.followThemeBg)
           .border({
             width: this.themeIndex === -1 ? 2 : 1,
-            color: this.themeIndex === -1 ? FQ_ACCENT : themeUtils.terTextColor,
+            color: this.themeIndex === -1 ? appState.accentColor : themeUtils.terTextColor,
           })
           .justifyContent(FlexAlign.Center)
           Text('跟随')
@@ -130,7 +129,7 @@ export struct ReaderSettingsDialogContent {
               .backgroundColor(theme.background)
               .border({
                 width: this.themeIndex === index ? 2 : 1,
-                color: this.themeIndex === index ? FQ_ACCENT : themeUtils.terTextColor,
+                color: this.themeIndex === index ? appState.accentColor : themeUtils.terTextColor,
               })
             Text(theme.label)
               .fontSize(10)
@@ -155,7 +154,7 @@ export struct ReaderSettingsDialogContent {
           Text(option.label)
             .fontSize(12)
             .fontColor(this.fontIndex === index ? '#FFFFFF' : themeUtils.textColor)
-            .backgroundColor(this.fontIndex === index ? FQ_ACCENT : 'transparent')
+            .backgroundColor(this.fontIndex === index ? appState.accentColor : 'transparent')
             .borderRadius(13)
             .padding({ left: 12, right: 12, top: 6, bottom: 6 })
             .onClick((): void => {
@@ -175,7 +174,7 @@ export struct ReaderSettingsDialogContent {
           Text(label)
             .fontSize(12)
             .fontColor(this.flipIndex === index ? '#FFFFFF' : themeUtils.textColor)
-            .backgroundColor(this.flipIndex === index ? FQ_ACCENT : 'transparent')
+            .backgroundColor(this.flipIndex === index ? appState.accentColor : 'transparent')
             .borderRadius(13)
             .padding({ left: 12, right: 12, top: 6, bottom: 6 })
             .onClick((): void => {

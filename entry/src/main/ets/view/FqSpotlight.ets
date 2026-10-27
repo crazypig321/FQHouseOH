@@ -5,6 +5,8 @@
 
 import { FqBackend } from '../core/FqBackend';
 import { FqMediaItem, fqKindLabel } from '../model/FqModels';
+import { appState } from '../entryability/AppState';
+import { FqColorUtils } from '../utils/FqColorUtils';
 
 const FQ_SPOTLIGHT_ACTIONS: Record<string, string> = {
   'video': '开始追剧',
@@ -34,7 +36,7 @@ export struct FqSpotlight {
           .width(4)
           .height(18)
           .borderRadius(2)
-          .backgroundColor('#FF7A3D')
+          .backgroundColor(appState.accentColor)
         Text('今日焦点')
           .fontSize(21)
           .fontWeight(800)
@@ -42,8 +44,8 @@ export struct FqSpotlight {
         Text('HOT')
           .fontSize(10)
           .fontWeight(800)
-          .fontColor('#FF7A3D')
-          .backgroundColor('#1AFF7A3D')
+          .fontColor(appState.accentColor)
+          .backgroundColor(FqColorUtils.withOpacity(appState.accentColor, 0.1))
           .padding({ left: 6, right: 6, top: 2, bottom: 2 })
           .borderRadius(4)
         Blank()
@@ -163,7 +165,7 @@ export struct FqSpotlight {
               .width(index === this.activeIndex ? 16 : 4)
               .height(4)
               .borderRadius(2)
-              .backgroundColor(index === this.activeIndex ? '#FF7A3D' : $r('sys.color.comp_divider'))
+              .backgroundColor(index === this.activeIndex ? appState.accentColor : $r('sys.color.comp_divider'))
           }, (item: FqMediaItem, index: number): string => `${item.kind}:${item.id}:${index}`)
         }
         .alignItems(VerticalAlign.Center)

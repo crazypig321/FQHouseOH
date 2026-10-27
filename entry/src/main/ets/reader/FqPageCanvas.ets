@@ -10,7 +10,8 @@ export struct FqPageCanvas {
   @Param commentCounts: number[] = [];
   @Param fontFamily: string = '';
   @Param highlightParaIndex: number = -1;
-  @Param highlightColor: string = '#1AFF7A3D';
+  /** 段落高亮底色（主题色 10% 透明派生，阅读页传入）。 */
+  @Param highlightColor: ResourceColor = Color.Transparent;
   /** 气泡命中段评（paraIndex）：行内气泡可点部分（计数 Span）触发。 */
   @Event onBubbleTap: (paraIndex: number) => void
 

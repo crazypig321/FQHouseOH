@@ -9,7 +9,6 @@
  */
 
 import { promptAction, display } from '@kit.ArkUI';
-import { FQ_ACCENT } from '../../view/CommonCom';
 import { CommonNav } from '../../view/CommonNav';
 import { CommonSheet, FqSheetOptions } from '../../view/sheet/CommonSheet';
 import { FqCatalogSheet } from '../../view/sheet/FqCatalogSheet';
@@ -38,6 +37,7 @@ import {
 import { FqCacheSheet } from '../../view/sheet/FqCacheSheet';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { appState } from '../../entryability/AppState';
+import { FqColorUtils } from '../../utils/FqColorUtils';
 
 /** 播放倍速档（avPlayer 0.75 ~ 2）。 */
 const FQ_RATES: number[] = [0.75, 1, 1.25, 1.5, 1.75, 2];
@@ -322,7 +322,7 @@ export struct ListenPage {
           .fontSize(13)
           .fontWeight(FontWeight.Medium)
           .fontColor(Color.White)
-          .backgroundColor(FQ_ACCENT)
+          .backgroundColor(appState.accentColor)
           .padding({ left: 16, right: 16, top: 5, bottom: 5 })
           .onClick((): void => {
             fqAudioSession.openChapter(fqAudioSession.index,
@@ -333,7 +333,7 @@ export struct ListenPage {
           LoadingProgress()
             .width(13)
             .height(13)
-            .color(FQ_ACCENT)
+            .color(appState.accentColor)
           Text('正在加载音频…')
             .fontSize(12.5)
             .fontColor($r('sys.color.font_secondary'))
@@ -363,11 +363,11 @@ export struct ListenPage {
     Column({ space: 5 }) {
       SymbolGlyph(icon)
         .fontSize(21)
-        .fontColor([active ? FQ_ACCENT : $r('sys.color.font_primary')])
+        .fontColor([active ? appState.accentColor : $r('sys.color.font_primary')])
       Text(label)
         .fontSize(11)
         .maxLines(1)
-        .fontColor(active ? FQ_ACCENT : $r('sys.color.font_secondary'))
+        .fontColor(active ? appState.accentColor : $r('sys.color.font_secondary'))
     }
     .layoutWeight(1)
     .padding({ top: 8, bottom: 8 })
@@ -383,11 +383,11 @@ export struct ListenPage {
       SymbolGlyph(this.inShelf ? $r('sys.symbol.bookshelf_badge_checkmark_fill')
         : $r('sys.symbol.bookshelf_badge_plus'))
         .fontSize(21)
-        .fontColor([this.inShelf ? FQ_ACCENT : $r('sys.color.font_primary')])
+        .fontColor([this.inShelf ? appState.accentColor : $r('sys.color.font_primary')])
       Text(this.inShelf ? '已在书架' : '加入书架')
         .fontSize(11)
         .maxLines(1)
-        .fontColor(this.inShelf ? FQ_ACCENT : $r('sys.color.font_secondary'))
+        .fontColor(this.inShelf ? appState.accentColor : $r('sys.color.font_secondary'))
     }
     .layoutWeight(1)
     .padding({ top: 8, bottom: 8 })
@@ -441,9 +441,9 @@ export struct ListenPage {
           .layoutWeight(1)
           .trackThickness(3)
           .blockSize({ width: 14, height: 14 })
-          .selectedColor(FQ_ACCENT)
+          .selectedColor(appState.accentColor)
           .trackColor($r('sys.color.comp_divider'))
-          .blockColor(FQ_ACCENT)
+          .blockColor(appState.accentColor)
           .enabled(fqAudioSession.durationSec > 0)
           .onChange((value: number, mode: SliderChangeMode): void => {
             if (mode === SliderChangeMode.End) {
@@ -479,7 +479,7 @@ export struct ListenPage {
     Column({ space: 2 }) {
       SymbolGlyph(icon)
         .fontSize(26)
-        .fontColor([active ? FQ_ACCENT : $r('sys.color.font_primary')])
+        .fontColor([active ? appState.accentColor : $r('sys.color.font_primary')])
     }
     .padding({ left: 16, right: 16, top: 8, bottom: 8 })
     .opacity(enabled ? 1 : 0.3)
@@ -533,7 +533,7 @@ export struct ListenPage {
         .fontWeight(FontWeight.Medium)
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .fontColor(this.toneChipSelected(tone) ? FQ_ACCENT : $r('sys.color.font_primary'))
+        .fontColor(this.toneChipSelected(tone) ? appState.accentColor : $r('sys.color.font_primary'))
       if (tone.description.length > 0) {
         Text(tone.description)
           .fontSize(11)
@@ -548,11 +548,11 @@ export struct ListenPage {
     .height('100%')
     .padding({ left: 12, right: 12, top: 8, bottom: 8 })
     .borderRadius(10)
-    .backgroundColor(this.toneChipSelected(tone) ? '#1AFF7A3D'
+    .backgroundColor(this.toneChipSelected(tone) ? FqColorUtils.withOpacity(appState.accentColor, 0.1)
       : $r('sys.color.comp_background_list_card'))
     .border({
       width: this.toneChipSelected(tone) ? 1.2 : 0,
-      color: this.toneChipSelected(tone) ? '#52FF7A3D' : Color.Transparent,
+      color: this.toneChipSelected(tone) ? FqColorUtils.withOpacity(appState.accentColor, 0.32) : Color.Transparent,
     })
     .onClick((): void => {
       if (fqAudioSession.hasFixedTone) {
@@ -755,16 +755,16 @@ export struct ListenPage {
                   .fontWeight(FontWeight.Medium)
                   .maxLines(1)
                   .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  .fontColor(this.voiceSelected(voice) ? FQ_ACCENT : $r('sys.color.font_primary'))
+                  .fontColor(this.voiceSelected(voice) ? appState.accentColor : $r('sys.color.font_primary'))
                   .width('100%')
                   .height(48)
                   .padding({ left: 12, right: 12 })
                   .borderRadius(8)
-                  .backgroundColor(this.voiceSelected(voice) ? '#1AFF7A3D'
+                  .backgroundColor(this.voiceSelected(voice) ? FqColorUtils.withOpacity(appState.accentColor, 0.1)
                     : $r('sys.color.comp_background_list_card'))
                   .border({
                     width: this.voiceSelected(voice) ? 1 : 0,
-                    color: this.voiceSelected(voice) ? '#52FF7A3D' : Color.Transparent,
+                    color: this.voiceSelected(voice) ? FqColorUtils.withOpacity(appState.accentColor, 0.32) : Color.Transparent,
                   })
                   .onClick((): void => {
                     fqAudioSession.selectNarrator(voice);
@@ -813,12 +813,12 @@ export struct ListenPage {
           .fontWeight(FontWeight.Medium)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .fontColor(this.voiceSelected(voice) ? FQ_ACCENT : $r('sys.color.font_primary'))
+          .fontColor(this.voiceSelected(voice) ? appState.accentColor : $r('sys.color.font_primary'))
           .layoutWeight(1)
         if (this.voiceSelected(voice)) {
           SymbolGlyph($r('sys.symbol.checkmark'))
             .fontSize(14)
-            .fontColor([FQ_ACCENT])
+            .fontColor([appState.accentColor])
         }
       }
       .width('100%')
@@ -835,11 +835,11 @@ export struct ListenPage {
     .height(64)
     .padding({ left: 12, right: 12, top: 10, bottom: 10 })
     .borderRadius(8)
-    .backgroundColor(this.voiceSelected(voice) ? '#1AFF7A3D'
+    .backgroundColor(this.voiceSelected(voice) ? FqColorUtils.withOpacity(appState.accentColor, 0.1)
       : $r('sys.color.comp_background_list_card'))
     .border({
       width: this.voiceSelected(voice) ? 1 : 0,
-      color: this.voiceSelected(voice) ? '#52FF7A3D' : Color.Transparent,
+      color: this.voiceSelected(voice) ? FqColorUtils.withOpacity(appState.accentColor, 0.32) : Color.Transparent,
     })
     .onClick((): void => {
       fqAudioSession.selectTone(voice);
@@ -881,20 +881,20 @@ export struct ListenPage {
           Row() {
             Text(`${rate}x`)
               .fontSize(15)
-              .fontColor(rate === fqAudioSession.rate ? FQ_ACCENT
+              .fontColor(rate === fqAudioSession.rate ? appState.accentColor
                 : $r('sys.color.font_primary'))
             Blank()
             if (rate === fqAudioSession.rate) {
               SymbolGlyph($r('sys.symbol.checkmark'))
                 .fontSize(16)
-                .fontColor([FQ_ACCENT])
+                .fontColor([appState.accentColor])
             }
           }
           .width('100%')
           .height(48)
           .borderRadius(8)
           .padding({ left: 10, right: 10 })
-          .backgroundColor(rate === fqAudioSession.rate ? '#1AFF7A3D' : Color.Transparent)
+          .backgroundColor(rate === fqAudioSession.rate ? FqColorUtils.withOpacity(appState.accentColor, 0.1) : Color.Transparent)
           .onClick((): void => {
             fqAudioSession.setRate(rate);
             this.closeSheet();
@@ -921,13 +921,13 @@ export struct ListenPage {
           Row() {
             Text(`${minutes} 分钟后`)
               .fontSize(15)
-              .fontColor(fqAudioSession.sleepMinutesChoice === minutes ? FQ_ACCENT
+              .fontColor(fqAudioSession.sleepMinutesChoice === minutes ? appState.accentColor
                 : $r('sys.color.font_primary'))
             Blank()
             if (fqAudioSession.sleepMinutesChoice === minutes) {
               SymbolGlyph($r('sys.symbol.checkmark'))
                 .fontSize(16)
-                .fontColor([FQ_ACCENT])
+                .fontColor([appState.accentColor])
             }
           }
           .width('100%')
@@ -935,7 +935,7 @@ export struct ListenPage {
           .padding({ left: 10, right: 10 })
           .borderRadius(8)
           .backgroundColor(fqAudioSession.sleepMinutesChoice === minutes
-            ? '#1AFF7A3D' : Color.Transparent)
+            ? FqColorUtils.withOpacity(appState.accentColor, 0.1) : Color.Transparent)
           .onClick((): void => {
             fqAudioSession.setSleepMinutes(minutes);
             this.closeSheet();
@@ -945,20 +945,20 @@ export struct ListenPage {
         Row() {
           Text('播完本章')
             .fontSize(15)
-            .fontColor(fqAudioSession.sleepAtChapterEnd ? FQ_ACCENT
+            .fontColor(fqAudioSession.sleepAtChapterEnd ? appState.accentColor
               : $r('sys.color.font_primary'))
           Blank()
           if (fqAudioSession.sleepAtChapterEnd) {
             SymbolGlyph($r('sys.symbol.checkmark'))
               .fontSize(16)
-              .fontColor([FQ_ACCENT])
+              .fontColor([appState.accentColor])
           }
         }
         .width('100%')
         .height(48)
         .padding({ left: 10, right: 10 })
         .borderRadius(8)
-        .backgroundColor(fqAudioSession.sleepAtChapterEnd ? '#1AFF7A3D' : Color.Transparent)
+        .backgroundColor(fqAudioSession.sleepAtChapterEnd ? FqColorUtils.withOpacity(appState.accentColor, 0.1) : Color.Transparent)
         .onClick((): void => {
           fqAudioSession.setSleepAtChapterEnd();
           this.closeSheet();
@@ -970,20 +970,20 @@ export struct ListenPage {
         Row() {
           Text('关闭定时')
             .fontSize(15)
-            .fontColor(!fqAudioSession.sleepActive ? FQ_ACCENT
+            .fontColor(!fqAudioSession.sleepActive ? appState.accentColor
               : $r('sys.color.font_primary'))
           Blank()
           if (!fqAudioSession.sleepActive) {
             SymbolGlyph($r('sys.symbol.checkmark'))
               .fontSize(16)
-              .fontColor([FQ_ACCENT])
+              .fontColor([appState.accentColor])
           }
         }
         .width('100%')
         .height(48)
         .borderRadius(8)
         .padding({ left: 10, right: 10 })
-        .backgroundColor(!fqAudioSession.sleepActive ? '#1AFF7A3D' : Color.Transparent)
+        .backgroundColor(!fqAudioSession.sleepActive ? FqColorUtils.withOpacity(appState.accentColor, 0.1) : Color.Transparent)
         .onClick((): void => {
           fqAudioSession.clearSleep();
           this.closeSheet();

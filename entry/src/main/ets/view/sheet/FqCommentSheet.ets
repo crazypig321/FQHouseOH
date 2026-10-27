@@ -14,7 +14,7 @@
 import { display } from '@kit.ArkUI';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { FqBookComment, FqBookCommentPage, FqChapterIdeaMeta, fqFormatCountInt } from '../../model/FqModels';
-import { CommonLoading, FQ_ACCENT } from '../CommonCom';
+import { CommonLoading } from '../CommonCom';
 import { CommonSheet } from './CommonSheet';
 import { appState } from '../../entryability/AppState';
 
@@ -133,7 +133,7 @@ export struct FqCommentTile {
               Text('作者')
                 .fontSize(9)
                 .fontColor(Color.White)
-                .backgroundColor(FQ_ACCENT)
+                .backgroundColor(appState.accentColor)
                 .borderRadius(4)
                 .padding({ left: 5, right: 5, top: 1, bottom: 1 })
             }
@@ -390,7 +390,7 @@ export struct FqCommentSheet {
       Column() {
         if (this.loading) {
           Column({ space: 10 }) {
-            CommonLoading({ sizeValue: 36, loadColor: FQ_ACCENT })
+            CommonLoading({ sizeValue: 36, loadColor: appState.accentColor })
           }
           .width('100%')
           .layoutWeight(1)
@@ -403,7 +403,7 @@ export struct FqCommentSheet {
               .textAlign(TextAlign.Center)
               .padding({ left: 32, right: 32 })
             Button('重试')
-              .backgroundColor(FQ_ACCENT)
+              .backgroundColor(appState.accentColor)
               .onClick(() => {
                 this.loadComments(true);
               })
@@ -465,7 +465,7 @@ export struct FqCommentSheet {
         LoadingProgress()
           .width(18)
           .height(18)
-          .color(FQ_ACCENT)
+          .color(appState.accentColor)
         Text('正在加载')
           .fontSize(12)
           .fontColor(this.fontColor)

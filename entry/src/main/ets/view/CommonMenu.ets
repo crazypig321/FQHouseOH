@@ -6,13 +6,16 @@
 
 import { ComponentContent, LengthMetrics, SymbolGlyphModifier, UIContext, uiMaterial } from '@kit.ArkUI';
 import { IsApiVersion_26 } from '../utils/ModifierUtils';
+import { appState } from '../entryability/AppState';
 
 /** 公共菜单项参数（icon 为空字符串时不显示图标；endIcon 仅支持 sys.symbol 资源，
- *  经 SymbolGlyphModifier 渲染——MenuItem.endIcon 不支持 Symbol 图标，直接赋值不显示）。 */
+ *  经 SymbolGlyphModifier 渲染——MenuItem.endIcon 不支持 Symbol 图标，直接赋值不显示；
+ *  swatch 非 null 时以自绘色板行渲染（主题色等颜色选择菜单）。 */
 export class FqMenuItem {
   icon: ResourceStr = '';
   label: string = '';
   endIcon: ResourceStr = '';
+  swatch: ResourceColor | null = null;
   onAction: () => void = (): void => {};
 }
 
@@ -33,7 +36,19 @@ export function fqMenuMaterial(): uiMaterial.Material | undefined {
 export function fqMenuBuilder(params: FqMenuParams) {
   Menu() {
     ForEach(params.items, (item: FqMenuItem) => {
-      if (typeof item.icon === 'string') {
+      if (item.swatch !== null) {
+        MenuItem({
+          content: item.label,
+          symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.circle_fill'))
+            .fontSize(16)
+            .fontColor([item.swatch ?? Color.Transparent]),
+          symbolEndIcon: typeof item.endIcon === 'string'
+            ? undefined : new SymbolGlyphModifier(item.endIcon).fontColor([appState.accentColor])
+        })
+          .onClick(() => {
+            item.onAction();
+          })
+      } else if (typeof item.icon === 'string') {
         MenuItem({
           content: item.label,
           symbolEndIcon: typeof item.endIcon === 'string'

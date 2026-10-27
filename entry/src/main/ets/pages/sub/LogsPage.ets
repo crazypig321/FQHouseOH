@@ -479,7 +479,7 @@ export struct LogsPage {
       .fontColor(this.source === index ? Color.White : $r('sys.color.font_secondary'))
       .padding({ left: 16, right: 16, top: 7, bottom: 7 })
       .borderRadius(16)
-      .backgroundColor(this.source === index ? '#FF7A3D' : $r('sys.color.comp_background_tertiary'))
+      .backgroundColor(this.source === index ? appState.accentColor : $r('sys.color.comp_background_tertiary'))
       .onClick((): void => {
         if (this.source !== index) {
           this.source = index;

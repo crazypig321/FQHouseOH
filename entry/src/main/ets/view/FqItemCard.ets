@@ -4,6 +4,8 @@
 
 import { FqBackend } from '../core/FqBackend';
 import { FqMediaItem, fqEmptyMediaItem } from '../model/FqModels';
+import { appState } from '../entryability/AppState';
+import { FqColorUtils } from '../utils/FqColorUtils';
 
 @ComponentV2
 export struct FqItemCard {
@@ -41,7 +43,7 @@ export struct FqItemCard {
               .fontSize(11)
               .padding({ left: 6, right: 6, top: 2, bottom: 2 })
               .borderRadius(4)
-              .backgroundColor('#1AFF7A3D')
+              .backgroundColor(FqColorUtils.withOpacity(appState.accentColor, 0.1))
           }
           if (this.item.score > 0) {
             Text(this.scoreLabel())

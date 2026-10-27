@@ -52,7 +52,6 @@
 import { display, window } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { Player, PlayerSurface, Media, PlayerConfig } from '@mpv-ohos/mpv-arkts';
-import { FQ_ACCENT } from '../../view/CommonCom';
 import { CommonNav } from '../../view/CommonNav';
 import { CommonSheet, FqSheetOptions } from '../../view/sheet/CommonSheet';
 import { FqCacheSheet } from '../../view/sheet/FqCacheSheet';
@@ -1266,7 +1265,7 @@ export struct PlayerPage {
         .type(ButtonType.Capsule)
         .height(34)
         .fontSize(14)
-        .backgroundColor(FQ_ACCENT)
+        .backgroundColor(appState.accentColor)
         .onClick((): void => {
           this.retry();
         })

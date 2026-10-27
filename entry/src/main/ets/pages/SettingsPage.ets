@@ -9,7 +9,7 @@
 
 import { CommonNav } from '../view/CommonNav';
 import { FqMenu, FqMenuItem } from '../view/CommonMenu';
-import { CommonLoading, FQ_ACCENT } from '../view/CommonCom';
+import { CommonLoading } from '../view/CommonCom';
 import { common, Want } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { FqTitleBarOptions, ROUTE_ABOUT, ROUTE_CACHED_BOOKS, ROUTE_CACHED_DRAMAS, ROUTE_CACHED_AUDIO, ROUTE_CACHED_COMICS, ROUTE_LOGS } from '../model/FqNavModels';
@@ -20,16 +20,20 @@ import {
   FQ_THEME_LIGHT,
   FqAppSettingsStore,
 } from '../core/FqAppSettingsStore';
+import { FQ_THEME_COLOR_OPTIONS, fqThemeColorOf, fqThemeColorNameOf } from '../core/FqThemeColors';
 import { FqDataCleaner } from '../core/FqDataCleaner';
 import { FqBackend } from '../core/FqBackend';
 import { DialogManager } from '../utils/DialogUtils';
 import { FqColorUtils } from '../utils/FqColorUtils';
 import { appState } from '../entryability/AppState';
+import { CommonSheet, FqSheetOptions } from '../view/sheet/CommonSheet';
+import { HSBColorPicker, HSBColorPickerLayout } from '@keke/color-picker';
 
 const FQ_HOME_TOP_INSET: number = 56;
 /** 滚动内容末尾偏移：悬浮底栏 56 + 底部悬浮边距 28。 */
 const FQ_SETTINGS_BOTTOM_INSET: number = 84;
 const FQ_THEME_ANCHOR_ID: string = 'settings_theme_anchor';
+const FQ_THEME_COLOR_ANCHOR_ID: string = 'settings_theme_color_anchor';
 /** 行内分割线左右避让：左侧行 padding 14 + 图标块 34 + 间距 12，右侧对称一致。 */
 const FQ_ROW_DIVIDER_INSET: number = 60;
 /** 深色模式档位文案（下标即档位值）。 */
@@ -64,6 +68,9 @@ export struct SettingsPage {
   @Local backgroundAudio: boolean = true;
   @Local backendUrl: string = '';
   @Local backendRefreshing: boolean = false;
+  /** 自定义颜色取色器 sheet 可见性 + 起始色（三方 HSBColorPicker）。 */
+  @Local colorSheetVisible: boolean = false;
+  @Local pickerColor: string = '#FF7A3D';
 
   aboutToAppear(): void {
     this.themeMode = FqAppSettingsStore.getThemeMode();
@@ -84,6 +91,8 @@ export struct SettingsPage {
           this.SectionHeader('外观')
           FqSettingsCard() {
             this.ThemeRow()
+            this.RowDivider()
+            this.ThemeColorRow()
           }
 
           this.SectionHeader('播放')
@@ -146,6 +155,9 @@ export struct SettingsPage {
       .contentEndOffset(appState.bottomRect + FQ_SETTINGS_BOTTOM_INSET)
       .width('100%')
       .height('100%')
+      .bindSheet(this.colorSheetVisible, this.ColorPickerSheet(), FqSheetOptions((): void => {
+        this.colorSheetVisible = false;
+      }, 480))
     }
   }
 
@@ -170,6 +182,65 @@ export struct SettingsPage {
   private applyThemeMode(mode: number): void {
     this.themeMode = mode;
     FqAppSettingsStore.setThemeMode(mode);
+  }
+
+  /** 主题色菜单：色板 + 名称 + 选中勾（点击即时切换全局高亮色；自定义颜色开 HSB 取色器）。 */
+  private openThemeColorMenu(): void {
+    const items: FqMenuItem[] = [];
+    for (const option of FQ_THEME_COLOR_OPTIONS) {
+      const item: FqMenuItem = new FqMenuItem();
+      item.label = option.name;
+      if (option.key === 'custom') {
+        item.swatch = FqAppSettingsStore.getThemeCustomColor();
+        item.onAction = (): void => {
+          this.openCustomColorPicker();
+        };
+      } else {
+        item.swatch = fqThemeColorOf(option.key);
+        const picked: string = option.key;
+        item.onAction = (): void => {
+          FqAppSettingsStore.setThemeColor(picked);
+        };
+      }
+      if (option.key === FqAppSettingsStore.getThemeColor()) {
+        item.endIcon = $r('sys.symbol.checkmark');
+      }
+      items.push(item);
+    }
+    FqMenu.open(this.getUIContext(), FQ_THEME_COLOR_ANCHOR_ID, items);
+  }
+
+  /** 打开自定义颜色取色器（起始色 = 当前自定义色，选色即时生效）。 */
+  private openCustomColorPicker(): void {
+    this.pickerColor = FqAppSettingsStore.getThemeCustomColor();
+    this.colorSheetVisible = true;
+  }
+
+  /** 自定义颜色 sheet：三方 HSBColorPicker 纵向布局（色相/饱和度/亮度 + 预设色），选色即时应用全局高亮色。 */
+  @Builder
+  private ColorPickerSheet() {
+    CommonSheet({
+      sheetTitle: '自定义颜色',
+      showClose: true,
+      closeClick: (): void => {
+        this.colorSheetVisible = false;
+      },
+    }) {
+      HSBColorPicker({
+        color: this.pickerColor,
+        layout: HSBColorPickerLayout.COLUMN,
+        radius: 8,
+        showAlpha: true,
+        onChange: (value: string): void => {
+          this.pickerColor = value;
+          FqAppSettingsStore.setThemeCustomColor(value);
+          FqAppSettingsStore.setThemeColor('custom');
+        },
+      })
+      .width('100%')
+      .height(320)
+      .padding({ left: 20, right: 20 })
+    }
   }
 
   private confirmClearAllData(): void {
@@ -210,7 +281,7 @@ export struct SettingsPage {
         .width(3.5)
         .height(15)
         .borderRadius(2)
-        .backgroundColor(FQ_ACCENT)
+        .backgroundColor(appState.accentColor)
       Text(title)
         .fontSize(16)
         .fontWeight(FontWeight.Bold)
@@ -314,6 +385,55 @@ export struct SettingsPage {
     })
   }
 
+  /** 主题色行（锚点 FqMenu 色板直选：跟随系统/番茄橙/琥珀金/松石绿/青碧/蔚蓝/紫罗兰/樱花粉/绯红）。 */
+  @Builder
+  private ThemeColorRow() {
+    Row({ space: 12 }) {
+      Stack() {
+        SymbolGlyph($r('sys.symbol.paintpalette'))
+          .fontSize(17)
+          .fontColor([appState.accentColor])
+      }
+      .width(34)
+      .height(34)
+      .borderRadius(10)
+      .backgroundColor(FqColorUtils.withOpacity(appState.accentColor, 0.12))
+
+      Column({ space: 3 }) {
+        Text('主题色')
+          .fontSize(14.5)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('sys.color.font_primary'))
+        Text('高亮与选中颜色，即时生效')
+          .fontSize(11.5)
+          .fontColor($r('sys.color.font_secondary'))
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+
+      Row({ space: 6 }) {
+        Row()
+          .width(12)
+          .height(12)
+          .borderRadius(6)
+          .backgroundColor(appState.accentColor)
+        Text(fqThemeColorNameOf(appState.themeColorKey))
+          .fontSize(12.5)
+          .fontColor($r('sys.color.font_secondary'))
+      }
+      .alignItems(VerticalAlign.Center)
+      SymbolGlyph($r('sys.symbol.chevron_right'))
+        .fontSize(13)
+        .fontColor([$r('sys.color.font_tertiary')])
+    }
+    .id(FQ_THEME_COLOR_ANCHOR_ID)
+    .padding({ left: 14, right: 14, top: 11, bottom: 11 })
+    .width('100%')
+    .onClick((): void => {
+      this.openThemeColorMenu();
+    })
+  }
+
   /** 开启后台播放行（Toggle 开关：开=支持后台播放，关=无法后台播放）。 */
   @Builder
   private BackgroundAudioRow() {
@@ -341,7 +461,7 @@ export struct SettingsPage {
       .layoutWeight(1)
 
       Toggle({ type: ToggleType.Switch, isOn: this.backgroundAudio })
-        .selectedColor(FQ_ACCENT)
+        .selectedColor(appState.accentColor)
         .onChange((isOn: boolean): void => {
           this.backgroundAudio = isOn;
           FqAppSettingsStore.setBackgroundAudio(isOn);

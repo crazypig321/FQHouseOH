@@ -8,7 +8,7 @@
 
 import { ROUTE_DETAIL, ROUTE_READER2, ROUTE_CACHED_BOOKS, DetailNavParams, ReaderNavParams } from '../model/FqNavModels';
 import { CommonNav, titleBarOf } from '../view/CommonNav';
-import { FQ_ACCENT, CommonSearch, CommonBlur } from '../view/CommonCom';
+import { CommonSearch, CommonBlur } from '../view/CommonCom';
 import { FqMenu, FqMenuItem } from '../view/CommonMenu';
 import { FqShelfStore, FqShelfItem } from '../core/FqShelfStore';
 import { FqBrowseStore } from '../core/FqBrowseStore';
@@ -713,7 +713,7 @@ export struct ShelfPage {
           Text('书架')
             .fontSize(12)
             .fontWeight(this.currentTab === 0 ? FontWeight.Bold : FontWeight.Normal)
-            .fontColor(this.currentTab === 0 ? FQ_ACCENT : $r('sys.color.font_tertiary'))
+            .fontColor(this.currentTab === 0 ? appState.accentColor : $r('sys.color.font_tertiary'))
             .height(26)
             .layoutWeight(1)
             .textAlign(TextAlign.Center)
@@ -723,7 +723,7 @@ export struct ShelfPage {
           Text('浏览历史')
             .fontSize(12)
             .fontWeight(this.currentTab === 1 ? FontWeight.Bold : FontWeight.Normal)
-            .fontColor(this.currentTab === 1 ? FQ_ACCENT : $r('sys.color.font_tertiary'))
+            .fontColor(this.currentTab === 1 ? appState.accentColor : $r('sys.color.font_tertiary'))
             .height(26)
             .layoutWeight(1)
             .textAlign(TextAlign.Center)
@@ -786,7 +786,7 @@ export struct ShelfPage {
       if (appState.isBatchMode) {
         SymbolGlyph(this.isSelectedId(row.id) ? $r('sys.symbol.checkmark_circle_fill') : $r('sys.symbol.circle'))
           .fontSize(24)
-          .fontColor([this.isSelectedId(row.id) ? FQ_ACCENT : $r('sys.color.icon_tertiary')])
+          .fontColor([this.isSelectedId(row.id) ? appState.accentColor : $r('sys.color.icon_tertiary')])
           .transition(TransitionEffect.OPACITY)
       }
       if (row.cover.length > 0) {
@@ -843,7 +843,7 @@ export struct ShelfPage {
           .backgroundColor($r('sys.color.comp_background_tertiary'))
         SymbolGlyph(this.currentTab === 0 ? $r('sys.symbol.book') : $r('sys.symbol.clock'))
           .fontSize(32)
-          .fontColor([FQ_ACCENT])
+          .fontColor([appState.accentColor])
       }
       Text(this.emptyTitle())
         .fontSize(16)

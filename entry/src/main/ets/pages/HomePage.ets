@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 首页：fqapp 原版 6 频道多源推荐流
  * （推荐 = 首页流多 tab 交错 + 漫画搜索分页；单频道 = 单源）。
  * 各 homepage 源推荐游标停走后转入 search 兜底续页
@@ -13,7 +13,7 @@ import { FqHomeCache } from '../core/FqHomeCache';
 import { FqMediaItem } from '../model/FqModels';
 import { FqMediaCard } from '../view/FqMediaCard';
 import { FqSpotlight } from '../view/FqSpotlight';
-import { CommonSearch, FQ_ACCENT, CommonLoading, RefreshOverlay } from '../view/CommonCom';
+import { CommonSearch, CommonLoading, RefreshOverlay } from '../view/CommonCom';
 import { DetailNavParams, ROUTE_DETAIL, ROUTE_SEARCH, FqTitleBarOptions } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import { CommonNav } from '../view/CommonNav';
@@ -149,7 +149,7 @@ export struct HomePage {
                   .width(4)
                   .height(18)
                   .borderRadius(2)
-                  .backgroundColor('#FF7A3D')
+                  .backgroundColor(appState.accentColor)
                 Column({ space: 2 }) {
                   Text('发现更多好故事')
                     .fontSize(20)
@@ -196,7 +196,7 @@ export struct HomePage {
             if (this.loadingMore) {
               ListItem() {
                 Row({ space: 8 }) {
-                  CommonLoading({ sizeValue: 18, loadColor: FQ_ACCENT })
+                  CommonLoading({ sizeValue: 18, loadColor: appState.accentColor })
                   Text('加载中…')
                     .fontSize(13)
                     .fontColor($r('sys.color.font_secondary'))
@@ -288,7 +288,7 @@ export struct HomePage {
           .height(38)
           .padding({ left: 14, right: 14 })
           .borderRadius(19)
-          .backgroundColor(this.channelIndex === index ? '#FF7A3D' : Color.Transparent)
+          .backgroundColor(this.channelIndex === index ? appState.accentColor : Color.Transparent)
           .alignItems(VerticalAlign.Center)
           .onClick(() => this.selectChannel(index))
           .attributeModifier(this.channelIndex === index ? undefined : rowImmersiveModifier)
@@ -309,7 +309,7 @@ export struct HomePage {
   private FeedLoading() {
     ListItem() {
       Column({ space: 12 }) {
-        CommonLoading({ sizeValue: 24, loadColor: FQ_ACCENT })
+        CommonLoading({ sizeValue: 24, loadColor: appState.accentColor })
         Text('正在寻找好故事')
           .fontSize(13)
           .fontColor($r('sys.color.font_secondary'))
@@ -335,7 +335,7 @@ export struct HomePage {
           .textAlign(TextAlign.Center)
           .padding({ left: 32, right: 32 })
         Button('重试')
-          .backgroundColor('#FF7A3D')
+          .backgroundColor(appState.accentColor)
           .onClick(() => this.loadFirst())
       }
       .width('100%')
@@ -357,7 +357,7 @@ export struct HomePage {
             .backgroundColor($r('sys.color.comp_background_tertiary'))
           SymbolGlyph($r('sys.symbol.compass'))
             .fontSize(32)
-            .fontColor(['#FF7A3D'])
+            .fontColor([appState.accentColor])
         }
         Text('暂无内容')
           .fontSize(16)
@@ -368,9 +368,9 @@ export struct HomePage {
           .fontColor($r('sys.color.font_secondary'))
         Button('刷新推荐')
           .backgroundColor(Color.Transparent)
-          .fontColor('#FF7A3D')
+          .fontColor(appState.accentColor)
           .borderRadius(18)
-          .border({ width: 1, color: '#FF7A3D' })
+          .border({ width: 1, color: appState.accentColor })
           .margin({ top: 6 })
           .onClick(() => this.loadFirst())
       }

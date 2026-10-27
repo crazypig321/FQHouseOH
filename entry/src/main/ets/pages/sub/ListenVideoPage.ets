@@ -16,7 +16,6 @@
 
 import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
-import { FQ_ACCENT } from '../../view/CommonCom';
 import { CommonNav } from '../../view/CommonNav';
 import { CommonSheet, FqSheetOptions } from '../../view/sheet/CommonSheet';
 import { FqCatalogSheet } from '../../view/sheet/FqCatalogSheet';
@@ -30,6 +29,7 @@ import { FqReadStatsStore } from '../../core/FqReadStatsStore';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { appState } from '../../entryability/AppState';
 import { Player, Media, PlayerConfig } from '@mpv-ohos/mpv-arkts';
+import { FqColorUtils } from '../../utils/FqColorUtils';
 
 /** 定时分钟档（对齐听书页 -1/15/30/60）。 */
 const FQ_SLEEP_MINUTES: number[] = [15, 30, 60];
@@ -373,7 +373,7 @@ export struct ListenVideoPage {
           .fontSize(13)
           .fontWeight(FontWeight.Medium)
           .fontColor(Color.White)
-          .backgroundColor(FQ_ACCENT)
+          .backgroundColor(appState.accentColor)
           .padding({ left: 16, right: 16, top: 5, bottom: 5 })
           .onClick((): void => {
             this.loadEpisode(this.index, -1);
@@ -383,7 +383,7 @@ export struct ListenVideoPage {
           LoadingProgress()
             .width(13)
             .height(13)
-            .color(FQ_ACCENT)
+            .color(appState.accentColor)
           Text('正在加载音频…')
             .fontSize(12.5)
             .fontColor($r('sys.color.font_secondary'))
@@ -433,9 +433,9 @@ export struct ListenVideoPage {
           .layoutWeight(1)
           .trackThickness(3)
           .blockSize({ width: 14, height: 14 })
-          .selectedColor(FQ_ACCENT)
+          .selectedColor(appState.accentColor)
           .trackColor($r('sys.color.comp_divider'))
-          .blockColor(FQ_ACCENT)
+          .blockColor(appState.accentColor)
           .enabled(this.player.state.duration > 0)
           .onChange((value: number, mode: SliderChangeMode): void => {
             if (mode === SliderChangeMode.End) {
@@ -471,7 +471,7 @@ export struct ListenVideoPage {
     Column({ space: 2 }) {
       SymbolGlyph(icon)
         .fontSize(26)
-        .fontColor([active ? FQ_ACCENT : $r('sys.color.font_primary')])
+        .fontColor([active ? appState.accentColor : $r('sys.color.font_primary')])
     }
     .padding({ left: 16, right: 16, top: 8, bottom: 8 })
     .opacity(enabled ? 1 : 0.3)
@@ -573,8 +573,8 @@ export struct ListenVideoPage {
                     .height(30)
                     .showSteps(true)
                     .stepColor($r('sys.color.comp_background_tertiary'))
-                    .blockColor(FQ_ACCENT)
-                    .selectedColor('#33FF7A3D')
+                    .blockColor(appState.accentColor)
+                    .selectedColor(FqColorUtils.withOpacity(appState.accentColor, 0.2))
                     .trackColor($r('sys.color.comp_background_tertiary'))
                     .onChange((value: number, mode: SliderChangeMode): void => {
                       if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) {
@@ -592,7 +592,7 @@ export struct ListenVideoPage {
                       Text(fqSpeedStepLabel(step))
                         .fontSize(7)
                         .fontWeight(this.isCurrentSpeedStep(step) ? FontWeight.Bold : FontWeight.Normal)
-                        .fontColor(this.isCurrentSpeedStep(step) ? FQ_ACCENT
+                        .fontColor(this.isCurrentSpeedStep(step) ? appState.accentColor
                           : $r('sys.color.font_tertiary'))
                     }, (step: number) => `${step}`)
                   }
@@ -631,13 +631,13 @@ export struct ListenVideoPage {
           Row() {
             Text(`${minutes} 分钟后`)
               .fontSize(15)
-              .fontColor(this.sleepMinutesChoice === minutes ? FQ_ACCENT
+              .fontColor(this.sleepMinutesChoice === minutes ? appState.accentColor
                 : $r('sys.color.font_primary'))
             Blank()
             if (this.sleepMinutesChoice === minutes) {
               SymbolGlyph($r('sys.symbol.checkmark'))
                 .fontSize(16)
-                .fontColor([FQ_ACCENT])
+                .fontColor([appState.accentColor])
             }
           }
           .width('100%')
@@ -645,7 +645,7 @@ export struct ListenVideoPage {
           .padding({ left: 10, right: 10 })
           .borderRadius(8)
           .backgroundColor(this.sleepMinutesChoice === minutes
-            ? '#1AFF7A3D' : Color.Transparent)
+            ? FqColorUtils.withOpacity(appState.accentColor, 0.1) : Color.Transparent)
           .onClick((): void => {
             this.setSleepMinutes(minutes);
             this.closeSheet();
@@ -655,20 +655,20 @@ export struct ListenVideoPage {
         Row() {
           Text('播完本集')
             .fontSize(15)
-            .fontColor(this.sleepAtEpisodeEnd ? FQ_ACCENT
+            .fontColor(this.sleepAtEpisodeEnd ? appState.accentColor
               : $r('sys.color.font_primary'))
           Blank()
           if (this.sleepAtEpisodeEnd) {
             SymbolGlyph($r('sys.symbol.checkmark'))
               .fontSize(16)
-              .fontColor([FQ_ACCENT])
+              .fontColor([appState.accentColor])
           }
         }
         .width('100%')
         .height(48)
         .padding({ left: 10, right: 10 })
         .borderRadius(8)
-        .backgroundColor(this.sleepAtEpisodeEnd ? '#1AFF7A3D' : Color.Transparent)
+        .backgroundColor(this.sleepAtEpisodeEnd ? FqColorUtils.withOpacity(appState.accentColor, 0.1) : Color.Transparent)
         .onClick((): void => {
           this.setSleepAtEpisodeEnd();
           this.closeSheet();
@@ -680,20 +680,20 @@ export struct ListenVideoPage {
         Row() {
           Text('关闭定时')
             .fontSize(15)
-            .fontColor(!this.sleepActive() ? FQ_ACCENT
+            .fontColor(!this.sleepActive() ? appState.accentColor
               : $r('sys.color.font_primary'))
           Blank()
           if (!this.sleepActive()) {
             SymbolGlyph($r('sys.symbol.checkmark'))
               .fontSize(16)
-              .fontColor([FQ_ACCENT])
+              .fontColor([appState.accentColor])
           }
         }
         .width('100%')
         .height(48)
         .borderRadius(8)
         .padding({ left: 10, right: 10 })
-        .backgroundColor(!this.sleepActive() ? '#1AFF7A3D' : Color.Transparent)
+        .backgroundColor(!this.sleepActive() ? FqColorUtils.withOpacity(appState.accentColor, 0.1) : Color.Transparent)
         .onClick((): void => {
           this.clearSleep();
           this.closeSheet();

@@ -32,7 +32,7 @@ import { FqLocalBookStore } from '../../core/FqLocalBookStore';
 import { FqChapterCacheStore, FqCachedCatalog } from '../../core/FqChapterCacheStore';
 import { ReaderNavParams, ListenNavParams, ROUTE_LISTEN } from '../../model/FqNavModels';
 import { CommonNav, titleBarOf } from '../../view/CommonNav';
-import { CommonLoading, FQ_ACCENT } from '../../view/CommonCom';
+import { CommonLoading } from '../../view/CommonCom';
 import { CommonSheet, FqSheetOptions } from '../../view/sheet/CommonSheet';
 import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/sheet/FqCommentSheet';
 import { FqCatalogSheet } from '../../view/sheet/FqCatalogSheet';
@@ -59,6 +59,7 @@ import { FqPageCanvas } from '../../reader/FqPageCanvas';
 import { FqReaderFlip } from '../../reader/FqReaderFlip';
 import { drawing } from '@kit.ArkGraphics2D';
 import { FqMeasureFn, FqPaginationEngine, fqPageIndexForPosition } from '../../reader/FqPagination';
+import { FqColorUtils } from '../../utils/FqColorUtils';
 
 /** 眉页「第N章」前缀匹配（N 支持数字与中文数字，量词：章节回卷集话篇）。 */
 const FQ_HEADER_PREFIX_RE: RegExp = new RegExp('^第[0-9零一二三四五六七八九十百千万]+[章节回卷集话篇]');
@@ -453,7 +454,7 @@ export struct ReaderPage {
 
         if (this.loadingState) {
           Column({ space: 12 }) {
-            CommonLoading({ sizeValue: 36, loadColor: FQ_ACCENT })
+            CommonLoading({ sizeValue: 36, loadColor: appState.accentColor })
             Text('正在加载本章内容')
               .fontSize(14)
               .fontColor(this.theme().fontColor)
@@ -470,7 +471,7 @@ export struct ReaderPage {
               .textAlign(TextAlign.Center)
               .padding({ left: 32, right: 32 })
             Button('重试')
-              .backgroundColor(FQ_ACCENT)
+              .backgroundColor(appState.accentColor)
               .onClick(() => this.retry())
           }
           .width('100%')
@@ -569,7 +570,7 @@ export struct ReaderPage {
       commentCounts: this.layoutForSlot(slot)?.commentCounts ?? [],
       fontFamily: this.readerFontFamily,
       highlightParaIndex: this.slotHighlightPara(slot),
-      highlightColor: this.theme().night ? '#33FF7A3D' : '#1AFF7A3D',
+      highlightColor: this.theme().night ? FqColorUtils.withOpacity(appState.accentColor, 0.2) : FqColorUtils.withOpacity(appState.accentColor, 0.1),
       onBubbleTap: (paraIndex: number): void => {
         this.openParaSheet(paraIndex);
       },
@@ -777,7 +778,7 @@ export struct ReaderPage {
               right: this.cachedMetrics.sidePaddingVp,
             })
             .backgroundColor(this.verticalParaHighlighted(item)
-              ? (this.theme().night ? '#33FF7A3D' : '#1AFF7A3D') : 'transparent')
+              ? (this.theme().night ? FqColorUtils.withOpacity(appState.accentColor, 0.2) : FqColorUtils.withOpacity(appState.accentColor, 0.1)) : 'transparent')
             .borderRadius(this.verticalParaHighlighted(item) ? 6 : 0)
           }
         }, (item: FqVerticalTextItem): string => `${item.chapterIndex}_${item.paraIndex}`)
@@ -2441,7 +2442,7 @@ export struct ReaderPage {
         }
         if (this.paraLoading) {
           Column({ space: 10 }) {
-            CommonLoading({ sizeValue: 36, loadColor: FQ_ACCENT })
+            CommonLoading({ sizeValue: 36, loadColor: appState.accentColor })
           }
           .width('100%')
           .layoutWeight(1)
@@ -2454,7 +2455,7 @@ export struct ReaderPage {
               .textAlign(TextAlign.Center)
               .padding({ left: 32, right: 32 })
             Button('重试')
-              .backgroundColor(FQ_ACCENT)
+              .backgroundColor(appState.accentColor)
               .onClick(() => {
                 this.loadParaComments(this.paraSheetParaIndex, true);
               })
@@ -2544,7 +2545,7 @@ export struct ReaderPage {
               Text('作者')
                 .fontSize(9)
                 .fontColor(Color.White)
-                .backgroundColor(FQ_ACCENT)
+                .backgroundColor(appState.accentColor)
                 .borderRadius(4)
                 .padding({ left: 5, right: 5, top: 1, bottom: 1 })
             }
@@ -2600,7 +2601,7 @@ export struct ReaderPage {
         LoadingProgress()
           .width(18)
           .height(18)
-          .color(FQ_ACCENT)
+          .color(appState.accentColor)
         Text('正在加载')
           .fontSize(12)
           .fontColor(this.theme().fontColor)

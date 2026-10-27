@@ -5,7 +5,7 @@
 
 import { FqBackend } from '../core/FqBackend';
 import { FqMediaItem, fqEmptyMediaItem, fqKindLabel } from '../model/FqModels';
-import { FQ_ACCENT } from './CommonCom';
+import { appState } from '../entryability/AppState';
 
 @ComponentV2
 export struct FqMediaCard {
@@ -48,7 +48,7 @@ export struct FqMediaCard {
         if (this.batchMode) {
           SymbolGlyph(this.selected ? $r('sys.symbol.checkmark_circle_fill') : $r('sys.symbol.circle'))
             .fontSize(22)
-            .fontColor([this.selected ? FQ_ACCENT : $r('sys.color.icon_tertiary')])
+            .fontColor([this.selected ? appState.accentColor : $r('sys.color.icon_tertiary')])
             .margin(6)
             .transition(TransitionEffect.OPACITY)
         }

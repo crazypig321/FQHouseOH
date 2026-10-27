@@ -19,7 +19,7 @@ import { BlurStrategy,
 import { appState } from '../entryability/AppState';
 import { LengthMetrics } from '@kit.ArkUI';
 import { themeUtils } from '../utils/ThemeUtils';
-import { FQ_ACCENT } from './CommonCom';
+import { FqColorUtils } from '../utils/FqColorUtils';
 
 export function titleBarOf(mainTitle: ResourceStr, subTitle?: ResourceStr,
   menus?: Array<HdsNavigationMenuItemOptions>, bottomBuilder?: BottomBuilderParams): TitleBarContentOptions {
@@ -243,7 +243,7 @@ export struct CommonNav {
     }
     const options: LinearGradientOptions = {
       angle: 180,
-      colors: [['#1AFF7A3D', 0], ['#00FF7A3D', 1]],
+      colors: [[FqColorUtils.withOpacity(appState.accentColor, 0.1), 0], [FqColorUtils.withOpacity(appState.accentColor, 0), 1]],
     };
     return options;
   }
@@ -315,7 +315,7 @@ export struct CommonNav {
       .justifyContent(FlexAlign.Center)
       /*.linearGradient(this.readBarKind === 'book' ? {
         angle: 90,
-        colors: [[FQ_ACCENT, 0], ['#E4432E', 1]],
+        colors: [[appState.accentColor, 0], ['#E4432E', 1]],
       } : undefined)*/
       .onClick(() => this.readerBarClick(this.readBarActionLabel()))
     }

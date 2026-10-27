@@ -9,7 +9,7 @@
  */
 
 import { FqChapter } from '../../model/FqModels';
-import { CommonSearch, FQ_ACCENT } from '../CommonCom';
+import { CommonSearch } from '../CommonCom';
 import { CommonSheet } from './CommonSheet';
 import { appState } from '../../entryability/AppState';
 
@@ -144,7 +144,7 @@ export struct FqCatalogSheet {
   /** 进度列颜色：当前章强调色、已读 100% 系统三级色、其余宿主字体色。 */
   private progressColorAt(index: number, text: string): ResourceColor {
     if (index === this.currentChapterIndex) {
-      return FQ_ACCENT;
+      return appState.accentColor;
     }
     return text === '100%' ? $r('sys.color.font_tertiary') : this.fontColor;
   }
@@ -202,7 +202,7 @@ export struct FqCatalogSheet {
                   : `第${this.chapters.indexOf(chapter) + 1}章`)
                   .fontSize(14)
                   .fontColor(this.chapters.indexOf(chapter) === this.currentChapterIndex
-                    ? FQ_ACCENT : this.fontColor)
+                    ? appState.accentColor : this.fontColor)
                   .layoutWeight(1)
                   .maxLines(1)
                   .textOverflow({ overflow: TextOverflow.Ellipsis })

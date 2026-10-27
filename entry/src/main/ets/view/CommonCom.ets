@@ -1,8 +1,6 @@
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { searchImmersiveModifier } from '../utils/UiUtils';
-
-/** 品牌橙（标题栏/底栏强调色）。 */
-export const FQ_ACCENT: ResourceColor = '#FF7A3D';
+import { appState } from '../entryability/AppState';
 
 /**
  * 公共搜索组件（移植 musicfreeOH CommonSearch）。
@@ -48,7 +46,7 @@ export struct CommonSearch {
         style: CancelButtonStyle.INPUT,
         icon: new SymbolGlyphModifier($r('sys.symbol.xmark')).fontColor([$r('sys.color.font_tertiary')])
       })
-      .searchButton('搜索', { fontColor: FQ_ACCENT })
+      .searchButton('搜索', { fontColor: appState.accentColor })
       .attributeModifier(searchImmersiveModifier)
       .placeholderColor($r('sys.color.font_tertiary'))
       .placeholderFont({ size: 14, weight: 400 })
@@ -115,7 +113,7 @@ export struct RefreshOverlay {
   build() {
     Stack() {
       Column({ space: 10 }) {
-        CommonLoading({ sizeValue: 36, loadColor: FQ_ACCENT })
+        CommonLoading({ sizeValue: 36, loadColor: appState.accentColor })
         Text('正在刷新')
           .fontSize(13)
           .fontColor($r('sys.color.font_secondary'))

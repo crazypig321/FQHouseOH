@@ -7,7 +7,7 @@ import { BottomBuilderParams, HdsNavigationMenuItemOptions, HdsNavigationTitle, 
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import { FqChapter } from './FqModels';
-import { FQ_ACCENT } from '../view/CommonCom';
+import { appState } from '../entryability/AppState';
 
 export const ROUTE_SEARCH: string = 'search';
 export const ROUTE_DETAIL: string = 'detail';
@@ -175,7 +175,7 @@ export function FqTitleBarOptions(mainTitle: ResourceStr, showSearch: boolean,
         // 已在书架时用主题橙高亮（SymbolGlyphModifier 携带 fontColor）
         icon: shelfActive === true
           ? new SymbolGlyphModifier($r('sys.symbol.bookshelf_badge_checkmark_fill'))
-            .fontColor([FQ_ACCENT])
+            .fontColor([appState.accentColor])
           : $r('sys.symbol.bookshelf_badge_plus'),
         label: 'shelf',
         action: onShelf,

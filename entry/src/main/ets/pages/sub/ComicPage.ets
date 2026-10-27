@@ -26,7 +26,7 @@ import { FqReadStatsStore } from '../../core/FqReadStatsStore';
 import { ComicNavParams, ROUTE_CACHED_COMICS } from '../../model/FqNavModels';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { CommonNav, titleBarOf } from '../../view/CommonNav';
-import { CommonLoading, FQ_ACCENT } from '../../view/CommonCom';
+import { CommonLoading } from '../../view/CommonCom';
 import { FqSheetOptions } from '../../view/sheet/CommonSheet';
 import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/sheet/FqCommentSheet';
 import { FqCatalogSheet } from '../../view/sheet/FqCatalogSheet';
@@ -306,7 +306,7 @@ export struct ComicPage {
 
           if (this.loadingState) {
             Column({ space: 12 }) {
-              CommonLoading({ sizeValue: 36, loadColor: FQ_ACCENT })
+              CommonLoading({ sizeValue: 36, loadColor: appState.accentColor })
               Text('正在加载本话内容')
                 .fontSize(14)
                 .fontColor(FQ_COMIC_TEXT)
@@ -323,7 +323,7 @@ export struct ComicPage {
                 .textAlign(TextAlign.Center)
                 .padding({ left: 32, right: 32 })
               Button('重试')
-                .backgroundColor(FQ_ACCENT)
+                .backgroundColor(appState.accentColor)
                 .onClick(() => this.retry())
             }
             .width('100%')

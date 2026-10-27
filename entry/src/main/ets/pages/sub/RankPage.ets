@@ -16,7 +16,7 @@ import {
 import { DetailNavParams, ROUTE_DETAIL } from '../../model/FqNavModels';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { CommonNav, titleBarOf } from '../../view/CommonNav';
-import { CommonLoading, FQ_ACCENT } from '../../view/CommonCom';
+import { CommonLoading } from '../../view/CommonCom';
 import { appState } from '../../entryability/AppState';
 import { textImmersiveModifier } from '../../utils/ModifierUtils';
 
@@ -108,7 +108,7 @@ export struct RankPage {
       Column() {
         if (this.loading && this.entryCount === 0) {
           Column({ space: 12 }) {
-            CommonLoading({ sizeValue: 28, loadColor: FQ_ACCENT })
+            CommonLoading({ sizeValue: 28, loadColor: appState.accentColor })
             Text('正在加载榜单')
               .fontSize(13)
               .fontColor($r('sys.color.font_secondary'))
@@ -124,7 +124,7 @@ export struct RankPage {
               .textAlign(TextAlign.Center)
               .padding({ left: 32, right: 32 })
             Button('重试')
-              .backgroundColor('#FF7A3D')
+              .backgroundColor(appState.accentColor)
               .onClick(() => this.retryLoad())
           }
           .layoutWeight(1)
@@ -139,7 +139,7 @@ export struct RankPage {
                     .width(30)
                     .fontSize(entry.position <= 3 ? 17 : 15)
                     .fontWeight(700)
-                    .fontColor(entry.position <= 3 ? '#FF7A3D' : $r('sys.color.font_secondary'))
+                    .fontColor(entry.position <= 3 ? appState.accentColor : $r('sys.color.font_secondary'))
                     .textAlign(TextAlign.Center)
                   if (entry.cover.length > 0) {
                     Image(FqBackend.get().resourceUrl(entry.cover))
@@ -199,7 +199,7 @@ export struct RankPage {
               }
             } else if (this.loadingMore) {
               ListItem() {
-                CommonLoading({ sizeValue: 18, loadColor: FQ_ACCENT })
+                CommonLoading({ sizeValue: 18, loadColor: appState.accentColor })
                   .margin(12)
               }
             }
@@ -251,7 +251,7 @@ export struct RankPage {
             .fontColor(this.rankIndex === index ? Color.White : $r('sys.color.font_primary'))
             .padding({ left: 14, right: 14, top: 7, bottom: 7 })
             .borderRadius(999)
-            .backgroundColor(this.rankIndex === index ? '#FF7A3D' : Color.Transparent)
+            .backgroundColor(this.rankIndex === index ? appState.accentColor : Color.Transparent)
             .attributeModifier(this.rankIndex === index ? undefined : textImmersiveModifier)
             .onClick(() => this.selectRank(index))
         }, (tab: FqRankTab): string => tab.name)
@@ -275,7 +275,7 @@ export struct RankPage {
           Text(category.name)
             .fontSize(12)
             .fontWeight(this.categoryIndex === index ? 700 : 400)
-            .fontColor(this.categoryIndex === index ? '#FF7A3D' : $r('sys.color.font_tertiary'))
+            .fontColor(this.categoryIndex === index ? appState.accentColor : $r('sys.color.font_tertiary'))
             .padding({ left: 8, right: 8, top: 6, bottom: 6 })
             .onClick(() => this.selectCategory(index))
         }, (category: FqRankCategory): string => `${category.id}`)

@@ -13,7 +13,7 @@ import { FqMediaCard } from '../../view/FqMediaCard';
 import { AuthorNavParams, DetailNavParams, FqTitleBarOptions, ROUTE_DETAIL } from '../../model/FqNavModels';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { CommonNav } from '../../view/CommonNav';
-import { CommonLoading, FQ_ACCENT } from '../../view/CommonCom';
+import { CommonLoading } from '../../view/CommonCom';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { appState } from '../../entryability/AppState';
 
@@ -55,7 +55,7 @@ export struct AuthorPage {
     }) {
       if (this.loadingState) {
         Column({ space: 12 }) {
-          CommonLoading({ sizeValue: 36, loadColor: FQ_ACCENT })
+          CommonLoading({ sizeValue: 36, loadColor: appState.accentColor })
           Text('正在加载作者信息')
             .fontSize(14)
             .fontColor($r('sys.color.font_secondary'))
@@ -71,7 +71,7 @@ export struct AuthorPage {
             .textAlign(TextAlign.Center)
             .padding({ left: 32, right: 32 })
           Button('重试')
-            .backgroundColor('#FF7A3D')
+            .backgroundColor(appState.accentColor)
             .onClick(() => this.load())
         }
         .width('100%')

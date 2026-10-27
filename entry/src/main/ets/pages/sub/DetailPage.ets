@@ -28,11 +28,12 @@ import { DialogManager } from '../../utils/DialogUtils';
 import { AuthorNavParams, ComicNavParams, DetailNavParams, FqTitleBarOptions, ListenNavParams, PlayerNavParams, ReaderNavParams, ROUTE_AUTHOR, ROUTE_COMIC, ROUTE_LISTEN, ROUTE_PLAYER, ROUTE_READER2 } from '../../model/FqNavModels';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { CommonNav } from '../../view/CommonNav';
-import { CommonLoading, FQ_ACCENT } from '../../view/CommonCom';
+import { CommonLoading } from '../../view/CommonCom';
 import { FqSheetOptions } from '../../view/sheet/CommonSheet';
 import { FqCommentSheet, FqCommentTile, fqCommentSheetHeightVp } from '../../view/sheet/FqCommentSheet';
 import { FqCatalogSheet } from '../../view/sheet/FqCatalogSheet';
 import { appState } from '../../entryability/AppState';
+import { FqColorUtils } from '../../utils/FqColorUtils';
 
 /** 目录预览行数（对齐 fqapp _previewChapterCount）。 */
 const FQ_PREVIEW_CHAPTER_COUNT: number = 3;
@@ -106,7 +107,7 @@ export struct DetailPage {
       Stack({ alignContent: Alignment.Bottom }) {
         if (this.loadingState) {
           Column({ space: 12 }) {
-            CommonLoading({ sizeValue: 36, loadColor: FQ_ACCENT })
+            CommonLoading({ sizeValue: 36, loadColor: appState.accentColor })
             Text('正在加载书籍与目录')
               .fontSize(14)
               .fontColor($r('sys.color.font_secondary'))
@@ -122,7 +123,7 @@ export struct DetailPage {
               .textAlign(TextAlign.Center)
               .padding({ left: 32, right: 32 })
             Button('重试')
-              .backgroundColor('#FF7A3D')
+              .backgroundColor(appState.accentColor)
               .onClick(() => this.load())
           }
           .width('100%')
@@ -226,17 +227,17 @@ export struct DetailPage {
           Row({ space: 4 }) {
             SymbolGlyph($r('sys.symbol.wand_and_stars'))
               .fontSize(11)
-              .fontColor([FQ_ACCENT])
+              .fontColor([appState.accentColor])
             Text('原创')
               .fontSize(11)
               .fontWeight(FontWeight.Medium)
-              .fontColor(FQ_ACCENT)
+              .fontColor(appState.accentColor)
           }
           .alignItems(VerticalAlign.Center)
           .padding({ left: 8, right: 8, top: 3.5, bottom: 3.5 })
           .borderRadius(6)
-          .backgroundColor('#1AFF7A3D')
-          .border({ width: 0.6, color: '#52FF7A3D' })
+          .backgroundColor(FqColorUtils.withOpacity(appState.accentColor, 0.1))
+          .border({ width: 0.6, color: FqColorUtils.withOpacity(appState.accentColor, 0.32) })
         }
       }
       .layoutWeight(1)
@@ -354,7 +355,7 @@ export struct DetailPage {
             ForEach([1, 2, 3, 4, 5], (star: number) => {
               SymbolGlyph(star <= Math.floor(this.scoreValue() / 2) ? $r('sys.symbol.star_fill') : $r('sys.symbol.star'))
                 .fontSize(11)
-                .fontColor([star <= Math.floor(this.scoreValue() / 2) ? FQ_ACCENT : $r('sys.color.comp_divider')])
+                .fontColor([star <= Math.floor(this.scoreValue() / 2) ? appState.accentColor : $r('sys.color.comp_divider')])
             }, (star: number): string => `${star}`)
           }
           .alignItems(VerticalAlign.Center)
@@ -381,7 +382,7 @@ export struct DetailPage {
           .width(3.5)
           .height(14)
           .borderRadius(2)
-          .backgroundColor(FQ_ACCENT)
+          .backgroundColor(appState.accentColor)
         Text('书籍简介')
           .fontSize(16.5)
           .fontWeight(FontWeight.Bold)
@@ -398,10 +399,10 @@ export struct DetailPage {
         Row({ space: 3 }) {
           Text(this.descExpanded ? '收起' : '展开')
             .fontSize(12.5)
-            .fontColor(FQ_ACCENT)
+            .fontColor(appState.accentColor)
           SymbolGlyph($r('sys.symbol.chevron_down'))
             .fontSize(14)
-            .fontColor([FQ_ACCENT])
+            .fontColor([appState.accentColor])
             .rotate({ angle: this.descExpanded ? 180 : 0 })
         }
         .alignItems(VerticalAlign.Center)
@@ -468,7 +469,7 @@ export struct DetailPage {
         .width(3.5)
         .height(14)
         .borderRadius(2)
-        .backgroundColor(FQ_ACCENT)
+        .backgroundColor(appState.accentColor)
         .margin({ right: 8 })
       Text('查看目录')
         .fontSize(16)
@@ -566,7 +567,7 @@ export struct DetailPage {
           .width(3.5)
           .height(14)
           .borderRadius(2)
-          .backgroundColor(FQ_ACCENT)
+          .backgroundColor(appState.accentColor)
         Text(`${this.commentLabel()} · 共${this.commentTotal}条`)
           .fontSize(16.5)
           .fontWeight(FontWeight.Bold)
@@ -596,10 +597,10 @@ export struct DetailPage {
           Text(`查看全部 ${fqFormatCountInt(this.commentTotal)} 条${this.commentLabel()}`)
             .fontSize(13)
             .fontWeight(FontWeight.Medium)
-            .fontColor(FQ_ACCENT)
+            .fontColor(appState.accentColor)
           SymbolGlyph($r('sys.symbol.chevron_right'))
             .fontSize(14)
-            .fontColor([FQ_ACCENT])
+            .fontColor([appState.accentColor])
         }
         .alignItems(VerticalAlign.Center)
         .justifyContent(FlexAlign.Center)

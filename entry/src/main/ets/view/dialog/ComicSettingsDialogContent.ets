@@ -4,8 +4,8 @@
  * 仅翻页方式一行（仿真/覆盖/上下）；当前值经 @Param 注入、变更经 @Event 回调宿主页；
  * 配色跟随系统深浅色（弹窗卡片为系统色）。
  */
-import { FQ_ACCENT } from '../CommonCom';
 import { themeUtils } from '../../utils/ThemeUtils';
+import { appState } from '../../entryability/AppState';
 
 /** 漫画翻页模式标签（下标与 comicFlipIndex 对应）。 */
 export const FQ_COMIC_FLIP_LABELS: string[] = ['仿真', '覆盖', '上下'];
@@ -25,7 +25,7 @@ export struct ComicSettingsDialogContent {
         Text(label)
           .fontSize(12)
           .fontColor(this.comicFlipIndex === index ? '#FFFFFF' : themeUtils.textColor)
-          .backgroundColor(this.comicFlipIndex === index ? FQ_ACCENT : 'transparent')
+          .backgroundColor(this.comicFlipIndex === index ? appState.accentColor : 'transparent')
           .borderRadius(13)
           .padding({ left: 12, right: 12, top: 6, bottom: 6 })
           .onClick((): void => {

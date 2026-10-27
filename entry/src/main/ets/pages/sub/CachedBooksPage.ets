@@ -189,7 +189,7 @@ export struct CachedBooksPage {
       Text('导出')
         .fontSize(12.5)
         .fontWeight(FontWeight.Medium)
-        .fontColor('#FF7A3D')
+        .fontColor(appState.accentColor)
         .padding({ left: 10, right: 2, top: 8, bottom: 8 })
         .onClick((): void => {
         this.confirmExportBook(row);

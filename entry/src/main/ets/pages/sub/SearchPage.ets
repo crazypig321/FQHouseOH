@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 搜索页（CommonNav/HdsNavDestination）：bottomBuilder 搜索框 + 分类条 +
  * 单 List 装载历史/结果流。端点语义对齐 fqapp search_page.dart 的 _SearchCategory 与
  * ApiClient.searchTabs（/api/v1/search）。
@@ -14,7 +14,7 @@ import { FqMediaDataSource } from '../../core/FqMediaDataSource';
 import { FqItemCard } from '../../view/FqItemCard';
 import { DetailNavParams, FqTitleBarOptions, ROUTE_DETAIL } from '../../model/FqNavModels';
 import { NavPathUtils } from '../../utils/NavPathUtils';
-import { CommonSearch, FQ_ACCENT, CommonLoading } from '../../view/CommonCom';
+import { CommonSearch, CommonLoading } from '../../view/CommonCom';
 import { CommonNav } from '../../view/CommonNav';
 import { appState } from '../../entryability/AppState';
 
@@ -94,7 +94,7 @@ export struct SearchPage {
               Blank()
               Text('按关键词搜索')
                 .fontSize(13)
-                .fontColor(FQ_ACCENT)
+                .fontColor(appState.accentColor)
                 .onClick(() => this.searchAsKeyword())
             }
             .width('100%')
@@ -115,7 +115,7 @@ export struct SearchPage {
                 .textAlign(TextAlign.Center)
                 .padding({ left: 32, right: 32 })
               Button('重试')
-                .backgroundColor('#FF7A3D')
+                .backgroundColor(appState.accentColor)
                 .onClick(() => this.submit())
             }
             .width('100%')
@@ -125,7 +125,7 @@ export struct SearchPage {
         } else if (this.itemCount === 0 && this.loadingState) {
           ListItem() {
             Column() {
-              CommonLoading({ sizeValue: 36, loadColor: FQ_ACCENT })
+              CommonLoading({ sizeValue: 36, loadColor: appState.accentColor })
             }
             .width('100%')
             .padding({ top: 64 })
@@ -156,7 +156,7 @@ export struct SearchPage {
           if (this.loadingMore) {
             ListItem() {
               Row({ space: 8 }) {
-                CommonLoading({ sizeValue: 18, loadColor: FQ_ACCENT })
+                CommonLoading({ sizeValue: 18, loadColor: appState.accentColor })
                 Text('加载中…')
                   .fontSize(13)
                   .fontColor($r('sys.color.font_secondary'))
@@ -293,7 +293,7 @@ export struct SearchPage {
   }
 
   private categoryColor(index: number): ResourceColor {
-    return this.categoryIndex === index ? '#FF7A3D' : $r('sys.color.font_secondary');
+    return this.categoryIndex === index ? appState.accentColor : $r('sys.color.font_secondary');
   }
 
   private selectCategory(index: number): void {

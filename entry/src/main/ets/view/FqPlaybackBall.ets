@@ -11,7 +11,6 @@
  */
 
 import { fqAudioSession } from '../core/FqAudioSession';
-import { FQ_ACCENT } from './CommonCom';
 import { appState } from '../entryability/AppState';
 import { ListenNavParams, ROUTE_LISTEN } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
@@ -146,7 +145,7 @@ export struct FqPlaybackBall {
           type: ProgressType.Ring,
         })
           .style({ strokeWidth: this.expanded ? 4 : 6 })
-          .color(FQ_ACCENT)
+          .color(appState.accentColor)
           .backgroundColor(Color.Transparent)
           .width(FQ_BALL_SIZE - 1)
           .height(FQ_BALL_SIZE - 1)

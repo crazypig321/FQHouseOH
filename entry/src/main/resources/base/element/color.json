@@ -3,6 +3,38 @@
     {
       "name": "start_window_background",
       "value": "#FFFFFF"
+    },
+    {
+      "name": "theme_color_orange",
+      "value": "#FF7A3D"
+    },
+    {
+      "name": "theme_color_gold",
+      "value": "#C99A2E"
+    },
+    {
+      "name": "theme_color_green",
+      "value": "#34A853"
+    },
+    {
+      "name": "theme_color_teal",
+      "value": "#00B8A9"
+    },
+    {
+      "name": "theme_color_blue",
+      "value": "#0A7DFF"
+    },
+    {
+      "name": "theme_color_violet",
+      "value": "#7C5CFF"
+    },
+    {
+      "name": "theme_color_pink",
+      "value": "#FF6482"
+    },
+    {
+      "name": "theme_color_red",
+      "value": "#F53F3F"
     }
   ]
 }

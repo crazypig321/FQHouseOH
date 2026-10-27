@@ -7,7 +7,7 @@
  */
 
 import { ButtonOptions } from '@kit.ArkUI';
-import { FQ_ACCENT } from '../view/CommonCom';
+import { appState } from '../entryability/AppState';
 
 /** 公共弹窗管理器：弹窗标识/宿主动作/生命周期回调的静态集散地。 */
 export class DialogManager {
@@ -96,7 +96,7 @@ export class DialogManager {
     }
     const cancel: ButtonOptions = {
       value: '取消',
-      fontColor: FQ_ACCENT,
+      fontColor: appState.accentColor,
       buttonStyle: ButtonStyleMode.TEXTUAL,
       action: (): void => {
       }
@@ -104,7 +104,7 @@ export class DialogManager {
     const confirm: ButtonOptions = {
       value: DialogManager.confirmLabel,
       fontColor: Color.White,
-      background: FQ_ACCENT,
+      background: appState.accentColor,
       buttonStyle: ButtonStyleMode.TEXTUAL,
       action: (): void => {
         DialogManager.ConfirmButtonDialog(key);

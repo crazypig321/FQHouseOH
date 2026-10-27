@@ -1,17 +1,15 @@
 /**
  * 底部 Tab 菜单配置（对齐 musicfreeOH TabsModels 模式：
- * SymbolGlyph 图标 + BottomTabBarStyle，选中色为主题橙）。
+ *  SymbolGlyph 图标 + BottomTabBarStyle，选中色为主题色）。
  */
 
 import { SymbolGlyphModifier } from '@kit.ArkUI';
+import { appState } from '../entryability/AppState';
 
 export interface MenuItem {
   icon: Resource;
   label: string;
 }
-
-/** 选中态强调色 */
-const ACCENT_COLOR: string = '#FF7A3D';
 
 export function tabBarSymbolOf(item: MenuItem): TabBarSymbol {
   const normal: SymbolGlyphModifier = new SymbolGlyphModifier(item.icon)
@@ -19,7 +17,7 @@ export function tabBarSymbolOf(item: MenuItem): TabBarSymbol {
     .fontColor([$r('sys.color.icon_primary')]);
   const selected: SymbolGlyphModifier = new SymbolGlyphModifier(item.icon)
     .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-    .fontColor([ACCENT_COLOR]);
+    .fontColor([appState.accentColor]);
   const symbol: TabBarSymbol = {
     normal: normal,
     selected: selected,
