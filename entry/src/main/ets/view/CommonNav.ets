@@ -190,7 +190,11 @@ export struct CommonNav {
           blurEffectiveStartOffset: LengthMetrics.vp(0), // 动态样式线性过渡的起始位置
           blurEffectiveEndOffset: LengthMetrics.vp(80), // 动态样式线性过渡的终点位置
         },
-        scrollEffectStyle: { backgroundStyle: { maskExtraHeight: this.scrollMaskExtraHeight, blurRadius: this.navBlurRadius } },
+        scrollEffectStyle: {
+          backgroundStyle: {
+            backgroundColor: FqColorUtils.withOpacity(appState.accentColor, 0.1),
+            maskExtraHeight: this.scrollMaskExtraHeight, blurRadius: this.navBlurRadius }
+        },
         blurStrategy: BlurStrategy.ADAPTIVE,
         systemMaterialEffect: {
           materialType: appState.materialType,
