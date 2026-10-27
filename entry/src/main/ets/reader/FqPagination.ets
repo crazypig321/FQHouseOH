@@ -7,9 +7,10 @@
  *       按页高装页（行高/段前距/章题上下距计入；段评气泡优先行内化拼在末行后，
  *       放不下时窄列重排末行或回退独立气泡行）→
  *       输出 FqReaderPageData[]（片段 + 行集合 + 气泡命中区 + 页首位置）。
- * 渲染约定：渲染端按片段 Text 自然换行 + TextAlign.JUSTIFY（对齐上下滚动模式正文），
- * 引擎断行仅作装页行数记账；断行预算扣一个全角字宽安全余量，
- * 使 Text 自然换行行数恒 ≤ 引擎计数，页内容不超高（页底被裁根因）。
+ * 渲染约定：引擎切好的行逐行入片段（lines/lineSpaceFp），渲染端逐行 Text 呈现，
+ * 行数与装页记账零分歧（章中页填满，页底不裁不空）；满行行尾空隙由渲染端按
+ * lineSpaceFp 以 letterSpacing 补齐右边（段末末行/章题行不拉伸，同上下滚动 JUSTIFY 视觉）；
+ * 行预算留 1/4 全角字宽安全余量，保证每行实渲染不超一行宽。
  * measureText 仅支持 HarmonyOS Sans（自定义字体名会被忽略），
  * 自定义阅读字体时测量回调由 ReaderPage 以「全角 1em 步进 + 半角系统测量」合成。
  */
@@ -49,8 +50,8 @@ export class FqPaginationEngine {
 
   /** 段落断行：单字符宽度缓存累加（O(N) 快，调字号重排不卡顿），累加超宽时整行实测验证
    * （含标点压缩），使断行行数与 Text 自然换行一致（减少页底留空）；禁则回退。
-   * 安全余量：行预算扣一个全角字宽——渲染端 Text 自然换行容量恒 ≥ 引擎行容量，
-   * 渲染行数 ≤ 引擎计数，页内容永不超高（FqPageCanvas 顶部对齐+clip 下页底溢出根因）。 */
+   * 安全余量：行预算扣 1/4 全角字宽——渲染端逐行 Text（maxLines(1)）恒单行呈现，
+   * 行宽不超一行宽（防末字被裁），行数与装页记账零分歧。 */
   private splitLines(text: string, firstMaxW: number, restMaxW: number,
     fontFp: number, weight: string): string[] {
     // 码点切字符（代理对合并，emoji 安全）
@@ -68,8 +69,8 @@ export class FqPaginationEngine {
       chars.push(text.charAt(pos));
     }
     const lines: string[] = [];
-    // 行预算 = 内容宽 - 一个全角字宽（保守容量：Text 自然换行行数不超引擎计数）
-    const safetyPx: number = this.measureFn('汉', fontFp, weight);
+    // 行预算 = 内容宽 - 1/4 全角字宽（防测量误差致逐行 Text 末字被裁）
+    const safetyPx: number = this.measureFn('汉', fontFp, weight) / 4;
     let cur: string = '';
     let curW: number = 0;
     let maxW: number = firstMaxW - safetyPx;
@@ -109,6 +110,40 @@ export class FqPaginationEngine {
       lines.push(cur);
     }
     return lines;
+  }
+
+  /** 行尾拉伸（fp）：满行（非段末末行）按「内容宽 - 6px 防裁切余量」补齐行尾空隙，
+   *  上限两个全角字宽（禁则回退至多 2 字，防拉伸过疏）；段末末行/超宽行返回 0。 */
+  private lineStretchFp(metrics: FqReaderLayoutMetrics, line: string,
+    fontFp: number, weight: string, stretch: boolean): number {
+    if (!stretch) {
+      return 0;
+    }
+    const charW: number = this.measureFn('汉', fontFp, weight);
+    const slack: number = Math.min(metrics.contentWidthPx - 6
+      - this.measureFn(line, fontFp, weight), charW * 2);
+    if (slack <= 0) {
+      return 0;
+    }
+    const count: number = FqPaginationEngine.codePointCount(line);
+    if (count <= 1) {
+      return 0;
+    }
+    // px → fp（letterSpacing 单位 fp）；按码点数均摊（letterSpacing 作用于每个字符后）
+    return slack / count / metrics.textDensity;
+  }
+
+  /** 码点数（代理对计 1）。 */
+  private static codePointCount(text: string): number {
+    let count: number = 0;
+    for (let pos: number = 0; pos < text.length; pos++) {
+      const code: number = text.charCodeAt(pos);
+      if (code >= 0xdc00 && code <= 0xdfff) {
+        continue;
+      }
+      count += 1;
+    }
+    return count;
   }
 
   /** 气泡宽度（px）：内边距/间距随字号缩放，图标按 fp 实高换算，计数文本实测 + 安全余量。 */
@@ -162,6 +197,12 @@ export class FqPaginationEngine {
             page.startChar = charIdx;
           }
         }
+        // 逐行入片段：渲染端逐行 Text 呈现，断行/行数与装页记账零分歧（章中页填满）
+        frag.lines.push(lines[li]);
+        // 满行行尾拉伸（fp）：安全余量/禁则回退的行尾空隙由渲染端 letterSpacing 补齐；
+        // 段末末行/章题行不拉伸（同上下滚动 JUSTIFY：末行左起自然收尾）
+        frag.lineSpaceFp.push(this.lineStretchFp(metrics, lines[li], fontFp, weight,
+          !isTitle && li < lines.length - 1));
         frag.text += lines[li];
         charIdx += lines[li].length;
         frag.endChar = charIdx;
@@ -194,6 +235,8 @@ export class FqPaginationEngine {
           bubbleFrag.endChar = text.length;
           bubbleFrag.isParaEnd = true;
           bubbleFrag.showBubble = true;
+          bubbleFrag.lines.push('');
+          bubbleFrag.lineSpaceFp.push(0);
           page.fragments.push(bubbleFrag);
           page.startPara = para;
           page.startChar = text.length;

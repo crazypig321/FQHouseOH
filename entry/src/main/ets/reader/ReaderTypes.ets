@@ -16,8 +16,12 @@ export class FqPageFragment {
   readonly paraIndex: number;
   /** 是否章题段（加大加粗样式）。 */
   readonly isTitle: boolean;
-  /** 片段文本（段的可见子串，含缩进前缀若是段首；渲染整段 Text 自然换行两端对齐）。 */
+  /** 片段文本（段的可见子串，含缩进前缀若是段首；'\n' 连接的行序列化，键值/调试用）。 */
   text: string = '';
+  /** 片段行序列（引擎切好的行，渲染端逐行呈现，断行/行数与装页记账零分歧）。 */
+  lines: string[] = [];
+  /** 行尾拉伸（fp，与 lines 平行；满行补齐右边用，段末末行/章题行为 0）。 */
+  lineSpaceFp: number[] = [];
   /** 段内起始字符（含缩进前缀）。 */
   startChar: number = 0;
   /** 段内结束字符（不含）。 */
