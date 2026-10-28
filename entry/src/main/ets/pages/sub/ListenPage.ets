@@ -171,7 +171,7 @@ export struct ListenPage {
             .bindSheet(this.cacheSheetVisible, this.CacheSheetBuilder(),
               FqSheetOptions((): void => {
                 this.closeCacheSheet();
-              }, fqRatioScreenHeightVp(0.75), false))
+              }, fqRatioScreenHeightVp(0.75)))
 
           this.CoverCard()
           this.ExcerptBlock()

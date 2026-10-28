@@ -36,13 +36,13 @@ export function FqSheetOptions(onClose: () => void, height?: SheetSize | Length,
     onWillSpringBackWhenDismiss: ()=>{},
     onWillAppear: () => {
       if (foregroundBlur) {
-        appState.isForegroundBlur = true
+        appState.pushForegroundBlur()
       }
     },
     onWillDisappear: (): void => {
       onClose();
       if (foregroundBlur) {
-        appState.isForegroundBlur = false
+        appState.popForegroundBlur()
       }
     },
   };

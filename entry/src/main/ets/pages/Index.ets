@@ -212,7 +212,11 @@ struct Index {
     onWillDismiss: (dialog: DismissDialogAction): void => {
       dialog.dismiss()
     },
+    onWillAppear: (): void => {
+      appState.pushForegroundBlur()
+    },
     onWillDisappear: (): void => {
+      appState.popForegroundBlur()
       DialogManager.DisappearDialog(DialogManager.dialogChangeKey)
     }
   });
@@ -230,6 +234,7 @@ struct Index {
     // 窗口化时 bottomRect=0，动态计算保证弹窗始终贴工具栏上沿（手机全屏时 -84+bottomRect 仍为 -68）。
     offset: { dx: 0, dy: - appState.bottomRect - 84 },
     autoCancel: true,
+    // 「阅读设置」/「漫画设置」不触发前景模糊（阅读内容保持原样，规则见 AGENTS.md）
     onWillDisappear: (): void => {
       DialogManager.DisappearDialog(DialogManager.dialogChangeKey);
     },
@@ -248,7 +253,11 @@ struct Index {
     onWillDismiss: (dialog: DismissDialogAction): void => {
       dialog.dismiss()
     },
+    onWillAppear: (): void => {
+      appState.pushForegroundBlur()
+    },
     onWillDisappear: (): void => {
+      appState.popForegroundBlur()
       DialogManager.ClearReaderThemeEditor();
     },
   });

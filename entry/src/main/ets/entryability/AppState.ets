@@ -22,6 +22,24 @@ export class AppState {
   @Trace screenHeight: number = 0;
   // 是否开启模糊
   @Trace isForegroundBlur: boolean = false;
+  /** 前景模糊引用计数（sheet/弹窗呼出 push、消失 pop；归零自动关闭，二级弹层互不影响）。 */
+  private foregroundBlurCount: number = 0;
+
+  /** 前景模糊计数 +1（sheet/弹窗 onWillAppear 调用；计数 >0 即开启模糊）。 */
+  public pushForegroundBlur(): void {
+    this.foregroundBlurCount++;
+    this.isForegroundBlur = true;
+  }
+
+  /** 前景模糊计数 -1（sheet/弹窗 onWillDisappear 调用；归零才关闭，二级弹层关闭不影响底层模糊）。 */
+  public popForegroundBlur(): void {
+    if (this.foregroundBlurCount > 0) {
+      this.foregroundBlurCount--;
+    }
+    if (this.foregroundBlurCount === 0) {
+      this.isForegroundBlur = false;
+    }
+  }
   /*设备断点获取*/
   @Trace WidthBp: number = 1
   @Trace HeightBp: number = 1

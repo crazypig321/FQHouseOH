@@ -399,7 +399,7 @@ export struct LogsPage {
       .bindSheet(this.actionsVisible, this.ActionsSheetBuilder(),
         FqSheetOptions((): void => {
           this.closeActions();
-        }, 320, false))
+        }, 320))
     }
   }
 

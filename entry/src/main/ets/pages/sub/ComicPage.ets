@@ -326,7 +326,7 @@ export struct ComicPage {
             .height(0)
             .bindSheet(this.cacheSheetVisible, this.CacheSheetBuilder(), FqSheetOptions((): void => {
               this.closeCacheSheet();
-            }, this.fqRatioSheetHeightVp(), false))
+            }, this.fqRatioSheetHeightVp()))
 
           if (this.loadingState) {
             Column({ space: 12 }) {
