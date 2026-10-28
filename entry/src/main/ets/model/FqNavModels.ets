@@ -192,6 +192,40 @@ export function FqTitleBarMenuOptions(mainTitle: ResourceStr, menuIcon: Resource
 }
 
 /**
+ * 双自定义菜单标题栏配置（网页登录浮层等右上角需要两个图标菜单的场景）：
+ * 标题 + 右上角两个自定义图标菜单（first 在前、second 在后）。
+ */
+export function FqTitleBarTwoMenusOptions(mainTitle: ResourceStr,
+  firstIcon: Resource, firstLabel: string, firstAction: () => void,
+  secondIcon: Resource, secondLabel: string, secondAction: () => void,
+  subTitle?: ResourceStr): TitleBarContentOptions {
+  const title: HdsNavigationTitle = {
+    mainTitle: mainTitle,
+  };
+  if (subTitle !== undefined) {
+    title.subTitle = subTitle;
+  }
+  const menus: HdsNavigationMenuItemOptions[] = [{
+    content: {
+      icon: firstIcon,
+      label: firstLabel,
+      action: firstAction,
+    },
+  }, {
+    content: {
+      icon: secondIcon,
+      label: secondLabel,
+      action: secondAction,
+    },
+  }];
+  const content: TitleBarContentOptions = {
+    title: title,
+    menu: { value: menus },
+  };
+  return content;
+}
+
+/**
  * HDS 标题栏内容配置（样式统一由 view/CommonNav 的 CommonNav 提供）：
  * 标题 + 可选书架（onShelf，shelfActive 控制实心图标）/刷新（onRefresh）/
  * 搜索（showSearch）/排行（showRank）菜单 + 可选 bottomBuilder。

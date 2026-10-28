@@ -4,15 +4,18 @@
  *   登录成功（Cookie 含会话标识）自动关闭并采集书架/文件夹/进度/历史；
  * - 从历史文件导入：系统文件选择器选 fqapp 采集 JSON 或官方 read_history 单页响应；
  * - 采集/解析结果就地预览（统计 + 前 6 本），确认后合并到本机（只补缺失，可重复导入）；
- * - busy 期间禁用操作，采集/解析可取消（已采集数据保留）；标题栏菜单可退出网页登录。
+ * - busy 期间禁用操作，采集/解析可取消（已采集数据保留）；标题栏菜单可退出网页登录；
+ * - 登录浮层期间标题栏额外提供「恢复初始大小」键：缩放复位 + 平移验证码容器把拼图钉在可视区正中。
  */
 
 import { webview } from '@kit.ArkWeb';
 import { BusinessError } from '@kit.BasicServicesKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+import { TitleBarContentOptions } from '@kit.UIDesignKit';
 import { fileIo, picker } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { CommonNav } from '../../view/CommonNav';
-import { FqTitleBarMenuOptions } from '../../model/FqNavModels';
+import { FqTitleBarMenuOptions, FqTitleBarTwoMenusOptions } from '../../model/FqNavModels';
 import { FqColorUtils } from '../../utils/FqColorUtils';
 import { DialogManager } from '../../utils/DialogUtils';
 import { appState } from '../../entryability/AppState';
@@ -135,13 +138,28 @@ export struct FanqieImportPage {
     }
   }
 
+  /** 登录浮层显隐期间，标题栏额外提供「恢复初始大小」键（webController.zoom(1) 回到加载时的适配缩放）。 */
+  private titleBarOp(): TitleBarContentOptions {
+    const logoutIcon: Resource = this.loggedIn
+      ? $r('sys.symbol.person_text_rectangle_fill')
+      : $r('sys.symbol.person_text_rectangle');
+    if (this.loginVisible) {
+      return FqTitleBarTwoMenusOptions('登录番茄账号',
+        $r('sys.symbol.arrow_down_right_and_arrow_up_left'), '恢复初始大小', (): void => {
+          this.resetLoginZoom();
+        },
+        logoutIcon, '退出网页登录', (): void => {
+          this.confirmLogout();
+        }, '登录后自动开始采集');
+    }
+    return FqTitleBarMenuOptions('导入番茄书架', logoutIcon, '退出网页登录', (): void => {
+      this.confirmLogout();
+    });
+  }
+
   build() {
     CommonNav({
-      titleBarOp: FqTitleBarMenuOptions(this.loginVisible ? '登录番茄账号' : '导入番茄书架',
-        this.loggedIn ? $r('sys.symbol.person_text_rectangle_fill') : $r('sys.symbol.person_text_rectangle'),
-        '退出网页登录', (): void => {
-          this.confirmLogout();
-        }, this.loginVisible ? '登录后自动开始采集' : undefined),
+      titleBarOp: this.titleBarOp(),
       scroller: this.scroller,
       backPressed: (): boolean => this.handleBack(),
     }) {
@@ -544,6 +562,91 @@ export struct FanqieImportPage {
         this.messageIsError = false;
         this.message = '已退出网页登录，下次导入需重新登录。';
       });
+  }
+
+  /** 标题栏「恢复初始大小」：缩放复位到 0.68（拼图完整可见的适配值），再 scrollTo 平移可视区，最后回读验证。 */
+  private resetLoginZoom(): void {
+    hilog.info(0x0001, 'FqFanqieLogin', 'resetLoginZoom tapped');
+    try {
+      this.webController.runJavaScript('window.visualViewport ? window.visualViewport.scale : 1',
+        (error: BusinessError | undefined, result: string): void => {
+          if (error !== undefined && error !== null) {
+            hilog.error(0x0001, 'FqFanqieLogin', `read scale failed code=${error.code} msg=${error.message}`);
+            return;
+          }
+          let scale: number = 1;
+          try {
+            scale = parseFloat(result.replace(/"/g, ''));
+          } catch (e) {
+            scale = 1;
+          }
+          if (Number.isNaN(scale) || !(scale > 0)) {
+            scale = 1;
+          }
+          const targetScale: number = 0.68;
+          const factor: number = targetScale / scale;
+          hilog.info(0x0001, 'FqFanqieLogin', `cur scale=${scale} zoom factor=${factor}`);
+          try {
+            if (Math.abs(factor - 1) > 0.001) {
+              this.webController.zoom(factor);
+            }
+          } catch (error2) {
+            const err2 = error2 as BusinessError;
+            hilog.error(0x0001, 'FqFanqieLogin', `zoom(${factor}) failed code=${err2.code} msg=${err2.message}`);
+          }
+          setTimeout((): void => {
+            this.scrollCaptchaIntoView();
+          }, 500);
+        });
+    } catch (error) {
+      const err = error as BusinessError;
+      hilog.error(0x0001, 'FqFanqieLogin', `resetLoginZoom throw code=${err.code} msg=${err.message}`);
+    }
+  }
+
+  /** 平移整个验证码容器（SDK 只管 iframe 不管容器），300ms 轮询对抗 SDK 的 iframe 位置管理，把拼图钉在可视区正中。 */
+  private scrollCaptchaIntoView(): void {
+    const centerJs: string = `(function(){
+      var vv = window.visualViewport;
+      if (!vv) { return 'no vv'; }
+      var cont = document.querySelector('div[id*="captcha" i]');
+      if (!cont) { return 'no container'; }
+      function fix() {
+        var ifr = null;
+        var frs = document.querySelectorAll('iframe');
+        for (var i = 0; i < frs.length; i++) {
+          if (frs[i].src && frs[i].src.indexOf('verifycenter') >= 0) { ifr = frs[i]; break; }
+        }
+        if (!ifr) {
+          cont.style.setProperty('transform', 'none', 'important');
+          return 'reset (no iframe)';
+        }
+        cont.style.setProperty('transform', 'none', 'important');
+        var r = ifr.getBoundingClientRect();
+        var tl = vv.offsetLeft + (vv.width - r.width) / 2;
+        var tt = vv.offsetTop + (vv.height - r.height) / 2;
+        cont.style.setProperty('transform', 'translate(' + (tl - r.left) + 'px,' + (tt - r.top) + 'px)', 'important');
+        return 'dx=' + Math.round(tl - r.left) + ' dy=' + Math.round(tt - r.top);
+      }
+      var first = fix();
+      if (!window.__fqCaptchaFixTimer) {
+        window.__fqCaptchaFixTimer = setInterval(fix, 300);
+      }
+      return 'cont-fix ' + first;
+    })()`;
+    try {
+      this.webController.runJavaScript(centerJs,
+        (error: BusinessError | undefined, result: string): void => {
+          if (error !== undefined && error !== null) {
+            hilog.error(0x0001, 'FqFanqieLogin', `center failed code=${error.code} msg=${error.message}`);
+            return;
+          }
+          hilog.info(0x0001, 'FqFanqieLogin', `center: ${result}`);
+        });
+    } catch (error) {
+      const err = error as BusinessError;
+      hilog.error(0x0001, 'FqFanqieLogin', `center throw code=${err.code} msg=${err.message}`);
+    }
   }
 
   /** 返回拦截：登录浮层优先关闭；可取消的 busy 先取消。 */
