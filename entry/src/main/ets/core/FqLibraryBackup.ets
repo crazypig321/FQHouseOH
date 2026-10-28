@@ -110,6 +110,19 @@ function fqBackupCheckList(raw: Object | undefined): Object[] {
   return arr;
 }
 
+/** 已看剧集续播进度内的整剧百分比（书架角标）：旧备份缺省 -1；非法值报错。 */
+function fqBackupDecodePercent(progressRec: Record<string, Object>): number {
+  const percentRaw: Object | undefined = progressRec['percent'];
+  if (percentRaw === undefined) {
+    return -1;
+  }
+  if (typeof percentRaw !== 'number' || percentRaw < 0 || percentRaw > 100
+    || Math.trunc(percentRaw) !== percentRaw) {
+    throw new Error('备份已看进度字段 percent 无效');
+  }
+  return percentRaw;
+}
+
 /** UTF-8 字节数（体积校验用，不额外分配大缓冲）。 */
 function fqBackupUtf8Length(text: string): number {
   let total: number = 0;
@@ -496,6 +509,9 @@ export class FqLibraryBackup {
         progressRec['episodeId'] = entry.progress.episodeId;
         progressRec['position'] = entry.progress.position;
         progressRec['duration'] = entry.progress.duration;
+        if (entry.progress.percent >= 0) {
+          progressRec['percent'] = entry.progress.percent;
+        }
         rec['progress'] = progressRec;
       }
       watched.push(rec);
@@ -680,7 +696,8 @@ export class FqLibraryBackup {
         }
         progress = new FqWatchedProgress(fqBackupCheckId(fqStr(progressRec, 'episodeId')),
           fqBackupCheckNumber(progressRec, 'position', 1e12),
-          fqBackupCheckNumber(progressRec, 'duration', 1e12));
+          fqBackupCheckNumber(progressRec, 'duration', 1e12),
+          fqBackupDecodePercent(progressRec));
       }
       watched.push(new FqBackupWatched(seriesId, episodes, progress));
     }

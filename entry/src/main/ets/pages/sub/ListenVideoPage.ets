@@ -980,7 +980,27 @@ export struct ListenVideoPage {
     }
     FqWatchedStore.saveProgress(ListenVideoNavParams.contentId,
       new FqWatchedProgress(episode.itemId,
-        this.player.state.position, this.player.state.duration));
+        this.player.state.position, this.player.state.duration,
+        this.seriesPercent(this.episodeFraction())));
+  }
+
+  /** 整剧百分比 0..100（书架角标）：(当前集下标 + 集内比例)/总集数；无效返回 -1。 */
+  private seriesPercent(fraction: number): number {
+    const total: number = this.episodes.length;
+    if (total <= 0 || this.index < 0 || this.index >= total) {
+      return -1;
+    }
+    const value: number = Math.round(((this.index + fraction) / total) * 100);
+    return Math.min(100, Math.max(0, value));
+  }
+
+  /** 当前集内播放比例 0..1（时长未知 0）。 */
+  private episodeFraction(): number {
+    const duration: number = this.player.state.duration;
+    if (duration <= 0) {
+      return 0;
+    }
+    return Math.min(1, Math.max(0, this.player.state.position / duration));
   }
 
   /** 目录进度列：当前集显示百分比。 */

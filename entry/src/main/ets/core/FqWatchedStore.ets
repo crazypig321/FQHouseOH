@@ -9,6 +9,7 @@ import preferences from '@ohos.data.preferences';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { fqAsArray, fqAsRecord, fqNum, fqStr } from './FqJson';
+import { fqStoreBus } from './FqStoreBus';
 
 const FQ_WATCHED_STORE_NAME: string = 'fq_watched';
 /** 续播进度 key 前缀（与已看集合同文件、不同 key 命名空间）。 */
@@ -21,11 +22,14 @@ export class FqWatchedProgress {
   readonly position: number;
   /** 时长（秒，未知 0）。 */
   readonly duration: number;
+  /** 整剧百分比 0..100（书架角标：(集下标 + 集内比例)/总集数）；-1 未记录。 */
+  readonly percent: number;
 
-  constructor(episodeId: string, position: number, duration: number) {
+  constructor(episodeId: string, position: number, duration: number, percent: number = -1) {
     this.episodeId = episodeId;
     this.position = position;
     this.duration = duration;
+    this.percent = percent;
   }
 }
 
@@ -110,6 +114,7 @@ export class FqWatchedStore {
         // 忽略写入失败
       }
     }
+    fqStoreBus.watchedVersion++;
     return true;
   }
 
@@ -128,6 +133,7 @@ export class FqWatchedStore {
     } catch (error) {
       // 忽略写入失败
     }
+    fqStoreBus.watchedVersion++;
   }
 
   /** 读取某剧续播进度（无记录返回 null）。 */
@@ -160,7 +166,15 @@ export class FqWatchedStore {
       if (episodeId.length === 0) {
         return null;
       }
-      return new FqWatchedProgress(episodeId, fqNum(rec, 'position'), fqNum(rec, 'duration'));
+      // 整剧百分比（书架角标）：旧记录缺省 -1（下次播放保存后补上）
+      const percentRaw: Object | undefined = rec['percent'];
+      let percent: number = -1;
+      if (percentRaw !== undefined && typeof percentRaw === 'number'
+        && percentRaw >= 0 && percentRaw <= 100 && Math.trunc(percentRaw) === percentRaw) {
+        percent = percentRaw;
+      }
+      return new FqWatchedProgress(episodeId, fqNum(rec, 'position'), fqNum(rec, 'duration'),
+        percent);
     } catch (error) {
       // 损坏数据按无续播处理
       return null;
@@ -180,6 +194,7 @@ export class FqWatchedStore {
     rec['episodeId'] = progress.episodeId;
     rec['position'] = progress.position;
     rec['duration'] = progress.duration;
+    rec['percent'] = progress.percent;
     try {
       pref.putSync(FQ_WATCHED_PROGRESS_PREFIX + seriesId, JSON.stringify(rec));
       pref.flush().catch((_error: BusinessError): void => {
@@ -188,6 +203,7 @@ export class FqWatchedStore {
     } catch (error) {
       // 忽略写入失败
     }
+    fqStoreBus.watchedVersion++;
   }
 
   /** 全部已看记录（剧 id → 已看集集合；备份导出用，遍历落盘 key 走读穿缓存）。 */
@@ -287,6 +303,7 @@ export class FqWatchedStore {
         // 忽略写入失败
       }
     }
+    fqStoreBus.watchedVersion++;
     return new FqWatchedMergeOutcome(added, progressWritten);
   }
 }

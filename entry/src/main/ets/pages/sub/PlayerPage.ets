@@ -2688,7 +2688,7 @@ export struct PlayerPage {
       // 切集：续播记录立即指向新集（位置 0；周期/暂停/退出再精化），
       // 避免切集后立刻退出仍续播回旧集；同集重试不覆盖原位置
       // （听视频返回切集跳过：新集起播位置由听到的位置决定，不重置为 0）
-      this.progress = new FqWatchedProgress(episode.itemId, 0, 0);
+      this.progress = new FqWatchedProgress(episode.itemId, 0, 0, this.seriesPercent(0));
       FqWatchedStore.saveProgress(PlayerNavParams.contentId, this.progress);
     }
     // 弹幕整池作废（切集），按 0 起取新集首批
@@ -2755,8 +2755,28 @@ export struct PlayerPage {
       return;
     }
     this.progress = new FqWatchedProgress(episode.itemId,
-      this.player.state.position, this.player.state.duration);
+      this.player.state.position, this.player.state.duration,
+      this.seriesPercent(this.episodeFraction()));
     FqWatchedStore.saveProgress(PlayerNavParams.contentId, this.progress);
+  }
+
+  /** 整剧百分比 0..100（书架角标）：(当前集下标 + 集内比例)/总集数；无效返回 -1。 */
+  private seriesPercent(fraction: number): number {
+    const total: number = this.episodes.length;
+    if (total <= 0 || this.index < 0 || this.index >= total) {
+      return -1;
+    }
+    const value: number = Math.round(((this.index + fraction) / total) * 100);
+    return Math.min(100, Math.max(0, value));
+  }
+
+  /** 当前集内播放比例 0..1（时长未知 0）。 */
+  private episodeFraction(): number {
+    const duration: number = this.player.state.duration;
+    if (duration <= 0) {
+      return 0;
+    }
+    return Math.min(1, Math.max(0, this.player.state.position / duration));
   }
 
   /** 周期保存续播进度（5s 一存，仅播放中；暂停不重复盖时间戳）。 */

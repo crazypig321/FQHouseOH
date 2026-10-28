@@ -13,6 +13,7 @@ import { FqMenu, FqMenuItem } from '../view/CommonMenu';
 import { FqShelfStore, FqShelfItem } from '../core/FqShelfStore';
 import { FqBrowseStore } from '../core/FqBrowseStore';
 import { FqReaderStore } from '../core/FqReaderStore';
+import { FqWatchedProgress, FqWatchedStore } from '../core/FqWatchedStore';
 import { fqStoreBus, FqStoreBus } from '../core/FqStoreBus';
 import { DialogManager } from '../utils/DialogUtils';
 import { FqReadStatsStore } from '../core/FqReadStatsStore';
@@ -114,8 +115,8 @@ export struct ShelfPage {
   /** 已尝试封面匹配的本地书（会话内去重，避免重复搜索）。 */
   private coverMatchTried: Set<string> = new Set<string>();
 
-  /** 书架/浏览历史数据变化（详情页收藏、阅读记录、批量移除等）实时刷新列表。 */
-  @Monitor('storeBus.shelfVersion', 'storeBus.browseVersion')
+  /** 书架/浏览历史/已看剧集数据变化（详情页收藏、阅读记录、看剧进度、批量移除等）实时刷新列表。 */
+  @Monitor('storeBus.shelfVersion', 'storeBus.browseVersion', 'storeBus.watchedVersion')
   onStoreDataChange(): void {
     this.refreshData();
   }
@@ -305,7 +306,7 @@ export struct ShelfPage {
         if (keyword.length === 0 || entry.title.includes(keyword)) {
           rows.push(new ShelfRow(entry.id, entry.kind, entry.title, entry.cover,
             FqLocalBookStore.isLocalBookId(entry.id) ? '本地书籍' : fqKindLabel(entry.kind),
-            FqReaderStore.getProgress(entry.id).percent));
+            this.entryPercent(entry.id, entry.kind)));
         }
       }
     } else {
@@ -313,12 +314,26 @@ export struct ShelfPage {
         if (keyword.length === 0 || entry.title.includes(keyword)) {
           rows.push(new ShelfRow(entry.id, entry.kind, entry.title, entry.cover,
             this.relativeTime(entry.visitedAt),
-            FqReaderStore.getProgress(entry.id).percent));
+            this.entryPercent(entry.id, entry.kind)));
         }
       }
     }
     this.visibleCount = rows.length;
     this.dataSource.reload(rows);
+  }
+
+  /** 封面角标百分比 0..100（-1 无进度不显示）：
+   *  小说/漫画走阅读进度（整书百分比）；短剧/漫剧走续播记录内保存的整剧百分比
+   *  （(集下标 + 集内比例)/总集数，播放页保存时计算；旧记录未存则不显示，下次播放后补上）。 */
+  private entryPercent(id: string, kind: string): number {
+    if (kind === 'video' || kind === 'manju') {
+      const progress: FqWatchedProgress | null = FqWatchedStore.progress(id);
+      if (progress === null || progress.percent < 0) {
+        return -1;
+      }
+      return progress.percent;
+    }
+    return FqReaderStore.getProgress(id).percent;
   }
 
   /** 相对时间文案（浏览历史副标题）。 */
