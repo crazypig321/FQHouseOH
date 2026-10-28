@@ -8,6 +8,7 @@
  */
 
 import { bundleManager } from '@kit.AbilityKit';
+import { buffer } from '@kit.ArkTS';
 import { FqShelfItem, FqShelfStore } from './FqShelfStore';
 import { FqBrowseItem, FqBrowseStore } from './FqBrowseStore';
 import { FqListenRecord, FqAudioHistory } from './FqAudioHistory';
@@ -30,6 +31,12 @@ const FQ_BACKUP_MAX_TEXT: number = 8192;
 const FQ_BACKUP_KINDS: string[] = ['book', 'audio', 'manga', 'video', 'manju'];
 const FQ_BACKUP_ID_PATTERN: RegExp = /^[A-Za-z0-9_-]{1,128}$/;
 const FQ_BACKUP_HTTPS_PREFIX: RegExp = /^https?:\/\/[^/\s]+/;
+/** 背景图原文件 ≤ 此字节数直接内嵌；超限先压缩转 JPEG 再内嵌。 */
+const FQ_BACKUP_BG_RAW_MAX: number = 512 * 1024;
+/** 备份内背景图 base64 总预算（字符数；总 JSON 仍受 16MB 上限约束）。 */
+const FQ_BACKUP_BG_B64_TOTAL: number = 10 * 1024 * 1024;
+/** 单张背景图 base64 长度上限（decode 校验用）。 */
+const FQ_BACKUP_BG_B64_PER: number = 3 * 1024 * 1024;
 /** 主题色 key 白名单（与 FqAppSettingsStore 主题色档位一致）。 */
 const FQ_BACKUP_THEME_COLORS: string[] =
   ['', 'orange', 'gold', 'green', 'teal', 'blue', 'violet', 'pink', 'red', 'custom'];
@@ -150,7 +157,7 @@ export class FqBackupReaderProgress {
   }
 }
 
-/** 备份内自定义阅读主题：浅色/深色双模式参数白名单（背景图文件本体不进备份，恢复时按文件校验沙箱存在）。 */
+/** 备份内自定义阅读主题：浅色/深色双模式参数白名单 + 背景图 base64 内嵌（跨设备迁移）。 */
 export class FqBackupCustomTheme {
   readonly id: string;
   readonly name: string;
@@ -164,12 +171,17 @@ export class FqBackupCustomTheme {
   readonly darkFontSize: number;
   readonly darkFontIndex: number;
   readonly darkLineHeight: number;
+  /** 浅色背景图 base64（预算耗尽或本机文件缺失时为空串）。 */
+  readonly lightBgData: string;
+  /** 深色背景图 base64（预算耗尽或本机文件缺失时为空串）。 */
+  readonly darkBgData: string;
 
   constructor(id: string, name: string,
     lightBgFile: string, lightFontColor: string, lightFontSize: number,
     lightFontIndex: number, lightLineHeight: number,
     darkBgFile: string, darkFontColor: string, darkFontSize: number,
-    darkFontIndex: number, darkLineHeight: number) {
+    darkFontIndex: number, darkLineHeight: number,
+    lightBgData: string = '', darkBgData: string = '') {
     this.id = id;
     this.name = name;
     this.lightBgFile = lightBgFile;
@@ -182,6 +194,8 @@ export class FqBackupCustomTheme {
     this.darkFontSize = darkFontSize;
     this.darkFontIndex = darkFontIndex;
     this.darkLineHeight = darkLineHeight;
+    this.lightBgData = lightBgData;
+    this.darkBgData = darkBgData;
   }
 }
 
@@ -294,7 +308,7 @@ export class FqLibraryBackupRestoreResult {
 
 export class FqLibraryBackup {
   /** 采集本机数据生成备份（排除 local_ 本地书记录并计数，其余字段过白名单校验）。 */
-  public static capture(): FqLibraryBackupData {
+  public static async capture(): Promise<FqLibraryBackupData> {
     let excluded: number = 0;
     const shelf: FqShelfItem[] = [];
     for (const item of FqShelfStore.all()) {
@@ -370,14 +384,37 @@ export class FqLibraryBackup {
         fqEncodeReadRanges(FqReaderStore.getReadChapters(bookId))));
     }
     const readerSettings: FqReaderSettings = FqReaderStore.getSettings();
-    // 自定义阅读主题：只备份双模式参数（bgPath 取 basename），图片文件本体不进备份（16MB 上限）
+    // 自定义阅读主题：双模式参数（bgPath 取 basename）+ 背景图 base64 内嵌
+    // （导入即压缩为小图；旧大图备份时再压缩；总预算超限的图降级为仅参数，不阻断备份）
     const customThemes: FqBackupCustomTheme[] = [];
+    let bgBudget: number = FQ_BACKUP_BG_B64_TOTAL;
     for (const theme of readerSettings.customThemes) {
+      const lightBgFile: string = fqBackupBaseName(theme.lightBgPath);
+      const darkBgFile: string = fqBackupBaseName(theme.darkBgPath);
+      let lightBgData: string = '';
+      let darkBgData: string = '';
+      if (lightBgFile.length > 0 && bgBudget > 0) {
+        const bytes: ArrayBuffer | null =
+          await FqReaderStore.loadBgBytesForBackup(lightBgFile, FQ_BACKUP_BG_RAW_MAX);
+        if (bytes !== null) {
+          lightBgData = buffer.from(bytes).toString('base64');
+          bgBudget -= lightBgData.length;
+        }
+      }
+      if (darkBgFile.length > 0 && bgBudget > 0) {
+        const bytes: ArrayBuffer | null =
+          await FqReaderStore.loadBgBytesForBackup(darkBgFile, FQ_BACKUP_BG_RAW_MAX);
+        if (bytes !== null) {
+          darkBgData = buffer.from(bytes).toString('base64');
+          bgBudget -= darkBgData.length;
+        }
+      }
       customThemes.push(new FqBackupCustomTheme(theme.id, theme.name,
-        fqBackupBaseName(theme.lightBgPath), theme.lightFontColor, theme.lightFontSize,
+        lightBgFile, theme.lightFontColor, theme.lightFontSize,
         theme.lightFontIndex, theme.lightLineHeight,
-        fqBackupBaseName(theme.darkBgPath), theme.darkFontColor, theme.darkFontSize,
-        theme.darkFontIndex, theme.darkLineHeight));
+        darkBgFile, theme.darkFontColor, theme.darkFontSize,
+        theme.darkFontIndex, theme.darkLineHeight,
+        lightBgData, darkBgData));
     }
     const settings: FqBackupAppSettings = new FqBackupAppSettings(
       FqAppSettingsStore.getThemeMode(),
@@ -498,6 +535,12 @@ export class FqLibraryBackup {
         themeRec['darkFontSize'] = theme.darkFontSize;
         themeRec['darkFontIndex'] = theme.darkFontIndex;
         themeRec['darkLineHeight'] = theme.darkLineHeight;
+        if (theme.lightBgData.length > 0) {
+          themeRec['lightBgData'] = theme.lightBgData;
+        }
+        if (theme.darkBgData.length > 0) {
+          themeRec['darkBgData'] = theme.darkBgData;
+        }
         customThemes.push(themeRec);
       }
       settings['readerCustomThemes'] = customThemes;
@@ -689,7 +732,8 @@ export class FqLibraryBackup {
         if (themesList === null || themesList.length > FQ_BACKUP_MAX_THEMES) {
           throw new Error('备份自定义主题段格式无效');
         }
-        const themeIds: Set<string> = new Set<string>();
+          const themeIds: Set<string> = new Set<string>();
+          let bgDataTotal: number = 0;
         for (const themeValue of themesList) {
           const themeRec: Record<string, Object> | null = fqAsRecord(themeValue);
           if (themeRec === null) {
@@ -776,10 +820,27 @@ export class FqLibraryBackup {
           if (lightBgFile.length === 0 && darkBgFile.length === 0) {
             throw new Error('备份字段 bgFile 无效');
           }
+          // 背景图 base64 内嵌（旧备份缺省为空串；需有对应文件名；单张与总量设上限）
+          let lightBgData: string = fqStr(themeRec, 'lightBgData');
+          let darkBgData: string = fqStr(themeRec, 'darkBgData');
+          if (lightBgData.length > FQ_BACKUP_BG_B64_PER || darkBgData.length > FQ_BACKUP_BG_B64_PER) {
+            throw new Error('备份字段 bgData 无效');
+          }
+          if (lightBgFile.length === 0) {
+            lightBgData = '';
+          }
+          if (darkBgFile.length === 0) {
+            darkBgData = '';
+          }
+          bgDataTotal += lightBgData.length + darkBgData.length;
+          if (bgDataTotal > FQ_BACKUP_BG_B64_TOTAL) {
+            throw new Error('备份背景图数据超限');
+          }
           customThemes.push(new FqBackupCustomTheme(themeId,
             fqBackupCheckText(themeRec, 'name'),
             lightBgFile, lightFontColor, lightFontSize, lightFontIndex, lightLineHeight,
-            darkBgFile, darkFontColor, darkFontSize, darkFontIndex, darkLineHeight));
+            darkBgFile, darkFontColor, darkFontSize, darkFontIndex, darkLineHeight,
+            lightBgData, darkBgData));
         }
       }
       const customThemeId: string = fqStr(settingsRec, 'readerCustomThemeId');
@@ -845,7 +906,22 @@ export class FqLibraryBackup {
         settings.readerThemeIndex, settings.readerFlipIndex, settings.readerFontIndex,
         settings.readerShowParagraphComment);
       FqReaderStore.saveComicFlip(settings.readerComicFlipIndex);
-      // 自定义阅读主题：按模式校验背景图文件仍在本机沙箱时重建条目（跨设备图片缺失自动降级/跳过）
+      // 自定义阅读主题：先写回内嵌背景图文件（本机已有同名文件保留现状），
+      // 再按模式校验重建条目（无内嵌数据的旧备份仍走沙箱文件存在性校验）
+      for (const theme of settings.readerCustomThemes) {
+        try {
+          if (theme.lightBgData.length > 0) {
+            FqReaderStore.writeBgBytes(theme.lightBgFile,
+              buffer.from(theme.lightBgData, 'base64').buffer);
+          }
+          if (theme.darkBgData.length > 0) {
+            FqReaderStore.writeBgBytes(theme.darkBgFile,
+              buffer.from(theme.darkBgData, 'base64').buffer);
+          }
+        } catch (error) {
+          // 单张背景图数据损坏时跳过该图，不阻断整份恢复
+        }
+      }
       for (const theme of settings.readerCustomThemes) {
         FqReaderStore.mergeCustomTheme(theme.id, theme.name,
           theme.lightBgFile, theme.lightFontColor, theme.lightFontSize,

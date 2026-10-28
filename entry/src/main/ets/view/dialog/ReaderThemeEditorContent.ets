@@ -381,7 +381,7 @@ export struct ReaderThemeEditorContent {
         return;
       }
       const previous: string = this.curBg();
-      const path: string = FqReaderStore.importThemeImage(result.photoUris[0]);
+      const path: string = await FqReaderStore.importThemeImage(result.photoUris[0]);
       if (path.length === 0) {
         promptAction.showToast({ message: '背景图导入失败，请重试', duration: 2000 });
         return;

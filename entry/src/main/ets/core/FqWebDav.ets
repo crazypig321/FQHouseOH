@@ -12,7 +12,7 @@ import { rcp } from '@kit.RemoteCommunicationKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { util } from '@kit.ArkTS';
 import { FqWebDavConfigStore } from './FqWebDavConfigStore';
-import { FqLibraryBackup } from './FqLibraryBackup';
+import { FqLibraryBackup, FqLibraryBackupData } from './FqLibraryBackup';
 
 /** WebDAV 远端备份条目（列表弹窗展示用）。 */
 export class FqWebDavBackupEntry {
@@ -130,7 +130,8 @@ export class FqWebDav {
     headers['Content-Type'] = 'application/json';
     // 逐级创建远端目录（已存在时返回 405，忽略即可）
     await FqWebDav.ensureRemoteFolders();
-    const text: string = FqLibraryBackup.encode(FqLibraryBackup.capture());
+    const data: FqLibraryBackupData = await FqLibraryBackup.capture();
+    const text: string = FqLibraryBackup.encode(data);
     const resp: FqWebDavResponse | null = await FqWebDav.request(
       `${FqWebDav.folderUrl()}${encodeURIComponent(FqWebDav.backupFileName())}`,
       'PUT', headers, text, 30000);

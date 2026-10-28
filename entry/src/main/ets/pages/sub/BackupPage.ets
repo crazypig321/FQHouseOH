@@ -221,13 +221,14 @@ export struct BackupPage {
     this.message = '';
     this.messageIsError = false;
     try {
-      const data: FqLibraryBackupData = FqLibraryBackup.capture();
+      const data: FqLibraryBackupData = await FqLibraryBackup.capture();
       const text: string = FqLibraryBackup.encode(data);
       const name: string = `fqhouse-backup-${fqBackupFileStamp(new Date())}.json`;
       await fqExportTextFile(getContext(this), name, text);
       let summary: string = `备份已保存到 ${FQ_BACKUP_DIR_TEXT}/${name}\n` +
         `收录收藏 ${data.shelf.length} 条、浏览 ${data.browse.length} 条、收听 ${data.listen.length} 条、` +
-        `阅读进度 ${data.reader.length} 本、已看剧集 ${data.episodeCount()} 集。\n` +
+        `阅读进度 ${data.reader.length} 本、已看剧集 ${data.episodeCount()} 集` +
+        `${this.themeSummary(data)}。\n` +
         '将文件传到新设备，在本页选择导入即可。';
       if (data.excludedLocalRecords > 0) {
         summary += `\n已排除 ${data.excludedLocalRecords} 条本地书籍相关记录。`;
@@ -240,6 +241,14 @@ export struct BackupPage {
     } finally {
       this.busy = '';
     }
+  }
+
+  /** 备份摘要中的自定义主题段（无主题返回空串）。 */
+  private themeSummary(data: FqLibraryBackupData): string {
+    if (data.settings === null || data.settings.readerCustomThemes.length === 0) {
+      return '';
+    }
+    return `、自定义主题 ${data.settings.readerCustomThemes.length} 个（含背景图）`;
   }
 
   /** 选择备份文件：系统选择器 → 读取校验 → 预览。 */
@@ -398,6 +407,9 @@ export struct BackupPage {
         this.StatCell(`${data.listen.length}`, '收听')
         this.StatCell(`${data.reader.length}`, '阅读进度')
         this.StatCell(`${data.episodeCount()}`, '已看剧集')
+        if (data.settings !== null && data.settings.readerCustomThemes.length > 0) {
+          this.StatCell(`${data.settings.readerCustomThemes.length}`, '自定义主题')
+        }
       }
       .width('100%')
 

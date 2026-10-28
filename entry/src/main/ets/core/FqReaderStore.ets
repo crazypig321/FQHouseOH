@@ -8,6 +8,7 @@ import preferences from '@ohos.data.preferences';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { fileIo } from '@kit.CoreFileKit';
+import { image } from '@kit.ImageKit';
 import { fqAsRecord, fqAsArray, fqKeys, fqStr, fqNum } from './FqJson';
 
 const FQ_READER_STORE_NAME: string = 'fq_reader';
@@ -15,6 +16,9 @@ const FQ_READER_KEY_SETTINGS: string = 'settings';
 const FQ_READER_KEY_PROGRESS: string = 'progress_';
 const FQ_READER_KEY_PAGES: string = 'pages_';
 const FQ_READER_KEY_READ: string = 'read_';
+/** 自定义主题背景图压缩参数（导入即压缩，控制沙箱与备份内嵌体积）。 */
+const FQ_THEME_BG_MAX_EDGE: number = 1440;
+const FQ_THEME_BG_JPEG_QUALITY: number = 85;
 
 /** 单书阅读进度。 */
 export class FqReaderProgress {
@@ -345,10 +349,11 @@ export class FqReaderStore {
   private static themeImportSeq: number = 0;
 
   /**
-   * 系统图库选图 URI → 拷入沙箱 fq_reader_bg/ct{时间戳}_{序号}.{ext}（不落条目）。
+   * 系统图库选图 URI → 压缩转 JPEG（限最长边 1440、质量 85）写入沙箱
+   * fq_reader_bg/ct{时间戳}_{序号}.jpg（不落条目）；压缩失败回退原图拷贝。
    * 先写临时文件再原子改名，失败不产生脏文件；返回沙箱绝对路径（失败返回空串）。
    */
-  public static importThemeImage(uri: string): string {
+  public static async importThemeImage(uri: string): Promise<string> {
     const filesDir: string = FqReaderStore.filesDir;
     if (filesDir.length === 0 || uri.length === 0) {
       return '';
@@ -365,9 +370,11 @@ export class FqReaderStore {
     FqReaderStore.themeImportSeq += 1;
     const name: string = `ct${Date.now()}_${FqReaderStore.themeImportSeq}`;
     const dir: string = `${filesDir}/fq_reader_bg`;
-    const target: string = `${dir}/${name}.${ext}`;
-    const tmp: string = `${dir}/${name}_new.${ext}`;
+    const tmpBase: string = `${dir}/${name}_new`;
+    let target: string = `${dir}/${name}.jpg`;
     let src: fileIo.File | null = null;
+    let dst: fileIo.File | null = null;
+    let wroteJpeg: boolean = false;
     try {
       try {
         fileIo.mkdirSync(dir);
@@ -375,21 +382,192 @@ export class FqReaderStore {
         // 目录已存在
       }
       src = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
-      let dst: fileIo.File | null = null;
-      try {
-        dst = fileIo.openSync(tmp, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+      // 压缩为 JPEG 小图（备份内嵌体积可控）；失败回退原图拷贝
+      const packed: ArrayBuffer | null =
+        await FqReaderStore.packJpegBytes(src.fd, FQ_THEME_BG_MAX_EDGE, FQ_THEME_BG_JPEG_QUALITY);
+      if (packed !== null) {
+        dst = fileIo.openSync(`${tmpBase}.jpg`,
+          fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+        fileIo.writeSync(dst.fd, packed);
+        fileIo.closeSync(dst);
+        dst = null;
+        wroteJpeg = true;
+      } else {
+        dst = fileIo.openSync(`${tmpBase}.${ext}`,
+          fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
         fileIo.copyFileSync(src.fd, dst.fd);
-      } finally {
-        if (dst !== null) {
-          fileIo.closeSync(dst);
-        }
+        fileIo.closeSync(dst);
+        dst = null;
+        target = `${dir}/${name}.${ext}`;
       }
       fileIo.closeSync(src);
       src = null;
+      try {
+        fileIo.unlinkSync(target);
+      } catch (unlinkError) {
+        // 目标不存在属正常
+      }
+      fileIo.renameSync(wroteJpeg ? `${tmpBase}.jpg` : `${tmpBase}.${ext}`, target);
+      return target;
     } catch (error) {
       if (src !== null) {
         try {
           fileIo.closeSync(src);
+        } catch (closeError) {
+          // 忽略关闭失败
+        }
+      }
+      if (dst !== null) {
+        try {
+          fileIo.closeSync(dst);
+        } catch (closeError) {
+          // 忽略关闭失败
+        }
+      }
+      try {
+        fileIo.unlinkSync(`${tmpBase}.jpg`);
+      } catch (cleanError) {
+        // 忽略清理失败
+      }
+      try {
+        fileIo.unlinkSync(`${tmpBase}.${ext}`);
+      } catch (cleanError) {
+        // 忽略清理失败
+      }
+      return '';
+    }
+  }
+
+  /** 图片 fd 解码 → 最长边压到 maxEdge（小图不放大）→ JPEG（quality）字节；失败返回 null。 */
+  private static async packJpegBytes(fd: number, maxEdge: number, quality: number):
+    Promise<ArrayBuffer | null> {
+    let source: image.ImageSource | null = null;
+    let pixelMap: image.PixelMap | null = null;
+    let packer: image.ImagePacker | null = null;
+    try {
+      source = image.createImageSource(fd);
+      const info: image.ImageInfo = await source.getImageInfo();
+      const width: number = info.size.width;
+      const height: number = info.size.height;
+      if (width <= 0 || height <= 0) {
+        return null;
+      }
+      let targetWidth: number = width;
+      let targetHeight: number = height;
+      const longer: number = Math.max(width, height);
+      if (longer > maxEdge) {
+        const scale: number = maxEdge / longer;
+        targetWidth = Math.max(1, Math.round(width * scale));
+        targetHeight = Math.max(1, Math.round(height * scale));
+      }
+      pixelMap = await source.createPixelMap({
+        desiredSize: { width: targetWidth, height: targetHeight },
+      });
+      packer = image.createImagePacker();
+      return await packer.packing(pixelMap, { format: 'image/jpeg', quality: quality });
+    } catch (error) {
+      return null;
+    } finally {
+      if (pixelMap !== null) {
+        pixelMap.release();
+      }
+      if (packer !== null) {
+        packer.release();
+      }
+      if (source !== null) {
+        source.release();
+      }
+    }
+  }
+
+  /**
+   * 备份内嵌用：读背景图文件字节（文件 ≤ rawMax 直接读原文，超限压缩转 JPEG 控制体积）。
+   * 文件名仅允许 fq_reader_bg/ 下的裸文件名；失败返回 null。
+   */
+  public static async loadBgBytesForBackup(fileName: string, rawMax: number):
+    Promise<ArrayBuffer | null> {
+    const clean: string = fileName.trim();
+    if (FqReaderStore.filesDir.length === 0 || clean.length === 0
+      || clean.length > 128 || clean.indexOf('/') >= 0 || clean.indexOf('\\') >= 0) {
+      return null;
+    }
+    const path: string = `${FqReaderStore.filesDir}/fq_reader_bg/${clean}`;
+    let size: number = -1;
+    try {
+      size = fileIo.statSync(path).size;
+    } catch (error) {
+      return null;
+    }
+    if (size <= 0) {
+      return null;
+    }
+    if (size <= rawMax) {
+      try {
+        const data: ArrayBuffer = new ArrayBuffer(size);
+        const file: fileIo.File = fileIo.openSync(path, fileIo.OpenMode.READ_ONLY);
+        try {
+          fileIo.readSync(file.fd, data);
+        } finally {
+          fileIo.closeSync(file);
+        }
+        return data;
+      } catch (error) {
+        return null;
+      }
+    }
+    // 旧版导入的大图：压缩后再内嵌
+    let src: fileIo.File | null = null;
+    try {
+      src = fileIo.openSync(path, fileIo.OpenMode.READ_ONLY);
+      return await FqReaderStore.packJpegBytes(src.fd, FQ_THEME_BG_MAX_EDGE, FQ_THEME_BG_JPEG_QUALITY);
+    } catch (error) {
+      return null;
+    } finally {
+      if (src !== null) {
+        try {
+          fileIo.closeSync(src);
+        } catch (closeError) {
+          // 忽略关闭失败
+        }
+      }
+    }
+  }
+
+  /** 备份恢复：背景图字节写入沙箱 fq_reader_bg/（本机已有同名文件保留现状）；失败返回 false。 */
+  public static writeBgBytes(fileName: string, data: ArrayBuffer): boolean {
+    const clean: string = fileName.trim();
+    if (FqReaderStore.filesDir.length === 0 || clean.length === 0
+      || clean.length > 128 || clean.indexOf('/') >= 0 || clean.indexOf('\\') >= 0) {
+      return false;
+    }
+    const dir: string = `${FqReaderStore.filesDir}/fq_reader_bg`;
+    const target: string = `${dir}/${clean}`;
+    try {
+      if (fileIo.accessSync(target)) {
+        return true;
+      }
+    } catch (error) {
+      // 文件不存在，继续写入
+    }
+    try {
+      fileIo.mkdirSync(dir);
+    } catch (error) {
+      // 目录已存在
+    }
+    const tmp: string = `${target}.tmp`;
+    let dst: fileIo.File | null = null;
+    try {
+      dst = fileIo.openSync(tmp,
+        fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+      fileIo.writeSync(dst.fd, data);
+      fileIo.closeSync(dst);
+      dst = null;
+      fileIo.renameSync(tmp, target);
+      return true;
+    } catch (error) {
+      if (dst !== null) {
+        try {
+          fileIo.closeSync(dst);
         } catch (closeError) {
           // 忽略关闭失败
         }
@@ -399,24 +577,8 @@ export class FqReaderStore {
       } catch (cleanError) {
         // 忽略清理失败
       }
-      return '';
+      return false;
     }
-    try {
-      try {
-        fileIo.unlinkSync(target);
-      } catch (unlinkError) {
-        // 目标不存在属正常
-      }
-      fileIo.renameSync(tmp, target);
-    } catch (error) {
-      try {
-        fileIo.unlinkSync(tmp);
-      } catch (unlinkError) {
-        // 忽略清理失败
-      }
-      return '';
-    }
-    return target;
   }
 
   /** 新建自定义主题（draft 需至少一张背景图）；返回新条目（失败返回 null）。 */
