@@ -235,6 +235,8 @@ export class FqBackupAppSettings {
   readonly readerComicFlipIndex: number;
   readonly readerFontIndex: number;
   readonly readerShowParagraphComment: boolean;
+  /** 音量键翻页开关（旧备份缺省为 false）。 */
+  readonly readerVolumeKeyPaging: boolean;
   /** 自定义阅读主题参数（旧备份缺省为空列表）。 */
   readonly readerCustomThemes: FqBackupCustomTheme[];
   /** 当前选中的自定义主题 id（旧备份缺省为空串）。 */
@@ -244,6 +246,7 @@ export class FqBackupAppSettings {
     backgroundAudio: boolean, readerFontSize: number, readerLineHeight: number,
     readerThemeIndex: number, readerFlipIndex: number, readerComicFlipIndex: number,
     readerFontIndex: number, readerShowParagraphComment: boolean,
+    readerVolumeKeyPaging: boolean,
     readerCustomThemes: FqBackupCustomTheme[], readerCustomThemeId: string) {
     this.themeMode = themeMode;
     this.themeColor = themeColor;
@@ -256,6 +259,7 @@ export class FqBackupAppSettings {
     this.readerComicFlipIndex = readerComicFlipIndex;
     this.readerFontIndex = readerFontIndex;
     this.readerShowParagraphComment = readerShowParagraphComment;
+    this.readerVolumeKeyPaging = readerVolumeKeyPaging;
     this.readerCustomThemes = readerCustomThemes;
     this.readerCustomThemeId = readerCustomThemeId;
   }
@@ -445,6 +449,7 @@ export class FqLibraryBackup {
       readerSettings.comicFlipIndex,
       readerSettings.fontIndex,
       readerSettings.showParagraphComment,
+      readerSettings.volumeKeyPaging,
       customThemes,
       readerSettings.customThemeId);
     return new FqLibraryBackupData(Date.now(), FqLibraryBackup.appVersion(),
@@ -543,6 +548,7 @@ export class FqLibraryBackup {
       settings['readerComicFlipIndex'] = data.settings.readerComicFlipIndex;
       settings['readerFontIndex'] = data.settings.readerFontIndex;
       settings['readerShowParagraphComment'] = data.settings.readerShowParagraphComment;
+      settings['readerVolumeKeyPaging'] = data.settings.readerVolumeKeyPaging;
       const customThemes: Object[] = [];
       for (const theme of data.settings.readerCustomThemes) {
         const themeRec: Record<string, Object> = {};
@@ -758,6 +764,8 @@ export class FqLibraryBackup {
         throw new Error('备份字段 readerLineHeight 无效');
       }
       const showParaRaw: Object | undefined = settingsRec['readerShowParagraphComment'];
+      // 音量键翻页开关（旧备份缺省 false）
+      const volumeKeyRaw: Object | undefined = settingsRec['readerVolumeKeyPaging'];
       // 自定义阅读主题段（旧 v2 备份无此字段：空列表 + 空选中 id，全量白名单校验）
       const customThemes: FqBackupCustomTheme[] = [];
       const themesRaw: Object | undefined = settingsRec['readerCustomThemes'];
@@ -890,6 +898,7 @@ export class FqLibraryBackup {
         fqBackupCheckRange(settingsRec, 'readerComicFlipIndex', 0, 2),
         fqBackupCheckRange(settingsRec, 'readerFontIndex', 0, 8),
         typeof showParaRaw === 'boolean' ? showParaRaw : true,
+        typeof volumeKeyRaw === 'boolean' ? volumeKeyRaw : false,
         customThemes,
         customThemeId);
     }
@@ -940,6 +949,7 @@ export class FqLibraryBackup {
         settings.readerThemeIndex, settings.readerFlipIndex, settings.readerFontIndex,
         settings.readerShowParagraphComment);
       FqReaderStore.saveComicFlip(settings.readerComicFlipIndex);
+      FqReaderStore.saveVolumeKeyPaging(settings.readerVolumeKeyPaging);
       // 自定义阅读主题：先写回内嵌背景图文件（本机已有同名文件保留现状），
       // 再按模式校验重建条目（无内嵌数据的旧备份仍走沙箱文件存在性校验）
       for (const theme of settings.readerCustomThemes) {

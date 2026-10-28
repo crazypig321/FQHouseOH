@@ -83,6 +83,9 @@ export struct CommonNav {
   /** NavDestination 显示回调（每次 onShown 触发，含从上层页面返回）。 */
   @Event onShown: () => void = (): void => {}
 
+  /** NavDestination 隐藏回调（每次 onHidden 触发，含被新页面压栈覆盖）。 */
+  @Event onHidden: () => void = (): void => {}
+
   /** readerBar点击回调 */
   @Event readerBarClick: (key: string) => void
 
@@ -232,6 +235,7 @@ export struct CommonNav {
       if (!this.showPlaybackBall) {
         appState.hidePlaybackBall = false;
       }
+      this.onHidden()
     })
     .dynamicHideTitleBar({
       hideBottomBuilder: this.isSearchBarScroller,

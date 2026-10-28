@@ -48,6 +48,8 @@ export class FqReaderSettings {
   fontIndex: number = 0;
   /** 段评显示开关（关闭后不显示段评气泡与计数，重新分页）。 */
   showParagraphComment: boolean = true;
+  /** 音量键翻页开关（阅读页/漫画页共用；分页模式拦截音量上/下 = 上/下一页，上下滚动模式不拦截）。 */
+  volumeKeyPaging: boolean = false;
   /** 自定义阅读主题列表（背景图 + 独立排版参数；themeIndex=3 生效）。 */
   customThemes: FqCustomReaderTheme[] = [];
   /** 当前选中的自定义主题 id（themeIndex=3 时生效；空 = 无选中）。 */
@@ -202,6 +204,10 @@ export class FqReaderStore {
       if (typeof showParagraphComment === 'boolean') {
         FqReaderStore.settings.showParagraphComment = showParagraphComment;
       }
+      const volumeKeyPaging: Object | undefined = rec['volumeKeyPaging'];
+      if (typeof volumeKeyPaging === 'boolean') {
+        FqReaderStore.settings.volumeKeyPaging = volumeKeyPaging;
+      }
       // 旧版单张自定义背景（v4 及以前 customBgPath）迁移为自定义主题列表首项
       const customBgPath: Object | undefined = rec['customBgPath'];
       if (typeof customBgPath === 'string' && customBgPath.length > 0
@@ -265,6 +271,12 @@ export class FqReaderStore {
   /** 漫画翻页方式单独保存（不动小说设置）。 */
   public static saveComicFlip(comicFlipIndex: number): void {
     FqReaderStore.settings.comicFlipIndex = Math.min(2, Math.max(0, Math.trunc(comicFlipIndex)));
+    FqReaderStore.persistSettings();
+  }
+
+  /** 音量键翻页开关单独保存（阅读页/漫画页共用）。 */
+  public static saveVolumeKeyPaging(enabled: boolean): void {
+    FqReaderStore.settings.volumeKeyPaging = enabled;
     FqReaderStore.persistSettings();
   }
 
@@ -764,6 +776,7 @@ export class FqReaderStore {
     rec['comicFlipIndex'] = FqReaderStore.settings.comicFlipIndex;
     rec['fontIndex'] = FqReaderStore.settings.fontIndex;
     rec['showParagraphComment'] = FqReaderStore.settings.showParagraphComment;
+    rec['volumeKeyPaging'] = FqReaderStore.settings.volumeKeyPaging;
     const themes: Record<string, Object>[] = [];
     for (const item of FqReaderStore.settings.customThemes) {
       const themeRec: Record<string, Object> = {};

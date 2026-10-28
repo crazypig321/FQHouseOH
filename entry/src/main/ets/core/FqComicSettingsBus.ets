@@ -7,6 +7,8 @@
 export class FqComicSettingsBus {
   /** 漫画翻页方式：0 仿真 / 1 覆盖 / 2 上下滚动。 */
   @Trace comicFlipIndex: number = 0;
+  /** 音量键翻页开关（与小说阅读共用 FqReaderStore 全局设置；分页模式拦截音量上/下）。 */
+  @Trace volumeKeyPaging: boolean = false;
   /** 漫画页注册的变更处理器（aboutToAppear 注册、aboutToDisappear 注销）。 */
   public handler: FqComicSettingsHandler | null = null;
 }
@@ -14,6 +16,8 @@ export class FqComicSettingsBus {
 /** 漫画设置变更处理器（漫画页实现：切换翻页模式并持久化，随后回写总线）。 */
 export interface FqComicSettingsHandler {
   changeFlip: (index: number) => void;
+  /** 音量键翻页开关（持久化并同步 inputConsumer 拦截注册）。 */
+  changeVolumeKeyPaging: (on: boolean) => void;
 }
 
 export const fqComicSettingsBus: FqComicSettingsBus = new FqComicSettingsBus();

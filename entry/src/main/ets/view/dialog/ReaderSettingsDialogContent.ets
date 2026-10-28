@@ -1,7 +1,7 @@
 /**
  * 「阅读设置」弹窗内容（经 utils/DialogUtils 的 DialogManager.OpenDialog('阅读设置') 打开，
  * 由宿主页 CustomContentDialog 装配：无标题无按钮仅内容区，悬于工具条上方居中）：
- * 字号/行距/主题/字体/翻页/段评六行；当前值经 @Param 注入、变更经 @Event 回调宿主页；
+ * 字号/行距/主题/字体/翻页/段评/音量键翻页七行；当前值经 @Param 注入、变更经 @Event 回调宿主页；
  * 主题行为「添加」固定卡片 + 横向滚动 List + ForEach（@Computed 选项，键含名称/图路径，改名换图即重建）：
  * 预设档 + 自定义主题列表（缩略图按应生效模式取图）；添加卡片固定在前，滑动主题时不随滚动划走；
  * 配色跟随系统深浅色（弹窗卡片为系统色），阅读主题常量集中于此导出供宿主页共用。
@@ -56,6 +56,8 @@ export struct ReaderSettingsDialogContent {
   @Param fontIndex: number = 0;
   /** 段评显示开关（关闭后不显示段评气泡与计数）。 */
   @Param showParagraphComment: boolean = true;
+  /** 音量键翻页开关（分页模式音量上/下 = 上/下一页，优先于调节音量）。 */
+  @Param volumeKeyPaging: boolean = false;
   /** 自定义阅读主题列表（数组整体替换，经 @Monitor 同步数据源）。 */
   @Param customThemes: FqCustomReaderTheme[] = [];
   /** 当前选中的自定义主题 id（themeIndex=3 时生效）。 */
@@ -70,6 +72,7 @@ export struct ReaderSettingsDialogContent {
   @Event fontChange: (index: number) => void = (_index: number): void => {};
   @Event flipChange: (index: number) => void = (_index: number): void => {};
   @Event showParagraphCommentChange: (on: boolean) => void = (_on: boolean): void => {};
+  @Event volumeKeyPagingChange: (on: boolean) => void = (_on: boolean): void => {};
   /** 图库选图新增自定义主题。 */
   @Event addCustomThemeChange: () => void = (): void => {};
   /** 选中指定自定义主题。 */
@@ -216,6 +219,24 @@ export struct ReaderSettingsDialogContent {
           .switchPointColor(Color.White)
           .onChange((isOn: boolean): void => {
             this.showParagraphCommentChange(isOn);
+          })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      Row({ space: 12 }) {
+        Text('音量键翻页')
+          .fontSize(14)
+          .fontColor(themeUtils.textColor)
+        Text(this.volumeKeyPaging ? '音量上/下键代替翻页' : '音量键保持调节系统音量')
+          .fontSize(12)
+          .fontColor(themeUtils.terTextColor)
+          .layoutWeight(1)
+        Toggle({ type: ToggleType.Switch, isOn: this.volumeKeyPaging })
+          .selectedColor(appState.accentColor)
+          .switchPointColor(Color.White)
+          .onChange((isOn: boolean): void => {
+            this.volumeKeyPagingChange(isOn);
           })
       }
       .width('100%')

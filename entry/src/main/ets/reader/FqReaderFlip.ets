@@ -14,6 +14,7 @@ import { display } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { appState } from '../entryability/AppState';
+import { FqFlipTurnController } from './FqFlipTurn';
 import { FqFlipDir, FqFlipPhase, FqFlipZone, FqSimFlipController, FqSimFlipRenderNode } from './FqSimFlip';
 
 /** 平移模式：松手完成动画时长（ms）。 */
@@ -59,6 +60,8 @@ export struct FqReaderFlip {
   @Event canTurn: (isNext: boolean) => boolean = (_isNext: boolean): boolean => true;
   /** 中区点击呼出菜单。 */
   @Event onMenuTap: () => void = (): void => {};
+  /** 外部动画翻页触发器（音量键翻页等）：宿主持有实例传入，挂载时注册回调、卸载时清空。 */
+  @Param turnController: FqFlipTurnController | null = null;
 
   /** 平移模式：拖拽/动画偏移（vp，+向右；0 = 静止）。 */
   @Local dragVp: number = 0;
@@ -91,6 +94,11 @@ export struct FqReaderFlip {
     this.applySimFoldColors();
     // 预设尺寸：NodeContainer 首次 makeNode 即有正确 frame
     this.sim.setSize(this.pageWidthPx(), this.pageHeightPx());
+    if (this.turnController !== null) {
+      this.turnController.turn = (isNext: boolean): void => {
+        this.pageTurn(isNext);
+      };
+    }
   }
 
   /** 页底色（主题）切换 → 同步仿真折叠层配色。 */
@@ -100,6 +108,9 @@ export struct FqReaderFlip {
   }
 
   aboutToDisappear(): void {
+    if (this.turnController !== null) {
+      this.turnController.turn = null;
+    }
     this.clearSimTimer();
     this.sim.releasePixelMap();
   }
@@ -201,7 +212,7 @@ export struct FqReaderFlip {
     const w: number = this.pageWidthVp();
     if (event.x < w / 3) {
       if (this.flipMode === 0) {
-        this.tapFlipSim(event, 0, false);
+        this.tapFlipSim(event.x, false);
       } else if (this.flipMode === 2) {
         this.tapFlipCover(false);
       } else {
@@ -211,7 +222,7 @@ export struct FqReaderFlip {
     }
     if (event.x >= w * 2 / 3) {
       if (this.flipMode === 0) {
-        this.tapFlipSim(event, 0, true);
+        this.tapFlipSim(event.x, true);
       } else if (this.flipMode === 2) {
         this.tapFlipCover(true);
       } else {
@@ -384,8 +395,19 @@ export struct FqReaderFlip {
       0x88111111);
   }
 
+  /** 外部程序化翻页（音量键等）：走屏幕左右触区点击同款动画路径，折点取页宽 1/2。 */
+  public pageTurn(isNext: boolean): void {
+    if (this.flipMode === 0) {
+      this.tapFlipSim(this.pageWidthVp() / 2, isNext);
+    } else if (this.flipMode === 2) {
+      this.tapFlipCover(isNext);
+    } else {
+      this.tapFlip(isNext);
+    }
+  }
+
   /** 触区点击仿真翻页（模拟底部折角自动翻页）。 */
-  private tapFlipSim(event: ClickEvent, xBaseVp: number, isNext: boolean): void {
+  private tapFlipSim(xVp: number, isNext: boolean): void {
     if (this.simTimer !== -1 || this.simDrawing) {
       return;
     }
@@ -404,7 +426,7 @@ export struct FqReaderFlip {
     this.sim.zone = FqFlipZone.MIDDLE;
     this.sim.phase = FqFlipPhase.RELEASE;
     this.sim.dir = isNext ? FqFlipDir.BACKWARD : FqFlipDir.FORWARD;
-    this.sim.positionX = this.vp2px(xBaseVp + event.x);
+    this.sim.positionX = this.vp2px(xVp);
     // 折点置于底边：前进式 y 条件立即参与终止判定（对齐示例 MIDDLE 初始化结果）
     this.sim.positionY = heightPx - 1;
     this.sim.flipPositionY = heightPx - 1;

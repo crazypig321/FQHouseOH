@@ -268,6 +268,7 @@ struct Index {
         flipIndex: fqReaderSettingsBus.flipIndex,
         fontIndex: fqReaderSettingsBus.fontIndex,
         showParagraphComment: fqReaderSettingsBus.showParagraphComment,
+        volumeKeyPaging: fqReaderSettingsBus.volumeKeyPaging,
         customThemes: fqReaderSettingsBus.customThemes,
         customThemeId: fqReaderSettingsBus.customThemeId,
         followThemeBg: fqEffectiveReaderTheme(fqReaderSettingsBus.themeIndex, appState.isDark).background,
@@ -308,6 +309,12 @@ struct Index {
             handler.changeShowParagraphComment(on);
           }
         },
+        volumeKeyPagingChange: (on: boolean): void => {
+          const handler: FqReaderSettingsHandler | null = fqReaderSettingsBus.handler;
+          if (handler !== null) {
+            handler.changeVolumeKeyPaging(on);
+          }
+        },
         addCustomThemeChange: (): void => {
           const handler: FqReaderSettingsHandler | null = fqReaderSettingsBus.handler;
           if (handler !== null) {
@@ -332,10 +339,17 @@ struct Index {
     } else if (key === '漫画设置') {
       ComicSettingsDialogContent({
         comicFlipIndex: fqComicSettingsBus.comicFlipIndex,
+        volumeKeyPaging: fqComicSettingsBus.volumeKeyPaging,
         flipChange: (index: number): void => {
           const handler: FqComicSettingsHandler | null = fqComicSettingsBus.handler;
           if (handler !== null) {
             handler.changeFlip(index);
+          }
+        },
+        volumeKeyPagingChange: (on: boolean): void => {
+          const handler: FqComicSettingsHandler | null = fqComicSettingsBus.handler;
+          if (handler !== null) {
+            handler.changeVolumeKeyPaging(on);
           }
         },
       })

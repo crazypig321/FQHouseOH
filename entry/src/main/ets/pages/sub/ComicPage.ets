@@ -41,8 +41,10 @@ import {
 import { appState } from '../../entryability/AppState';
 import { DialogManager } from '../../utils/DialogUtils';
 import { FqComicFlip } from '../../reader/FqComicFlip';
+import { FqFlipTurnController } from '../../reader/FqFlipTurn';
 import { FqComicCanvas } from '../../reader/FqComicCanvas';
 import { fqComicSettingsBus } from '../../core/FqComicSettingsBus';
+import { FqVolumeKeyPaging } from '../../utils/FqVolumeKeyPaging';
 
 /** 漫画正文底色（纯黑）。 */
 const FQ_COMIC_BG: string = '#000000';
@@ -122,6 +124,8 @@ export struct ComicPage {
   @Local totalChapters: number = 0;
   /** 翻页方式：0 仿真 / 1 覆盖 / 2 上下滚动。 */
   @Local comicFlipIndex: number = 0;
+  /** 音量键翻页开关（与小说阅读共用；分页模式音量上/下 = 上/下一页，关闭恢复系统音量）。 */
+  @Local volumeKeyPaging: boolean = false;
   /** 当前章图片 / 邻章预载缓存（引用替换驱动翻页容器刷新）。 */
   @Local curImages: string[] = [];
   @Local prevImages: string[] = [];
@@ -169,6 +173,8 @@ export struct ComicPage {
   /** 上下滚动模式数据源与滚动控制器。 */
   private verticalSource: FqComicImageSource = new FqComicImageSource();
   private verticalScroller: Scroller = new Scroller();
+  /** 外部动画翻页触发器（音量键）：FqComicFlip 挂载时注册，走触区点击同款动画。 */
+  private flipTurn: FqFlipTurnController = new FqFlipTurnController();
   /** 「已经是最后一话」提示去重（跳章/重建时复位）。 */
   private verticalEndedToastOnce: boolean = false;
   /** 图片预解码缓存（URL → PixelMap，翻页提交同帧渲染）。 */
@@ -182,6 +188,8 @@ export struct ComicPage {
   /** 预解码失败 toast 只提示一次（诊断通道）。 */
   private decodeFailToastShown: boolean = false;
   private disposed: boolean = false;
+  /** 页面当前可见（NavDestination onShown/onHidden 维护；被压栈隐藏时注销音量键拦截）。 */
+  private pageShown: boolean = true;
 
   aboutToAppear(): void {
     this.bookId = ComicNavParams.id;
@@ -210,6 +218,7 @@ export struct ComicPage {
     FqReaderStore.init(getContext(this));
     FqReadStatsStore.init(getContext(this));
     this.comicFlipIndex = FqReaderStore.getSettings().comicFlipIndex;
+    this.volumeKeyPaging = FqReaderStore.getSettings().volumeKeyPaging;
     this.updateZones();
     this.refreshFooterStatus();
     this.clockTimer = setInterval((): void => {
@@ -226,6 +235,8 @@ export struct ComicPage {
     this.disposed = true;
     this.releasePixelCache();
     this.applySystemBar(true);
+    // 页面销毁兜底注销音量键拦截（onHidden 被跳过时仍能恢复系统音量）
+    FqVolumeKeyPaging.disable();
     this.loadToken += 1;
     this.saveProgressNow();
     fqComicSettingsBus.handler = null;
@@ -253,6 +264,14 @@ export struct ComicPage {
         this.onReadBarAction(key);
       },
       backPressed: (): boolean => this.handleBackPressed(),
+      onShown: (): void => {
+        this.pageShown = true;
+        this.syncVolumeKeyConsumer();
+      },
+      onHidden: (): void => {
+        this.pageShown = false;
+        this.syncVolumeKeyConsumer();
+      },
     }) {
       // 外层：跟随容器（呼出菜单时被标题栏压缩，实测下压量）
       Stack() {
@@ -266,6 +285,7 @@ export struct ComicPage {
               snapshotPrefix: 'fq_comic',
               hasPrev: this.flipHasPrev(),
               hasNext: this.flipHasNext(),
+              turnController: this.flipTurn,
               canTurn: (isNext: boolean): boolean => this.flipTargetReady(isNext),
               headerZoneVp: this.headerZoneVp,
               footerZoneVp: this.footerZoneVp,
@@ -743,8 +763,8 @@ export struct ComicPage {
       .onReachEnd((): void => {
         this.onVerticalReachEnd();
       })
-      .onClick((): void => {
-        this.toggleMenu();
+      .onClick((event: ClickEvent): void => {
+        this.onVerticalTap(event.x);
       })
 
       if (this.verticalAppending) {
@@ -865,10 +885,70 @@ export struct ComicPage {
     return false;
   }
 
-  /** 沉浸控制：阅读时隐藏系统状态栏，菜单呼出（标题栏/工具栏出现）时恢复。 */
-  @Monitor('menuVisible')
-  onMenuVisibleChange(): void {
+  /** 沉浸控制：阅读时隐藏系统状态栏，菜单呼出（标题栏/工具栏出现）时恢复。
+   *  同时驱动音量键翻页拦截同步：菜单/半模态/开关任一变化即重算注册态。 */
+  @Monitor('menuVisible', 'comicFlipIndex', 'volumeKeyPaging', 'sheetVisible',
+    'commentSheetVisible', 'cacheSheetVisible')
+  onComicOverlayChange(): void {
     this.applySystemBar(this.menuVisible);
+    this.syncVolumeKeyConsumer();
+  }
+
+  /** 音量键翻页拦截同步：仅页面在顶 + 开关开
+   *  + 无菜单/半模态遮挡时消费音量上/下键（优先于系统音量）。 */
+  private syncVolumeKeyConsumer(): void {
+    const want: boolean = this.pageShown && this.volumeKeyPaging
+      && !this.menuVisible && !this.sheetVisible && !this.commentSheetVisible
+      && !this.cacheSheetVisible;
+    FqVolumeKeyPaging.sync(want, (): void => {
+      this.onVolumeKey(false);
+    }, (): void => {
+      this.onVolumeKey(true);
+    });
+  }
+
+  /** 音量键动作：分页模式（仿真/覆盖）走触区点击同款动画翻页，上下滚动模式整屏平滑滚动。 */
+  private onVolumeKey(next: boolean): void {
+    if (this.comicFlipIndex === 2) {
+      this.verticalScrollPage(next);
+      return;
+    }
+    const turn: ((isNext: boolean) => void) | null = this.flipTurn.turn;
+    if (turn !== null) {
+      turn(next);
+      return;
+    }
+    this.onFlipTurn(next);
+  }
+
+  /** 上下滚动模式整屏平滑滚动（音量键 / 左右触区共用）：
+   *  滚动量 = 整屏窗口高，下限 200vp 防异常小值。 */
+  private verticalScrollPage(next: boolean): void {
+    const deltaVp: number = Math.max(200, this.screenHeightVp());
+    this.getUIContext().animateTo({ duration: 300, curve: Curve.EaseOut }, (): void => {
+      this.verticalScroller.scrollBy(0, next ? deltaVp : -deltaVp);
+    });
+  }
+
+  /** 上下滚动模式点击分区：左 1/3 上滚一屏 / 右 1/3 下滚一屏 / 中区呼出菜单。 */
+  private onVerticalTap(xVp: number): void {
+    const w: number = this.screenWidthVp();
+    if (xVp < w / 3) {
+      this.verticalScrollPage(false);
+      return;
+    }
+    if (xVp >= w * 2 / 3) {
+      this.verticalScrollPage(true);
+      return;
+    }
+    this.toggleMenu();
+  }
+
+  /** 窗口宽（vp，含避让区整屏；上下滚动点击分区用）。 */
+  private screenWidthVp(): number {
+    const displayData: display.Display = display.getDefaultDisplaySync();
+    const density: number = displayData.densityPixels > 0 ? displayData.densityPixels : 1;
+    return (appState.screenWidth > 0 ? appState.screenWidth : displayData.width) / density;
   }
 
   private applySystemBar(show: boolean): void {
@@ -1096,11 +1176,25 @@ export struct ComicPage {
   /** 弹窗宿主在 Index：镜像翻页方式并注册变更处理器（弹窗内容实时刷新）。 */
   private attachSettingsBus(): void {
     fqComicSettingsBus.comicFlipIndex = this.comicFlipIndex;
+    fqComicSettingsBus.volumeKeyPaging = this.volumeKeyPaging;
     fqComicSettingsBus.handler = {
       changeFlip: (index: number): void => {
         this.changeFlip(index);
       },
+      changeVolumeKeyPaging: (on: boolean): void => {
+        this.changeVolumeKeyPaging(on);
+        fqComicSettingsBus.volumeKeyPaging = this.volumeKeyPaging;
+      },
     };
+  }
+
+  /** 音量键翻页开关：持久化（@Monitor 监听 volumeKeyPaging 触发拦截注册同步）。 */
+  private changeVolumeKeyPaging(on: boolean): void {
+    if (on === this.volumeKeyPaging) {
+      return;
+    }
+    this.volumeKeyPaging = on;
+    FqReaderStore.saveVolumeKeyPaging(on);
   }
 
   /** 切换翻页方式：0/1 仅换渲染模式，进出上下滚动模式时迁移阅读位置。 */

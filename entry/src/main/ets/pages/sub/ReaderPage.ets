@@ -18,7 +18,7 @@
  */
 
 import { common, ConfigurationConstant } from '@kit.AbilityKit';
-import { curves, display, promptAction, window } from '@kit.ArkUI';
+import { curves, display, LengthMetrics, promptAction, window } from '@kit.ArkUI';
 import { fileIo } from '@kit.CoreFileKit';
 import { batteryInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -57,9 +57,11 @@ import {
 } from '../../reader/ReaderTypes';
 import { FqPageCanvas } from '../../reader/FqPageCanvas';
 import { FqReaderFlip } from '../../reader/FqReaderFlip';
+import { FqFlipTurnController } from '../../reader/FqFlipTurn';
 import { drawing } from '@kit.ArkGraphics2D';
 import { FqMeasureFn, FqPaginationEngine, fqPageIndexForPosition } from '../../reader/FqPagination';
 import { FqColorUtils } from '../../utils/FqColorUtils';
+import { FqVolumeKeyPaging } from '../../utils/FqVolumeKeyPaging';
 
 /** 眉页「第N章」前缀匹配（N 支持数字与中文数字，量词：章节回卷集话篇）。 */
 const FQ_HEADER_PREFIX_RE: RegExp = new RegExp('^第[0-9零一二三四五六七八九十百千万]+[章节回卷集话篇]');
@@ -245,6 +247,8 @@ export struct ReaderPage {
   @Local flipIndex: number = 0;
   @Local fontIndex: number = 0;
   @Local showParagraphComment: boolean = true;
+  /** 音量键翻页开关（分页模式音量上/下 = 上/下一页；关闭恢复系统音量）。 */
+  @Local volumeKeyPaging: boolean = false;
   /** 自定义阅读主题列表（themeIndex=3 时经 customThemeId 选定生效条目）。 */
   @Local customThemes: FqCustomReaderTheme[] = [];
   @Local customThemeId: string = '';
@@ -291,6 +295,8 @@ export struct ReaderPage {
   @Local verticalAppending: boolean = false;
   private verticalSource: FqVerticalPageSource = new FqVerticalPageSource();
   private verticalScroller: Scroller = new Scroller();
+  /** 外部动画翻页触发器（音量键）：FqReaderFlip 挂载时注册，走触区点击同款动画。 */
+  private flipTurn: FqFlipTurnController = new FqFlipTurnController();
   /** 上下滚动已到最后一章提示去重。 */
   private verticalEndedToastOnce: boolean = false;
   /** 上下滚动定位中（源重建到 scrollToIndex 生效前忽略滚动回调，防进度被首屏覆写）。 */
@@ -299,6 +305,8 @@ export struct ReaderPage {
   private verticalCurPara: number = 0;
   /** 封面（跳转参数透传，阅读页→听书页显示用）。 */
   private readerCover: string = '';
+  /** 页面当前可见（NavDestination onShown/onHidden 维护；被压栈隐藏时注销音量键拦截）。 */
+  private pageShown: boolean = true;
 
   aboutToAppear(): void {
     this.bookId = ReaderNavParams.id;
@@ -345,6 +353,7 @@ export struct ReaderPage {
     this.flipIndex = settings.flipIndex;
     this.fontIndex = settings.fontIndex;
     this.showParagraphComment = settings.showParagraphComment;
+    this.volumeKeyPaging = settings.volumeKeyPaging;
     this.customThemes = settings.customThemes;
     this.customThemeId = settings.customThemeId;
     this.syncReaderColorMode();
@@ -365,6 +374,8 @@ export struct ReaderPage {
   aboutToDisappear(): void {
     this.restoreSystemColorMode();
     this.applySystemBar(true);
+    // 页面销毁兜底注销音量键拦截（onHidden 被跳过时仍能恢复系统音量）
+    FqVolumeKeyPaging.disable();
     this.loadToken += 1;
     this.saveProgressNow();
     fqReaderSettingsBus.handler = null;
@@ -425,6 +436,14 @@ export struct ReaderPage {
         this.onReadBarAction(key);
       },
       backPressed: (): boolean => this.handleBackPressed(),
+      onShown: (): void => {
+        this.pageShown = true;
+        this.syncVolumeKeyConsumer();
+      },
+      onHidden: (): void => {
+        this.pageShown = false;
+        this.syncVolumeKeyConsumer();
+      },
     }) {
       Stack() {
         // 自定义背景图（主题档 3）：垫底全幅 Cover，正文层背景透明承接
@@ -442,6 +461,7 @@ export struct ReaderPage {
             flipMode: this.flipIndex,
             hasPrev: this.flipHasPrev(),
             hasNext: this.flipHasNext(),
+            turnController: this.flipTurn,
             headerZoneVp: this.cachedMetrics.headerZoneVp,
             footerZoneVp: this.cachedMetrics.footerZoneVp,
             pageBgColor: this.pageBg(),
@@ -834,14 +854,15 @@ export struct ReaderPage {
       .layoutWeight(1)
       .scrollBar(BarState.Off)
       .cachedCount(8)
+      .fadingEdge(true, { fadingEdgeLength: LengthMetrics.vp(40) })
       .onScrollIndex((first: number, last: number): void => {
         this.onVerticalScrollIndex(first);
       })
       .onReachEnd((): void => {
         this.onVerticalReachEnd();
       })
-      .onClick((): void => {
-        this.toggleMenu();
+      .onClick((event: ClickEvent): void => {
+        this.onVerticalTap(event.x);
       })
 
       if (this.verticalAppending) {
@@ -1593,10 +1614,72 @@ export struct ReaderPage {
     return false;
   }
 
-  /** 沉浸控制：阅读时隐藏系统状态栏，菜单呼出（标题栏/工具栏出现）时恢复。 */
-  @Monitor('menuVisible')
-  onMenuVisibleChange(): void {
+  /** 沉浸控制：阅读时隐藏系统状态栏，菜单呼出（标题栏/工具栏出现）时恢复。
+   *  同时驱动音量键翻页拦截同步：菜单/半模态/开关任一变化即重算注册态。 */
+  @Monitor('menuVisible', 'flipIndex', 'volumeKeyPaging', 'sheetVisible',
+    'commentSheetVisible', 'paraSheetVisible')
+  onReaderOverlayChange(): void {
     this.applySystemBar(this.menuVisible);
+    this.syncVolumeKeyConsumer();
+  }
+
+  /** 音量键翻页拦截同步：仅页面在顶 + 开关开
+   *  + 无菜单/半模态遮挡 + 非边听边读时消费音量上/下键（优先于系统音量）。 */
+  private syncVolumeKeyConsumer(): void {
+    const want: boolean = this.pageShown && this.volumeKeyPaging
+      && !this.menuVisible && !this.sheetVisible && !this.commentSheetVisible
+      && !this.paraSheetVisible && !this.listenAlong;
+    FqVolumeKeyPaging.sync(want, (): void => {
+      this.onVolumeKey(false);
+    }, (): void => {
+      this.onVolumeKey(true);
+    });
+  }
+
+  /** 音量键动作：分页模式（仿真/横滑/覆盖）走触区点击同款动画翻页，上下滚动模式整屏平滑滚动。 */
+  private onVolumeKey(next: boolean): void {
+    if (this.flipIndex === 2) {
+      this.verticalScrollPage(next);
+      return;
+    }
+    const turn: ((isNext: boolean) => void) | null = this.flipTurn.turn;
+    if (turn !== null) {
+      turn(next);
+      return;
+    }
+    this.onFlipTurn(next);
+  }
+
+  /** 上下滚动模式整屏平滑滚动（音量键 / 左右触区共用）：
+   *  滚动量 = 页高 - 眉页 - 眉脚（可视正文区整屏），下限 200vp 防异常小值。 */
+  private verticalScrollPage(next: boolean): void {
+    const viewportVp: number = this.cachedMetrics.pageHeightPx / this.cachedMetrics.density
+      - this.cachedMetrics.headerZoneVp - this.cachedMetrics.footerZoneVp;
+    const deltaVp: number = Math.max(200, viewportVp);
+    this.getUIContext().animateTo({ duration: 300, curve: Curve.EaseOut }, (): void => {
+      this.verticalScroller.scrollBy(0, next ? deltaVp : -deltaVp);
+    });
+  }
+
+  /** 上下滚动模式点击分区：左 1/3 上滚一屏 / 右 1/3 下滚一屏 / 中区呼出菜单。 */
+  private onVerticalTap(xVp: number): void {
+    const w: number = this.screenWidthVp();
+    if (xVp < w / 3) {
+      this.verticalScrollPage(false);
+      return;
+    }
+    if (xVp >= w * 2 / 3) {
+      this.verticalScrollPage(true);
+      return;
+    }
+    this.toggleMenu();
+  }
+
+  /** 窗口宽（vp，含避让区整屏；上下滚动点击分区用）。 */
+  private screenWidthVp(): number {
+    const displayData: display.Display = display.getDefaultDisplaySync();
+    const density: number = displayData.densityPixels > 0 ? displayData.densityPixels : 1;
+    return (appState.screenWidth > 0 ? appState.screenWidth : displayData.width) / density;
   }
 
   private applySystemBar(show: boolean): void {
@@ -2269,6 +2352,10 @@ export struct ReaderPage {
         this.changeShowParagraphComment(on);
         fqReaderSettingsBus.showParagraphComment = this.showParagraphComment;
       },
+      changeVolumeKeyPaging: (on: boolean): void => {
+        this.changeVolumeKeyPaging(on);
+        fqReaderSettingsBus.volumeKeyPaging = this.volumeKeyPaging;
+      },
       pickCustomTheme: (): void => {
         this.addCustomTheme();
       },
@@ -2523,6 +2610,15 @@ export struct ReaderPage {
     }
     this.showParagraphComment = on;
     this.applySettingChange(true);
+  }
+
+  /** 音量键翻页开关：持久化（@Monitor 监听 volumeKeyPaging 触发拦截注册同步）。 */
+  private changeVolumeKeyPaging(on: boolean): void {
+    if (on === this.volumeKeyPaging) {
+      return;
+    }
+    this.volumeKeyPaging = on;
+    FqReaderStore.saveVolumeKeyPaging(on);
   }
 
   private applySettingChange(needRelayout: boolean): void {
