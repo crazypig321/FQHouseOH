@@ -1,8 +1,8 @@
 /**
  * 漫画分页画布（ComicPage 仿真/覆盖模式专用，架构对齐小说页固定绑定——不做层轮换）：
- * - PixelMap 源：NodeContainer + RenderNode 同帧 Contain 绘制。提交翻页换源即换绘
- *   （@Monitor → invalidate → 下一 vsync 出新图），不经 Image 组件跨实例换源上传，
- *   杜绝提交帧黑底透出的“闪一下”；
+ * - PixelMap 源：NodeContainer + 常驻 RenderNode 同帧 Contain 绘制。提交翻页换源只换
+ *   host.pixelMap 引用并 invalidate 标脏（draw 实时读 host 状态），不清树重建——
+ *   clearChildren + appendChild 重建当帧新节点未绘，会黑屏透出一帧（提交瞬间闪黑根因）；
  * - 字符串源（预解码未就绪/失败的 URL 回退）：退回 Image 异步加载（降级路径）；
  * - 空串：空白（无图槽位，由调用方 if 守卫保证不进来）。
  */
@@ -45,10 +45,12 @@ class FqComicCanvasRenderNode extends RenderNode {
   }
 }
 
-/** 画布宿主控制器：持绘制区尺寸与当前位图，invalidate 换渲染节点驱动重绘。 */
+/** 画布宿主控制器：持绘制区尺寸与当前位图，invalidate 标脏常驻节点驱动重绘。 */
 export class FqComicCanvasController extends NodeController {
   private rootNode: FrameNode | null = null;
   private ui: UIContext | null = null;
+  /** 常驻绘制节点（换源不重建，invalidate 标脏同帧出新图）。 */
+  private drawNode: FqComicCanvasRenderNode | null = null;
   /** 绘制区尺寸（px）。 */
   public widthPx: number = 0;
   public heightPx: number = 0;
@@ -57,16 +59,28 @@ export class FqComicCanvasController extends NodeController {
 
   makeNode(uiContext: UIContext): FrameNode {
     this.ui = uiContext;
+    this.drawNode = null;
     this.rootNode = new FrameNode(uiContext);
     this.applyRootFrame();
-    this.mountRenderNode();
+    this.mountDrawNode();
     return this.rootNode;
   }
 
-  /** 尺寸/位图变化后重绘（根 frame 同步 + 清子节点挂新渲染节点）。 */
+  /** 尺寸/位图变化后重绘：同步 frame 后标脏常驻节点（不清树——清树重建当帧不绘，黑屏一帧）。 */
   public invalidate(): void {
     this.applyRootFrame();
-    this.mountRenderNode();
+    this.mountDrawNode();
+    const node: FqComicCanvasRenderNode | null = this.drawNode;
+    const ui: UIContext | null = this.ui;
+    if (node !== null && ui !== null) {
+      node.frame = {
+        x: 0,
+        y: 0,
+        width: ui.px2vp(this.widthPx),
+        height: ui.px2vp(this.heightPx),
+      };
+      node.invalidate();
+    }
   }
 
   private applyRootFrame(): void {
@@ -86,15 +100,15 @@ export class FqComicCanvasController extends NodeController {
     }
   }
 
-  private mountRenderNode(): void {
+  /** 首挂载创建常驻绘制节点（幂等：已存在则跳过）。 */
+  private mountDrawNode(): void {
     const root: FrameNode | null = this.rootNode;
     const ui: UIContext | null = this.ui;
-    if (root === null || ui === null) {
+    if (root === null || ui === null || this.drawNode !== null) {
       return;
     }
     const renderNode = root.getRenderNode();
     if (renderNode !== null) {
-      renderNode.clearChildren();
       const node: FqComicCanvasRenderNode = new FqComicCanvasRenderNode(this);
       // 渲染节点须显式设 frame（vp）：0 尺寸节点被裁剪不绘制（黑屏根因）
       node.frame = {
@@ -104,6 +118,7 @@ export class FqComicCanvasController extends NodeController {
         height: ui.px2vp(this.heightPx),
       };
       renderNode.appendChild(node);
+      this.drawNode = node;
     }
   }
 }

@@ -3,7 +3,7 @@
  * - 正文：整页图片（Contain，纯黑底，显式定高不随菜单呼出的容器
  *   resize 缩放），一页一张图；邻图预解码为 PixelMap 经 FqComicCanvas 同帧绘制
  *   （提交翻页换源即换绘，无 Image 跨实例换源上传闪帧；未就绪回退 URL 异步加载兜底）；
- * - 翻页方式：0 仿真 / 1 覆盖（FqReaderFlip flipMode=0/2）/ 2 上下滚动
+ * - 翻页方式：0 仿真 / 1 覆盖（FqComicFlip flipMode=0/2）/ 2 上下滚动
  *   （webtoon：List + LazyForEach 整章图片连续纵向滚动，滚到章尾自动追加下一话）；
  * - 眉页（章节名）/眉脚（时钟/电量/章内图序），目录半模态、漫评半模态、
  *   「漫画设置」公共弹窗（仅翻页方式）、沉浸状态栏、进度持久化，
@@ -40,7 +40,7 @@ import {
 } from '../../core/FqComicDownloader';
 import { appState } from '../../entryability/AppState';
 import { DialogManager } from '../../utils/DialogUtils';
-import { FqReaderFlip } from '../../reader/FqReaderFlip';
+import { FqComicFlip } from '../../reader/FqComicFlip';
 import { FqComicCanvas } from '../../reader/FqComicCanvas';
 import { fqComicSettingsBus } from '../../core/FqComicSettingsBus';
 
@@ -261,7 +261,7 @@ export struct ComicPage {
           if (this.comicFlipIndex === 2) {
             this.VerticalBody()
           } else {
-            FqReaderFlip({
+            FqComicFlip({
               flipMode: this.comicFlipIndex === 0 ? 0 : 2,
               snapshotPrefix: 'fq_comic',
               hasPrev: this.flipHasPrev(),
@@ -448,7 +448,7 @@ export struct ComicPage {
     });
   }
 
-  /** 翻页目标页图源是否就绪（FqReaderFlip canTurn 门禁）：
+  /** 翻页目标页图源是否就绪（FqComicFlip canTurn 门禁）：
    *  已解码 / 无图 / 曾失败（回退 URL 兜底）→ 放行；未就绪 → 拒绝并触发预解码。 */
   private flipTargetReady(isNext: boolean): boolean {
     const url: string = this.imageForSlot(isNext ? 1 : -1);
