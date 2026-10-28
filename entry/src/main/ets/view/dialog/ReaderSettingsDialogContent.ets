@@ -2,8 +2,8 @@
  * 「阅读设置」弹窗内容（经 utils/DialogUtils 的 DialogManager.OpenDialog('阅读设置') 打开，
  * 由宿主页 CustomContentDialog 装配：无标题无按钮仅内容区，悬于工具条上方居中）：
  * 字号/行距/主题/字体/翻页/段评六行；当前值经 @Param 注入、变更经 @Event 回调宿主页；
- * 主题行为横向滚动 List + ForEach（@Computed 选项，键含名称/图路径，改名换图即重建）：
- * 添加卡片 + 预设档 + 自定义主题列表（缩略图按应生效模式取图）；
+ * 主题行为「添加」固定卡片 + 横向滚动 List + ForEach（@Computed 选项，键含名称/图路径，改名换图即重建）：
+ * 预设档 + 自定义主题列表（缩略图按应生效模式取图）；添加卡片固定在前，滑动主题时不随滚动划走；
  * 配色跟随系统深浅色（弹窗卡片为系统色），阅读主题常量集中于此导出供宿主页共用。
  */
 import { FQ_FONT_OPTIONS, FqFontOption } from '../../core/FqOnlineParser';
@@ -37,9 +37,9 @@ export function fqEffectiveReaderTheme(themeIndex: number, systemDark: boolean):
   return FQ_READER_THEMES[index] ?? FQ_READER_THEMES[0];
 }
 
-/** 主题行选项：预设档 / 自定义主题 / 添加入口。 */
+/** 主题行选项：预设档 / 自定义主题。 */
 export class FqThemeOption {
-  /** 'preset' 预设档 / 'custom' 自定义主题 / 'add' 添加入口。 */
+  /** 'preset' 预设档 / 'custom' 自定义主题。 */
   kind: string = 'preset';
   /** 预设档主题下标（-1 跟随 / 0 纸白 / 1 米黄 / 2 夜间）。 */
   presetIndex: number = 0;
@@ -77,13 +77,10 @@ export struct ReaderSettingsDialogContent {
   /** 长按自定义主题：编辑参数（名称/字色/字号/字体/行距）。 */
   @Event editCustomThemeChange: (id: string) => void = (_id: string): void => {};
 
-  /** 主题行选项（添加卡片 + 预设 4 项 + 自定义主题列表；key 含名称/图路径，改名即重建项）。 */
+  /** 主题行滚动选项（预设 4 项 + 自定义主题列表；key 含名称/图路径，改名即重建项）。「添加」卡片固定在列表前端不随滚动。 */
   @Computed
   get themeOptions(): FqThemeOption[] {
     const options: FqThemeOption[] = [];
-    const addOption: FqThemeOption = new FqThemeOption();
-    addOption.kind = 'add';
-    options.push(addOption);
     const presetIndexes: number[] = [-1, 0, 1, 2];
     for (const presetIndex of presetIndexes) {
       const option: FqThemeOption = new FqThemeOption();
@@ -147,6 +144,7 @@ export struct ReaderSettingsDialogContent {
           .fontSize(14)
           .fontColor(themeUtils.textColor)
           .width(36)
+        this.AddThemeCard()
         List({ space: 12 }) {
           ForEach(this.themeOptions, (option: FqThemeOption) => {
             ListItem() {
@@ -231,9 +229,6 @@ export struct ReaderSettingsDialogContent {
   private optionKeyOf(option: FqThemeOption): string {
     if (option.kind === 'custom' && option.custom !== null) {
       return `c_${option.custom.id}_${option.custom.name}_${option.custom.lightBgPath}_${option.custom.darkBgPath}`;
-    }
-    if (option.kind === 'add') {
-      return 'add';
     }
     return `p_${option.presetIndex}`;
   }
@@ -325,32 +320,37 @@ export struct ReaderSettingsDialogContent {
         .onAction((): void => {
           this.editCustomThemeChange(option.custom !== null ? option.custom.id : '');
         }))
-    } else {
-      Column({ space: 4 }) {
-        Column() {
-          SymbolGlyph($r('sys.symbol.plus'))
-            .fontSize(18)
-            .fontColor([themeUtils.terTextColor])
-        }
-        .width(34)
-        .height(34)
-        .borderRadius(17)
-        .backgroundColor($r('app.color.reader_chip_bg'))
-        .border({
-          width: 1,
-          color: themeUtils.terTextColor,
-          style: BorderStyle.Dashed,
-        })
-        .justifyContent(FlexAlign.Center)
-        Text('添加')
-          .fontSize(10)
-          .fontColor(themeUtils.textColor)
-          .opacity(0.6)
-      }
-      .alignItems(HorizontalAlign.Center)
-      .onClick((): void => {
-        this.addCustomThemeChange();
-      })
     }
+  }
+
+  /** 「添加」固定卡片：置于主题滚动列表前端，滑动主题时不随滚动划走。 */
+  @Builder
+  private AddThemeCard() {
+    Column({ space: 4 }) {
+      Column() {
+        SymbolGlyph($r('sys.symbol.plus'))
+          .fontSize(18)
+          .fontColor([themeUtils.terTextColor])
+      }
+      .width(34)
+      .height(34)
+      .borderRadius(17)
+      .backgroundColor($r('app.color.reader_chip_bg'))
+      .border({
+        width: 1,
+        color: themeUtils.terTextColor,
+        style: BorderStyle.Dashed,
+      })
+      .justifyContent(FlexAlign.Center)
+      Text('添加')
+        .fontSize(10)
+        .fontColor(themeUtils.textColor)
+        .opacity(0.6)
+    }
+    .alignItems(HorizontalAlign.Center)
+    .margin({ right: 4 })
+    .onClick((): void => {
+      this.addCustomThemeChange();
+    })
   }
 }

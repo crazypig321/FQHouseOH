@@ -62,6 +62,8 @@ const PORT: number = 8080;
 const REQUEST_TIMEOUT_MS: number = 20000;
 /** 短超时（ms）：装饰性数据（失败静默降级）与可回退链路（chapterText v1→legacy）。 */
 export const FQ_SHORT_TIMEOUT_MS: number = 10000;
+/** 漫画章节超时（ms）：后端需下载解密整话图片后才应答，长条漫话数多、耗时远超普通请求。 */
+const COMIC_CONTENT_TIMEOUT_MS: number = 60000;
 /** rankCatalog 内存 TTL（ms）：每次进排行榜页必拉，短缓存内直接复用。 */
 const RANK_CATALOG_TTL_MS: number = 30000;
 const MAX_CONCURRENCY: number = 6;
@@ -689,7 +691,7 @@ export class FqBackend {
   public async chapterImages(itemId: string): Promise<string[]> {
     const query: string = `source=${encodeURIComponent('番茄')}&item_id=${encodeURIComponent(itemId)}`
       + `&tab=${encodeURIComponent('漫画')}&cmd=1`;
-    const payload: Record<string, Object> = await this.getJson('/api/content', query);
+    const payload: Record<string, Object> = await this.getJson('/api/content', query, COMIC_CONTENT_TIMEOUT_MS);
     const rawImages: string[] = fqParseChapterImages(payload);
     const images: string[] = [];
     for (const raw of rawImages) {

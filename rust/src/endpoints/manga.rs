@@ -341,6 +341,12 @@ struct MangaPicInfo {
     pic_url: String,
 }
 
+/// Upper bound on concurrent chapter-image downloads. A long-strip chapter
+/// carries dozens of images and the serial loop pushed the whole
+/// /api/content?tab=漫画&cmd=1 call past the app-side request timeout on
+/// first load, so the chapter never finished loading.
+const IMAGE_FETCH_CONCURRENCY: usize = 6;
+
 /// Manga.parseAndDownload: extracts the picInfos JSON, downloads and decrypts
 /// every image, writes them to the src dir, and returns the served URLs / HTML.
 async fn parse_and_download(ctx: &Ctx, content: &str, show_html: bool) -> (Vec<String>, String) {
@@ -373,6 +379,32 @@ async fn parse_and_download(ctx: &Ctx, content: &str, show_html: bool) -> (Vec<S
         return (Vec::new(), String::new());
     }
 
+    // Bounded-parallel download, results kept in pic_infos order: reading
+    // order must match the upstream chapter, and one slow image must not
+    // block the rest of the batch.
+    let total = pic_infos.len();
+    let mut bodies: Vec<Option<Vec<u8>>> = vec![None; total];
+    let mut next = 0usize;
+    while next < total {
+        let end = (next + IMAGE_FETCH_CONCURRENCY).min(total);
+        let mut batch = tokio::task::JoinSet::new();
+        for i in next..end {
+            let url = pic_infos[i].pic_url.clone();
+            let up = ctx.up.clone();
+            batch.spawn(async move {
+                (i, download_image(up, &url).await)
+            });
+        }
+        while let Some(joined) = batch.join_next().await {
+            if let Ok((i, body)) = joined {
+                if let Ok(data) = body {
+                    bodies[i] = Some(data);
+                }
+            }
+        }
+        next = end;
+    }
+
     let mut urls: Vec<String> = Vec::new();
     let mut html = String::new();
     let mut last_written: Option<std::path::PathBuf> = None;
@@ -380,9 +412,9 @@ async fn parse_and_download(ctx: &Ctx, content: &str, show_html: bool) -> (Vec<S
         if pic.pic_url.is_empty() {
             continue;
         }
-        let enc = match download_image(ctx, &pic.pic_url).await {
-            Ok(d) => d,
-            Err(_) => continue,
+        let enc = match bodies[i].take() {
+            Some(d) => d,
+            None => continue,
         };
         if enc.len() <= 100 {
             continue;
@@ -446,8 +478,8 @@ async fn write_image_once(path: &std::path::Path, image: &[u8]) -> Result<(), St
 }
 
 /// Manga.download: fetches an image body with the Windows browser UA.
-async fn download_image(ctx: &Ctx, url: &str) -> ApiResult<Vec<u8>> {
-    Upstream::new(ctx.up.clone())
+async fn download_image(up: std::sync::Arc<crate::upstream::UpstreamClient>, url: &str) -> ApiResult<Vec<u8>> {
+    Upstream::new(up)
         .raw(&UpstreamRequestSpec {
             mode: UpstreamMode::NoSign,
             raw_url: Some(url.to_string()),
