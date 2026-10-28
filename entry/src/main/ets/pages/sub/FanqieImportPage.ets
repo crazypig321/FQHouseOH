@@ -25,6 +25,7 @@ import {
   FqFanqieImportService,
   FqFanqieMergeResult,
 } from '../../core/FqFanqieImport';
+import { fqExportTextFile } from '../../core/FqCacheExport';
 
 /** 顶部内容起始偏移（标题栏下方）。 */
 const FQ_FANQIE_IMPORT_TOP_INSET: number = 56;
@@ -36,6 +37,8 @@ const FQ_FANQIE_IMPORT_ROW_DIVIDER_INSET: number = 60;
 const FQ_FANQIE_LOGIN_URL: string = 'https://fanqienovel.com/main/writer/login';
 /** 导入文件大小上限（与采集文档一致）。 */
 const FQ_FANQIE_IMPORT_MAX_BYTES: number = 16 * 1024 * 1024;
+/** 采集文件导出目录（展示文案）。 */
+const FQ_FANQIE_EXPORT_DIR_TEXT: string = 'Download/FQHouseOH';
 /** 登录页主框架跳转域名白名单（后缀匹配）。 */
 const FQ_FANQIE_LOGIN_DOMAINS: string[] =
   ['fanqienovel.com', 'snssdk.com', 'bytedance.com', 'zijieapi.com'];
@@ -68,6 +71,12 @@ function fqFanqieImportFormatIso(iso: string): string {
 function fqFanqieImportCreatedAt(capture: FqFanqieCapture): string {
   const value: Object | undefined = capture.document['createdAt'];
   return typeof value === 'string' ? value : '';
+}
+
+/** 导出文件名时间戳（yyyyMMdd_HHmmss，与备份页一致）。 */
+function fqFanqieImportFileStamp(now: Date): string {
+  return `${now.getFullYear()}${fqFanqieImportPad(now.getMonth() + 1)}${fqFanqieImportPad(now.getDate())}` +
+    `_${fqFanqieImportPad(now.getHours())}${fqFanqieImportPad(now.getMinutes())}${fqFanqieImportPad(now.getSeconds())}`;
 }
 
 @Builder
@@ -178,6 +187,19 @@ export struct FanqieImportPage {
                     .enabled(this.busy.length === 0)
                     .onClick((): void => {
                       this.runPrepareFromLast();
+                    })
+                  Button('导出采集文件')
+                    .fontSize(14)
+                    .fontColor(appState.accentColor)
+                    .backgroundColor(Color.Transparent)
+                    .border({ width: 1, color: FqColorUtils.withOpacity(appState.accentColor, 0.5) })
+                    .height(38)
+                    .borderRadius(12)
+                    .width('100%')
+                    .margin({ top: 8 })
+                    .enabled(this.busy.length === 0)
+                    .onClick((): void => {
+                      this.confirmExportCapture();
                     })
                 }
                 .padding(16)
@@ -446,6 +468,40 @@ export struct FanqieImportPage {
     this.messageIsError = false;
     this.message = `导入完成：新增书架 ${result.shelfAdded} 本、补全封面 ${result.coverFilled} 本、` +
       `写入阅读进度 ${result.progressAdded} 本。\n本机已有记录保持不变，可重复导入。`;
+  }
+
+  /** 导出前弹窗确认（DialogManager 公共确认弹窗）。 */
+  private confirmExportCapture(): void {
+    if (this.busy.length > 0 || this.lastCapture === null) {
+      return;
+    }
+    DialogManager.ShowConfirm('导出采集文件',
+      `采集结果将导出为 JSON 文件（不含登录凭证），保存到 ${FQ_FANQIE_EXPORT_DIR_TEXT} 目录；` +
+        '传到其他设备后，可在本页通过「从历史文件导入」解析合并。',
+      '导出', (): void => {
+        this.runExportCapture();
+      });
+  }
+
+  /** 导出最近一次采集 JSON 到下载目录（对齐 fqapp「导出原始数据」）。 */
+  private async runExportCapture(): Promise<void> {
+    const capture: FqFanqieCapture | null = this.lastCapture;
+    if (capture === null || this.busy.length > 0) {
+      return;
+    }
+    this.busy = '正在导出采集文件…';
+    try {
+      const name: string = `fanqie-library-${fqFanqieImportFileStamp(new Date())}.json`;
+      await fqExportTextFile(getContext(this), name, capture.encode());
+      this.messageIsError = false;
+      this.message = `采集文件已保存到 ${FQ_FANQIE_EXPORT_DIR_TEXT}/${name}`;
+    } catch (error) {
+      const err = error as BusinessError;
+      this.messageIsError = true;
+      this.message = err.message.length > 0 ? err.message : '导出失败，请重试';
+    } finally {
+      this.busy = '';
+    }
   }
 
   /** 采集摘要文案（时间/响应数/停止原因）。 */

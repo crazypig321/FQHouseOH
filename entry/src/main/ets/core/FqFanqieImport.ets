@@ -18,7 +18,7 @@ import fq from 'libfqapi_napi.so';
 import { FqBackend, FqRequestError } from './FqBackend';
 import { FqChapter } from '../model/FqModels';
 import { FqShelfItem, FqShelfStore } from './FqShelfStore';
-import { FqReaderStore } from './FqReaderStore';
+import { FqReaderProgress, FqReaderStore } from './FqReaderStore';
 import { fqAsArray, fqAsInt, fqAsRecord } from './FqJson';
 
 const FQ_FANQIE_LIBRARY_PATH: string = '/api/v1/account/fanqie/library';
@@ -106,6 +106,15 @@ function fqFanqieCoverOk(cover: string): boolean {
   }
   const host: string = match[1];
   return host.length > 0 && host.indexOf('@') < 0;
+}
+
+/** 整书百分比 0..100：章首续读口径（章内比例 0）；参数无效返回 -1（书架角标不显示）。 */
+function fqFanqiePercent(episode: number, chapterTotal: number): number {
+  if (episode < 0 || chapterTotal <= 0) {
+    return -1;
+  }
+  const percent: number = Math.round((episode / chapterTotal) * 100);
+  return Math.min(100, Math.max(0, percent));
 }
 
 /** 采集文档（fqapp.fanqie-library-capture v2 兼容；sources 内联载荷）。 */
@@ -520,6 +529,8 @@ export class FqFanqieBook {
   chapterId: string = '';
   /** 已匹配的本应用目录章节下标（-1 未定位/未匹配）。 */
   episode: number = -1;
+  /** 定位时拉取的目录总章数（0 = 未拉取；合并时计算整书百分比）。 */
+  chapterTotal: number = 0;
   /** 预览文案（'第 N 章'；空 = 未定位）。 */
   epText: string = '';
 
@@ -771,6 +782,7 @@ export class FqFanqieImportService {
       try {
         const chapters: FqChapter[] =
           await FqBackend.get().directoryChapters(record.id, '小说');
+        record.chapterTotal = chapters.length;
         let index: number = -1;
         for (let i: number = 0; i < chapters.length; i++) {
           if (chapters[i].itemId === record.chapterId) {
@@ -793,7 +805,8 @@ export class FqFanqieImportService {
     return new FqFanqieImportPreview(records, matched, unresolved, parser.skipped, sourceLabel);
   }
 
-  /** 合并到本机：书架只补缺失（已有条目回填空封面），进度仅本机无记录时写入。 */
+  /** 合并到本机：书架只补缺失（已有条目回填空封面），进度仅本机无记录时写入；
+   *  旧导入（已有进度但无整书百分比）按本次定位结果回填百分比，不改动本机阅读位置。 */
   public merge(preview: FqFanqieImportPreview): FqFanqieMergeResult {
     let shelfAdded: number = 0;
     let coverFilled: number = 0;
@@ -806,9 +819,15 @@ export class FqFanqieImportService {
       } else if (record.cover.length > 0 && FqShelfStore.updateCover(record.id, record.cover)) {
         coverFilled++;
       }
-      if (record.episode >= 0 && FqReaderStore.getProgress(record.id).chapterIndex < 0) {
-        FqReaderStore.saveProgress(record.id, record.episode, '');
+      const progress: FqReaderProgress = FqReaderStore.getProgress(record.id);
+      if (record.episode >= 0 && progress.chapterIndex < 0) {
+        // 整书百分比：从定位章节开头续读（章内比例 0），总章数未知存 -1 不显示角标
+        FqReaderStore.saveProgress(record.id, record.episode, '',
+          fqFanqiePercent(record.episode, record.chapterTotal));
         progressAdded++;
+      } else if (record.episode >= 0 && progress.percent < 0 && record.chapterTotal > 0) {
+        FqReaderStore.saveProgress(record.id, progress.chapterIndex, progress.domPos,
+          fqFanqiePercent(progress.chapterIndex, record.chapterTotal));
       }
     }
     return new FqFanqieMergeResult(shelfAdded, coverFilled, progressAdded);
