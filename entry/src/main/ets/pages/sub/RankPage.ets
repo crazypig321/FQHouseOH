@@ -13,8 +13,7 @@ import {
   FqRankTab,
   fqEmptyRankCatalog,
 } from '../../model/FqModels';
-import { DetailNavParams, ROUTE_DETAIL } from '../../model/FqNavModels';
-import { NavPathUtils } from '../../utils/NavPathUtils';
+import { fqPushBookOrDetail } from '../../model/FqNavModels';
 import { CommonNav, titleBarOf } from '../../view/CommonNav';
 import { CommonLoading } from '../../view/CommonCom';
 import { appState } from '../../entryability/AppState';
@@ -340,16 +339,12 @@ export struct RankPage {
   }
 
   private openDetail(entry: FqRankEntry): void {
-    DetailNavParams.title = entry.title;
-    DetailNavParams.cover = entry.cover;
     if (entry.kind === 'video' || entry.kind === 'manju') {
-      DetailNavParams.id = entry.seriesId.length > 0 ? entry.seriesId : entry.id;
-      DetailNavParams.kind = entry.kind;
-    } else {
-      DetailNavParams.id = entry.id;
-      DetailNavParams.kind = 'book';
+      fqPushBookOrDetail(entry.seriesId.length > 0 ? entry.seriesId : entry.id, entry.kind,
+        entry.title, entry.cover);
+      return;
     }
-    NavPathUtils.push(ROUTE_DETAIL);
+    fqPushBookOrDetail(entry.id, 'book', entry.title, entry.cover);
   }
 
   /** 目录加载：novel homepage(tab_type=2) 深搜 rank_with_category_data。 */

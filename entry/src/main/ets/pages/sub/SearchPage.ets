@@ -12,8 +12,7 @@ import { FqMediaItem, FqSearchTab } from '../../model/FqModels';
 import { fqMediaIdFromSearch } from '../../core/FqParser';
 import { FqMediaDataSource } from '../../core/FqMediaDataSource';
 import { FqItemCard } from '../../view/FqItemCard';
-import { DetailNavParams, FqTitleBarOptions, ROUTE_DETAIL } from '../../model/FqNavModels';
-import { NavPathUtils } from '../../utils/NavPathUtils';
+import { fqPushBookOrDetail, FqTitleBarOptions } from '../../model/FqNavModels';
 import { CommonSearch, CommonLoading } from '../../view/CommonCom';
 import { CommonNav } from '../../view/CommonNav';
 import { appState } from '../../entryability/AppState';
@@ -467,11 +466,7 @@ export struct SearchPage {
   }
 
   private openDetail(item: FqMediaItem): void {
-    DetailNavParams.id = item.id;
-    DetailNavParams.kind = item.kind;
-    DetailNavParams.title = item.title;
-    DetailNavParams.cover = item.cover;
-    NavPathUtils.push(ROUTE_DETAIL);
+    fqPushBookOrDetail(item.id, item.kind, item.title, item.cover);
   }
 
   // ----- 搜索历史（preferences） -----

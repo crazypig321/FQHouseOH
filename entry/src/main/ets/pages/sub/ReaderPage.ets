@@ -247,8 +247,11 @@ export struct ReaderPage {
   @Local flipIndex: number = 0;
   @Local fontIndex: number = 0;
   @Local showParagraphComment: boolean = true;
-  /** 音量键翻页开关（分页模式音量上/下 = 上/下一页；关闭恢复系统音量）。 */
-  @Local volumeKeyPaging: boolean = false;
+  /** 音量键翻页开关（AppState 全局共享：设置页/小说阅读/漫画阅读三处开关实时同步）。 */
+  @Computed
+  get volumeKeyPaging(): boolean {
+    return appState.volumeKeyPaging;
+  }
   /** 自定义阅读主题列表（themeIndex=3 时经 customThemeId 选定生效条目）。 */
   @Local customThemes: FqCustomReaderTheme[] = [];
   @Local customThemeId: string = '';
@@ -353,7 +356,6 @@ export struct ReaderPage {
     this.flipIndex = settings.flipIndex;
     this.fontIndex = settings.fontIndex;
     this.showParagraphComment = settings.showParagraphComment;
-    this.volumeKeyPaging = settings.volumeKeyPaging;
     this.customThemes = settings.customThemes;
     this.customThemeId = settings.customThemeId;
     this.syncReaderColorMode();
@@ -2352,10 +2354,6 @@ export struct ReaderPage {
         this.changeShowParagraphComment(on);
         fqReaderSettingsBus.showParagraphComment = this.showParagraphComment;
       },
-      changeVolumeKeyPaging: (on: boolean): void => {
-        this.changeVolumeKeyPaging(on);
-        fqReaderSettingsBus.volumeKeyPaging = this.volumeKeyPaging;
-      },
       pickCustomTheme: (): void => {
         this.addCustomTheme();
       },
@@ -2610,15 +2608,6 @@ export struct ReaderPage {
     }
     this.showParagraphComment = on;
     this.applySettingChange(true);
-  }
-
-  /** 音量键翻页开关：持久化（@Monitor 监听 volumeKeyPaging 触发拦截注册同步）。 */
-  private changeVolumeKeyPaging(on: boolean): void {
-    if (on === this.volumeKeyPaging) {
-      return;
-    }
-    this.volumeKeyPaging = on;
-    FqReaderStore.saveVolumeKeyPaging(on);
   }
 
   private applySettingChange(needRelayout: boolean): void {

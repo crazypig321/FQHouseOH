@@ -30,6 +30,7 @@ const FQ_SETTINGS_KEY_THEME: string = 'themeMode';
 const FQ_SETTINGS_KEY_THEME_COLOR: string = 'themeColor';
 const FQ_SETTINGS_KEY_THEME_CUSTOM_COLOR: string = 'themeCustomColor';
 const FQ_SETTINGS_KEY_BG_AUDIO: string = 'backgroundAudio';
+const FQ_SETTINGS_KEY_DIRECT_READ: string = 'directRead';
 const FQ_SETTINGS_KEY_UPDATE_PROXY: string = 'updateProxyDownload';
 const FQ_SETTINGS_KEY_CHANGELOG_SHOWN: string = 'changelogShownVersion';
 
@@ -48,6 +49,7 @@ export class FqAppSettingsStore {
   /** 自定义主题色 hex（themeColor=custom 时的 accentColor 值；默认番茄橙）。 */
   private static themeCustomColor: string = '#FF7A3D';
   private static backgroundAudio: boolean = true;
+  private static directRead: boolean = false;
   private static updateProxyDownload: boolean = false;
   private static changelogShownVersion: string = '';
 
@@ -82,6 +84,10 @@ export class FqAppSettingsStore {
       if (typeof rawBg === 'boolean') {
         FqAppSettingsStore.backgroundAudio = rawBg;
       }
+      const rawDirectRead: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_DIRECT_READ, false);
+      if (typeof rawDirectRead === 'boolean') {
+        FqAppSettingsStore.directRead = rawDirectRead;
+      }
       const rawProxy: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_UPDATE_PROXY, false);
       if (typeof rawProxy === 'boolean') {
         FqAppSettingsStore.updateProxyDownload = rawProxy;
@@ -95,6 +101,7 @@ export class FqAppSettingsStore {
     }
     FqAppSettingsStore.applyTheme();
     FqAppSettingsStore.applyThemeColor();
+    appState.directReadEnabled = FqAppSettingsStore.directRead;
   }
 
   /** 当前深色模式档位（0 跟随系统 / 1 浅色 / 2 深色）。 */
@@ -191,6 +198,28 @@ export class FqAppSettingsStore {
     }
     try {
       pref.putSync(FQ_SETTINGS_KEY_BG_AUDIO, enabled);
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
+  }
+
+  /** 点击书籍直接进入阅读开关（开=点小说/漫画跳过详情页直接开读，关=先进详情页）。 */
+  public static isDirectRead(): boolean {
+    return FqAppSettingsStore.directRead;
+  }
+
+  public static setDirectRead(enabled: boolean): void {
+    FqAppSettingsStore.directRead = enabled;
+    appState.directReadEnabled = enabled;
+    const pref: preferences.Preferences | null = FqAppSettingsStore.pref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.putSync(FQ_SETTINGS_KEY_DIRECT_READ, enabled);
       pref.flush().catch((_error: BusinessError): void => {
         // 落盘失败不阻断
       });

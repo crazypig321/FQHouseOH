@@ -60,7 +60,7 @@ import { FqMenu, FqMenuItem } from '../../view/CommonMenu';
 import { FqDanmakuView } from '../../view/FqDanmakuView';
 import { FqSettingRow } from '../../view/FqSettingRow';
 import { FqStoryPanel } from '../../view/FqStoryPanel';
-import { DetailNavParams, PlayerNavParams, ListenVideoNavParams, ROUTE_DETAIL, ROUTE_LISTEN_VIDEO, ROUTE_CACHED_DRAMAS } from '../../model/FqNavModels';
+import { fqPushBookOrDetail, PlayerNavParams, ListenVideoNavParams, ROUTE_LISTEN_VIDEO, ROUTE_CACHED_DRAMAS } from '../../model/FqNavModels';
 import { FqBookCommentPage, FqChapter, FqDanmaku, FqDanmakuPage, FqEpisodeCommentPage, FqEpisodeSource, FqEpisodeVariant, FqSeriesRelateBook, fqKindToTab, FqCacheTaskView } from '../../model/FqModels';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { fqAudioSession } from '../../core/FqAudioSession';
@@ -2540,11 +2540,7 @@ export struct PlayerPage {
     this.player.pause();
     // 暂停即保存续播进度（fqapp 暂停写入点；进详情页期间周期保存已停）
     this.saveCurrentProgress();
-    DetailNavParams.id = book.id;
-    DetailNavParams.kind = 'book';
-    DetailNavParams.title = book.title;
-    DetailNavParams.cover = book.cover;
-    NavPathUtils.push(ROUTE_DETAIL);
+    fqPushBookOrDetail(book.id, 'book', book.title, book.cover);
   }
 
   /** 目录为空时先拉剧集目录（tab 由 kind 映射：短剧/漫剧）。 */

@@ -6,7 +6,7 @@
  * 批量多选以 appState.isBatchMode 为单一数据源（Index 返回手势退出多选、主 TabBar 显隐共享）。
  */
 
-import { ROUTE_DETAIL, ROUTE_READER2, ROUTE_CACHE_MANAGE, DetailNavParams, ReaderNavParams } from '../model/FqNavModels';
+import { ROUTE_READER2, ROUTE_CACHE_MANAGE, fqPushBookOrDetail, ReaderNavParams } from '../model/FqNavModels';
 import { CommonNav, titleBarOf } from '../view/CommonNav';
 import { CommonSearch, CommonBlur } from '../view/CommonCom';
 import { FqMenu, FqMenuItem } from '../view/CommonMenu';
@@ -712,11 +712,7 @@ export struct ShelfPage {
       NavPathUtils.push(ROUTE_READER2);
       return;
     }
-    DetailNavParams.id = row.id;
-    DetailNavParams.kind = row.kind;
-    DetailNavParams.title = row.title;
-    DetailNavParams.cover = row.cover;
-    NavPathUtils.push(ROUTE_DETAIL);
+    fqPushBookOrDetail(row.id, row.kind, row.title, row.cover);
   }
 
   /** 标题栏下方扩展区：「书架/浏览历史」胶囊滑块 + 可展开搜索框。 */

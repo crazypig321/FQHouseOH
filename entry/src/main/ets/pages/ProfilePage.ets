@@ -10,12 +10,11 @@ import { CommonNav } from '../view/CommonNav';
 import { CommonSheet, FqSheetOptions } from '../view/sheet/CommonSheet';
 import { RefreshOverlay } from '../view/CommonCom';
 import {
-  DetailNavParams,
   FqTitleBarOptions,
+  fqPushBookOrDetail,
   ROUTE_ABOUT,
   ROUTE_CACHED_BOOKS,
   ROUTE_CACHED_DRAMAS,
-  ROUTE_DETAIL,
 } from '../model/FqNavModels';
 import { SETTINGS_TAB_INDEX } from '../model/FqTabsModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
@@ -394,11 +393,7 @@ export struct ProfilePage {
     if (entry.kind.length === 0) {
       return;
     }
-    DetailNavParams.id = entry.id;
-    DetailNavParams.kind = entry.kind;
-    DetailNavParams.title = entry.title;
-    DetailNavParams.cover = entry.cover;
-    NavPathUtils.push(ROUTE_DETAIL);
+    fqPushBookOrDetail(entry.id, entry.kind, entry.title, entry.cover);
   }
 
   private heatColor(minutes: number): ResourceColor {

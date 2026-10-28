@@ -14,11 +14,10 @@ import { CommonSheet, FqSheetOptions } from '../../view/sheet/CommonSheet';
 import { FqCatalogSheet } from '../../view/sheet/FqCatalogSheet';
 import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/sheet/FqCommentSheet';
 import {
-  DetailNavParams,
   FqTitleBarOptions,
+  fqPushBookOrDetail,
   ListenNavParams,
   ReaderNavParams,
-  ROUTE_DETAIL,
   ROUTE_READER2,
   ROUTE_CACHED_AUDIO,
 } from '../../model/FqNavModels';
@@ -1345,11 +1344,7 @@ export struct ListenPage {
     if (work.id.length === 0) {
       return;
     }
-    DetailNavParams.id = work.id;
-    DetailNavParams.kind = work.kind === 'video' ? 'video' : 'book';
-    DetailNavParams.title = work.title;
-    DetailNavParams.cover = work.cover;
-    NavPathUtils.push(ROUTE_DETAIL);
+    fqPushBookOrDetail(work.id, work.kind === 'video' ? 'video' : 'book', work.title, work.cover);
   }
 
   /** 边听边读：进阅读页跟读（播放不停，阅读页高亮朗读段落并自动翻页/跟章）。 */

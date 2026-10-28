@@ -124,8 +124,11 @@ export struct ComicPage {
   @Local totalChapters: number = 0;
   /** 翻页方式：0 仿真 / 1 覆盖 / 2 上下滚动。 */
   @Local comicFlipIndex: number = 0;
-  /** 音量键翻页开关（与小说阅读共用；分页模式音量上/下 = 上/下一页，关闭恢复系统音量）。 */
-  @Local volumeKeyPaging: boolean = false;
+  /** 音量键翻页开关（AppState 全局共享：设置页/小说阅读/漫画阅读三处开关实时同步）。 */
+  @Computed
+  get volumeKeyPaging(): boolean {
+    return appState.volumeKeyPaging;
+  }
   /** 当前章图片 / 邻章预载缓存（引用替换驱动翻页容器刷新）。 */
   @Local curImages: string[] = [];
   @Local prevImages: string[] = [];
@@ -218,7 +221,6 @@ export struct ComicPage {
     FqReaderStore.init(getContext(this));
     FqReadStatsStore.init(getContext(this));
     this.comicFlipIndex = FqReaderStore.getSettings().comicFlipIndex;
-    this.volumeKeyPaging = FqReaderStore.getSettings().volumeKeyPaging;
     this.updateZones();
     this.refreshFooterStatus();
     this.clockTimer = setInterval((): void => {
@@ -1176,25 +1178,11 @@ export struct ComicPage {
   /** 弹窗宿主在 Index：镜像翻页方式并注册变更处理器（弹窗内容实时刷新）。 */
   private attachSettingsBus(): void {
     fqComicSettingsBus.comicFlipIndex = this.comicFlipIndex;
-    fqComicSettingsBus.volumeKeyPaging = this.volumeKeyPaging;
     fqComicSettingsBus.handler = {
       changeFlip: (index: number): void => {
         this.changeFlip(index);
       },
-      changeVolumeKeyPaging: (on: boolean): void => {
-        this.changeVolumeKeyPaging(on);
-        fqComicSettingsBus.volumeKeyPaging = this.volumeKeyPaging;
-      },
     };
-  }
-
-  /** 音量键翻页开关：持久化（@Monitor 监听 volumeKeyPaging 触发拦截注册同步）。 */
-  private changeVolumeKeyPaging(on: boolean): void {
-    if (on === this.volumeKeyPaging) {
-      return;
-    }
-    this.volumeKeyPaging = on;
-    FqReaderStore.saveVolumeKeyPaging(on);
   }
 
   /** 切换翻页方式：0/1 仅换渲染模式，进出上下滚动模式时迁移阅读位置。 */

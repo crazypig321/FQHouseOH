@@ -14,7 +14,7 @@ import { FqMediaItem } from '../model/FqModels';
 import { FqMediaCard } from '../view/FqMediaCard';
 import { FqSpotlight } from '../view/FqSpotlight';
 import { CommonSearch, CommonLoading, RefreshOverlay } from '../view/CommonCom';
-import { DetailNavParams, ROUTE_DETAIL, ROUTE_SEARCH, FqTitleBarOptions } from '../model/FqNavModels';
+import { fqPushBookOrDetail, ROUTE_SEARCH, FqTitleBarOptions } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import { CommonNav } from '../view/CommonNav';
 import { appState } from '../entryability/AppState';
@@ -480,11 +480,7 @@ export struct HomePage {
   }
 
   private openDetail(item: FqMediaItem): void {
-    DetailNavParams.id = item.id;
-    DetailNavParams.kind = item.kind;
-    DetailNavParams.title = item.title;
-    DetailNavParams.cover = item.cover;
-    NavPathUtils.push(ROUTE_DETAIL);
+    fqPushBookOrDetail(item.id, item.kind, item.title, item.cover);
   }
 
   private applyFeed(): void {

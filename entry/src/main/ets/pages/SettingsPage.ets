@@ -20,6 +20,7 @@ import {
   FQ_THEME_LIGHT,
   FqAppSettingsStore,
 } from '../core/FqAppSettingsStore';
+import { FqReaderStore } from '../core/FqReaderStore';
 import { FQ_THEME_COLOR_OPTIONS, fqThemeColorOf, fqThemeColorNameOf } from '../core/FqThemeColors';
 import { FqDataCleaner } from '../core/FqDataCleaner';
 import { FqBackend } from '../core/FqBackend';
@@ -90,8 +91,12 @@ export struct SettingsPage {
             this.ThemeColorRow()
           }
 
-          this.SectionHeader('播放')
+          this.SectionHeader('阅读与播放')
           FqSettingsCard() {
+            this.DirectReadRow()
+            this.RowDivider()
+            this.VolumeKeyPagingRow()
+            this.RowDivider()
             this.BackgroundAudioRow()
           }
 
@@ -390,6 +395,78 @@ export struct SettingsPage {
     .onClick((): void => {
       this.openThemeColorMenu();
     })
+  }
+
+  /** 点击书籍直接进入阅读行（Toggle：开=点小说/漫画跳过详情页从进度直接开读）。 */
+  @Builder
+  private DirectReadRow() {
+    Row({ space: 12 }) {
+      Stack() {
+        SymbolGlyph($r('sys.symbol.book_open_fill'))
+          .fontSize(17)
+          .fontColor(['#FFF59E0B'])
+      }
+      .width(34)
+      .height(34)
+      .borderRadius(10)
+      .backgroundColor(FqColorUtils.withOpacity('#FFF59E0B', 0.12))
+
+      Column({ space: 3 }) {
+        Text('点击书籍直接进入阅读')
+          .fontSize(14.5)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('sys.color.font_primary'))
+        Text('开启后点小说和漫画跳过详情页，从上次进度继续阅读')
+          .fontSize(11.5)
+          .fontColor($r('sys.color.font_secondary'))
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+
+      Toggle({ type: ToggleType.Switch, isOn: appState.directReadEnabled })
+        .selectedColor(appState.accentColor)
+        .onChange((isOn: boolean): void => {
+          FqAppSettingsStore.setDirectRead(isOn);
+        })
+    }
+    .padding({ left: 14, right: 14, top: 11, bottom: 11 })
+    .width('100%')
+  }
+
+  /** 音量键翻页行（Toggle：与小说/漫画阅读设置弹窗内开关同源同步，全局共用）。 */
+  @Builder
+  private VolumeKeyPagingRow() {
+    Row({ space: 12 }) {
+      Stack() {
+        SymbolGlyph($r('sys.symbol.speaker_wave_2_fill'))
+          .fontSize(17)
+          .fontColor(['#FF0EA5E9'])
+      }
+      .width(34)
+      .height(34)
+      .borderRadius(10)
+      .backgroundColor(FqColorUtils.withOpacity('#FF0EA5E9', 0.12))
+
+      Column({ space: 3 }) {
+        Text('音量键翻页')
+          .fontSize(14.5)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('sys.color.font_primary'))
+        Text('分页模式音量上/下键代替翻页，与阅读页设置内开关同步')
+          .fontSize(11.5)
+          .fontColor($r('sys.color.font_secondary'))
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+
+      Toggle({ type: ToggleType.Switch, isOn: appState.volumeKeyPaging })
+        .selectedColor(appState.accentColor)
+        .onChange((isOn: boolean): void => {
+          FqReaderStore.saveVolumeKeyPaging(isOn);
+        })
+    }
+    .padding({ left: 14, right: 14, top: 11, bottom: 11 })
+    .width('100%')
   }
 
   /** 开启后台播放行（Toggle 开关：开=支持后台播放，关=无法后台播放）。 */

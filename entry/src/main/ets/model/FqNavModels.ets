@@ -136,6 +136,36 @@ export class ComicNavParams {
 }
 
 /**
+ * 书籍详情跳转分流：「点击书籍直接进入阅读」开启时，小说（book）/漫画（manga）
+ * 跳过详情页直接进对应阅读页（chapterIndex=-1 跟随上次进度续读），
+ * 其余类型（听书/短剧/漫剧等）照旧进详情页。
+ */
+export function fqPushBookOrDetail(id: string, kind: string, title: string, cover: string): void {
+  if (appState.directReadEnabled && kind === 'book') {
+    ReaderNavParams.id = id;
+    ReaderNavParams.kind = 'book';
+    ReaderNavParams.title = title;
+    ReaderNavParams.cover = cover;
+    ReaderNavParams.chapterIndex = -1;
+    ReaderNavParams.listenAlong = false;
+    NavPathUtils.push(ROUTE_READER2);
+    return;
+  }
+  if (appState.directReadEnabled && kind === 'manga') {
+    ComicNavParams.id = id;
+    ComicNavParams.title = title;
+    ComicNavParams.chapterIndex = -1;
+    NavPathUtils.push(ROUTE_COMIC);
+    return;
+  }
+  DetailNavParams.id = id;
+  DetailNavParams.kind = kind;
+  DetailNavParams.title = title;
+  DetailNavParams.cover = cover;
+  NavPathUtils.push(ROUTE_DETAIL);
+}
+
+/**
  * 单自定义菜单标题栏配置（FqTitleBarOptions 固定菜单组合的轻量替代）：
  * 标题 + 右上角单个自定义图标菜单（听视频页语速菜单等）。
  */

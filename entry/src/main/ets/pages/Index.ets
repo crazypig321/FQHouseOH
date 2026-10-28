@@ -21,6 +21,7 @@ import { FqPlaybackBall } from '../view/FqPlaybackBall';
 import { FqSheetOptions } from '../view/sheet/CommonSheet';
 import { FqChangelogSheet } from '../view/sheet/FqChangelogSheet';
 import { FqAppSettingsStore } from '../core/FqAppSettingsStore';
+import { FqReaderStore } from '../core/FqReaderStore';
 import { HSBColorPicker, HSBColorPickerLayout } from '@keke/color-picker';
 
 @Entry
@@ -268,7 +269,7 @@ struct Index {
         flipIndex: fqReaderSettingsBus.flipIndex,
         fontIndex: fqReaderSettingsBus.fontIndex,
         showParagraphComment: fqReaderSettingsBus.showParagraphComment,
-        volumeKeyPaging: fqReaderSettingsBus.volumeKeyPaging,
+        volumeKeyPaging: appState.volumeKeyPaging,
         customThemes: fqReaderSettingsBus.customThemes,
         customThemeId: fqReaderSettingsBus.customThemeId,
         followThemeBg: fqEffectiveReaderTheme(fqReaderSettingsBus.themeIndex, appState.isDark).background,
@@ -310,10 +311,7 @@ struct Index {
           }
         },
         volumeKeyPagingChange: (on: boolean): void => {
-          const handler: FqReaderSettingsHandler | null = fqReaderSettingsBus.handler;
-          if (handler !== null) {
-            handler.changeVolumeKeyPaging(on);
-          }
+          FqReaderStore.saveVolumeKeyPaging(on);
         },
         addCustomThemeChange: (): void => {
           const handler: FqReaderSettingsHandler | null = fqReaderSettingsBus.handler;
@@ -339,7 +337,7 @@ struct Index {
     } else if (key === '漫画设置') {
       ComicSettingsDialogContent({
         comicFlipIndex: fqComicSettingsBus.comicFlipIndex,
-        volumeKeyPaging: fqComicSettingsBus.volumeKeyPaging,
+        volumeKeyPaging: appState.volumeKeyPaging,
         flipChange: (index: number): void => {
           const handler: FqComicSettingsHandler | null = fqComicSettingsBus.handler;
           if (handler !== null) {
@@ -347,10 +345,7 @@ struct Index {
           }
         },
         volumeKeyPagingChange: (on: boolean): void => {
-          const handler: FqComicSettingsHandler | null = fqComicSettingsBus.handler;
-          if (handler !== null) {
-            handler.changeVolumeKeyPaging(on);
-          }
+          FqReaderStore.saveVolumeKeyPaging(on);
         },
       })
     } else if (key === '自定义颜色') {

@@ -10,8 +10,7 @@
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { FqAuthorProfile, FqAuthorWork, FqMediaItem } from '../../model/FqModels';
 import { FqMediaCard } from '../../view/FqMediaCard';
-import { AuthorNavParams, DetailNavParams, FqTitleBarOptions, ROUTE_DETAIL } from '../../model/FqNavModels';
-import { NavPathUtils } from '../../utils/NavPathUtils';
+import { AuthorNavParams, fqPushBookOrDetail, FqTitleBarOptions } from '../../model/FqNavModels';
 import { CommonNav } from '../../view/CommonNav';
 import { CommonLoading } from '../../view/CommonCom';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -296,10 +295,6 @@ export struct AuthorPage {
     if (item.id.length === 0) {
       return;
     }
-    DetailNavParams.id = item.id;
-    DetailNavParams.kind = 'book';
-    DetailNavParams.title = item.title;
-    DetailNavParams.cover = item.cover;
-    NavPathUtils.push(ROUTE_DETAIL);
+    fqPushBookOrDetail(item.id, 'book', item.title, item.cover);
   }
 }

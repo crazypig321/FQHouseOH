@@ -62,6 +62,8 @@ export default class EntryAbility extends UIAbility {
     FqAudioHistory.init(this.context);
     FqWatchedStore.init(this.context);
     FqReaderStore.init(this.context);
+    // 音量键翻页开关镜像到 AppState（设置页/小说/漫画三处开关共享）
+    appState.volumeKeyPaging = FqReaderStore.getSettings().volumeKeyPaging;
     // 应用设置（深色模式恢复 + 后台保活开关）初始化
     FqAppSettingsStore.init(this.context);
     // 章节缓存/剧集缓存（阅读即缓存 + 离线播放）初始化

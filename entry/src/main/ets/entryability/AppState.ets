@@ -49,6 +49,14 @@ export class AppState {
    *  半透明变体经 FqColorUtils.withOpacity(appState.accentColor, x) 派生） */
   @Trace accentColor: ResourceColor = $r('app.color.theme_color_orange');
 
+  /** 音量键翻页开关（设置页/小说阅读/漫画阅读三处开关实时同步；
+   *  持久化于 FqReaderStore，EntryAbility 启动时初始化，写入统一走 FqReaderStore.saveVolumeKeyPaging）。 */
+  @Trace volumeKeyPaging: boolean = false;
+
+  /** 点击书籍直接进入阅读（点小说/漫画跳过详情页，从上次进度直接开读；
+   *  持久化于 FqAppSettingsStore，开关写入统一走 FqAppSettingsStore.setDirectRead）。 */
+  @Trace directReadEnabled: boolean = false;
+
   /** 主 Ability 上下文（EntryAbility 注入：退出应用 terminateSelf 用）。 */
   public abilityContext: common.UIAbilityContext | null = null;
 

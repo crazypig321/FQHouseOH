@@ -10,6 +10,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { image } from '@kit.ImageKit';
 import { fqAsRecord, fqAsArray, fqKeys, fqStr, fqNum } from './FqJson';
+import { appState } from '../entryability/AppState';
 
 const FQ_READER_STORE_NAME: string = 'fq_reader';
 const FQ_READER_KEY_SETTINGS: string = 'settings';
@@ -274,9 +275,10 @@ export class FqReaderStore {
     FqReaderStore.persistSettings();
   }
 
-  /** 音量键翻页开关单独保存（阅读页/漫画页共用）。 */
+  /** 音量键翻页开关单独保存（阅读页/漫画页/设置页共用；同步 AppState 全局开关实时联动）。 */
   public static saveVolumeKeyPaging(enabled: boolean): void {
     FqReaderStore.settings.volumeKeyPaging = enabled;
+    appState.volumeKeyPaging = enabled;
     FqReaderStore.persistSettings();
   }
 
