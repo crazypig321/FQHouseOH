@@ -142,18 +142,22 @@ export class FqBackupWatched {
   }
 }
 
-/** 备份内单书阅读进度：章节下标 + 段内位置串 + 已读章节区间串（"a-b,c"）。 */
+/** 备份内单书阅读进度：章节下标 + 段内位置串 + 已读章节区间串（"a-b,c"）+ 整书百分比。 */
 export class FqBackupReaderProgress {
   readonly bookId: string;
   readonly chapterIndex: number;
   readonly domPos: string;
   readonly readRanges: string;
+  /** 整书阅读百分比 0..100（书架封面角标）；-1 = 旧备份未记录。 */
+  readonly percent: number;
 
-  constructor(bookId: string, chapterIndex: number, domPos: string, readRanges: string) {
+  constructor(bookId: string, chapterIndex: number, domPos: string, readRanges: string,
+    percent: number = -1) {
     this.bookId = bookId;
     this.chapterIndex = chapterIndex;
     this.domPos = domPos;
     this.readRanges = readRanges;
+    this.percent = percent;
   }
 }
 
@@ -381,7 +385,7 @@ export class FqLibraryBackup {
         continue;
       }
       reader.push(new FqBackupReaderProgress(bookId, progress.chapterIndex, progress.domPos,
-        fqEncodeReadRanges(FqReaderStore.getReadChapters(bookId))));
+        fqEncodeReadRanges(FqReaderStore.getReadChapters(bookId)), progress.percent));
     }
     const readerSettings: FqReaderSettings = FqReaderStore.getSettings();
     // 自定义阅读主题：双模式参数（bgPath 取 basename）+ 背景图 base64 内嵌
@@ -504,6 +508,9 @@ export class FqLibraryBackup {
       rec['chapterIndex'] = entry.chapterIndex;
       rec['domPos'] = entry.domPos;
       rec['read'] = entry.readRanges;
+      if (entry.percent >= 0) {
+        rec['percent'] = entry.percent;
+      }
       reader.push(rec);
     }
     root['reader'] = reader;
@@ -689,10 +696,20 @@ export class FqLibraryBackup {
         throw new Error('备份中有重复的阅读进度');
       }
       readerIds.add(bookId);
+      // 整书百分比（书架封面角标）：旧备份缺省 -1
+      const percentRaw: Object | undefined = rec['percent'];
+      let percent: number = -1;
+      if (percentRaw !== undefined && typeof percentRaw === 'number') {
+        if (percentRaw < 0 || percentRaw > 100 || Math.trunc(percentRaw) !== percentRaw) {
+          throw new Error('备份字段 percent 无效');
+        }
+        percent = percentRaw;
+      }
       reader.push(new FqBackupReaderProgress(bookId,
         fqBackupCheckInt(rec, 'chapterIndex', 2147483647),
         fqBackupCheckText(rec, 'domPos'),
-        fqBackupCheckText(rec, 'read')));
+        fqBackupCheckText(rec, 'read'),
+        percent));
     }
     let excluded: number = 0;
     if (root['excludedLocalRecords'] !== undefined) {
@@ -886,7 +903,7 @@ export class FqLibraryBackup {
     let readerAdded: number = 0;
     for (const entry of data.reader) {
       if (FqReaderStore.getProgress(entry.bookId).chapterIndex < 0) {
-        FqReaderStore.saveProgress(entry.bookId, entry.chapterIndex, entry.domPos);
+        FqReaderStore.saveProgress(entry.bookId, entry.chapterIndex, entry.domPos, entry.percent);
         const chapters: Set<number> = fqDecodeReadRanges(entry.readRanges);
         if (chapters.size > 0) {
           FqReaderStore.saveReadChapters(entry.bookId, chapters);

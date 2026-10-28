@@ -743,7 +743,25 @@ export struct ReaderPage {
     if (page.startPara < 0) {
       return;
     }
-    FqReaderStore.saveProgress(this.bookId, this.chapterIndex, `p2:${page.startPara}:${page.startChar}`);
+    FqReaderStore.saveProgress(this.bookId, this.chapterIndex, `p2:${page.startPara}:${page.startChar}`,
+      this.bookPercent());
+  }
+
+  /** 整书阅读百分比 0..100（章数未知返回 -1）：（章序 + 章内比例）/ 总章数，对齐 fqapp。 */
+  private bookPercent(): number {
+    const layout: FqChapterLayout | null = this.curLayout;
+    if (this.totalChapters <= 0 || layout === null) {
+      return -1;
+    }
+    let fraction: number = 0;
+    if (this.flipIndex === 2) {
+      fraction = layout.paragraphs.length > 0
+        ? Math.min(1, this.verticalCurPara / layout.paragraphs.length) : 0;
+    } else {
+      fraction = layout.pages.length > 1 ? this.pageIndex / (layout.pages.length - 1) : 0;
+    }
+    const percent: number = Math.round(((this.chapterIndex + fraction) / this.totalChapters) * 100);
+    return Math.min(100, Math.max(0, percent));
   }
 
   // ---------------------------------------------------------------------------
@@ -939,7 +957,8 @@ export struct ReaderPage {
       this.afterPageShown();
     }
     // 段级精确进度（覆盖页级保存）
-    FqReaderStore.saveProgress(this.bookId, this.chapterIndex, `p2:${item.paraIndex}:0`);
+    FqReaderStore.saveProgress(this.bookId, this.chapterIndex, `p2:${item.paraIndex}:0`,
+      this.bookPercent());
   }
 
   /** 滚到章尾：追加下一章分页；无下章提示一次。 */
@@ -1552,7 +1571,9 @@ export struct ReaderPage {
     }
   }
 
-  /** 系统返回：先关段评/书评/目录半模态，再关菜单，最后放行返回上一页。 */
+  /** 系统返回：先关段评/书评/目录半模态，再放行返回上一页。
+   *  工具栏不在此拦截：左上角返回按钮点击即退出阅读页（对齐 fqapp 返回书籍），
+   *  工具栏关闭走正文点击/菜单键。 */
   private handleBackPressed(): boolean {
     if (this.paraSheetVisible) {
       this.onParaSheetClose();
@@ -1564,12 +1585,6 @@ export struct ReaderPage {
     }
     if (this.sheetVisible) {
       this.onSheetClose();
-      return true;
-    }
-    if (this.menuVisible) {
-      this.getUIContext().animateTo({ duration: 300 }, ()=>{
-        this.menuVisible = false;
-      })
       return true;
     }
     // 返回放行前先恢复系统状态栏：让状态栏在转场开始时即就位（随页面滑动出现），

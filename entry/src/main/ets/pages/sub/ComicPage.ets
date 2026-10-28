@@ -848,7 +848,9 @@ export struct ComicPage {
     }
   }
 
-  /** 系统返回：先关漫评/目录半模态，再关菜单，最后放行返回上一页。 */
+  /** 系统返回：先关漫评/目录半模态，再放行返回上一页。
+   *  工具栏不在此拦截：左上角返回按钮点击即退出漫画页（对齐 fqapp），
+   *  工具栏关闭走正文点击/菜单键。 */
   private handleBackPressed(): boolean {
     if (this.commentSheetVisible) {
       this.onCommentSheetClose();
@@ -856,10 +858,6 @@ export struct ComicPage {
     }
     if (this.sheetVisible) {
       this.onSheetClose();
-      return true;
-    }
-    if (this.menuVisible) {
-      this.menuVisible = false;
       return true;
     }
     // 返回放行前先恢复系统状态栏（aboutToDisappear 里仍兜底恢复一次）
@@ -1307,13 +1305,26 @@ export struct ComicPage {
     return 0;
   }
 
-  /** 进度持久化：domPos = 'img:章内图下标'。 */
+  /** 进度持久化：domPos = 'img:章内图下标'；percent = 整书百分比（封面角标用）。 */
   private saveProgressNow(): void {
     if (this.chapters.length === 0
       || this.chapterIndex < 0 || this.chapterIndex >= this.chapters.length) {
       return;
     }
-    FqReaderStore.saveProgress(this.bookId, this.chapterIndex, `img:${this.pageIndex}`);
+    FqReaderStore.saveProgress(this.bookId, this.chapterIndex, `img:${this.pageIndex}`,
+      this.bookPercent());
+  }
+
+  /** 整书阅读百分比 0..100（章数未知返回 -1）：（章序 + 章内图比例）/ 总章数。 */
+  private bookPercent(): number {
+    if (this.chapters.length === 0 || this.chapterIndex < 0
+      || this.chapterIndex >= this.chapters.length) {
+      return -1;
+    }
+    const total: number = this.curImages.length;
+    const fraction: number = total > 1 ? this.pageIndex / (total - 1) : 0;
+    const percent: number = Math.round(((this.chapterIndex + fraction) / this.chapters.length) * 100);
+    return Math.min(100, Math.max(0, percent));
   }
 
   /** 章节已读进度：当前章按图位置计百分比、读毕章节 100%、未读章节 0%。 */

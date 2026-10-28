@@ -6,6 +6,7 @@
 import { FqBackend } from '../core/FqBackend';
 import { FqMediaItem, fqEmptyMediaItem, fqKindLabel } from '../model/FqModels';
 import { appState } from '../entryability/AppState';
+import { FqColorUtils } from '../utils/FqColorUtils';
 
 @ComponentV2
 export struct FqMediaCard {
@@ -17,6 +18,8 @@ export struct FqMediaCard {
   @Param selected: boolean = false;
   /** 角标文案覆盖（非空时替代 kind 标签，如本地书"本地书籍"）。 */
   @Param chipText: string = '';
+  /** 整书阅读百分比 0..100（封面右上角渐变角标）；-1 = 无进度不显示。 */
+  @Param badgePercent: number = -1;
 
   build() {
     Column({ space: 6 }) {
@@ -61,6 +64,24 @@ export struct FqMediaCard {
             .backgroundColor('#A61C1B1A')
             .margin(5)
             .transition(TransitionEffect.OPACITY)
+        }
+        if (!this.batchMode && this.badgePercent >= 0) {
+          Column() {
+            Text(`${this.badgePercent}%`)
+              .fontSize(9)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(Color.White)
+              .maxLines(1)
+              .textAlign(TextAlign.Center)
+              .constraintSize({ minWidth: 26 })
+              .padding({ left: 5, right: 5, top: 2, bottom: 2 })
+              .borderRadius(5)
+              .backgroundColor(appState.accentColor)
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.End)
+          .padding(4)
+          .transition(TransitionEffect.OPACITY)
         }
         if (!this.batchMode && this.item.ep.length > 0) {
           Column() {

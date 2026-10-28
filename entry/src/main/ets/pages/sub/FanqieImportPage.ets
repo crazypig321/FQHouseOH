@@ -267,10 +267,11 @@ export struct FanqieImportPage {
             }
           }
         }
-        .padding({ left: 16, right: 16, top: 10, bottom: appState.bottomRect + FQ_FANQIE_IMPORT_BOTTOM_INSET })
+        .padding({ left: 16, right: 16 })
         .scrollBar(BarState.Off)
         .edgeEffect(EdgeEffect.Spring)
         .contentStartOffset(appState.topRect + FQ_FANQIE_IMPORT_TOP_INSET)
+        .contentEndOffset(appState.bottomRect)
         .width('100%')
         .height('100%')
 

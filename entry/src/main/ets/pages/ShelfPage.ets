@@ -12,6 +12,7 @@ import { CommonSearch, CommonBlur } from '../view/CommonCom';
 import { FqMenu, FqMenuItem } from '../view/CommonMenu';
 import { FqShelfStore, FqShelfItem } from '../core/FqShelfStore';
 import { FqBrowseStore } from '../core/FqBrowseStore';
+import { FqReaderStore } from '../core/FqReaderStore';
 import { fqStoreBus, FqStoreBus } from '../core/FqStoreBus';
 import { DialogManager } from '../utils/DialogUtils';
 import { FqReadStatsStore } from '../core/FqReadStatsStore';
@@ -25,6 +26,7 @@ import { rowImmersiveModifier, stackImmersiveModifier } from '../utils/ModifierU
 import { HdsNavigationMenuItemOptions } from '@kit.UIDesignKit';
 import preferences from '@ohos.data.preferences';
 import { BusinessError } from '@kit.BasicServicesKit';
+import { FqColorUtils } from '../utils/FqColorUtils';
 
 /** 书架页「更多」菜单锚点 id */
 const SHELF_MORE_ANCHOR_ID: string = 'shelf_more_anchor';
@@ -42,13 +44,16 @@ class ShelfRow {
   readonly cover: string;
   /** 列表版式副标题（kind 标签或相对时间）。 */
   readonly sub: string;
+  /** 整书阅读百分比 0..100（封面右上角角标）；-1 = 无进度。 */
+  readonly percent: number;
 
-  constructor(id: string, kind: string, title: string, cover: string, sub: string) {
+  constructor(id: string, kind: string, title: string, cover: string, sub: string, percent: number = -1) {
     this.id = id;
     this.kind = kind;
     this.title = title;
     this.cover = cover;
     this.sub = sub;
+    this.percent = percent;
   }
 }
 
@@ -177,6 +182,7 @@ export struct ShelfPage {
                 FqMediaCard({
                   item: this.rowToMediaItem(row),
                   chipText: FqLocalBookStore.isLocalBookId(row.id) ? '本地书籍' : '',
+                  badgePercent: row.percent,
                   onItemClick: (clicked: FqMediaItem): void => {
                     this.onRowTap(row);
                   },
@@ -190,7 +196,7 @@ export struct ShelfPage {
                 this.onRowLongPress(row);
               }))
           }, (row: ShelfRow, index: number): string =>
-            `${row.id}_${row.cover.length > 0 ? 'c' : 'n'}_${this.layout}`)
+            `${row.id}_${row.cover.length > 0 ? 'c' : 'n'}_${this.layout}_${row.percent}`)
         }
         .width('100%')
         .height('100%')
@@ -298,14 +304,16 @@ export struct ShelfPage {
       for (const entry of FqShelfStore.all()) {
         if (keyword.length === 0 || entry.title.includes(keyword)) {
           rows.push(new ShelfRow(entry.id, entry.kind, entry.title, entry.cover,
-            FqLocalBookStore.isLocalBookId(entry.id) ? '本地书籍' : fqKindLabel(entry.kind)));
+            FqLocalBookStore.isLocalBookId(entry.id) ? '本地书籍' : fqKindLabel(entry.kind),
+            FqReaderStore.getProgress(entry.id).percent));
         }
       }
     } else {
       for (const entry of FqBrowseStore.all()) {
         if (keyword.length === 0 || entry.title.includes(keyword)) {
           rows.push(new ShelfRow(entry.id, entry.kind, entry.title, entry.cover,
-            this.relativeTime(entry.visitedAt)));
+            this.relativeTime(entry.visitedAt),
+            FqReaderStore.getProgress(entry.id).percent));
         }
       }
     }
@@ -790,13 +798,28 @@ export struct ShelfPage {
           .transition(TransitionEffect.OPACITY)
       }
       if (row.cover.length > 0) {
-        Image(FqBackend.get().resourceUrl(row.cover))
-          .width(60)
-          .height(82)
-          .borderRadius(8)
-          .objectFit(ImageFit.Cover)
-          .autoResize(true)
-          .draggable(false)
+        Stack({ alignContent: Alignment.TopEnd }) {
+          Image(FqBackend.get().resourceUrl(row.cover))
+            .width(60)
+            .height(82)
+            .borderRadius(8)
+            .objectFit(ImageFit.Cover)
+            .autoResize(true)
+            .draggable(false)
+          if (!appState.isBatchMode && row.percent >= 0) {
+            Text(`${row.percent}%`)
+              .fontSize(8)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(Color.White)
+              .maxLines(1)
+              .padding({ left: 3, right: 3, top: 1, bottom: 1 })
+              .borderRadius(3)
+              .backgroundColor(appState.accentColor)
+              .margin(3)
+          }
+        }
+        .width(60)
+        .height(82)
       } else {
         Stack({ alignContent: Alignment.Center }) {
           SymbolGlyph($r('sys.symbol.book'))

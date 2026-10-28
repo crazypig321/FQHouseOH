@@ -24,10 +24,13 @@ const FQ_THEME_BG_JPEG_QUALITY: number = 85;
 export class FqReaderProgress {
   readonly chapterIndex: number;
   readonly domPos: string;
+  /** 整书阅读百分比 0..100（书架封面角标用）；-1 = 未记录。 */
+  readonly percent: number;
 
-  constructor(chapterIndex: number, domPos: string) {
+  constructor(chapterIndex: number, domPos: string, percent: number = -1) {
     this.chapterIndex = chapterIndex;
     this.domPos = domPos;
+    this.percent = percent;
   }
 }
 
@@ -819,13 +822,18 @@ export class FqReaderStore {
       if (typeof chapterIndex !== 'number' || typeof domPos !== 'string') {
         return new FqReaderProgress(-1, '');
       }
-      return new FqReaderProgress(Math.trunc(chapterIndex), domPos);
+      const percentRaw: Object | undefined = rec['percent'];
+      let percent: number = -1;
+      if (typeof percentRaw === 'number' && percentRaw >= 0 && percentRaw <= 100) {
+        percent = Math.trunc(percentRaw);
+      }
+      return new FqReaderProgress(Math.trunc(chapterIndex), domPos, percent);
     } catch (error) {
       return new FqReaderProgress(-1, '');
     }
   }
 
-  public static saveProgress(bookId: string, chapterIndex: number, domPos: string): void {
+  public static saveProgress(bookId: string, chapterIndex: number, domPos: string, percent: number = -1): void {
     const pref: preferences.Preferences | null = FqReaderStore.pref;
     if (pref === null || bookId.length === 0) {
       return;
@@ -833,6 +841,12 @@ export class FqReaderStore {
     const rec: Record<string, Object> = {};
     rec['chapterIndex'] = chapterIndex;
     rec['domPos'] = domPos;
+    // percent < 0：调用方未提供（导入/恢复/进度回填等），保留既有整书百分比
+    const eff: number = percent >= 0 ? Math.min(100, Math.max(0, Math.trunc(percent)))
+      : FqReaderStore.getProgress(bookId).percent;
+    if (eff >= 0) {
+      rec['percent'] = eff;
+    }
     try {
       pref.putSync(`${FQ_READER_KEY_PROGRESS}${bookId}`, JSON.stringify(rec));
       pref.flush().catch((_error: BusinessError): void => {
