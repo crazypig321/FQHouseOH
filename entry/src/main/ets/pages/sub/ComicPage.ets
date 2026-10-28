@@ -180,6 +180,8 @@ export struct ComicPage {
   private flipTurn: FqFlipTurnController = new FqFlipTurnController();
   /** 「已经是最后一话」提示去重（跳章/重建时复位）。 */
   private verticalEndedToastOnce: boolean = false;
+  /** 上下滚动源中已载入的最高话下标（话尾提前追加下一话，防整屏翻页被截成半屏）。 */
+  private verticalMaxChapter: number = -1;
   /** 图片预解码缓存（URL → PixelMap，翻页提交同帧渲染）。 */
   private pixelCache: Map<string, image.PixelMap> = new Map();
   /** 在途预解码去重。 */
@@ -795,6 +797,8 @@ export struct ComicPage {
     for (let i: number = 0; i < images.length; i++) {
       this.verticalSource.append(new FqComicImageItem(this.chapterIndex, i, images[i]));
     }
+    this.verticalMaxChapter = this.chapterIndex;
+    this.prefetchNextVerticalChapter();
     const target: number = Math.min(Math.max(0, startImage), Math.max(0, images.length - 1));
     setTimeout((): void => {
       if (this.verticalSource.totalCount() > target) {
@@ -810,6 +814,7 @@ export struct ComicPage {
     }
     const item: FqComicImageItem = this.verticalSource.getData(first);
     if (item.chapterIndex !== this.chapterIndex || item.imageIndex !== this.pageIndex) {
+      const chapterChanged: boolean = item.chapterIndex !== this.chapterIndex;
       if (item.chapterIndex > this.chapterIndex) {
         // 上下滚动滚进后话 = 前话已整话读过
         this.markChapterRead(this.chapterIndex);
@@ -817,15 +822,19 @@ export struct ComicPage {
       this.chapterIndex = item.chapterIndex;
       this.pageIndex = item.imageIndex;
       this.saveProgressNow();
+      if (chapterChanged) {
+        // 滚进新话 = 源中已含新话，仅跨话时提前追加下下话（保持一话预取余量）
+        this.prefetchNextVerticalChapter();
+      }
     }
   }
 
-  /** 滚到章尾：追加下一话图片；无下话提示一次。 */
+  /** 滚到已载内容末尾：兜底重试追加下一话（预取失败/未完成时）；无下话提示一次。 */
   private onVerticalReachEnd(): void {
     if (this.verticalAppending || this.loadingState) {
       return;
     }
-    const nextIndex: number = this.chapterIndex + 1;
+    const nextIndex: number = this.verticalMaxChapter + 1;
     if (nextIndex >= this.totalChapters) {
       if (!this.verticalEndedToastOnce) {
         this.verticalEndedToastOnce = true;
@@ -833,10 +842,22 @@ export struct ComicPage {
       }
       return;
     }
-    this.appendVerticalChapter(nextIndex);
+    this.appendVerticalChapter(nextIndex, false);
   }
 
-  private async appendVerticalChapter(index: number): Promise<void> {
+  /** 上下滚动提前追加下一话入源（话尾整屏翻页有内容可滚，不因余量不足被截成半屏）。 */
+  private prefetchNextVerticalChapter(): void {
+    if (this.verticalAppending || this.loadingState) {
+      return;
+    }
+    const nextIndex: number = this.verticalMaxChapter + 1;
+    if (nextIndex >= this.totalChapters) {
+      return;
+    }
+    this.appendVerticalChapter(nextIndex, true);
+  }
+
+  private async appendVerticalChapter(index: number, silent: boolean): Promise<void> {
     const token: number = this.loadToken;
     this.verticalAppending = true;
     try {
@@ -847,8 +868,11 @@ export struct ComicPage {
       for (let i: number = 0; i < images.length; i++) {
         this.verticalSource.append(new FqComicImageItem(index, i, images[i]));
       }
+      this.verticalMaxChapter = Math.max(this.verticalMaxChapter, index);
     } catch (error) {
-      promptAction.showToast({ message: fqErrorMessage(error), duration: 1500 });
+      if (!silent) {
+        promptAction.showToast({ message: fqErrorMessage(error), duration: 1500 });
+      }
     }
     this.verticalAppending = false;
   }

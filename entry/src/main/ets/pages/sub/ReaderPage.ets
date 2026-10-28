@@ -306,6 +306,8 @@ export struct ReaderPage {
   private verticalPositioning: boolean = false;
   /** 上下滚动首可见段（章内段下标，重排保位用）。 */
   private verticalCurPara: number = 0;
+  /** 上下滚动源中已载入的最高章下标（章尾提前追加下一章，防整屏翻页被截成半屏）。 */
+  private verticalMaxChapter: number = -1;
   /** 封面（跳转参数透传，阅读页→听书页显示用）。 */
   private readerCover: string = '';
   /** 页面当前可见（NavDestination onShown/onHidden 维护；被压栈隐藏时注销音量键拦截）。 */
@@ -855,7 +857,7 @@ export struct ReaderPage {
       .width('100%')
       .layoutWeight(1)
       .scrollBar(BarState.Off)
-      .cachedCount(8)
+      .cachedCount(24)
       .fadingEdge(true, { fadingEdgeLength: LengthMetrics.vp(40) })
       .onScrollIndex((first: number, last: number): void => {
         this.onVerticalScrollIndex(first);
@@ -937,6 +939,7 @@ export struct ReaderPage {
     this.verticalEndedToastOnce = false;
     if (layout === null || layout.paragraphs.length === 0) {
       this.verticalSource.reset();
+      this.verticalMaxChapter = -1;
       return;
     }
     const items: FqVerticalTextItem[] = [];
@@ -944,6 +947,8 @@ export struct ReaderPage {
       items.push(new FqVerticalTextItem(layout.chapterIndex, i, layout));
     }
     this.verticalSource.replaceAll(items);
+    this.verticalMaxChapter = layout.chapterIndex;
+    this.prefetchNextVerticalChapter();
     hilog.info(0x0001, 'FqM', `buildVertical startPara=${startPara} items=${items.length} fontSize=${this.effFontSize()}`);
     const target: number = Math.min(Math.max(0, startPara), layout.paragraphs.length - 1);
     this.verticalCurPara = target;
@@ -972,6 +977,8 @@ export struct ReaderPage {
       this.prevLayout = null;
       this.nextLayout = null;
       this.resetListenState();
+      // 滚进新章 = 源中已含新章，继续提前追加下下章（保持一章预取余量）
+      this.prefetchNextVerticalChapter();
     }
     this.verticalCurPara = item.paraIndex;
     const pageIdx: number = fqPageIndexForPosition(item.layout.pages, item.paraIndex, 0);
@@ -984,12 +991,12 @@ export struct ReaderPage {
       this.bookPercent());
   }
 
-  /** 滚到章尾：追加下一章分页；无下章提示一次。 */
+  /** 滚到已载内容末尾：兜底重试追加下一章（预取失败/未完成时）；无下章提示一次。 */
   private onVerticalReachEnd(): void {
     if (this.verticalAppending || this.loadingState) {
       return;
     }
-    const nextIndex: number = this.chapterIndex + 1;
+    const nextIndex: number = this.verticalMaxChapter + 1;
     if (nextIndex >= this.totalChapters) {
       if (!this.verticalEndedToastOnce) {
         this.verticalEndedToastOnce = true;
@@ -997,10 +1004,22 @@ export struct ReaderPage {
       }
       return;
     }
-    this.appendVerticalChapter(nextIndex);
+    this.appendVerticalChapter(nextIndex, false);
   }
 
-  private async appendVerticalChapter(index: number): Promise<void> {
+  /** 上下滚动提前追加下一章入源（章尾整屏翻页有内容可滚，不因余量不足被截成半屏）。 */
+  private prefetchNextVerticalChapter(): void {
+    if (this.verticalAppending || this.loadingState) {
+      return;
+    }
+    const nextIndex: number = this.verticalMaxChapter + 1;
+    if (nextIndex >= this.totalChapters) {
+      return;
+    }
+    this.appendVerticalChapter(nextIndex, true);
+  }
+
+  private async appendVerticalChapter(index: number, silent: boolean): Promise<void> {
     const token: number = this.loadToken;
     this.verticalAppending = true;
     try {
@@ -1018,11 +1037,14 @@ export struct ReaderPage {
       for (let i: number = 0; i < layout.paragraphs.length; i++) {
         this.verticalSource.append(new FqVerticalTextItem(index, i, layout));
       }
+      this.verticalMaxChapter = Math.max(this.verticalMaxChapter, index);
       this.chapterPages.set(index, layout.pages.length);
       FqReaderStore.saveChapterPages(this.bookId, this.chapterPages);
       this.refreshChapterEstimate(index);
     } catch (error) {
-      promptAction.showToast({ message: fqErrorMessage(error), duration: 1500 });
+      if (!silent) {
+        promptAction.showToast({ message: fqErrorMessage(error), duration: 1500 });
+      }
     } finally {
       this.verticalAppending = false;
     }
