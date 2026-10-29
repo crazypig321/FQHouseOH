@@ -60,13 +60,12 @@ export struct PcMainLayout {
         .hideTitleBar(true)
         .navDestination(this.pageMap)
         // PC 布局路由转场接管（仅本文件 = 仅 PC 布局生效）：
-        // - 进场（push/replace）：返回 undefined 走系统转场，即 CommonNav 的 systemTransition(EXPLODE)；
-        // - 退场（pop）：自定义退场——退场页中心缩小渐隐（EXPLODE 逆过程），NavBar 侧静止。
+        // - 进场（push/replace）：返回 undefined，走 CommonNav 的 .transition(OPACITY) 渐显；
+        // - 退场（pop）：自定义退场——退场页渐隐（OPACITY），NavBar 侧静止。
         //   必须 Navigation 级接管：NavDestination 级转场属性管不到 pop 的入场方 NavBar，此前退出一直滑动即此原因
         .customNavContentTransition((from: NavContentInfo, to: NavContentInfo,
           operation: NavigationOperation): NavigationAnimatedTransition | undefined => {
           if (operation !== NavigationOperation.POP) {
-            appState.pcNavExitScale = 1
             appState.pcNavExitOpacity = 1
             return undefined
           }
@@ -74,16 +73,14 @@ export struct PcMainLayout {
             timeout: 400,
             transition: (proxy: NavigationTransitionProxy): void => {
               this.getUIContext().animateTo({
-                duration: 300,
+                duration: 250,
                 curve: Curve.Smooth,
                 onFinish: (): void => {
                   proxy.finishTransition()
                   // 退场页已卸载，全局参数归位，避免残留 0 值影响后续绑定实例
-                  appState.pcNavExitScale = 1
                   appState.pcNavExitOpacity = 1
                 }
               }, (): void => {
-                appState.pcNavExitScale = 0.9
                 appState.pcNavExitOpacity = 0
               })
             }

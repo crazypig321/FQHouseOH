@@ -105,10 +105,8 @@ export struct CommonNav {
     // PC 布局 pop 退场后全局透明度停在 0，而 push(replacePath) 不触发 customNavContentTransition
     // 复位回调，新页会以透明挂载导致内容空白——此处挂载时自复位（手机端恒为 1，永不写入；
     // 内嵌 tab 页不绑定转场参数，无需复位——切 tab 挂载时复位反而会打断 pop 退场动画）
-    if (!this.embedded &&
-      (appState.pcNavExitOpacity !== 1 || appState.pcNavExitScale !== 1)) {
+    if (!this.embedded && appState.pcNavExitOpacity !== 1) {
       appState.pcNavExitOpacity = 1;
-      appState.pcNavExitScale = 1;
     }
   }
 
@@ -237,13 +235,13 @@ export struct CommonNav {
     .backgroundColor(this.pageBackgroundColor ?? $r('sys.color.background_secondary'))
     .width('100%')
     .height('100%')
-    // 进场系统转场：PC 用 EXPLODE 中心缩放，手机保持 DEFAULT（等同未设置）；
-    // 内嵌 tab 页非路由节点，恒 DEFAULT
-    .systemTransition(this.embedded ? NavigationSystemTransitionType.DEFAULT :
+    // PC 侧边栏布局路由页转场：进场渐显 / 替换换页渐隐（pop 退场由 PcMainLayout
+    // customNavContentTransition 全局接管渐隐，NavBar 侧静止）；
+    // 内嵌 tab 页非路由节点、手机端均不设转场（保持系统默认横滑）
+    .transition(this.embedded ? undefined :
       (useSidebarLayout(appState.WidthBp, appState.windowWidthVp, appState.displayWidthVp) ?
-        NavigationSystemTransitionType.EXPLODE : NavigationSystemTransitionType.DEFAULT))
-    // PC pop 退场参数（仅 PcMainLayout 驱动；手机端恒为 1，绑定无效；内嵌实例恒 1 旁路）
-    .scale({ x: this.embedded ? 1 : appState.pcNavExitScale, y: this.embedded ? 1 : appState.pcNavExitScale })
+        TransitionEffect.OPACITY.animation({ duration: 250, curve: Curve.Smooth }) : undefined))
+    // PC pop 退场渐隐参数（仅 PcMainLayout 驱动；手机端恒为 1，绑定无效；内嵌实例恒 1 旁路）
     .opacity(this.embedded ? 1 : appState.pcNavExitOpacity)
     .onBackPressed(() => {
       return this.backPressed()

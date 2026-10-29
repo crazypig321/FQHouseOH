@@ -52,9 +52,8 @@ export class AppState {
   @Trace WidthBp: number = 1
   @Trace HeightBp: number = 1
 
-  // PC 布局路由退场动画参数（仅 PcMainLayout 的 customNavContentTransition 驱动；
-  // CommonNav 路由实例绑定 scale/opacity，内嵌 tab 实例旁路；手机端恒为 1）
-  @Trace pcNavExitScale: number = 1;
+  // PC 布局路由退场渐隐参数（仅 PcMainLayout 的 customNavContentTransition 驱动；
+  // CommonNav 路由实例绑定 opacity，内嵌 tab 实例旁路；手机端恒为 1）
   @Trace pcNavExitOpacity: number = 1;
 
   // 沉浸光感参数
