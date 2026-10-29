@@ -19,6 +19,7 @@ import { NavPathUtils } from '../utils/NavPathUtils';
 import { CommonNav } from '../view/CommonNav';
 import { appState } from '../entryability/AppState';
 import { rowImmersiveModifier } from '../utils/ModifierUtils';
+import { feedColumns } from '../utils/BreakpointUtils';
 import { LengthMetrics } from '@kit.ArkUI';
 
 class FqChannelDef {
@@ -116,6 +117,7 @@ export struct HomePage {
       }, (): void => {
         this.startRefresh();
       }, true),
+      embedded: true,
       isHideBackButton: true,
       scroller: this.scroller,
       isSearchBarScroller: true,
@@ -186,7 +188,7 @@ export struct HomePage {
                 }, (row: FqMediaItem, index: number): string => this.rowKey(row, index))
               }
               .width('100%')
-              .lanes(3, 20)
+              .lanes(feedColumns(appState.WidthBp), 20)
               .scrollBar(BarState.Off)
               .edgeEffect(EdgeEffect.None)
               .padding({ left: 20, right: 20 })

@@ -77,6 +77,7 @@ export struct SettingsPage {
   build() {
     CommonNav({
       titleBarOp: FqTitleBarOptions('应用设置', false),
+      embedded: this.isTab,
       isHideBackButton: this.isTab,
       scroller: this.scroller,
       doubleTapToTop: this.isTab,

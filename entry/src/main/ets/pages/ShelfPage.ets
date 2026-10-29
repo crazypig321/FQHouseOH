@@ -24,6 +24,7 @@ import { FqMediaCard } from '../view/FqMediaCard';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import { appState, AppState } from '../entryability/AppState';
 import { rowImmersiveModifier, stackImmersiveModifier } from '../utils/ModifierUtils';
+import { shelfColumns } from '../utils/BreakpointUtils';
 import { HdsNavigationMenuItemOptions } from '@kit.UIDesignKit';
 import preferences from '@ohos.data.preferences';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -163,6 +164,7 @@ export struct ShelfPage {
           },
           height: this.showSearchBox ? 110 : 40
         }),
+      embedded: true,
       isHideBackButton: true,
       scroller: this.scroller,
       // 胶囊常驻标题栏下方，不随滚动隐藏
@@ -202,7 +204,7 @@ export struct ShelfPage {
         .width('100%')
         .height('100%')
         .scrollBar(BarState.Off)
-        .lanes(this.layout === 0 ? 3 : (this.layout === 1 ? 2 : 1), 20)
+        .lanes(shelfColumns(appState.WidthBp, appState.windowWidthVp, appState.displayWidthVp, this.layout), 20)
         .padding({
           left: this.layout === 2 ? 16 : 20,
           right: this.layout === 2 ? 16 : 20

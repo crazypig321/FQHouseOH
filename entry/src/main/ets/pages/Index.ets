@@ -23,11 +23,15 @@ import { FqChangelogSheet } from '../view/sheet/FqChangelogSheet';
 import { FqAppSettingsStore } from '../core/FqAppSettingsStore';
 import { FqReaderStore } from '../core/FqReaderStore';
 import { HSBColorPicker, HSBColorPickerLayout } from '@keke/color-picker';
+import { useSidebarLayout } from '../utils/BreakpointUtils';
+import { PcMainLayout } from '../view/pcUI/PcMainLayout';
 
 @Entry
 @ComponentV2
 struct Index {
   private tabsController: HdsTabsController = new HdsTabsController();
+  /** PC 侧边栏布局内容区 Tabs 控制器（barHeight 0 仅保活页面，切换经 PcSideBar） */
+  private sideTabsController: TabsController = new TabsController();
 
   @Local appStateUse: AppState = appState
 
@@ -39,6 +43,10 @@ struct Index {
   /** 监听 tabbar的显示和消失 */
   @Monitor('appStateUse.isBatchMode')
   isShowTabBar(){
+    // PC 侧边栏布局无 HdsTabs，控制器未挂载，跳过
+    if (this.isPcLayout) {
+      return;
+    }
     if (this.appStateUse.isBatchMode) {
       this.tabsController.applyHideAnimation(HdsAnimationMode.CLICK_ANIMATION)
     }else{
@@ -46,9 +54,19 @@ struct Index {
     }
   }
 
+  /** 是否 PC 侧边栏布局（2in1/平板恒开；手机恒关；其余设备自由窗口判定）。 */
+  @Computed
+  get isPcLayout(): boolean {
+    return useSidebarLayout(appState.WidthBp, appState.windowWidthVp, appState.displayWidthVp);
+  }
+
   aboutToAppear(): void {
     appState.switchMainTab = (index: number): void => {
-      this.tabsController.changeIndex(index);
+      if (this.isPcLayout) {
+        this.sideTabsController.changeIndex(index);
+      } else {
+        this.tabsController.changeIndex(index);
+      }
     };
     DialogManager.Register((): void => {
       if (DialogManager.dialogChangeKey === '阅读设置' || DialogManager.dialogChangeKey === '漫画设置') {
@@ -105,39 +123,44 @@ struct Index {
 
   build() {
     Stack() {
-      HdsNavigation(appState.pageInfos) {
-        HdsTabs({ controller: this.tabsController }) {
-          MainTabPagesBuilder()
+      if (this.isPcLayout) {
+        // PC 侧边栏布局：PcTitleBar + PcSideBar + 内容区 Navigation
+        PcMainLayout({ tabsController: this.sideTabsController })
+      } else {
+        HdsNavigation(appState.pageInfos) {
+          HdsTabs({ controller: this.tabsController }) {
+            MainTabPagesBuilder()
+          }
+          .barOverlap(true)
+          .vertical(false)
+          .scrollable(false)
+          .barPosition(BarPosition.End)
+          // 批量多选模式下隐藏 tab 栏（对齐 musicfreeOH Index）
+          .barHeight(56)
+          .animationDuration(500)
+          .barFloatingStyle({
+            barBottomMargin: 28,
+            systemMaterialEffect: {
+              materialType: appState.materialType,
+              materialLevel: appState.materialLevel
+            },
+            // 智感握姿：随设置开关 handedness 适配
+            adaptToHandedness: appState.smartReachEnabled,
+          })
+          .onSelected((index: number) => {
+            appState.currTabsIndex = index
+          })
         }
-        .barOverlap(true)
-        .vertical(false)
-        .scrollable(false)
-        .barPosition(BarPosition.End)
-        // 批量多选模式下隐藏 tab 栏（对齐 musicfreeOH Index）
-        .barHeight(56)
-        .animationDuration(500)
-        .barFloatingStyle({
-          barBottomMargin: 28,
-          systemMaterialEffect: {
-            materialType: appState.materialType,
-            materialLevel: appState.materialLevel
-          },
-          // 智感握姿：随设置开关 handedness 适配
-          adaptToHandedness: appState.smartReachEnabled,
-        })
-        .onSelected((index: number) => {
-          appState.currTabsIndex = index
-        })
+        .titleMode(HdsNavigationTitleMode.MINI)
+        .mode(NavigationMode.Stack)
+        .hideBackButton(true)
+        .hideTitleBar(true)
+        .navDestination(this.pageMap)
+        .width('100%')
+        .height('100%')
+        .foregroundBlurStyle(appState.isForegroundBlur ? BlurStyle.Thin : BlurStyle.NONE,
+          { colorMode: ThemeColorMode.SYSTEM, adaptiveColor: AdaptiveColor.DEFAULT, scale: 0.3 })
       }
-      .titleMode(HdsNavigationTitleMode.MINI)
-      .mode(NavigationMode.Stack)
-      .hideBackButton(true)
-      .hideTitleBar(true)
-      .navDestination(this.pageMap)
-      .width('100%')
-      .height('100%')
-      .foregroundBlurStyle(appState.isForegroundBlur ? BlurStyle.Thin : BlurStyle.NONE,
-        { colorMode: ThemeColorMode.SYSTEM, adaptiveColor: AdaptiveColor.DEFAULT, scale: 0.3 })
       if (this.showPlaybackBall) {
         FqPlaybackBall()
       }
@@ -171,7 +194,11 @@ struct Index {
       return true;
     }
     if (appState.currTabsIndex !== 0) {
-      this.tabsController.changeIndex(0);
+      if (this.isPcLayout) {
+        this.sideTabsController.changeIndex(0);
+      } else {
+        this.tabsController.changeIndex(0);
+      }
       return true;
     }
     this.showExitConfirm();

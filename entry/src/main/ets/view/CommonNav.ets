@@ -17,6 +17,7 @@ import { BlurStrategy,
   HdsNavDestinationTitleMode,
   HdsAnimationMode} from '@kit.UIDesignKit';
 import { appState } from '../entryability/AppState';
+import { useSidebarLayout } from '../utils/BreakpointUtils';
 import { LengthMetrics } from '@kit.ArkUI';
 import { themeUtils } from '../utils/ThemeUtils';
 import { FqColorUtils } from '../utils/FqColorUtils';
@@ -42,8 +43,12 @@ export function titleBarOf(mainTitle: ResourceStr, subTitle?: ResourceStr,
 @ComponentV2
 export struct CommonNav {
   private tabsController: HdsTabsController = new HdsTabsController();
-  @Param titleBarOp?: TitleBarContentOptions = undefined
-  @Param isHideBackButton: boolean = false
+    @Param titleBarOp?: TitleBarContentOptions = undefined
+    @Param isHideBackButton: boolean = false
+    /** 内嵌模式：作为 TabContent 内容挂载（主 Tab 页），非路由 NavDestination。
+     *  不参与 PC 路由转场（scale/opacity/systemTransition 全部旁路）——
+     *  PC pop 退场会把全局 pcNavExit* 动画到 0，内嵌实例若绑定会跟着变透明且无人复位，导致整页空白 */
+    @Param embedded: boolean = false
   /** 标题栏背景延伸至状态栏，内容区从标题栏下方起排 */
   @Param avoidLayoutSafeArea: boolean = true
   /** 绑定页面滚动器（驱动标题栏滚动模糊与上滑隐藏） */
@@ -95,6 +100,17 @@ export struct CommonNav {
   private lastTitleTapTime: number = 0;
   /** 页面宽度（vp，用于排除右侧菜单按钮区域） */
   private pageWidthVp: number = 0;
+
+  aboutToAppear(): void {
+    // PC 布局 pop 退场后全局透明度停在 0，而 push(replacePath) 不触发 customNavContentTransition
+    // 复位回调，新页会以透明挂载导致内容空白——此处挂载时自复位（手机端恒为 1，永不写入；
+    // 内嵌 tab 页不绑定转场参数，无需复位——切 tab 挂载时复位反而会打断 pop 退场动画）
+    if (!this.embedded &&
+      (appState.pcNavExitOpacity !== 1 || appState.pcNavExitScale !== 1)) {
+      appState.pcNavExitOpacity = 1;
+      appState.pcNavExitScale = 1;
+    }
+  }
 
   /** 标题栏区域触摸：双击回滚到顶部 */
   private handleTouch(event: TouchEvent): void {
@@ -221,6 +237,14 @@ export struct CommonNav {
     .backgroundColor(this.pageBackgroundColor ?? $r('sys.color.background_secondary'))
     .width('100%')
     .height('100%')
+    // 进场系统转场：PC 用 EXPLODE 中心缩放，手机保持 DEFAULT（等同未设置）；
+    // 内嵌 tab 页非路由节点，恒 DEFAULT
+    .systemTransition(this.embedded ? NavigationSystemTransitionType.DEFAULT :
+      (useSidebarLayout(appState.WidthBp, appState.windowWidthVp, appState.displayWidthVp) ?
+        NavigationSystemTransitionType.EXPLODE : NavigationSystemTransitionType.DEFAULT))
+    // PC pop 退场参数（仅 PcMainLayout 驱动；手机端恒为 1，绑定无效；内嵌实例恒 1 旁路）
+    .scale({ x: this.embedded ? 1 : appState.pcNavExitScale, y: this.embedded ? 1 : appState.pcNavExitScale })
+    .opacity(this.embedded ? 1 : appState.pcNavExitOpacity)
     .onBackPressed(() => {
       return this.backPressed()
     })

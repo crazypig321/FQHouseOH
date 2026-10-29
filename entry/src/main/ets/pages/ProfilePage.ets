@@ -417,6 +417,7 @@ export struct ProfilePage {
       titleBarOp: FqTitleBarOptions('我的', false, undefined, (): void => {
         this.startRefresh();
       }),
+      embedded: true,
       isHideBackButton: true,
       scroller: this.scroller,
       doubleTapToTop: true,

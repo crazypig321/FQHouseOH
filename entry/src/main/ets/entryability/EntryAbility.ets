@@ -154,6 +154,29 @@ export default class EntryAbility extends UIAbility {
       mainWindow.setWindowLayoutFullScreen(true).then(() => {
         // 全屏后跟踪系统避让区尺寸，供各页面 contentStartOffset/EndOffset 计算
         const uiContext = mainWindow.getUIContext();
+        // PC/平板自由窗口：隐藏系统标题栏（页面扩展至标题栏区域，右上角仅保留系统三键
+        // 下沉到页面内），与 PcTitleBar 合并为一条横栏；读取三键区宽度供右侧避让
+        try {
+          mainWindow.setWindowDecorVisible(false);
+        } catch (error) {
+          // 手机/全屏等无标题栏形态不支持，忽略
+        }
+        const syncDecorButtonWidth = (): void => {
+          try {
+            const buttonRect: window.TitleButtonRect = mainWindow.getTitleButtonRect();
+            appState.decorButtonWidth = uiContext.px2vp(buttonRect.right + buttonRect.width);
+          } catch (error) {
+            appState.decorButtonWidth = 0;
+          }
+        };
+        syncDecorButtonWidth();
+        try {
+          mainWindow.on('windowTitleButtonRectChange', (rect: window.TitleButtonRect): void => {
+            appState.decorButtonWidth = uiContext.px2vp(rect.right + rect.width);
+          });
+        } catch (error) {
+          // 不支持窗口三键区的设备忽略
+        }
         const syncAvoidArea = (): void => {
           const topRectVp: number = uiContext.px2vp(
             mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM).topRect.height);
@@ -180,12 +203,19 @@ export default class EntryAbility extends UIAbility {
         /*断点及屏幕尺寸获取*/
         windowStage.getMainWindow().then((data: window.Window) => {
           let uiContext = data.getUIContext()
+          // 启动即初始化窗口宽度与断点（此前仅 windowSizeChange 更新，首帧缺失）
+          appState.displayWidthVp = uiContext.px2vp(displayData.width);
+          const windowRect: window.Rect = data.getWindowProperties().windowRect;
+          appState.windowWidthVp = uiContext.px2vp(windowRect.width);
+          appState.WidthBp = uiContext.getWindowWidthBreakpoint();
+          appState.HeightBp = uiContext.getWindowHeightBreakpoint();
 
           //监听屏幕改变
           data.on('windowSizeChange', (data) => {
             //获取屏幕宽高数值
             appState.screenWidth = data.width
             appState.screenHeight = data.height
+            appState.windowWidthVp = uiContext!.px2vp(data.width)
             //获取横屏断点
             const widthBp: WidthBreakpoint = uiContext!.getWindowWidthBreakpoint()
             const heightBp: HeightBreakpoint = uiContext!.getWindowHeightBreakpoint()

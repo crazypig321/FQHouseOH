@@ -20,6 +20,14 @@ export class AppState {
   @Trace screenWidth: number = 0;
   /** 屏幕物理高度（px，启动时由 EntryAbility 同步） */
   @Trace screenHeight: number = 0;
+  /** 当前窗口宽度（vp，EntryAbility 跟踪；PC 侧边栏布局判定用） */
+  @Trace windowWidthVp: number = 0;
+  /** 物理屏宽度（vp，与窗口宽度差值判定是否以自由窗口方式运行） */
+  @Trace displayWidthVp: number = 0;
+  /** 2in1 系统三键（最小化/最大化/关闭）避让宽度（vp；0 = 无窗口三键形态） */
+  @Trace decorButtonWidth: number = 0;
+  /** PC 侧边栏展开/收起（PcSideBar 宽度切换） */
+  @Trace sidebarExpanded: boolean = true;
   // 是否开启模糊
   @Trace isForegroundBlur: boolean = false;
   /** 前景模糊引用计数（sheet/弹窗呼出 push、消失 pop；归零自动关闭，二级弹层互不影响）。 */
@@ -40,9 +48,14 @@ export class AppState {
       this.isForegroundBlur = false;
     }
   }
-  /*设备断点获取*/
+  // 设备断点获取
   @Trace WidthBp: number = 1
   @Trace HeightBp: number = 1
+
+  // PC 布局路由退场动画参数（仅 PcMainLayout 的 customNavContentTransition 驱动；
+  // CommonNav 路由实例绑定 scale/opacity，内嵌 tab 实例旁路；手机端恒为 1）
+  @Trace pcNavExitScale: number = 1;
+  @Trace pcNavExitOpacity: number = 1;
 
   // 沉浸光感参数
   @Trace materialLevel: hdsMaterial.MaterialLevel = hdsMaterial.MaterialLevel.ADAPTIVE;
