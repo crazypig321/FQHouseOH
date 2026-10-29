@@ -24,6 +24,7 @@ import { FqReaderStore } from '../core/FqReaderStore';
 import { FQ_THEME_COLOR_OPTIONS, fqThemeColorOf, fqThemeColorNameOf } from '../core/FqThemeColors';
 import { FqDataCleaner } from '../core/FqDataCleaner';
 import { FqBackend } from '../core/FqBackend';
+import { FqUpdateChecker } from '../core/FqUpdateChecker';
 import { DialogManager } from '../utils/DialogUtils';
 import { FqColorUtils } from '../utils/FqColorUtils';
 import { appState } from '../entryability/AppState';
@@ -72,6 +73,9 @@ export struct SettingsPage {
     this.themeMode = FqAppSettingsStore.getThemeMode();
     this.backgroundAudio = FqAppSettingsStore.isBackgroundAudio();
     this.backendUrl = FqBackend.get().baseUrl;
+    // 进入设置页静默检查更新（会话内节流，与关于页共用）：
+    // 发现新版本时「关于」条目显示红点，无新版本时清空红点
+    FqUpdateChecker.checkLatestSilently();
   }
 
   build() {
@@ -131,10 +135,7 @@ export struct SettingsPage {
 
           this.SectionHeader('关于')
           FqSettingsCard() {
-            this.SettingRow($r('sys.symbol.person_fill'), '#FF8B5CF6', '关于', '版本与开源信息', '', true,
-              (): void => {
-                NavPathUtils.push(ROUTE_ABOUT);
-              })
+            this.AboutEntryRow()
           }
         }
         .padding({ left: 16, right: 16, top: 10, bottom: 40 })
@@ -306,6 +307,51 @@ export struct SettingsPage {
     .padding({ left: 14, right: 14, top: 11, bottom: 11 })
     .width('100%')
     .onClick(onTap)
+  }
+
+  /** 关于条目行：静默检查发现新版本时「关于」右侧显示红点（颜色同关于页「检查更新」标记）。 */
+  @Builder
+  private AboutEntryRow() {
+    Row({ space: 12 }) {
+      Stack() {
+        SymbolGlyph($r('sys.symbol.person_fill'))
+          .fontSize(17)
+          .fontColor(['#FF8B5CF6'])
+      }
+      .width(34)
+      .height(34)
+      .borderRadius(10)
+      .backgroundColor(FqColorUtils.withOpacity('#FF8B5CF6', 0.12))
+
+      Column({ space: 3 }) {
+        Text('关于')
+          .fontSize(14.5)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('sys.color.font_primary'))
+        Text('版本与开源信息')
+          .fontSize(11.5)
+          .fontColor($r('sys.color.font_secondary'))
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+
+      if (appState.latestVersion.length > 0) {
+        Row()
+          .width(8)
+          .height(8)
+          .borderRadius(4)
+          .backgroundColor('#FFE5484D')
+          .transition(TransitionEffect.OPACITY)
+      }
+      SymbolGlyph($r('sys.symbol.chevron_right'))
+        .fontSize(13)
+        .fontColor([$r('sys.color.font_tertiary')])
+    }
+    .padding({ left: 14, right: 14, top: 11, bottom: 11 })
+    .width('100%')
+    .onClick((): void => {
+      NavPathUtils.push(ROUTE_ABOUT);
+    })
   }
 
   /** 深色模式行（锚点 FqMenu 三档直选）。 */

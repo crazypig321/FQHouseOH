@@ -87,6 +87,9 @@ export class AppState {
    *  持久化于 FqAppSettingsStore，开关写入统一走 FqAppSettingsStore.setDirectRead）。 */
   @Trace directReadEnabled: boolean = false;
 
+  /** 静默检查更新发现的 GitHub 新版本号（空 = 暂无更新；设置页「关于」红点与关于页新版本标签共用）。 */
+  @Trace latestVersion: string = '';
+
   /** 主 Ability 上下文（EntryAbility 注入：退出应用 terminateSelf 用）。 */
   public abilityContext: common.UIAbilityContext | null = null;
 

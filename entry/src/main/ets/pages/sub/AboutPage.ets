@@ -77,6 +77,8 @@ class FqAboutItem {
   public imageIcon: Resource | null = null;
   /** 右侧开关（代替 chevron/trailing）：开启=代理，关闭=直连。 */
   public showSwitch: boolean = false;
+  /** 「检查更新」行：发现新版本时右侧显示红点与新版本号（this.latestVersion 驱动）。 */
+  public isCheckUpdate: boolean = false;
 
   constructor(icon: Resource, tint: string, title: string, subtitle: string,
     rightText: string, showChevron: boolean, onTap: (() => void) | null) {
@@ -137,6 +139,8 @@ export struct AboutPage {
   @Local activeSheet: string = FqAboutSheetKind.none;
   private sheetCloseToken: number = 0;
   @Local versionName: string = '1.0.0';
+  /** GitHub 最新 release 版本号；为空表示无需更新（红点/标签不展示），与 appState.latestVersion 同步。 */
+  @Local latestVersion: string = appState.latestVersion;
   /** 更新包代理下载开关（仅用于下载更新软件包：开=代理，关=直连）。 */
   @Local proxyDownload: boolean = false;
   private sections: FqAboutSection[] = [];
@@ -154,6 +158,11 @@ export struct AboutPage {
     }
     this.proxyDownload = FqAppSettingsStore.isUpdateProxyDownload();
     this.buildSections();
+    // 进入关于页静默检查更新（与设置页共用会话内节流）：
+    // 最新版本高于本地时记录，供「检查更新」红点与版本号旁标签展示
+    FqUpdateChecker.checkLatestSilently().then((): void => {
+      this.latestVersion = appState.latestVersion;
+    });
   }
 
   build() {
@@ -233,15 +242,18 @@ export struct AboutPage {
       new FqAboutItem($r('sys.symbol.download'), '#FFEF5038', '代理下载新版本',
         '仅用于下载更新软件包，开启后经代理下载，关闭则直连', '', false, null);
     proxyItem.showSwitch = true;
+    const checkUpdateItem: FqAboutItem =
+      new FqAboutItem($r('sys.symbol.arrow_clockwise'), '#FF10B981', '检查更新', '检查是否有新版本', '', true,
+        (): void => {
+          this.checkUpdate();
+        });
+    checkUpdateItem.isCheckUpdate = true;
     sections.push(new FqAboutSection('软件版本', [
       new FqAboutItem($r('sys.symbol.clock'), '#FF3B82F6', '更新日志', `当前版本 v${this.versionName}`, '', true,
         (): void => {
           this.openSheet(FqAboutSheetKind.changelog);
         }),
-      new FqAboutItem($r('sys.symbol.arrow_clockwise'), '#FF10B981', '检查更新', '检查是否有新版本', '', true,
-        (): void => {
-          this.checkUpdate();
-        }),
+      checkUpdateItem,
       proxyItem,
     ]));
     sections.push(new FqAboutSection('开源与条款', [
@@ -291,9 +303,23 @@ export struct AboutPage {
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
         .fontColor($r('sys.color.font_primary'))
-      Text(`v${this.versionName}`)
-        .fontSize(12.5)
-        .fontColor($r('sys.color.font_secondary'))
+      Row({ space: 6 }) {
+        Text(`v${this.versionName}`)
+          .fontSize(12.5)
+          .fontColor($r('sys.color.font_secondary'))
+        if (this.latestVersion.length > 0) {
+          Text(`新版本 ${this.latestVersion}`)
+            .fontSize(10)
+            .fontColor($r('sys.color.font_secondary'))
+            .maxLines(1)
+            .padding({ left: 5, right: 5, top: 3, bottom: 3 })
+            .borderRadius(3)
+            .backgroundColor($r('sys.color.comp_background_tertiary'))
+            .onClick((): void => {
+              this.checkUpdate();
+            })
+        }
+      }
       Text('小说 / 短剧 / 漫剧 / 漫画 / 听书聚合客户端')
         .fontSize(12.5)
         .fontColor($r('sys.color.font_tertiary'))
@@ -368,6 +394,18 @@ export struct AboutPage {
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
 
+      if (item.isCheckUpdate && this.latestVersion.length > 0) {
+        Row()
+          .width(8)
+          .height(8)
+          .borderRadius(4)
+          .backgroundColor('#FFE5484D')
+          .transition(TransitionEffect.OPACITY)
+        Text(`新版本 ${this.latestVersion}`)
+          .fontSize(12.5)
+          .fontColor($r('sys.color.font_secondary'))
+          .maxLines(1)
+      }
       if (item.rightText.length > 0) {
         Text(item.rightText)
           .fontSize(12.5)
@@ -688,9 +726,13 @@ export struct AboutPage {
     }
     const tag = release.tag_name;
     if (tag === undefined || !FqUpdateChecker.isNewerVersion(tag, this.versionName)) {
+      appState.latestVersion = '';
+      this.latestVersion = '';
       this.toast('当前已是最新版本');
       return;
     }
+    this.latestVersion = tag;
+    appState.latestVersion = tag;
     const asset: FqReleaseAsset | null = FqUpdateChecker.pickReleaseAsset(release);
     if (asset === null) {
       this.toast('发布页未提供软件包，请到发布页查看');

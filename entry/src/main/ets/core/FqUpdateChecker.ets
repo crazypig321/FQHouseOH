@@ -5,11 +5,16 @@
 
 import http from '@ohos.net.http';
 import { fileIo as fs } from '@kit.CoreFileKit';
+import { bundleManager } from '@kit.AbilityKit';
+import { appState } from '../entryability/AppState';
+import { FqAppSettingsStore } from './FqAppSettingsStore';
 
 /** GitHub 最新 release 接口 */
 const FQ_RELEASE_API_URL: string = 'https://api.github.com/repos/crazypig321/FQHouseOH/releases/latest';
 /** 国内加速前缀型代理（拼接在目标 URL 前），检查更新与下载均依次回退尝试 */
 const FQ_GH_PROXY_PREFIXES: string[] = ['https://gh-proxy.com/', 'https://ghfast.top/'];
+/** 静默检查节流间隔（毫秒）：会话内最多每 10 分钟请求一次接口 */
+const FQ_SILENT_CHECK_THROTTLE_MS: number = 10 * 60 * 1000;
 
 /** GitHub latest release 接口返回体（仅声明所需字段） */
 export interface FqReleaseRaw {
@@ -30,6 +35,46 @@ export class FqReleaseAsset {
 }
 
 export class FqUpdateChecker {
+  /** 上次静默检查时间戳（0 = 本次会话尚未检查） */
+  private static lastSilentCheckAt: number = 0;
+
+  /** 读取本地版本号（bundleManager 同步读取；失败返回空串）。 */
+  public static currentVersionName(): string {
+    try {
+      const info: bundleManager.BundleInfo = bundleManager.getBundleInfoForSelfSync(
+        bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
+      return info.versionName;
+    } catch (error) {
+      return '';
+    }
+  }
+
+  /** 静默检查更新（会话内 10 分钟节流，设置页/关于页进入时共用）：
+   *  最新版本高于本地时记录到 appState.latestVersion，否则清空（红点/标签随状态刷新）；
+   *  请求失败不改动现有状态。 */
+  public static async checkLatestSilently(): Promise<void> {
+    const now: number = Date.now();
+    if (now - FqUpdateChecker.lastSilentCheckAt < FQ_SILENT_CHECK_THROTTLE_MS) {
+      return;
+    }
+    FqUpdateChecker.lastSilentCheckAt = now;
+    const current: string = FqUpdateChecker.currentVersionName();
+    if (current.length === 0) {
+      return;
+    }
+    const raw: FqReleaseRaw | null = await FqUpdateChecker.fetchLatestRelease(
+      FqAppSettingsStore.isUpdateProxyDownload());
+    if (raw === null) {
+      return;
+    }
+    const tag = raw.tag_name;
+    if (tag !== undefined && FqUpdateChecker.isNewerVersion(tag, current)) {
+      appState.latestVersion = tag;
+    } else {
+      appState.latestVersion = '';
+    }
+  }
+
   /** 从 release 资产中选取软件包：优先 .hap，其次第一个有效资产；无资产返回 null */
   public static pickReleaseAsset(release: FqReleaseRaw): FqReleaseAsset | null {
     const assets = release.assets;
