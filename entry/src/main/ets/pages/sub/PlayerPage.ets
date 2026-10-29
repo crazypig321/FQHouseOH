@@ -70,6 +70,7 @@ import { FqDramaCacheStore } from '../../core/FqDramaCacheStore';
 import { fqDramaDownloader, FqDramaDownloader, FqDramaDownloadTask, DramaDownloadStatus } from '../../core/FqDramaDownloader';
 import { FqReadStatsStore } from '../../core/FqReadStatsStore';
 import { NavPathUtils } from '../../utils/NavPathUtils';
+import { useSidebarLayout } from '../../utils/BreakpointUtils';
 import { appState } from '../../entryability/AppState';
 
 /** 官方竖屏播放页底部信息/进度/选集区高度（PlayerVideoLayout bottom 163）。 */
@@ -191,6 +192,10 @@ export struct PlayerPage {
   @Local commentOpenToken: number = 0;
   /** 全屏沉浸态（「全屏观看」进入；横屏片源锁横屏 + 隐藏系统栏）。 */
   @Local fullScreen: boolean = false;
+  /** 进入 PC 沉浸全屏前窗口是否为最大化（true 退出回最大化，false recover 回自由窗口原尺寸）。 */
+  private pcFullscreenWasMaximized: boolean = false;
+  /** 进入 PC 沉浸全屏前窗口已是沉浸全屏（用户双击标题栏等进入）：退出保持全屏形态不缩窗。 */
+  private pcFullscreenWasFullscreen: boolean = false;
   /** 全屏控件显隐（横片源 3s 自动隐藏，单击画面切换）。 */
   @Local fsControlsVisible: boolean = true;
   /** 中央播放按钮显隐（点击才出现；暂停时常驻，播放 3s 后自动隐藏）。 */
@@ -2488,15 +2493,42 @@ export struct PlayerPage {
     this.applyImmersive(false);
   }
 
-  /** 沉浸全屏：进入隐藏系统栏（横屏片源同时锁 AUTO_ROTATION_LANDSCAPE），退出恢复。 */
+  /** 沉浸全屏：进入隐藏系统栏（横屏片源同时锁 AUTO_ROTATION_LANDSCAPE），退出恢复。
+   *  PC 侧边栏布局额外接管窗口：进入 maximize(ENTER_IMMERSIVE) 沉浸全屏（隐藏系统标题栏/Dock，
+   *  PcMainLayout 同步隐藏应用标题栏与侧边栏）；退出按进入前窗口状态还原
+   *  （最大化 → maximize(EXIT_IMMERSIVE)，自由窗口 → recover() 恢复原尺寸位置）。 */
   private applyImmersive(enter: boolean): void {
     window.getLastWindow(getContext(this)).then((win: window.Window): void => {
+      const pcLayout: boolean = useSidebarLayout(appState.WidthBp, appState.windowWidthVp, appState.displayWidthVp);
       if (enter) {
+        if (pcLayout) {
+          const status: window.WindowStatusType = win.getWindowStatus();
+          this.pcFullscreenWasMaximized = status === window.WindowStatusType.MAXIMIZE;
+          this.pcFullscreenWasFullscreen = status === window.WindowStatusType.FULL_SCREEN;
+          appState.pcImmersiveFullscreen = true;
+          win.maximize(window.MaximizePresentation.ENTER_IMMERSIVE).catch((): void => {
+            // 窗口沉浸全屏失败保持原窗口形态，仅应用内隐藏标题栏/侧边栏
+          });
+        }
         if (this.isLandscapeVideo()) {
           win.setPreferredOrientation(window.Orientation.AUTO_ROTATION_LANDSCAPE);
         }
         win.setWindowSystemBarEnable([]);
       } else {
+        if (pcLayout) {
+          appState.pcImmersiveFullscreen = false;
+          if (this.pcFullscreenWasFullscreen) {
+            // 进入前已是沉浸全屏：保持全屏形态，仅恢复应用内标题栏/侧边栏
+          } else if (this.pcFullscreenWasMaximized) {
+            win.maximize(window.MaximizePresentation.EXIT_IMMERSIVE).catch((): void => {
+              // 还原失败保持现状，窗口形态由用户手动调整
+            });
+          } else {
+            win.recover().catch((): void => {
+              // 还原失败保持现状，窗口形态由用户手动调整
+            });
+          }
+        }
         win.setPreferredOrientation(window.Orientation.UNSPECIFIED);
         win.setWindowSystemBarEnable(['status', 'navigation']);
       }

@@ -24,21 +24,26 @@ export struct PcMainLayout {
 
   build() {
     Column() {
-      PcTitleBar()
+      // 视频「全屏观看」沉浸全屏（appState.pcImmersiveFullscreen）：隐藏应用标题栏与左侧导航栏，内容区铺满
+      if (!appState.pcImmersiveFullscreen) {
+        PcTitleBar()
+      }
 
       Row() {
-        PcSideBar({
-          expanded: appState.sidebarExpanded,
-          onSelect: (index: number): void => {
-            NavPathUtils.pop()
-            this.tabsController.changeIndex(index);
-          },
-          onToggle: (): void => {
-            this.getUIContext().animateTo({ duration: 250, curve: Curve.Smooth }, (): void => {
-              appState.sidebarExpanded = !appState.sidebarExpanded;
-            });
-          }
-        })
+        if (!appState.pcImmersiveFullscreen) {
+          PcSideBar({
+            expanded: appState.sidebarExpanded,
+            onSelect: (index: number): void => {
+              NavPathUtils.pop()
+              this.tabsController.changeIndex(index);
+            },
+            onToggle: (): void => {
+              this.getUIContext().animateTo({ duration: 250, curve: Curve.Smooth }, (): void => {
+                appState.sidebarExpanded = !appState.sidebarExpanded;
+              });
+            }
+          })
+        }
 
         // 内容区：二级页面（搜索/详情/阅读等）仅覆盖内容区，侧边栏保持可见
         HdsNavigation(appState.pageInfos) {

@@ -90,6 +90,10 @@ export class AppState {
   /** 静默检查更新发现的 GitHub 新版本号（空 = 暂无更新；设置页「关于」红点与关于页新版本标签共用）。 */
   @Trace latestVersion: string = '';
 
+  /** PC 沉浸全屏（视频「全屏观看」）：窗口 maximize(ENTER_IMMERSIVE) 期间，
+   *  PcMainLayout 据此隐藏顶部标题栏与左侧导航栏，内容区铺满全屏。 */
+  @Trace pcImmersiveFullscreen: boolean = false;
+
   /** 主 Ability 上下文（EntryAbility 注入：退出应用 terminateSelf 用）。 */
   public abilityContext: common.UIAbilityContext | null = null;
 
