@@ -55,6 +55,8 @@ export class FqReaderSettings {
   customThemes: FqCustomReaderTheme[] = [];
   /** 当前选中的自定义主题 id（themeIndex=3 时生效；空 = 无选中）。 */
   customThemeId: string = '';
+  /** 自定义字色板（取色器新增字色，新色在前；阅读主题编辑弹窗字色列表共用）。 */
+  customFontColors: string[] = [];
 }
 
 /** 自定义阅读主题：浅色/深色双模式（各配背景图 + 独立排版参数，0/-1/空 = 跟随全局阅读设置）。 */
@@ -249,6 +251,30 @@ export class FqReaderStore {
       if (typeof customThemeId === 'string') {
         FqReaderStore.settings.customThemeId = customThemeId;
       }
+      // 自定义字色板（JSON 数组，逐条规范化，坏值/重复跳过）
+      const customFontColorsRaw: Object | undefined = rec['customFontColors'];
+      if (typeof customFontColorsRaw === 'string' && customFontColorsRaw.length > 0) {
+        try {
+          const parsedColors: Object | null = JSON.parse(customFontColorsRaw);
+          const colorArray: Object[] | null = fqAsArray(parsedColors);
+          if (colorArray !== null) {
+            const colors: string[] = [];
+            for (const item of colorArray) {
+              if (typeof item !== 'string') {
+                continue;
+              }
+              const normalized: string = fqNormalizeThemeFontColor(item);
+              if (normalized.length === 0 || colors.indexOf(normalized) >= 0) {
+                continue;
+              }
+              colors.push(normalized);
+            }
+            FqReaderStore.settings.customFontColors = colors;
+          }
+        } catch (error) {
+          // 列表损坏按空处理
+        }
+      }
     } catch (error) {
       // 损坏配置按默认处理
     }
@@ -279,6 +305,27 @@ export class FqReaderStore {
   public static saveVolumeKeyPaging(enabled: boolean): void {
     FqReaderStore.settings.volumeKeyPaging = enabled;
     appState.volumeKeyPaging = enabled;
+    FqReaderStore.persistSettings();
+  }
+
+  /** 取自定义字色板（新色在前）。 */
+  public static getCustomFontColors(): string[] {
+    return FqReaderStore.settings.customFontColors;
+  }
+
+  /** 新增自定义字色：规范化去重后插到最前（已存在则提前），落盘。 */
+  public static addCustomFontColor(color: string): void {
+    const normalized: string = fqNormalizeThemeFontColor(color);
+    if (normalized.length === 0) {
+      return;
+    }
+    const next: string[] = [normalized];
+    for (const item of FqReaderStore.settings.customFontColors) {
+      if (item !== normalized) {
+        next.push(item);
+      }
+    }
+    FqReaderStore.settings.customFontColors = next;
     FqReaderStore.persistSettings();
   }
 
@@ -798,6 +845,7 @@ export class FqReaderStore {
     }
     rec['customThemes'] = JSON.stringify(themes);
     rec['customThemeId'] = FqReaderStore.settings.customThemeId;
+    rec['customFontColors'] = JSON.stringify(FqReaderStore.settings.customFontColors);
     try {
       pref.putSync(FQ_READER_KEY_SETTINGS, JSON.stringify(rec));
       pref.flush().catch((_error: BusinessError): void => {

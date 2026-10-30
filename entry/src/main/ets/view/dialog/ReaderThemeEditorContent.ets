@@ -2,7 +2,8 @@
  * 「自定义主题编辑」弹窗内容（经 DialogManager.ShowReaderThemeEditor 打开，
  * 独立宿主弹窗叠加于「阅读设置」之上）：
  * 浅色/深色模式滑块切换 + 图片位点击选图（即选即拷沙箱，取消自动清理）+
- * 名称（实时写回主题行标签）/ 字色（默认 + 预设色点 + 弹窗式 HSB 取色器）/
+ * 名称（实时写回主题行标签）/ 字色（「添加」固定卡片第一位不随滚动 +
+ * 横向滚动色列表：默认 + 预设色 + 自定义字色板（取色器新增色入板持久化、新色在前））/
  * 字号 / 行距 / 字体（0/-1/空 = 跟随全局），均按当前模式独立；
  * 编辑值经 @Local 驱动刷新、onChange 同步回 DialogManager（保存按钮经其统一读取）；
  * 本页 UI 一律内联写法，禁用 @Builder 传参（按值传参不刷新，选中态会冻结在初始值）；
@@ -37,6 +38,8 @@ export struct ReaderThemeEditorContent {
   @Local editorDarkFontSize: number = 0;
   @Local editorDarkFontIndex: number = -1;
   @Local editorDarkLineHeight: number = 0;
+  /** 自定义字色板（新色在前；打开时并入当前主题双模式旧自定义色保证可见）。 */
+  @Local customColors: string[] = [];
 
   aboutToAppear(): void {
     this.editorName = DialogManager.readerThemeName;
@@ -50,6 +53,9 @@ export struct ReaderThemeEditorContent {
     this.editorDarkFontSize = DialogManager.readerThemeDarkFontSize;
     this.editorDarkFontIndex = DialogManager.readerThemeDarkFontIndex;
     this.editorDarkLineHeight = DialogManager.readerThemeDarkLineHeight;
+    this.customColors = FqReaderStore.getCustomFontColors();
+    this.customColors = this.mergeLegacyColor(this.customColors, this.editorLightFontColor);
+    this.customColors = this.mergeLegacyColor(this.customColors, this.editorDarkFontColor);
   }
 
   build() {
@@ -158,75 +164,109 @@ export struct ReaderThemeEditorContent {
           .fontColor(themeUtils.textColor)
           .width(36)
         Column({ space: 3 }) {
-          Column()
-            .width(24)
-            .height(24)
-            .borderRadius(12)
-            .backgroundColor($r('app.color.reader_chip_bg'))
-            .border({
-              width: this.curFontColor().length === 0 ? 2 : 1,
-              color: this.curFontColor().length === 0 ? appState.accentColor : themeUtils.terTextColor,
-            })
-          Text('默认')
-            .fontSize(9)
-            .fontColor(themeUtils.textColor)
-            .opacity(this.curFontColor().length === 0 ? 1 : 0.6)
-        }
-        .alignItems(HorizontalAlign.Center)
-        .onClick((): void => {
-          this.applyCurFontColor('');
-        })
-        ForEach(FQ_EDITOR_FONT_COLORS, (color: string, index: number) => {
-          Column({ space: 3 }) {
-            Column()
-              .width(24)
-              .height(24)
-              .borderRadius(12)
-              .backgroundColor(color)
-              .border({
-                width: this.curFontColor() === color ? 2 : 1,
-                color: this.curFontColor() === color ? appState.accentColor : themeUtils.terTextColor,
-              })
-            Text(FQ_EDITOR_FONT_COLOR_LABELS[index])
-              .fontSize(9)
-              .fontColor(themeUtils.textColor)
-              .opacity(this.curFontColor() === color ? 1 : 0.6)
-          }
-          .alignItems(HorizontalAlign.Center)
-          .onClick((): void => {
-            this.applyCurFontColor(color);
-          })
-        }, (color: string): string => color)
-        Column({ space: 3 }) {
           Column() {
             SymbolGlyph($r('sys.symbol.plus'))
               .fontSize(14)
               .fontColor([themeUtils.terTextColor])
-              .opacity(this.isCustomPickedColor() ? 0 : 1)
           }
           .width(24)
           .height(24)
           .borderRadius(12)
-          .backgroundColor(this.isCustomPickedColor() ? this.curFontColor()
-            : $r('app.color.reader_chip_bg'))
+          .backgroundColor($r('app.color.reader_chip_bg'))
           .border({
-            width: this.isCustomPickedColor() ? 2 : 1,
-            color: this.isCustomPickedColor() ? appState.accentColor : themeUtils.terTextColor,
+            width: 1,
+            color: themeUtils.terTextColor,
+            style: BorderStyle.Dashed,
           })
           .justifyContent(FlexAlign.Center)
-          Text('自定义')
+          Text('添加')
             .fontSize(9)
             .fontColor(themeUtils.textColor)
-            .opacity(this.isCustomPickedColor() ? 1 : 0.6)
+            .opacity(0.6)
         }
         .alignItems(HorizontalAlign.Center)
         .onClick((): void => {
           DialogManager.ShowCustomColorPicker(
             this.curFontColor().length > 0 ? this.curFontColor() : '#1F2329',
             (hex: string): void => {
-              this.applyCurFontColor(fqNormalizeThemeFontColor(hex));
+              this.confirmPickedColor(hex);
             });
         })
+        List({ space: 8 }) {
+          ListItem() {
+            Column({ space: 3 }) {
+              Column()
+                .width(24)
+                .height(24)
+                .borderRadius(12)
+                .backgroundColor($r('app.color.reader_chip_bg'))
+                .border({
+                  width: this.curFontColor().length === 0 ? 2 : 1,
+                  color: this.curFontColor().length === 0 ? appState.accentColor : themeUtils.terTextColor,
+                })
+              Text('默认')
+                .fontSize(9)
+                .fontColor(themeUtils.textColor)
+                .opacity(this.curFontColor().length === 0 ? 1 : 0.6)
+            }
+            .alignItems(HorizontalAlign.Center)
+            .onClick((): void => {
+              this.applyCurFontColor('');
+            })
+          }
+          ForEach(FQ_EDITOR_FONT_COLORS, (color: string, index: number) => {
+            ListItem() {
+              Column({ space: 3 }) {
+                Column()
+                  .width(24)
+                  .height(24)
+                  .borderRadius(12)
+                  .backgroundColor(color)
+                  .border({
+                    width: this.curFontColor() === color ? 2 : 1,
+                    color: this.curFontColor() === color ? appState.accentColor : themeUtils.terTextColor,
+                  })
+                Text(FQ_EDITOR_FONT_COLOR_LABELS[index])
+                  .fontSize(9)
+                  .fontColor(themeUtils.textColor)
+                  .opacity(this.curFontColor() === color ? 1 : 0.6)
+              }
+              .alignItems(HorizontalAlign.Center)
+              .onClick((): void => {
+                this.applyCurFontColor(color);
+              })
+            }
+          }, (color: string): string => `p_${color}`)
+          ForEach(this.customColors, (color: string) => {
+            ListItem() {
+              Column({ space: 3 }) {
+                Column()
+                  .width(24)
+                  .height(24)
+                  .borderRadius(12)
+                  .backgroundColor(color)
+                  .border({
+                    width: this.curFontColor() === color ? 2 : 1,
+                    color: this.curFontColor() === color ? appState.accentColor : themeUtils.terTextColor,
+                  })
+                Text('自定义')
+                  .fontSize(9)
+                  .fontColor(themeUtils.textColor)
+                  .opacity(this.curFontColor() === color ? 1 : 0.6)
+              }
+              .alignItems(HorizontalAlign.Center)
+              .onClick((): void => {
+                this.applyCurFontColor(color);
+              })
+            }
+          }, (color: string): string => `c_${color}`)
+        }
+        .listDirection(Axis.Horizontal)
+        .layoutWeight(1)
+        .height(44)
+        .scrollBar(BarState.Off)
+        .edgeEffect(EdgeEffect.Spring)
+        .alignListItem(ListItemAlign.Center)
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
@@ -399,10 +439,25 @@ export struct ReaderThemeEditorContent {
     }
   }
 
-  /** 当前字色是否为取色器自定义色（非空且不在预设内）。 */
-  private isCustomPickedColor(): boolean {
-    const color: string = this.curFontColor();
-    return color.length > 0 && FQ_EDITOR_FONT_COLORS.indexOf(color) < 0;
+  /** 取色器确认：规范化后入自定义字色板（新色在前、持久化）并选中。 */
+  private confirmPickedColor(hex: string): void {
+    const normalized: string = fqNormalizeThemeFontColor(hex);
+    if (normalized.length === 0) {
+      return;
+    }
+    FqReaderStore.addCustomFontColor(normalized);
+    this.customColors = FqReaderStore.getCustomFontColors();
+    this.applyCurFontColor(normalized);
+  }
+
+  /** 旧自定义字色并入色板（非预设、非重复时插最前，仅本次显示不落盘）。 */
+  private mergeLegacyColor(colors: string[], color: string): string[] {
+    const normalized: string = fqNormalizeThemeFontColor(color);
+    if (normalized.length === 0 || FQ_EDITOR_FONT_COLORS.indexOf(normalized) >= 0
+      || colors.indexOf(normalized) >= 0) {
+      return colors;
+    }
+    return [normalized].concat(colors);
   }
 
   private applyCurFontColor(color: string): void {
