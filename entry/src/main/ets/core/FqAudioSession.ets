@@ -5,6 +5,8 @@
  * EntryAbility onDestroy 触发。负责：
  * - 章节装载（generation 取消、NO_THIS_TONE 兜底、历史恢复、播完态恢复）；
  * - 音色切换（智能朗读 toneId 重载 / 真人讲书跨书 switchBookVersion）；
+ * - 离线朗读（CoreSpeechKit textToSpeech：正文句读切分串行合成播报，
+ *   与在线听书共享章节进度 / AVSession / 长时任务 / 睡眠定时，随时互切）；
  * - 历史持久化（5s 周期 + 暂停/切章/关闭即时写）；
  * - 睡眠定时（分钟档 + 播完本章）；
  * - AVSession 同步（胶囊/播控中心，1s 节流）与播控命令；
@@ -15,7 +17,8 @@ import avSession from '@ohos.multimedia.avsession';
 import image from '@ohos.multimedia.image';
 import http from '@ohos.net.http';
 import { common } from '@kit.AbilityKit';
-import { BusinessError } from '@kit.BasicServicesKit';
+import { BusinessError, Callback, ErrorCallback } from '@kit.BasicServicesKit';
+import { textToSpeech } from '@kit.CoreSpeechKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { FqAudioEngine } from './FqAudioEngine';
 import { FqMediaBgTask } from './FqMediaBgTask';
@@ -24,7 +27,10 @@ import { FqReadStatsStore } from './FqReadStatsStore';
 import { FqAppSettingsStore } from './FqAppSettingsStore';
 import { FqBackend, fqErrorMessage } from './FqBackend';
 import { FqAudioCacheStore } from './FqAudioCacheStore';
+import { FqChapterCacheStore } from './FqChapterCacheStore';
+import { FqLocalBookStore } from './FqLocalBookStore';
 import { FqChapter } from '../model/FqModels';
+import { FqNormalizedChapter } from '../reader/ReaderTypes';
 import {
   FqAudioSource,
   FqAudioTone,
@@ -39,6 +45,26 @@ import {
 import { fqMergeToneVoices, fqUniqueTones } from './FqAudioParser';
 
 const TAG: string = 'FqAudioSession';
+
+/** 离线朗读单次合成片段上限（字符，句读边界切分；官方接口单次上限 10000）。 */
+const FQ_TTS_PIECE_MAX: number = 280;
+
+/** 离线朗读可选音色。 */
+export class FqTtsVoice {
+  /** textToSpeech person 音色 id。 */
+  readonly person: number;
+  readonly name: string;
+  readonly description: string;
+  /** 是否已安装（未安装音色选中后创建引擎失败会回退）。 */
+  readonly installed: boolean;
+
+  constructor(person: number, name: string, description: string, installed: boolean) {
+    this.person = person;
+    this.name = name;
+    this.description = description;
+    this.installed = installed;
+  }
+}
 
 /** 章节装载参数。 */
 export class FqChapterOpenOptions {
@@ -100,6 +126,42 @@ export class FqAudioSession {
 
   /** 定时关闭所选分钟档（0 = 未选分钟档）。 */
   @Trace sleepMinutesChoice: number = 0;
+
+  // ---- 离线朗读（CoreSpeechKit textToSpeech）----
+  /** 离线朗读模式（与在线听书互斥，共享章节/历史/AVSession/长时任务，随时互切）。 */
+  @Trace ttsMode: boolean = false;
+  /** 当前章朗读进度（0~1，字符偏移比）。 */
+  @Trace ttsProgress: number = 0;
+  /** 当前朗读片段原文（阅读页边听边读段落高亮用）。 */
+  @Trace ttsCueText: string = '';
+  /** 当前音色（textToSpeech person）。 */
+  @Trace ttsVoicePerson: number = 0;
+  /** 可选音色（listVoices 动态加载，失败回退静态表）。 */
+  @Trace ttsVoices: FqTtsVoice[] = FqAudioSession.fallbackTtsVoices();
+  /** 音色列表来自系统 listVoices（false = 静态回退表，音色下载不可用）。 */
+  @Trace ttsVoicesFromSystem: boolean = false;
+  /** 正在下载的音色 person（-1 无）。 */
+  @Trace ttsVoiceDownloading: number = -1;
+  /** 音色下载进度百分比（-1 未知/待开始）。 */
+  @Trace ttsVoiceDownloadPercent: number = -1;
+  private ttsEngine: textToSpeech.TextToSpeechEngine | null = null;
+  private ttsEnginePerson: number = -1;
+  private ttsVoicesLoaded: boolean = false;
+  /** listVoices 原始结果（downloadVoice 参数源：language/person/style）。 */
+  private ttsVoiceInfos: textToSpeech.VoiceInfo[] = [];
+  /** listVoices / downloadVoice requestId 序号（同实例内不可重复）。 */
+  private ttsVoicesQuerySerial: number = 0;
+  private ttsVoiceDownloadSerial: number = 0;
+  private ttsText: string = '';
+  private ttsOffset: number = 0;
+  private ttsPieceStart: number = 0;
+  private ttsPieceEnd: number = 0;
+  private ttsSerial: number = 0;
+  /** 待重启朗读的字符偏移（stop→onStop 后续读；-1 无待重启）。 */
+  private ttsRestartOffset: number = -1;
+  private ttsRestartTimer: number = -1;
+  /** 章节装载中暂存的定位 cue（正文就绪后按原文定位）。 */
+  private ttsPendingCue: string = '';
   // ---- 内部 ----
   private context: common.UIAbilityContext | null = null;
   private readonly engine: FqAudioEngine = new FqAudioEngine();
@@ -146,6 +208,8 @@ export class FqAudioSession {
   public init(context: common.UIAbilityContext): void {
     this.context = context;
     FqAudioHistory.init(context);
+    FqChapterCacheStore.init(context);
+    FqLocalBookStore.init(context);
   }
 
   /** 当前章节（无目录时 null）。 */
@@ -204,6 +268,16 @@ export class FqAudioSession {
     this.errorMessage = '';
     this.wantPlay = false;
     this.rate = 1;
+    this.ttsMode = false;
+    this.ttsProgress = 0;
+    this.ttsCueText = '';
+    this.ttsVoicePerson = FqAppSettingsStore.getTtsPerson();
+    this.ttsText = '';
+    this.ttsOffset = 0;
+    this.ttsSerial += 1;
+    this.ttsRestartOffset = -1;
+    this.ttsPendingCue = '';
+    this.cancelTtsRestartTimer();
     this.startTick();
     try {
       let chapters: FqChapter[] = [];
@@ -241,12 +315,21 @@ export class FqAudioSession {
       positionSec = record.positionSec;
       toneId = record.toneId.length > 0 ? record.toneId : '0';
       completed = record.completed;
-      if (record.rate > 0) {
+      if (record.mode === 'tts') {
+        // 离线朗读续读：恢复全局语速，位置从章首（秒级位置无法换算）
+        this.ttsMode = true;
+      this.rate = FqAppSettingsStore.getTtsRate();
+      this.refreshTtsVoices(false);
+      } else if (record.rate > 0) {
         this.rate = record.rate;
       }
       autoplay = !completed;
     }
     this.loadDecorations(this.nextDecorationsGeneration());
+    if (this.ttsMode) {
+      await this.openTtsChapter(openIndex, autoplay, completed ? 1 : 0);
+      return;
+    }
     await this.openChapter(openIndex, new FqChapterOpenOptions(toneId, positionSec, autoplay, completed));
   }
 
@@ -276,6 +359,16 @@ export class FqAudioSession {
     this.sleepMinutesChoice = 0;
     this.tonesPromise = null;
     this.voicesPromise = null;
+    this.ttsMode = false;
+    this.ttsProgress = 0;
+    this.ttsCueText = '';
+    this.ttsText = '';
+    this.ttsOffset = 0;
+    this.ttsSerial += 1;
+    this.ttsRestartOffset = -1;
+    this.ttsPendingCue = '';
+    this.cancelTtsRestartTimer();
+    this.shutdownTtsEngine();
     if (this.tickTimer >= 0) {
       clearInterval(this.tickTimer);
       this.tickTimer = -1;
@@ -298,8 +391,13 @@ export class FqAudioSession {
     this.startBackgroundTask();
     if (this.completed) {
       this.completed = false;
-      this.positionSec = 0;
-      this.engine.seek(0);
+      if (this.ttsMode) {
+        this.ttsOffset = 0;
+        this.ttsProgress = 0;
+      } else {
+        this.positionSec = 0;
+        this.engine.seek(0);
+      }
     }
     if (this.loading) {
       // 章节装载中：openChart 完成后按 wantPlay 起播
@@ -308,10 +406,14 @@ export class FqAudioSession {
       return;
     }
     this.wantPlay = true;
-    this.engine.play().catch((error: BusinessError): void => {
-      this.wantPlay = false;
-      this.errorMessage = fqErrorMessage(error);
-    });
+    if (this.ttsMode) {
+      this.playTts();
+    } else {
+      this.engine.play().catch((error: BusinessError): void => {
+        this.wantPlay = false;
+        this.errorMessage = fqErrorMessage(error);
+      });
+    }
     this.syncAvPlaybackState(true);
   }
 
@@ -320,8 +422,12 @@ export class FqAudioSession {
       return;
     }
     this.wantPlay = false;
-    this.engine.pause().catch((): void => {
-    });
+    if (this.ttsMode) {
+      this.stopTtsSpeak();
+    } else {
+      this.engine.pause().catch((): void => {
+      });
+    }
     this.persistHistory();
     this.syncAvPlaybackState(true);
   }
@@ -329,7 +435,11 @@ export class FqAudioSession {
   /** 主播放/暂停键：错误态点击 = 重试。 */
   public togglePlayPause(): void {
     if (this.errorMessage.length > 0 && !this.loading) {
-      this.openChapter(this.index, new FqChapterOpenOptions(this.toneId, this.positionSec, true, false));
+      if (this.ttsMode) {
+        this.openTtsChapter(this.index, true, 0);
+      } else {
+        this.openChapter(this.index, new FqChapterOpenOptions(this.toneId, this.positionSec, true, false));
+      }
       return;
     }
     if (this.wantPlay && !this.completed) {
@@ -340,7 +450,7 @@ export class FqAudioSession {
   }
 
   public seekTo(positionSec: number): void {
-    if (!this.hasSession) {
+    if (!this.hasSession || this.ttsMode) {
       return;
     }
     let position: number = positionSec;
@@ -367,6 +477,18 @@ export class FqAudioSession {
   }
 
   public previous(): void {
+    if (this.ttsMode) {
+      if (this.ttsProgress > 0.03) {
+        this.seekTts(0);
+        return;
+      }
+      if (this.index > 0) {
+        this.openChapter(this.index - 1, new FqChapterOpenOptions(this.toneId, 0, this.wantPlay, false));
+      } else {
+        this.seekTts(0);
+      }
+      return;
+    }
     if (this.positionSec > 3 || this.completed) {
       this.seekTo(0);
       return;
@@ -379,6 +501,10 @@ export class FqAudioSession {
   }
 
   public setRate(rate: number): void {
+    if (this.ttsMode) {
+      this.setTtsRate(rate);
+      return;
+    }
     this.rate = rate;
     this.engine.setRate(rate);
     this.persistHistory();
@@ -475,6 +601,11 @@ export class FqAudioSession {
       return;
     }
     if (index < 0 || index >= this.chapters.length) {
+      return;
+    }
+    // 离线朗读模式：同章切换走朗读装载（秒级位置不适用，从章首朗读）
+    if (this.ttsMode) {
+      await this.openTtsChapter(index, options.autoplay || this.wantPlay, 0);
       return;
     }
     const chapter: FqChapter = this.chapters[index];
@@ -582,6 +713,719 @@ export class FqAudioSession {
     this.sleepRemainingSec = -1;
     this.sleepAtChapterEnd = false;
     this.sleepMinutesChoice = 0;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 离线朗读（CoreSpeechKit textToSpeech）
+  // ---------------------------------------------------------------------------
+
+  /** 切到离线朗读：保留当前章，从章首朗读。 */
+  public switchToTts(): void {
+    if (!this.hasSession || this.ttsMode || this.loading || this.switchingVersion) {
+      return;
+    }
+    this.persistHistory();
+    this.ttsMode = true;
+    this.ttsVoicePerson = FqAppSettingsStore.getTtsPerson();
+    this.rate = FqAppSettingsStore.getTtsRate();
+    this.refreshTtsVoices(false);
+    this.openTtsChapter(this.index, this.wantPlay && !this.completed, 0);
+  }
+
+  /** 切回在线听书：保留当前章，从章首播（秒级位置无法从字符位置换算）。 */
+  public switchToOnline(): void {
+    if (!this.hasSession || !this.ttsMode) {
+      return;
+    }
+    this.stopTtsSpeak();
+    this.persistHistory();
+    this.ttsMode = false;
+    this.ttsProgress = 0;
+    this.ttsCueText = '';
+    const wasPlaying: boolean = this.wantPlay && !this.completed;
+    this.openChapter(this.index, new FqChapterOpenOptions(this.toneId, 0, wasPlaying, false));
+  }
+
+  /** 设置离线朗读语速（全局持久化；朗读中即时重起当前片段）。 */
+  public setTtsRate(rate: number): void {
+    this.rate = rate;
+    FqAppSettingsStore.setTtsRate(rate);
+    if (this.ttsMode && this.wantPlay && !this.completed && !this.loading
+      && this.errorMessage.length === 0) {
+      this.restartTtsFrom(this.ttsOffset);
+    }
+    this.persistHistory();
+    this.syncAvPlaybackState(true);
+  }
+
+  /** 选择离线朗读音色（全局持久化；朗读中停当前播报后续读）。 */
+  public selectTtsVoice(person: number): void {
+    if (!this.hasSession || person === this.ttsVoicePerson) {
+      return;
+    }
+    this.ttsVoicePerson = person;
+    FqAppSettingsStore.setTtsPerson(person);
+    this.shutdownTtsEngine();
+    if (this.ttsMode && this.wantPlay && !this.completed && !this.loading
+      && this.errorMessage.length === 0) {
+      this.restartTtsFrom(this.ttsOffset);
+    }
+  }
+
+  /** 章内定位（0~1 字符比）；朗读中即时重起，暂停态仅记录。 */
+  public seekTts(fraction: number): void {
+    if (!this.hasSession || !this.ttsMode || this.loading) {
+      return;
+    }
+    let target: number = fraction;
+    if (target < 0) {
+      target = 0;
+    }
+    if (target > 1) {
+      target = 1;
+    }
+    if (this.completed && target < 1) {
+      this.completed = false;
+    }
+    this.ttsOffset = FqAudioSession.skipWhitespace(this.ttsText, Math.floor(target * this.ttsText.length));
+    this.updateTtsProgress();
+    if (this.wantPlay && !this.completed && this.errorMessage.length === 0) {
+      this.restartTtsFrom(this.ttsOffset);
+    } else {
+      this.ttsCueText = '';
+      this.persistHistory();
+      this.syncAvPlaybackState(true);
+    }
+  }
+
+  /** 按朗读片段原文定位（阅读页边听边读进入听书页续读；装载中延后，匹配失败忽略）。
+   * 返回是否已受理（立即定位或装载后定位）。 */
+  public seekTtsByText(cue: string): boolean {
+    if (!this.hasSession || !this.ttsMode || cue.length === 0) {
+      return false;
+    }
+    if (this.loading) {
+      // 章节装载中：正文就绪后再定位
+      this.ttsPendingCue = cue;
+      return true;
+    }
+    if (this.ttsText.length === 0 || this.completed) {
+      return false;
+    }
+    let index: number = this.ttsText.indexOf(cue);
+    if (index < 0 && cue.length > 12) {
+      index = this.ttsText.indexOf(cue.substring(0, 12));
+    }
+    if (index < 0) {
+      return false;
+    }
+    this.seekTts(index / this.ttsText.length);
+    return true;
+  }
+
+  /** 起播/续播当前片段（wantPlay 已置位）。 */
+  private playTts(): void {
+    if (this.completed || this.ttsText.trim().length === 0) {
+      return;
+    }
+    this.speakTtsFrom(this.ttsOffset);
+  }
+
+  /** 离线朗读章节装载：取正文 → 就绪后按 wantPlay 起播（generation 守卫）。 */
+  private async openTtsChapter(index: number, autoplay: boolean, startFraction: number): Promise<void> {
+    if (!this.hasSession) {
+      return;
+    }
+    const chapter: FqChapter | undefined = this.chapters[index];
+    if (chapter === undefined) {
+      return;
+    }
+    const gen: number = ++this.generation;
+    const wantAutoplay: boolean = autoplay || this.wantPlay;
+    this.index = index;
+    this.itemId = chapter.itemId;
+    this.completed = startFraction >= 1;
+    this.wantPlay = wantAutoplay && !this.completed;
+    this.loading = true;
+    this.errorMessage = '';
+    this.ttsText = '';
+    this.ttsCueText = '';
+    this.ttsOffset = 0;
+    this.ttsProgress = this.completed ? 1 : 0;
+    this.ttsSerial += 1;
+    this.ttsRestartOffset = -1;
+    this.ttsPendingCue = '';
+    this.cancelTtsRestartTimer();
+    this.lastHistorySaveAt = Date.now();
+    // 切章先停旧音频：在线引擎立即静下来
+    await this.engine.pause().catch((): void => {
+    });
+    if (gen !== this.generation) {
+      return;
+    }
+    try {
+      const text: string = await this.fetchTtsChapterText(index);
+      if (gen !== this.generation) {
+        return;
+      }
+      if (text.trim().length === 0) {
+        throw new Error('本章暂无正文，无法离线朗读');
+      }
+      this.ttsText = text;
+      if (startFraction > 0 && startFraction < 1) {
+        this.ttsOffset = FqAudioSession.skipWhitespace(text, Math.floor(startFraction * text.length));
+        this.updateTtsProgress();
+      }
+      this.loading = false;
+      this.ensureAvSession();
+      this.syncAvMetadata();
+      this.syncAvPlaybackState(true);
+      this.persistHistory();
+      // 装载期间暂存的原文定位：就绪后按 cue 定位续读
+      const pendingCue: string = this.ttsPendingCue;
+      this.ttsPendingCue = '';
+      if (pendingCue.length > 0 && !this.completed) {
+        if (this.seekTtsByText(pendingCue)) {
+          return;
+        }
+      }
+      if (this.wantPlay && !this.completed) {
+        this.startBackgroundTask();
+        this.speakTtsFrom(this.ttsOffset);
+      }
+    } catch (error) {
+      if (gen !== this.generation) {
+        return;
+      }
+      this.ttsPendingCue = '';
+      this.wantPlay = false;
+      this.loading = false;
+      this.errorMessage = fqErrorMessage(error);
+      this.persistHistory();
+      hilog.error(0x0001, TAG, `openTtsChapter failed: ${this.errorMessage}`);
+    }
+  }
+
+  /** 朗读正文：本地书按导入偏移切片；在线拉取并写章节缓存，失败回退缓存（离线续读）。 */
+  private async fetchTtsChapterText(index: number): Promise<string> {
+    const chapter: FqChapter | undefined = this.chapters[index];
+    if (chapter === undefined) {
+      return '';
+    }
+    if (FqLocalBookStore.isLocalBookId(this.bookId)) {
+      return FqLocalBookStore.chapterText(this.bookId, index);
+    }
+    try {
+      const normalized: FqNormalizedChapter =
+        await FqBackend.get().chapterTextWithIdx(chapter.itemId, chapter.title);
+      if (normalized.text.trim().length === 0) {
+        throw new Error('本章暂无正文，无法离线朗读');
+      }
+      FqChapterCacheStore.write(this.bookId, chapter.itemId, chapter.title, normalized.text);
+      return normalized.text;
+    } catch (error) {
+      const cached: string = FqChapterCacheStore.read(this.bookId, chapter.itemId);
+      if (cached.trim().length > 0) {
+        return cached;
+      }
+      throw new Error(fqErrorMessage(error));
+    }
+  }
+
+  /** 创建/复用朗读引擎（音色变更时重建）。 */
+  private async ensureTtsEngine(): Promise<boolean> {
+    if (this.ttsEngine !== null && this.ttsEnginePerson === this.ttsVoicePerson) {
+      return true;
+    }
+    this.shutdownTtsEngine();
+    if (this.context === null) {
+      return false;
+    }
+    const extraParams: Record<string, Object> = {
+      'style': 'interaction-broadcast',
+      'locate': 'CN',
+      'name': 'FqHouse',
+      'isBackStage': true,
+    };
+    const params: textToSpeech.CreateEngineParams = {
+      language: 'zh-CN',
+      person: this.ttsVoicePerson,
+      online: 1,
+      extraParams: extraParams,
+    };
+    try {
+      const engine: textToSpeech.TextToSpeechEngine = await textToSpeech.createEngine(params);
+      this.ttsEngine = engine;
+      this.ttsEnginePerson = this.ttsVoicePerson;
+      engine.setListener(this.buildTtsListener());
+      return true;
+    } catch (error) {
+      hilog.warn(0x0001, TAG,
+        `tts createEngine failed person=${this.ttsVoicePerson}: ${fqErrorMessage(error)}`);
+      return false;
+    }
+  }
+
+  private buildTtsListener(): textToSpeech.SpeakListener {
+    const listener: textToSpeech.SpeakListener = {
+      onStart: (_requestId: string, _response: textToSpeech.StartResponse): void => {
+      },
+      onComplete: (requestId: string, response: textToSpeech.CompleteResponse): void => {
+        this.onTtsComplete(requestId, response);
+      },
+      onStop: (_requestId: string, _response: textToSpeech.StopResponse): void => {
+        this.runPendingTtsRestart();
+      },
+      onError: (requestId: string, errorCode: number, errorMessage: string): void => {
+        this.onTtsError(requestId, errorCode, errorMessage);
+      },
+    };
+    return listener;
+  }
+
+  /** 从 offset 切出下一片段合成播报（句读边界切分，serial 递增判过期）。 */
+  private async speakTtsFrom(offset: number): Promise<void> {
+    if (!this.ttsMode || this.ttsText.length === 0) {
+      return;
+    }
+    const engineReady: boolean = await this.ensureTtsEngine();
+    if (!engineReady) {
+      if (this.ttsMode && this.wantPlay) {
+        this.wantPlay = false;
+        this.errorMessage = '离线朗读引擎初始化失败，请稍后重试';
+        this.persistHistory();
+        this.syncAvPlaybackState(true);
+      }
+      return;
+    }
+    if (!this.ttsMode || !this.wantPlay || this.completed) {
+      return;
+    }
+    const start: number = FqAudioSession.skipWhitespace(this.ttsText, offset);
+    if (start >= this.ttsText.length) {
+      this.handleTtsChapterEnd();
+      return;
+    }
+    this.ttsOffset = start;
+    const end: number = FqAudioSession.findPieceEnd(this.ttsText, start);
+    this.ttsPieceStart = start;
+    this.ttsPieceEnd = end;
+    this.ttsSerial += 1;
+    const serial: number = this.ttsSerial;
+    const piece: string = this.ttsText.substring(start, end);
+    this.ttsCueText = piece;
+    this.updateTtsProgress();
+    this.persistHistory();
+    this.syncAvPlaybackState(true);
+    const speakExtra: Record<string, Object> = {
+      'speed': this.rate,
+      'languageContext': 'zh-CN',
+      'playType': 1,
+      'queueMode': 1,
+    };
+    const speakParams: textToSpeech.SpeakParams = {
+      requestId: `fqTts${serial}`,
+      extraParams: speakExtra,
+    };
+    const engine: textToSpeech.TextToSpeechEngine | null = this.ttsEngine;
+    if (engine === null) {
+      return;
+    }
+    try {
+      engine.speak(piece, speakParams);
+    } catch (error) {
+      this.wantPlay = false;
+      this.errorMessage = fqErrorMessage(error);
+      this.persistHistory();
+      this.syncAvPlaybackState(true);
+    }
+  }
+
+  private onTtsComplete(requestId: string, response: textToSpeech.CompleteResponse): void {
+    // 仅播报完成（type=1）推进；合成完成（type=0）忽略
+    if (response.type !== 1 || requestId !== `fqTts${this.ttsSerial}` || !this.ttsMode) {
+      return;
+    }
+    const end: number = this.ttsPieceEnd;
+    this.ttsOffset = end;
+    if (end >= this.ttsText.length) {
+      this.handleTtsChapterEnd();
+      return;
+    }
+    if (this.wantPlay && !this.completed) {
+      this.speakTtsFrom(end);
+    }
+  }
+
+  private onTtsError(requestId: string, errorCode: number, errorMessage: string): void {
+    if (requestId !== `fqTts${this.ttsSerial}` || !this.ttsMode) {
+      return;
+    }
+    hilog.error(0x0001, TAG, `tts error ${errorCode}: ${errorMessage}`);
+    this.wantPlay = false;
+    this.errorMessage = errorMessage.length > 0 ? errorMessage : `离线朗读失败（${errorCode}）`;
+    this.persistHistory();
+    this.syncAvPlaybackState(true);
+  }
+
+  /** 停止当前合成播报并作废在途回调。 */
+  private stopTtsSpeak(): void {
+    this.ttsSerial += 1;
+    this.ttsRestartOffset = -1;
+    this.cancelTtsRestartTimer();
+    const engine: textToSpeech.TextToSpeechEngine | null = this.ttsEngine;
+    if (engine !== null && engine.isBusy()) {
+      engine.stop();
+    }
+  }
+
+  /** 变速/定位/换音色续读：stop 当前播报，onStop（或 600ms 超时兜底）后从 offset 重起。 */
+  private restartTtsFrom(offset: number): void {
+    this.ttsRestartOffset = offset;
+    this.cancelTtsRestartTimer();
+    const engine: textToSpeech.TextToSpeechEngine | null = this.ttsEngine;
+    if (engine !== null && engine.isBusy()) {
+      engine.stop();
+      this.ttsRestartTimer = setTimeout((): void => {
+        this.ttsRestartTimer = -1;
+        this.runPendingTtsRestart();
+      }, 600);
+      return;
+    }
+    this.runPendingTtsRestart();
+  }
+
+  /** stop→onStop 续读（无待重启时忽略）。 */
+  private runPendingTtsRestart(): void {
+    if (this.ttsRestartTimer >= 0) {
+      clearTimeout(this.ttsRestartTimer);
+      this.ttsRestartTimer = -1;
+    }
+    const offset: number = this.ttsRestartOffset;
+    if (offset < 0) {
+      return;
+    }
+    this.ttsRestartOffset = -1;
+    if (!this.ttsMode || !this.wantPlay || this.completed || this.loading) {
+      return;
+    }
+    this.speakTtsFrom(offset);
+  }
+
+  private handleTtsChapterEnd(): void {
+    this.completed = true;
+    this.wantPlay = false;
+    this.ttsProgress = 1;
+    this.ttsCueText = '';
+    this.persistHistory();
+    this.syncAvPlaybackState(true);
+    if (this.sleepAtChapterEnd) {
+      this.sleepAtChapterEnd = false;
+      return;
+    }
+    if (this.autoAdvance && this.index + 1 < this.chapters.length) {
+      this.openChapter(this.index + 1, new FqChapterOpenOptions(this.toneId, 0, true, false));
+    }
+  }
+
+  private updateTtsProgress(): void {
+    if (this.ttsText.length === 0) {
+      this.ttsProgress = 0;
+      return;
+    }
+    const progress: number = this.ttsOffset / this.ttsText.length;
+    this.ttsProgress = Math.min(1, Math.max(0, progress));
+  }
+
+  /** 动态加载可选音色（listVoices；force 强刷状态，失败/为空保留静态回退表）。 */
+  public refreshTtsVoices(force: boolean): void {
+    if (!force && this.ttsVoicesLoaded) {
+      return;
+    }
+    const query: textToSpeech.VoiceQuery = {
+      requestId: `fqVoices${this.ttsVoicesQuerySerial += 1}`,
+      online: 1,
+    };
+    textToSpeech.listVoices(query)
+      .then((list: textToSpeech.VoiceInfo[]): void => {
+        if (list.length === 0) {
+          return;
+        }
+        this.ttsVoiceInfos = list;
+        const voices: FqTtsVoice[] = [];
+        for (const info of list) {
+          // 仅中文音色（8 劳拉为英语音色，无法朗读中文正文）；EOM 不可用
+          if (info.language.indexOf('zh') !== 0 || info.status === 'EOM') {
+            continue;
+          }
+          // 13/0 同为聆小珊（文档不一致）：统一为 0
+          const person: number = info.person === 13 ? 0 : info.person;
+          const installed: boolean = info.status === undefined || info.status === 'INSTALLED';
+          let merged: boolean = false;
+          for (let i: number = 0; i < voices.length; i++) {
+            if (voices[i].person === person) {
+              // 重复音色合并：任一已安装即视为已安装
+              if (installed && !voices[i].installed) {
+                voices[i] = new FqTtsVoice(person, voices[i].name, voices[i].description, true);
+              }
+              merged = true;
+              break;
+            }
+          }
+          if (merged) {
+            continue;
+          }
+          voices.push(new FqTtsVoice(person, FqAudioSession.ttsVoiceName(person),
+            info.description.length > 0 ? info.description : FqAudioSession.ttsVoiceDesc(person),
+            installed));
+        }
+        if (voices.length === 0) {
+          return;
+        }
+        this.ttsVoices = voices;
+        this.ttsVoicesLoaded = true;
+        this.ttsVoicesFromSystem = true;
+      })
+      .catch((_error: BusinessError): void => {
+        // 保留静态回退表
+      });
+  }
+
+  /** 选离线朗读音色（设置页用：无播放会话也生效，全局持久化）。 */
+  public applyTtsVoiceChoice(person: number): void {
+    if (this.hasSession) {
+      this.selectTtsVoice(person);
+      return;
+    }
+    if (person === this.ttsVoicePerson) {
+      return;
+    }
+    this.ttsVoicePerson = person;
+    FqAppSettingsStore.setTtsPerson(person);
+  }
+
+  /** 下载未安装音色（系统弹窗确认后下载；@Trace 下载态驱动 UI）。
+   * 返回是否已受理（无音色信息时 false）。 */
+  public downloadTtsVoice(person: number): boolean {
+    if (this.ttsVoiceDownloading >= 0) {
+      return true;
+    }
+    let info: textToSpeech.VoiceInfo | undefined = undefined;
+    for (const item of this.ttsVoiceInfos) {
+      if (item.person === person || (person === 0 && item.person === 13)) {
+        info = item;
+        if (item.person === person) {
+          break;
+        }
+      }
+    }
+    if (info === undefined) {
+      return false;
+    }
+    const params: textToSpeech.VoiceDownload = {
+      requestId: `fqVoiceDl${this.ttsVoiceDownloadSerial += 1}`,
+      language: info.language,
+      person: info.person,
+      style: info.style.length > 0 ? info.style : 'interaction-broadcast',
+    };
+    this.ttsVoiceDownloading = person;
+    this.ttsVoiceDownloadPercent = -1;
+    textToSpeech.downloadVoice(params, (error: BusinessError,
+      response: textToSpeech.DownloadResponse): void => {
+      if (error !== undefined && error !== null) {
+        // 1002300010 已下载过：直接标记已安装
+        if (error.code === 1002300010) {
+          this.markTtsVoiceInstalled(person);
+        } else {
+          hilog.error(0x0001, TAG,
+            `downloadVoice failed person=${person}: ${error.code} ${error.message}`);
+        }
+        this.resetTtsVoiceDownload();
+        return;
+      }
+      if (response === undefined || response === null) {
+        this.resetTtsVoiceDownload();
+        return;
+      }
+      const startCallback: Callback<string> = (_info: string): void => {
+        this.ttsVoiceDownloadPercent = -1;
+      };
+      const progressCallback: Callback<string> = (schedule: string): void => {
+        this.ttsVoiceDownloadPercent = FqAudioSession.parseDownloadPercent(schedule);
+      };
+      const cancelCallback: Callback<string> = (_info: string): void => {
+        this.resetTtsVoiceDownload();
+      };
+      const errorCallback: ErrorCallback<BusinessError> = (err: BusinessError): void => {
+        hilog.error(0x0001, TAG,
+          `download voice error person=${person}: ${err.code} ${err.message}`);
+        this.resetTtsVoiceDownload();
+      };
+      const completeCallback: Callback<textToSpeech.VoiceInfo> =
+        (_voice: textToSpeech.VoiceInfo): void => {
+          this.markTtsVoiceInstalled(person);
+          this.resetTtsVoiceDownload();
+          response.off('start', startCallback);
+          response.off('progress', progressCallback);
+          response.off('complete', completeCallback);
+          response.off('cancel', cancelCallback);
+          response.off('error', errorCallback);
+        };
+      response.on('start', startCallback);
+      response.on('progress', progressCallback);
+      response.on('complete', completeCallback);
+      response.on('cancel', cancelCallback);
+      response.on('error', errorCallback);
+    });
+    return true;
+  }
+
+  /** 标记音色已安装（重建数组触发 @Trace 刷新）。 */
+  private markTtsVoiceInstalled(person: number): void {
+    const voices: FqTtsVoice[] = [];
+    for (const voice of this.ttsVoices) {
+      voices.push(new FqTtsVoice(voice.person, voice.name, voice.description,
+        voice.installed || voice.person === person));
+    }
+    this.ttsVoices = voices;
+  }
+
+  private resetTtsVoiceDownload(): void {
+    this.ttsVoiceDownloading = -1;
+    this.ttsVoiceDownloadPercent = -1;
+  }
+
+  /** 解析下载进度字符串中的首个 0~100 整数（无法解析返回 -1）。 */
+  private static parseDownloadPercent(value: string): number {
+    let start: number = -1;
+    for (let i: number = 0; i < value.length; i++) {
+      const isDigit: boolean = value.charCodeAt(i) >= 48 && value.charCodeAt(i) <= 57;
+      if (isDigit && start < 0) {
+        start = i;
+      }
+      if (!isDigit && start >= 0) {
+        return FqAudioSession.clampPercent(Number(value.substring(start, i)));
+      }
+    }
+    if (start >= 0) {
+      return FqAudioSession.clampPercent(Number(value.substring(start)));
+    }
+    return -1;
+  }
+
+  private static clampPercent(value: number): number {
+    if (!Number.isFinite(value)) {
+      return -1;
+    }
+    return Math.min(100, Math.max(0, Math.round(value)));
+  }
+
+  private shutdownTtsEngine(): void {
+    const engine: textToSpeech.TextToSpeechEngine | null = this.ttsEngine;
+    this.ttsEngine = null;
+    this.ttsEnginePerson = -1;
+    if (engine !== null) {
+      try {
+        engine.shutdown();
+      } catch (error) {
+        // 忽略关闭异常
+      }
+    }
+  }
+
+  private cancelTtsRestartTimer(): void {
+    if (this.ttsRestartTimer >= 0) {
+      clearTimeout(this.ttsRestartTimer);
+      this.ttsRestartTimer = -1;
+    }
+  }
+
+  /** 跳过 offset 起的空白字符。 */
+  private static skipWhitespace(text: string, offset: number): number {
+    let index: number = offset;
+    if (index < 0) {
+      index = 0;
+    }
+    while (index < text.length) {
+      const code: number = text.charCodeAt(index);
+      if (code !== 32 && code !== 10 && code !== 13 && code !== 9 && code !== 0x3000) {
+        break;
+      }
+      index += 1;
+    }
+    return index;
+  }
+
+  /** 片段窗口内最后一个句读断点（换行即段界；无句读 1.5 倍扩找再硬切）。 */
+  private static findPieceEnd(text: string, start: number): number {
+    const limit: number = Math.min(text.length, start + FQ_TTS_PIECE_MAX);
+    let end: number = -1;
+    for (let i: number = start + 1; i < limit; i++) {
+      const ch: string = text.charAt(i);
+      if (ch === '\n') {
+        return i;
+      }
+      if (FqAudioSession.isTtsBreakChar(ch)) {
+        let j: number = i + 1;
+        // 断点后闭合引号跟随
+        while (j < limit && FqAudioSession.isTtsCloseQuote(text.charAt(j))) {
+          j += 1;
+        }
+        end = j;
+      }
+    }
+    if (end > start) {
+      return end;
+    }
+    if (limit >= text.length) {
+      return text.length;
+    }
+    // 窗口内无句读：1.5 倍扩找
+    const extended: number = Math.min(text.length, start + Math.floor(FQ_TTS_PIECE_MAX * 1.5));
+    for (let i: number = limit; i < extended; i++) {
+      const ch: string = text.charAt(i);
+      if (ch === '\n' || FqAudioSession.isTtsBreakChar(ch)) {
+        return i;
+      }
+    }
+    return extended;
+  }
+
+  private static isTtsBreakChar(ch: string): boolean {
+    return ch === '。' || ch === '！' || ch === '？' || ch === '；' || ch === '!' || ch === '?';
+  }
+
+  private static isTtsCloseQuote(ch: string): boolean {
+    return ch === '”' || ch === '』' || ch === '」' || ch === '"' || ch === '’';
+  }
+
+  /** 音色显示名（设置页入口右侧文案用，公开静态）。 */
+  public static ttsVoiceName(person: number): string {
+    if (person === 21) {
+      return '凌飞哲';
+    }
+    if (person === 8) {
+      return '劳拉';
+    }
+    return '聆小珊';
+  }
+
+  private static ttsVoiceDesc(person: number): string {
+    if (person === 21) {
+      return '男声';
+    }
+    if (person === 8) {
+      return '英语女声';
+    }
+    return '女声';
+  }
+
+  /** listVoices 不可用时的静态音色表。 */
+  private static fallbackTtsVoices(): FqTtsVoice[] {
+    const voices: FqTtsVoice[] = [];
+    voices.push(new FqTtsVoice(0, '聆小珊', '女声', true));
+    voices.push(new FqTtsVoice(21, '凌飞哲', '男声（需在系统下载音色）', false));
+    return voices;
   }
 
   // ---------------------------------------------------------------------------
@@ -827,6 +1671,12 @@ export class FqAudioSession {
         this.durationSec = duration;
       }
     }
+    const ttsActive: boolean = this.ttsMode && this.wantPlay && !this.completed && !this.loading
+      && this.errorMessage.length === 0;
+    if (ttsActive) {
+      // 朗读中同样需要长时任务兜底（息屏/后台续读）
+      this.startBackgroundTask();
+    }
     if (this.sleepDeadline > 0) {
       const remainSec: number = (this.sleepDeadline - now) / 1000;
       this.sleepRemainingSec = Math.max(0, Math.ceil(remainSec));
@@ -839,12 +1689,12 @@ export class FqAudioSession {
     if (now - this.lastAvSyncAt >= 1000) {
       this.syncAvPlaybackState(false);
     }
-    if (this.engine.isPlaying && now - this.lastHistorySaveAt >= 5000) {
+    if ((this.engine.isPlaying || ttsActive) && now - this.lastHistorySaveAt >= 5000) {
       this.lastHistorySaveAt = now;
       this.persistHistory();
     }
     // 播放中累计今日已读时长（每 10 次 tick = 5 秒落一次）
-    if (this.engine.isPlaying) {
+    if (this.engine.isPlaying || ttsActive) {
       this.statPlayingTicks += 1;
       if (this.statPlayingTicks >= 10) {
         this.statPlayingTicks = 0;
@@ -879,8 +1729,12 @@ export class FqAudioSession {
     if (!this.hasSession || this.bookId.length === 0 || this.chapters.length === 0) {
       return;
     }
-    FqAudioHistory.put(new FqListenRecord(this.bookId, this.index, this.positionSec,
-      this.durationSec, this.toneId, this.rate, this.completed, this.title, this.cover));
+    // 离线朗读：秒级位置无意义，写 0 + mode='tts'（章节进度与在线共享）
+    const positionSec: number = this.ttsMode ? 0 : this.positionSec;
+    const durationSec: number = this.ttsMode ? 0 : this.durationSec;
+    FqAudioHistory.put(new FqListenRecord(this.bookId, this.index, positionSec,
+      durationSec, this.toneId, this.rate, this.completed, this.title, this.cover,
+      this.ttsMode ? 'tts' : 'online'));
   }
 
   /** 真人讲书目录对位：核心标题 → 序号 → 原下标。 */
@@ -1020,7 +1874,7 @@ export class FqAudioSession {
       assetId: `${this.bookId}:${this.itemId}:${this.toneId}`,
       title: this.title,
       artist: chapter !== undefined ? chapter.title : '',
-      duration: Math.round(this.durationSec * 1000),
+      duration: Math.round((this.ttsMode ? 0 : this.durationSec) * 1000),
     };
     if (this.coverPixel !== null && this.coverPixelUrl === this.cover) {
       meta.mediaImage = this.coverPixel;
@@ -1049,7 +1903,7 @@ export class FqAudioSession {
       state: state,
       speed: this.rate,
       position: {
-        elapsedTime: Math.round(this.positionSec * 1000),
+        elapsedTime: Math.round((this.ttsMode ? 0 : this.positionSec) * 1000),
         updateTime: now,
       },
     };

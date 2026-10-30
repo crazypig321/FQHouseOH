@@ -22,7 +22,7 @@ import {
   ROUTE_CACHED_AUDIO,
 } from '../../model/FqNavModels';
 import { FqBackend } from '../../core/FqBackend';
-import { fqAudioSession, FqChapterOpenOptions } from '../../core/FqAudioSession';
+import { fqAudioSession, FqChapterOpenOptions, FqTtsVoice } from '../../core/FqAudioSession';
 import { FqAudioTone, FqRelatedWork, FqSubtitleTrack, fqSubtitleStartSec } from '../../model/FqAudioModels';
 import { FqChapter, FqCacheTaskView } from '../../model/FqModels';
 import { FqShelfItem, FqShelfStore } from '../../core/FqShelfStore';
@@ -83,6 +83,8 @@ function fqRatioScreenHeightVp(ratio: number): number {
 @ComponentV2
 export struct ListenPage {
   @Local seekPreview: number = -1;
+  /** 离线朗读章内拖动预览（0~1）。 */
+  @Local ttsSeekPreview: number = -1;
   /** 当前半模态种类（内容与高度选择器）。 */
   @Local activeSheet: FqListenSheetKind = FqListenSheetKind.none;
   /** bindSheet 显隐（独立于 activeSheet：关闭时内容保留至关闭动画结束，避免标题栏事件内同步改 isShow 被框架丢弃）。 */
@@ -118,6 +120,17 @@ export struct ListenPage {
       ListenNavParams.title, ListenNavParams.cover, ListenNavParams.chapters)
       .then(async (): Promise<void> => {
         ListenNavParams.chapterIndex = -1;
+        if (fqAudioSession.ttsMode) {
+          // 离线朗读：目录定位按朗读模式续读，原文 cue 字符定位（装载中自动延后）
+          if (startChapter >= 0 && startChapter < fqAudioSession.chapters.length) {
+            fqAudioSession.openChapter(startChapter,
+              new FqChapterOpenOptions(fqAudioSession.toneId, 0, true, false));
+          }
+          if (startCueText.trim().length > 0) {
+            fqAudioSession.seekTtsByText(startCueText);
+          }
+          return;
+        }
         if (startChapter >= 0 && startChapter < fqAudioSession.chapters.length) {
           let positionSec: number = 0;
           if (startCueText.trim().length > 0) {
@@ -333,16 +346,16 @@ export struct ListenPage {
             .width(13)
             .height(13)
             .color(appState.accentColor)
-          Text('正在加载音频…')
+          Text(fqAudioSession.ttsMode ? '正在加载正文…' : '正在加载音频…')
             .fontSize(12.5)
             .fontColor($r('sys.color.font_secondary'))
         }
       } else if (fqAudioSession.completed) {
-        Text('本章已播完')
+        Text(fqAudioSession.ttsMode ? '本章已朗读完' : '本章已播完')
           .fontSize(12.5)
           .fontColor($r('sys.color.font_secondary'))
       } else if (fqAudioSession.wantPlay) {
-        Text('正在播放')
+        Text(fqAudioSession.ttsMode ? '正在朗读' : '正在播放')
           .fontSize(12.5)
           .fontColor($r('sys.color.font_secondary'))
       } else {
@@ -418,57 +431,88 @@ export struct ListenPage {
     .padding({ left: 20, right: 20, top: 8 })
   }
 
-  /** 进度排：-15s / 拖动条 / +15s + 时间标签。 */
+  /** 进度排：离线朗读（本章字符比）/ 在线（-15s 拖动条 +15s）。 */
   @Builder
   private ProgressRow() {
-    Column({ space: 2 }) {
-      Row() {
-        Text('-15s')
-          .fontSize(12)
-          .fontWeight(FontWeight.Medium)
-          .fontColor($r('sys.color.font_secondary'))
-          .padding({ left: 8, right: 8, top: 10, bottom: 10 })
-          .onClick((): void => {
-            fqAudioSession.seekTo(fqAudioSession.positionSec - 15);
-          })
+    if (fqAudioSession.ttsMode) {
+      Column({ space: 2 }) {
         Slider({
-          value: this.displayPositionSec,
+          value: this.ttsSeekPreview >= 0 ? this.ttsSeekPreview : fqAudioSession.ttsProgress,
           min: 0,
-          max: fqAudioSession.durationSec > 0 ? fqAudioSession.durationSec : 1,
-          step: 1,
+          max: 1,
+          step: 0.01,
         })
-          .layoutWeight(1)
           .trackThickness(3)
           .blockSize({ width: 14, height: 14 })
           .selectedColor(appState.accentColor)
           .trackColor($r('sys.color.comp_divider'))
           .blockColor(appState.accentColor)
-          .enabled(fqAudioSession.durationSec > 0)
           .onChange((value: number, mode: SliderChangeMode): void => {
             if (mode === SliderChangeMode.End) {
-              this.seekPreview = -1;
-              fqAudioSession.seekTo(value);
+              this.ttsSeekPreview = -1;
+              fqAudioSession.seekTts(value);
             } else {
-              this.seekPreview = value;
+              this.ttsSeekPreview = value;
             }
           })
-        Text('+15s')
+        Text(`本章 ${Math.round((this.ttsSeekPreview >= 0
+          ? this.ttsSeekPreview : fqAudioSession.ttsProgress) * 100)}%`)
           .fontSize(12)
-          .fontWeight(FontWeight.Medium)
           .fontColor($r('sys.color.font_secondary'))
-          .padding({ left: 8, right: 8, top: 10, bottom: 10 })
-          .onClick((): void => {
-            fqAudioSession.seekTo(fqAudioSession.positionSec + 15);
-          })
       }
       .width('100%')
-      Text(`${fqFormatClock(this.displayPositionSec)}/${fqFormatClock(fqAudioSession.durationSec)}`)
-        .fontSize(12)
-        .fontColor($r('sys.color.font_secondary'))
+      .padding({ left: 20, right: 20, top: 12 })
+      .alignItems(HorizontalAlign.Center)
+    } else {
+      Column({ space: 2 }) {
+        Row() {
+          Text('-15s')
+            .fontSize(12)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('sys.color.font_secondary'))
+            .padding({ left: 8, right: 8, top: 10, bottom: 10 })
+            .onClick((): void => {
+              fqAudioSession.seekTo(fqAudioSession.positionSec - 15);
+            })
+          Slider({
+            value: this.displayPositionSec,
+            min: 0,
+            max: fqAudioSession.durationSec > 0 ? fqAudioSession.durationSec : 1,
+            step: 1,
+          })
+            .layoutWeight(1)
+            .trackThickness(3)
+            .blockSize({ width: 14, height: 14 })
+            .selectedColor(appState.accentColor)
+            .trackColor($r('sys.color.comp_divider'))
+            .blockColor(appState.accentColor)
+            .enabled(fqAudioSession.durationSec > 0)
+            .onChange((value: number, mode: SliderChangeMode): void => {
+              if (mode === SliderChangeMode.End) {
+                this.seekPreview = -1;
+                fqAudioSession.seekTo(value);
+              } else {
+                this.seekPreview = value;
+              }
+            })
+          Text('+15s')
+            .fontSize(12)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('sys.color.font_secondary'))
+            .padding({ left: 8, right: 8, top: 10, bottom: 10 })
+            .onClick((): void => {
+              fqAudioSession.seekTo(fqAudioSession.positionSec + 15);
+            })
+        }
+        .width('100%')
+        Text(`${fqFormatClock(this.displayPositionSec)}/${fqFormatClock(fqAudioSession.durationSec)}`)
+          .fontSize(12)
+          .fontColor($r('sys.color.font_secondary'))
+      }
+      .width('100%')
+      .padding({ left: 20, right: 20, top: 12 })
+      .alignItems(HorizontalAlign.Center)
     }
-    .width('100%')
-    .padding({ left: 20, right: 20, top: 12 })
-    .alignItems(HorizontalAlign.Center)
   }
 
   /** 控制排单键。 */
@@ -554,7 +598,9 @@ export struct ListenPage {
       color: this.toneChipSelected(tone) ? FqColorUtils.withOpacity(appState.accentColor, 0.32) : Color.Transparent,
     })
     .onClick((): void => {
-      if (fqAudioSession.hasFixedTone) {
+      if (fqAudioSession.ttsMode) {
+        this.onTtsVoiceChipTap(Number(tone.id));
+      } else if (fqAudioSession.hasFixedTone) {
         fqAudioSession.selectNarrator(tone);
       } else {
         fqAudioSession.selectTone(tone);
@@ -570,7 +616,8 @@ export struct ListenPage {
     Row({ space: 12 }) {
       Column({ space: 4 }) {
         Row({ space: 4 }) {
-          Text(fqAudioSession.hasFixedTone ? '真人讲书' : '智能朗读')
+          Text(fqAudioSession.ttsMode ? '离线朗读'
+            : (fqAudioSession.hasFixedTone ? '真人讲书' : '智能朗读'))
             .fontSize(15)
             .fontWeight(FontWeight.Bold)
             .fontColor($r('sys.color.font_primary'))
@@ -738,7 +785,111 @@ export struct ListenPage {
       },
     }) {
       List({ space: 16 }) {
-        if (fqAudioSession.toneSet.narratorTones.length > 0) {
+        ListItem() {
+          Column({ space: 10 }) {
+            Row({ space: 12 }) {
+              Column({ space: 3 }) {
+                Text('离线朗读')
+                  .fontSize(15)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor($r('sys.color.font_primary'))
+                Text('系统语音引擎朗读正文，无网络也能听')
+                  .fontSize(12)
+                  .fontColor($r('sys.color.font_secondary'))
+              }
+              .alignItems(HorizontalAlign.Start)
+              .layoutWeight(1)
+              Toggle({ type: ToggleType.Switch, isOn: fqAudioSession.ttsMode })
+                .onChange((isOn: boolean): void => {
+                  if (isOn) {
+                    fqAudioSession.switchToTts();
+                  } else {
+                    fqAudioSession.switchToOnline();
+                  }
+                })
+            }
+            .width('100%')
+            .padding({ left: 12, right: 12, top: 12, bottom: 12 })
+            .borderRadius(8)
+            .backgroundColor($r('sys.color.comp_background_list_card'))
+          }
+          .width('100%')
+        }
+        if (fqAudioSession.ttsMode) {
+          ListItem() {
+            Column({ space: 10 }) {
+              Text('朗读音色')
+                .fontSize(16)
+                .fontWeight(FontWeight.Bold)
+                .fontColor($r('sys.color.font_tertiary'))
+                .alignSelf(ItemAlign.Start)
+
+              ForEach(fqAudioSession.ttsVoices, (voice: FqTtsVoice) => {
+                Row({ space: 8 }) {
+                  Column({ space: 2 }) {
+                    Text(voice.name)
+                      .fontSize(14)
+                      .fontWeight(FontWeight.Medium)
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                      .fontColor(this.ttsVoiceSelected(voice) ? appState.accentColor
+                        : $r('sys.color.font_primary'))
+                    if (voice.description.length > 0 || !voice.installed) {
+                      Text(this.ttsVoiceSubtitle(voice))
+                        .fontSize(11.5)
+                        .maxLines(1)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
+                        .fontColor($r('sys.color.font_secondary'))
+                    }
+                  }
+                  .alignItems(HorizontalAlign.Start)
+                  .layoutWeight(1)
+                  if (fqAudioSession.ttsVoiceDownloading === voice.person) {
+                    Progress({
+                      value: fqAudioSession.ttsVoiceDownloadPercent >= 0
+                        ? fqAudioSession.ttsVoiceDownloadPercent : 0,
+                      total: 100,
+                      type: ProgressType.Linear,
+                    })
+                      .width(44)
+                      .height(4)
+                      .borderRadius(2)
+                      .color(appState.accentColor)
+                      .style({ strokeWidth: 4 })
+                  } else if (this.ttsVoiceSelected(voice)) {
+                    SymbolGlyph($r('sys.symbol.checkmark'))
+                      .fontSize(14)
+                      .fontColor([appState.accentColor])
+                  } else if (!voice.installed) {
+                    Text('下载')
+                      .fontSize(12)
+                      .fontWeight(FontWeight.Medium)
+                      .fontColor(appState.accentColor)
+                      .padding({ left: 12, right: 12, top: 5, bottom: 5 })
+                      .borderRadius(13)
+                      .backgroundColor(FqColorUtils.withOpacity(appState.accentColor, 0.12))
+                  }
+                }
+                .width('100%')
+                .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+                .borderRadius(8)
+                .backgroundColor(this.ttsVoiceSelected(voice)
+                  ? FqColorUtils.withOpacity(appState.accentColor, 0.1)
+                  : $r('sys.color.comp_background_list_card'))
+                .border({
+                  width: this.ttsVoiceSelected(voice) ? 1 : 0,
+                  color: this.ttsVoiceSelected(voice)
+                    ? FqColorUtils.withOpacity(appState.accentColor, 0.32) : Color.Transparent,
+                })
+                .onClick((): void => {
+                  this.onTtsVoiceTap(voice);
+                })
+              }, (voice: FqTtsVoice) => `tts_${voice.person}_${voice.installed}`)
+            }
+          }
+          .width('100%')
+        }
+        if (!fqAudioSession.ttsMode && fqAudioSession.toneSet.narratorTones.length > 0) {
           ListItem(){
             Column({ space: 10 }){
               Text('真人讲书')
@@ -774,7 +925,7 @@ export struct ListenPage {
             }.width('100%')
           }
         }
-        if (fqAudioSession.onlineToneOptions().length > 0) {
+        if (!fqAudioSession.ttsMode && fqAudioSession.onlineToneOptions().length > 0) {
           ListItem() {
             Column({ space: 10 }){
               Text('智能朗读')
@@ -1363,8 +1514,65 @@ export struct ListenPage {
 
   /** 音色条显示列表（保持原始顺序，滚动定位到选中项）。 */
   private toneChips(): FqAudioTone[] {
+    if (fqAudioSession.ttsMode) {
+      return this.ttsVoiceChips();
+    }
     return fqAudioSession.hasFixedTone
       ? fqAudioSession.toneSet.narratorTones : fqAudioSession.toneSet.ttsTones;
+  }
+
+  /** 离线朗读音色条（ttsVoices → FqAudioTone 映射，未安装/下载中副标题提示）。 */
+  private ttsVoiceChips(): FqAudioTone[] {
+    const chips: FqAudioTone[] = [];
+    for (const voice of fqAudioSession.ttsVoices) {
+      chips.push(new FqAudioTone(`${voice.person}`, voice.name, this.ttsVoiceSubtitle(voice),
+        '', '', false));
+    }
+    return chips;
+  }
+
+  /** 离线朗读音色副标题（下载中 / 未安装 / 描述）。 */
+  private ttsVoiceSubtitle(voice: FqTtsVoice): string {
+    if (fqAudioSession.ttsVoiceDownloading === voice.person) {
+      const percent: number = fqAudioSession.ttsVoiceDownloadPercent;
+      return percent >= 0 ? `正在下载音色 ${percent}%` : '正在下载音色…';
+    }
+    if (!voice.installed) {
+      return `${voice.description}（未安装，点击下载）`;
+    }
+    return voice.description;
+  }
+
+  /** 声音面板音色行点击：下载中忽略 / 未安装下载 / 已安装选中。 */
+  private onTtsVoiceTap(voice: FqTtsVoice): void {
+    if (fqAudioSession.ttsVoiceDownloading === voice.person) {
+      return;
+    }
+    if (!voice.installed) {
+      if (!fqAudioSession.downloadTtsVoice(voice.person)) {
+        promptAction.showToast({ message: '暂时无法获取音色信息，请稍后重试', duration: 1500 });
+      }
+      return;
+    }
+    fqAudioSession.selectTtsVoice(voice.person);
+  }
+
+  /** 音色条点击（离线朗读）：未安装音色下载，已安装选中。 */
+  private onTtsVoiceChipTap(person: number): void {
+    let installed: boolean = false;
+    for (const voice of fqAudioSession.ttsVoices) {
+      if (voice.person === person) {
+        installed = voice.installed;
+        break;
+      }
+    }
+    if (!installed) {
+      if (!fqAudioSession.downloadTtsVoice(person)) {
+        promptAction.showToast({ message: '暂时无法获取音色信息，请稍后重试', duration: 1500 });
+      }
+      return;
+    }
+    fqAudioSession.selectTtsVoice(person);
   }
 
   /** 音色条滚动到选中项（不排序，仅定位）。 */
@@ -1379,6 +1587,9 @@ export struct ListenPage {
   }
 
   private toneChipSelected(tone: FqAudioTone): boolean {
+    if (fqAudioSession.ttsMode) {
+      return tone.id === `${fqAudioSession.ttsVoicePerson}`;
+    }
     return fqAudioSession.hasFixedTone
       ? tone.id === fqAudioSession.bookId : tone.id === fqAudioSession.toneId;
   }
@@ -1389,9 +1600,21 @@ export struct ListenPage {
       ? voice.id === fqAudioSession.bookId : voice.id === fqAudioSession.toneId;
   }
 
+  /** 离线朗读音色选中态。 */
+  private ttsVoiceSelected(voice: FqTtsVoice): boolean {
+    return voice.person === fqAudioSession.ttsVoicePerson;
+  }
+
   /** 目录进度列：当前章显示百分比。 */
   private catalogProgressOf(index: number): string {
-    if (index !== fqAudioSession.index || fqAudioSession.durationSec <= 0) {
+    if (index !== fqAudioSession.index) {
+      return '';
+    }
+    if (fqAudioSession.ttsMode) {
+      const progress: number = fqAudioSession.completed ? 1 : fqAudioSession.ttsProgress;
+      return `${Math.round(progress * 100)}%`;
+    }
+    if (fqAudioSession.durationSec <= 0) {
       return '';
     }
     const percent: number = Math.min(100,

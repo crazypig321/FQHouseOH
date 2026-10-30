@@ -12,7 +12,7 @@ import { FqMenu, FqMenuItem } from '../view/CommonMenu';
 import { CommonLoading } from '../view/CommonCom';
 import { common, Want } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { FqTitleBarOptions, ROUTE_ABOUT, ROUTE_CACHE_MANAGE, ROUTE_LOGS, ROUTE_BACKUP } from '../model/FqNavModels';
+import { FqTitleBarOptions, ROUTE_ABOUT, ROUTE_CACHE_MANAGE, ROUTE_LOGS, ROUTE_BACKUP, ROUTE_TTS_SETTINGS } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import {
   FQ_THEME_DARK,
@@ -103,6 +103,12 @@ export struct SettingsPage {
             this.VolumeKeyPagingRow()
             this.RowDivider()
             this.BackgroundAudioRow()
+            this.RowDivider()
+            this.SettingRow($r('sys.symbol.waveform_headphones'), '#FF8B5CF6', '离线朗读',
+              '朗读音色下载与语速设置', '', true,
+              (): void => {
+                NavPathUtils.push(ROUTE_TTS_SETTINGS);
+              })
           }
 
           this.SectionHeader('数据')

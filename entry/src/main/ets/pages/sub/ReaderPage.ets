@@ -274,6 +274,8 @@ export struct ReaderPage {
   private lastCueIndex: number = -2;
   /** 段落匹配游标（字幕与段落均单调，向前优先）。 */
   private paraCursor: number = 0;
+  /** 上次已消费的离线朗读片段（去重，片段变化才重匹配）。 */
+  private lastTtsCue: string = '';
   /** 去空白段落数组（字幕文本匹配用，与 curLayout.paragraphs 同步重建）。 */
   private normParas: string[] = [];
   private bookId: string = '';
@@ -1438,6 +1440,18 @@ export struct ReaderPage {
     return fqAudioSession.wantPlay;
   }
 
+  /** 离线朗读当前片段原文（供 @Monitor 监听朗读推进）。 */
+  @Computed
+  get audioTtsCueText(): string {
+    return fqAudioSession.ttsCueText;
+  }
+
+  /** 朗读片段推进：刷新段落高亮与跟读翻页（离线朗读无字幕轨，以片段为 cue）。 */
+  @Monitor('audioTtsCueText')
+  onAudioTtsCueChange(): void {
+    this.syncListenHighlight();
+  }
+
   /** 播放停止：清跟读高亮（听书停下阅读页不再有高亮段落）；恢复播放：重同步高亮。 */
   @Monitor('audioWantPlay')
   onAudioWantPlayChange(): void {
@@ -1515,10 +1529,30 @@ export struct ReaderPage {
     if (!fqAudioSession.wantPlay) {
       this.highlightParaIndex = -1;
       this.lastCueIndex = -2;
+      this.lastTtsCue = '';
       return;
     }
     const layout: FqChapterLayout | null = this.curLayout;
     if (layout === null || this.loadingState) {
+      return;
+    }
+    if (fqAudioSession.ttsMode) {
+      // 离线朗读：无字幕轨，当前朗读片段原文即 cue
+      const cue: string = fqAudioSession.ttsCueText;
+      if (cue.length === 0) {
+        this.highlightParaIndex = -1;
+        return;
+      }
+      if (cue === this.lastTtsCue) {
+        return;
+      }
+      this.lastTtsCue = cue;
+      const para: number = this.matchParaForCue(cue);
+      if (para < 0) {
+        return;
+      }
+      this.highlightParaIndex = para;
+      this.turnToHighlightPage(layout, para);
       return;
     }
     const track: FqSubtitleTrack = fqAudioSession.subtitleTrack;
@@ -1544,6 +1578,11 @@ export struct ReaderPage {
       return;
     }
     this.highlightParaIndex = para;
+    this.turnToHighlightPage(layout, para);
+  }
+
+  /** 高亮段翻页跟随（上下滚动模式滚到段、翻页/覆盖模式切页）。 */
+  private turnToHighlightPage(layout: FqChapterLayout, para: number): void {
     const pageIdx: number = fqPageIndexForPosition(layout.pages, para, 0);
     if (pageIdx !== this.pageIndex) {
       this.pageIndex = pageIdx;
@@ -1585,6 +1624,7 @@ export struct ReaderPage {
     this.lastCueIndex = -2;
     this.paraCursor = 0;
     this.highlightParaIndex = -1;
+    this.lastTtsCue = '';
     const layout: FqChapterLayout | null = this.curLayout;
     this.normParas = layout === null ? [] : layout.paragraphs.map(
       (p: string): string => ReaderPage.normText(p));

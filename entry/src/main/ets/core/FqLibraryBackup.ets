@@ -361,7 +361,7 @@ export class FqLibraryBackup {
       fqBackupCheckId(record.bookId);
       listen.push(new FqListenRecord(record.bookId, record.chapterIndex, record.positionSec,
         record.durationSec, record.toneId, record.rate, record.completed, record.title,
-        fqBackupPortableCover(record.cover)));
+        fqBackupPortableCover(record.cover), record.mode));
     }
     const watchedIds: Map<string, Set<string>> = FqWatchedStore.allWatched();
     const watchedProgress: Map<string, FqWatchedProgress> = FqWatchedStore.allProgress();
@@ -497,6 +497,7 @@ export class FqLibraryBackup {
       rec['completed'] = record.completed;
       rec['title'] = record.title;
       rec['cover'] = record.cover;
+      rec['mode'] = record.mode;
       listen.push(rec);
     }
     root['listen'] = listen;
@@ -666,7 +667,8 @@ export class FqLibraryBackup {
         rate,
         rec['completed'] === true,
         fqBackupCheckText(rec, 'title'),
-        fqBackupPortableCover(fqBackupCheckText(rec, 'cover'))));
+        fqBackupPortableCover(fqBackupCheckText(rec, 'cover')),
+        fqBackupCheckText(rec, 'mode') === 'tts' ? 'tts' : 'online'));
     }
     const watched: FqBackupWatched[] = [];
     const watchedKeys: Set<string> = new Set<string>();

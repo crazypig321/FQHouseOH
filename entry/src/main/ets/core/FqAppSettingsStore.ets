@@ -33,6 +33,8 @@ const FQ_SETTINGS_KEY_BG_AUDIO: string = 'backgroundAudio';
 const FQ_SETTINGS_KEY_DIRECT_READ: string = 'directRead';
 const FQ_SETTINGS_KEY_UPDATE_PROXY: string = 'updateProxyDownload';
 const FQ_SETTINGS_KEY_CHANGELOG_SHOWN: string = 'changelogShownVersion';
+const FQ_SETTINGS_KEY_TTS_PERSON: string = 'ttsPerson';
+const FQ_SETTINGS_KEY_TTS_RATE: string = 'ttsRate';
 
 /** 深色模式档位：跟随系统。 */
 export const FQ_THEME_FOLLOW: number = 0;
@@ -52,6 +54,10 @@ export class FqAppSettingsStore {
   private static directRead: boolean = false;
   private static updateProxyDownload: boolean = false;
   private static changelogShownVersion: string = '';
+  /** 离线朗读音色（textToSpeech person；0 默认女声聆小珊）。 */
+  private static ttsPerson: number = 0;
+  /** 离线朗读语速（0.5 ~ 2）。 */
+  private static ttsRate: number = 1;
 
   public static init(context: common.Context): void {
     if (FqAppSettingsStore.pref !== null) {
@@ -95,6 +101,14 @@ export class FqAppSettingsStore {
       const rawShown: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_CHANGELOG_SHOWN, '');
       if (typeof rawShown === 'string') {
         FqAppSettingsStore.changelogShownVersion = rawShown;
+      }
+      const rawTtsPerson: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_TTS_PERSON, 0);
+      if (typeof rawTtsPerson === 'number' && rawTtsPerson >= 0) {
+        FqAppSettingsStore.ttsPerson = rawTtsPerson;
+      }
+      const rawTtsRate: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_TTS_RATE, 1);
+      if (typeof rawTtsRate === 'number' && rawTtsRate >= 0.5 && rawTtsRate <= 2) {
+        FqAppSettingsStore.ttsRate = rawTtsRate;
       }
     } catch (error) {
       // 损坏数据按默认值处理
@@ -262,6 +276,48 @@ export class FqAppSettingsStore {
     }
     try {
       pref.putSync(FQ_SETTINGS_KEY_CHANGELOG_SHOWN, version);
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
+  }
+
+  /** 离线朗读音色（textToSpeech person）。 */
+  public static getTtsPerson(): number {
+    return FqAppSettingsStore.ttsPerson;
+  }
+
+  public static setTtsPerson(person: number): void {
+    FqAppSettingsStore.ttsPerson = person;
+    const pref: preferences.Preferences | null = FqAppSettingsStore.pref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.putSync(FQ_SETTINGS_KEY_TTS_PERSON, person);
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
+  }
+
+  /** 离线朗读语速（0.5 ~ 2）。 */
+  public static getTtsRate(): number {
+    return FqAppSettingsStore.ttsRate;
+  }
+
+  public static setTtsRate(rate: number): void {
+    FqAppSettingsStore.ttsRate = rate;
+    const pref: preferences.Preferences | null = FqAppSettingsStore.pref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.putSync(FQ_SETTINGS_KEY_TTS_RATE, rate);
       pref.flush().catch((_error: BusinessError): void => {
         // 落盘失败不阻断
       });
