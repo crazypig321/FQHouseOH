@@ -1,6 +1,6 @@
 import { SymbolGlyphModifier } from '@kit.ArkUI';
-import { searchImmersiveModifier } from '../utils/UiUtils';
 import { appState } from '../entryability/AppState';
+import { searchImmersiveModifier } from '../utils/ModifierUtils';
 import { themeUtils } from '../utils/ThemeUtils';
 
 /**
