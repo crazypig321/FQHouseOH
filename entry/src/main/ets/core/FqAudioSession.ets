@@ -167,7 +167,7 @@ export class FqAudioSession {
   private ttsVoicesLoaded: boolean = false;
   /** listVoices 原始结果（downloadVoice 参数源：language/person/style）。 */
   private ttsVoiceInfos: textToSpeech.VoiceInfo[] = [];
-  /** listVoices / downloadVoice requestId 序号（同实例内不可重复）。 */
+  /** listVoices / downloadVoice requestId 序号（与时间戳拼接成跨重启唯一 id）。 */
   private ttsVoicesQuerySerial: number = 0;
   private ttsVoiceDownloadSerial: number = 0;
   private ttsText: string = '';
@@ -1511,12 +1511,15 @@ export class FqAudioSession {
       return;
     }
     const query: textToSpeech.VoiceQuery = {
-      requestId: `fqVoices${this.ttsVoicesQuerySerial += 1}`,
+      // 时间戳 + 序号全局唯一：hsp 侧对 requestId 去重且记忆跨应用冷启动存活，
+      // 固定前缀短序号（fqVoices1）每次冷启动归零重复即被拒（40000 repeated）
+      requestId: `${Date.now()}${this.ttsVoicesQuerySerial += 1}`,
       online: 1,
     };
     textToSpeech.listVoices(query)
       .then((list: textToSpeech.VoiceInfo[]): void => {
         if (list.length === 0) {
+          hilog.warn(0x0001, TAG, 'listVoices returned empty');
           return;
         }
         this.ttsVoiceInfos = list;
@@ -1554,8 +1557,9 @@ export class FqAudioSession {
         this.ttsVoicesLoaded = true;
         this.ttsVoicesFromSystem = true;
       })
-      .catch((_error: BusinessError): void => {
+      .catch((error: BusinessError): void => {
         // 保留静态回退表
+        hilog.error(0x0001, TAG, `listVoices failed: ${error.code} ${error.message}`);
       });
   }
 
@@ -1591,7 +1595,8 @@ export class FqAudioSession {
       return false;
     }
     const params: textToSpeech.VoiceDownload = {
-      requestId: `fqVoiceDl${this.ttsVoiceDownloadSerial += 1}`,
+      // 同 listVoices：时间戳 + 序号全局唯一（hsp 对 requestId 去重跨冷启动存活）
+      requestId: `${Date.now()}${this.ttsVoiceDownloadSerial += 1}`,
       language: info.language,
       person: info.person,
       style: info.style.length > 0 ? info.style : 'interaction-broadcast',
