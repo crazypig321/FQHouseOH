@@ -40,6 +40,7 @@ import { FqWebDavConfigStore } from '../core/FqWebDavConfigStore';
 import { FqWebDav } from '../core/FqWebDav';
 import { appState } from './AppState';
 import { themeUtils } from '../utils/ThemeUtils';
+import { FqSmartReach } from '../utils/FqSmartReach';
 
 const DOMAIN = 0x0000;
 
@@ -66,6 +67,8 @@ export default class EntryAbility extends UIAbility {
     appState.volumeKeyPaging = FqReaderStore.getSettings().volumeKeyPaging;
     // 应用设置（深色模式恢复 + 后台保活开关）初始化
     FqAppSettingsStore.init(this.context);
+    // 智感握姿：按持久化开关恢复握持手识别订阅（播控球侧位 + 底部栏 handedness 适配）
+    FqSmartReach.setup();
     // 章节缓存/剧集缓存（阅读即缓存 + 离线播放）初始化
     FqChapterCacheStore.init(this.context);
     FqDramaCacheStore.init(this.context);

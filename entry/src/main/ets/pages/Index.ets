@@ -162,7 +162,7 @@ struct Index {
           { colorMode: ThemeColorMode.SYSTEM, adaptiveColor: AdaptiveColor.DEFAULT, scale: 0.3 })
       }
       if (this.showPlaybackBall) {
-        FqPlaybackBall()
+        FqPlaybackBall({ ballAtRight: appState.holdingHand !== 'left' })
       }
     }
     .width('100%')

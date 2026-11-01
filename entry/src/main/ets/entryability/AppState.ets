@@ -60,8 +60,12 @@ export class AppState {
   @Trace materialLevel: hdsMaterial.MaterialLevel = hdsMaterial.MaterialLevel.ADAPTIVE;
   @Trace materialType: hdsMaterial.MaterialType = hdsMaterial.MaterialType.IMMERSIVE;
 
-  // 智感握姿开关（持久化设置，启动时由 Bootstrap 恢复，设置页切换时更新）
+  // 智感握姿开关（持久化设置，FqAppSettingsStore 启动恢复，设置页切换时更新）
   @Trace smartReachEnabled: boolean = false;
+
+  /** 智感握姿当前握持手（'right' 默认 / 'left' 左手握持）：FqSmartReach 订阅系统握持手识别更新，
+   *  播控球侧位与 HdsTabs handedness 适配据此渲染。 */
+  @Trace holdingHand: string = 'right';
 
   /** 批量多选模式（书架页长按进入）：主 TabBar 随之隐藏（barHeight 0/56，参考阅读页底栏模式） */
   @Trace isBatchMode: boolean = false;

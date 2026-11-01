@@ -26,6 +26,7 @@ import { FqDataCleaner } from '../core/FqDataCleaner';
 import { FqBackend } from '../core/FqBackend';
 import { FqUpdateChecker } from '../core/FqUpdateChecker';
 import { DialogManager } from '../utils/DialogUtils';
+import { FqSmartReach } from '../utils/FqSmartReach';
 import { FqColorUtils } from '../utils/FqColorUtils';
 import { appState } from '../entryability/AppState';
 
@@ -94,6 +95,8 @@ export struct SettingsPage {
             this.ThemeRow()
             this.RowDivider()
             this.ThemeColorRow()
+            this.RowDivider()
+            this.SmartReachRow()
           }
 
           this.SectionHeader('阅读与播放')
@@ -448,6 +451,43 @@ export struct SettingsPage {
     .onClick((): void => {
       this.openThemeColorMenu();
     })
+  }
+
+  /** 智感握姿行（Toggle：开=识别握持手，播控球与底部标签栏随握持侧换边）。 */
+  @Builder
+  private SmartReachRow() {
+    Row({ space: 12 }) {
+      Stack() {
+        SymbolGlyph($r('sys.symbol.hand_thumbsup'))
+          .fontSize(17)
+          .fontColor(['#FF14B8A6'])
+      }
+      .width(34)
+      .height(34)
+      .borderRadius(10)
+      .backgroundColor(FqColorUtils.withOpacity('#FF14B8A6', 0.12))
+
+      Column({ space: 3 }) {
+        Text('智感握姿')
+          .fontSize(14.5)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('sys.color.font_primary'))
+        Text('识别握持手，播控球与底部标签栏随拇指可达区域换边')
+          .fontSize(11.5)
+          .fontColor($r('sys.color.font_secondary'))
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+
+      Toggle({ type: ToggleType.Switch, isOn: appState.smartReachEnabled })
+        .selectedColor(appState.accentColor)
+        .onChange((isOn: boolean): void => {
+          FqAppSettingsStore.setSmartReachEnabled(isOn);
+          FqSmartReach.setEnabled(isOn);
+        })
+    }
+    .padding({ left: 14, right: 14, top: 11, bottom: 11 })
+    .width('100%')
   }
 
   /** 点击书籍直接进入阅读行（Toggle：开=点小说/漫画跳过详情页从进度直接开读）。 */

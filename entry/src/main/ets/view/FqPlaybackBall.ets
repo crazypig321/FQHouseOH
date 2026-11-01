@@ -7,7 +7,8 @@
  * - 展开态 7s 无操作自动收回
  * - 会话关闭（fqAudioSession.close / hasSession=false）后整体消失
  * - 悬于底部悬浮栏（tabbar/工具栏）上方；左右侧由「智感握姿」决定——
- *   该能力未实现，预埋 ballAtRight 参数（默认右侧），后续接入时改传值即可。
+ *   Index 传入 ballAtRight（appState.holdingHand !== 'left'），左手握持时换到左下角；
+ *   换侧经 @Monitor 包 animateTo 驱动水平 margin 过渡，球体平滑滑至另一侧。
  */
 
 import { fqAudioSession } from '../core/FqAudioSession';
@@ -35,23 +36,40 @@ const FQ_BALL_BOTTOM_GAP: number = 12;
 const FQ_BOTTOM_BAR_INSET: number = 84;
 /** 球体距屏幕左右边缘（vp）。 */
 const FQ_BALL_SIDE_MARGIN: number = 16;
+/** 智感握姿换侧滑动动画时长（ms）。 */
+const FQ_SIDE_SWITCH_MS: number = 250;
 
 @ComponentV2
 export struct FqPlaybackBall {
-  /** 智感握姿左右侧预埋：true 右侧（默认），false 左侧。 */
+  /** 智感握姿左右侧（Index 传 holdingHand !== 'left'）：true 右侧（默认），false 左侧。 */
   @Param ballAtRight: boolean = true;
+  /** 换侧动画镜像值：@Param 变化经 @Monitor 包 animateTo 驱动水平 margin 过渡。 */
+  @Local atRightAnim: boolean = true;
   /** 展开态（宽度动画在圆/胶囊之间切换）。 */
   @Local expanded: boolean = false;
   /** 展开态无操作自动收回的定时器句柄。 */
   private autoCollapseId: number = -1;
 
+  aboutToAppear(): void {
+    this.atRightAnim = this.ballAtRight;
+  }
+
   aboutToDisappear(): void {
     this.cancelAutoCollapse();
   }
 
+  /** 智感握姿换侧：包裹镜像值变化驱动水平 margin 过渡（球体平滑滑到另一侧）。 */
+  @Monitor('ballAtRight')
+  onBallSideChange(): void {
+    this.getUIContext().animateTo({ duration: FQ_SIDE_SWITCH_MS, curve: Curve.Smooth }, (): void => {
+      this.atRightAnim = this.ballAtRight;
+    });
+  }
+
   build() {
-    // 全屏触控透传层（HitTestMode.None），球体自身正常响应点击
-    Stack({ alignContent: this.ballAtRight ? Alignment.BottomEnd : Alignment.BottomStart }) {
+    // 全屏触控透传层（HitTestMode.None），球体自身正常响应点击；
+    // 恒以 BottomStart 锚定，水平位置由 BallPanel 的 margin left 驱动（可动画）
+    Stack({ alignContent: Alignment.BottomStart }) {
       if (fqAudioSession.hasSession) {
         this.BallPanel()
       }
@@ -258,13 +276,16 @@ export struct FqPlaybackBall {
     return this.expanded ? FQ_PANEL_COVER_INSET : 0;
   }
 
-  /** 悬浮位置：底栏上沿再抬高，左右随智感握姿侧位。 */
+  /** 悬浮位置：底栏上沿再抬高；水平恒用 margin left 定位——
+   *  右侧 = 窗口宽 - 球宽 - 边距（右缘贴边），左侧 = 边距；
+   *  换侧与展开/收起时 left 随 atRightAnim/expanded 在 animateTo 内重算，平滑过渡。 */
   private ballMargin(): Margin {
     const bottom: number = appState.bottomRect + FQ_BOTTOM_BAR_INSET + FQ_BALL_BOTTOM_GAP;
-    if (this.ballAtRight) {
-      return { bottom: bottom, right: FQ_BALL_SIDE_MARGIN };
-    }
-    return { bottom: bottom, left: FQ_BALL_SIDE_MARGIN };
+    const width: number = appState.windowWidthVp > 0 ? appState.windowWidthVp : appState.displayWidthVp;
+    const left: number = this.atRightAnim
+      ? Math.max(width - FQ_BALL_SIDE_MARGIN - this.ballPanelWidth(), FQ_BALL_SIDE_MARGIN)
+      : FQ_BALL_SIDE_MARGIN;
+    return { bottom: bottom, left: left };
   }
 
   private progressTotal(): number {

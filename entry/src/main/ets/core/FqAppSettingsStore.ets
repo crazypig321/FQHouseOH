@@ -35,6 +35,7 @@ const FQ_SETTINGS_KEY_UPDATE_PROXY: string = 'updateProxyDownload';
 const FQ_SETTINGS_KEY_CHANGELOG_SHOWN: string = 'changelogShownVersion';
 const FQ_SETTINGS_KEY_TTS_PERSON: string = 'ttsPerson';
 const FQ_SETTINGS_KEY_TTS_RATE: string = 'ttsRate';
+const FQ_SETTINGS_KEY_SMART_REACH: string = 'smartReach';
 
 /** 深色模式档位：跟随系统。 */
 export const FQ_THEME_FOLLOW: number = 0;
@@ -58,6 +59,8 @@ export class FqAppSettingsStore {
   private static ttsPerson: number = 0;
   /** 离线朗读语速（0.5 ~ 2）。 */
   private static ttsRate: number = 1;
+  /** 智感握姿开关。 */
+  private static smartReach: boolean = false;
 
   public static init(context: common.Context): void {
     if (FqAppSettingsStore.pref !== null) {
@@ -110,12 +113,17 @@ export class FqAppSettingsStore {
       if (typeof rawTtsRate === 'number' && rawTtsRate >= 0.5 && rawTtsRate <= 2) {
         FqAppSettingsStore.ttsRate = rawTtsRate;
       }
+      const rawSmartReach: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_SMART_REACH, false);
+      if (typeof rawSmartReach === 'boolean') {
+        FqAppSettingsStore.smartReach = rawSmartReach;
+      }
     } catch (error) {
       // 损坏数据按默认值处理
     }
     FqAppSettingsStore.applyTheme();
     FqAppSettingsStore.applyThemeColor();
     appState.directReadEnabled = FqAppSettingsStore.directRead;
+    appState.smartReachEnabled = FqAppSettingsStore.smartReach;
   }
 
   /** 当前深色模式档位（0 跟随系统 / 1 浅色 / 2 深色）。 */
@@ -234,6 +242,27 @@ export class FqAppSettingsStore {
     }
     try {
       pref.putSync(FQ_SETTINGS_KEY_DIRECT_READ, enabled);
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
+  }
+
+  /** 智感握姿开关（开=识别握持手，播控球与底部标签栏随握持侧适配）。 */
+  public static isSmartReachEnabled(): boolean {
+    return FqAppSettingsStore.smartReach;
+  }
+
+  public static setSmartReachEnabled(enabled: boolean): void {
+    FqAppSettingsStore.smartReach = enabled;
+    const pref: preferences.Preferences | null = FqAppSettingsStore.pref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.putSync(FQ_SETTINGS_KEY_SMART_REACH, enabled);
       pref.flush().catch((_error: BusinessError): void => {
         // 落盘失败不阻断
       });
