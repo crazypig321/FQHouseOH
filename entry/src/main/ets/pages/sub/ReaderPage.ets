@@ -19,13 +19,14 @@
 
 import { common, ConfigurationConstant } from '@kit.AbilityKit';
 import { curves, display, LengthMetrics, promptAction, window } from '@kit.ArkUI';
-import { fileIo } from '@kit.CoreFileKit';
+import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
 import { batteryInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { HdsAnimationMode, HdsTabsController, TitleBarContentOptions } from '@kit.UIDesignKit';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { FqChapter, fqFormatCountInt, fqKindToTab } from '../../model/FqModels';
-import { FqReaderProgress, FqReaderStore, FqCustomReaderTheme, fqCustomThemeUseDark } from '../../core/FqReaderStore';
+import { FqReaderProgress, FqReaderStore, FqCustomReaderFont, FqCustomReaderTheme, fqCustomThemeUseDark } from '../../core/FqReaderStore';
+import { fqEnsureDownloadSubdir } from '../../core/FqCacheExport';
 import { FqAppSettingsStore, FQ_THEME_DARK, FQ_THEME_LIGHT } from '../../core/FqAppSettingsStore';
 import { FqReadStatsStore } from '../../core/FqReadStatsStore';
 import { FqLocalBookStore } from '../../core/FqLocalBookStore';
@@ -255,6 +256,9 @@ export struct ReaderPage {
   /** 自定义阅读主题列表（themeIndex=3 时经 customThemeId 选定生效条目）。 */
   @Local customThemes: FqCustomReaderTheme[] = [];
   @Local customThemeId: string = '';
+  /** 自定义阅读字体列表（fontIndex=3 时经 customFontId 选定生效条目）。 */
+  @Local customFonts: FqCustomReaderFont[] = [];
+  @Local customFontId: string = '';
   /** 当前章分页结果 / 邻章预载缓存（引用替换驱动翻页容器刷新）。 */
   @Local curLayout: FqChapterLayout | null = null;
   @Local prevLayout: FqChapterLayout | null = null;
@@ -362,6 +366,8 @@ export struct ReaderPage {
     this.showParagraphComment = settings.showParagraphComment;
     this.customThemes = settings.customThemes;
     this.customThemeId = settings.customThemeId;
+    this.customFonts = settings.customFonts;
+    this.customFontId = settings.customFontId;
     this.syncReaderColorMode();
     this.filesDir = getContext(this).filesDir;
     this.chapterPages = FqReaderStore.getChapterPages(this.bookId);
@@ -2304,6 +2310,10 @@ export struct ReaderPage {
    *  避免注册坏文件后渲染静默回退系统字体（书宋回退问题）。 */
   private async prepareReaderFont(): Promise<void> {
     const effIndex: number = this.effFontIndex();
+    if (effIndex === 3) {
+      await this.prepareCustomReaderFont();
+      return;
+    }
     const option: FqFontOption | undefined = FQ_FONT_OPTIONS[effIndex];
     if (option === undefined) {
       this.readerFontFamily = '';
@@ -2338,6 +2348,145 @@ export struct ReaderPage {
     } catch (error) {
       hilog.warn(0x0001, 'ReaderPage', 'prepareReaderFont failed');
       this.readerFontFamily = '';
+    }
+  }
+
+  /** 自定义字体准备（字体档 3）：注册 Download/包名/fonts/ 下选中字体文件；
+   *  文件缺失/目录不可用时清空字体族（渲染回退系统字体，同书宋缺失行为）。 */
+  private async prepareCustomReaderFont(): Promise<void> {
+    const font: FqCustomReaderFont | null = FqReaderStore.fontById(this.customFontId);
+    if (font === null) {
+      this.readerFontFamily = '';
+      return;
+    }
+    let path: string = '';
+    try {
+      const dir: string = await fqEnsureDownloadSubdir(getContext(this), 'fonts');
+      path = `${dir}/${font.fileName}`;
+    } catch (error) {
+      this.readerFontFamily = '';
+      return;
+    }
+    if (!ReaderPage.fileExists(path)) {
+      hilog.warn(0x0001, 'ReaderPage', 'custom font file missing: %{public}s', font.fileName);
+      this.readerFontFamily = '';
+      return;
+    }
+    const familyName: string = `fqc_${font.id}`;
+    this.getUIContext().getFont().registerFont({
+      familyName: familyName,
+      familySrc: `file://${path}`,
+    });
+    this.readerFontFamily = familyName;
+  }
+
+  /** 从选择器 URI 提取文件名（末段，去查询参数；百分号编码解码，坏编码回退原串）。 */
+  private static fileNameFromUri(uri: string): string {
+    const noQuery: string = uri.split('?')[0];
+    const segments: string[] = noQuery.split('/');
+    const raw: string = segments.length > 0 ? segments[segments.length - 1] : '';
+    try {
+      return decodeURIComponent(raw);
+    } catch (error) {
+      return raw;
+    }
+  }
+
+  /** 字体行「添加」：文档选择器选 ttf/otf/ttc → 拷入 Download/包名/fonts/ → 新增条目并选中。 */
+  private async pickCustomFont(): Promise<void> {
+    const context: common.Context = getContext(this);
+    const docPicker: picker.DocumentViewPicker = new picker.DocumentViewPicker(context);
+    let uris: string[] = [];
+    try {
+      uris = await docPicker.select({
+        maxSelectNumber: 1,
+        fileSuffixFilters: ['ttf', 'otf', 'ttc'],
+      });
+    } catch (error) {
+      return;
+    }
+    if (uris.length === 0) {
+      return;
+    }
+    const fileName: string = ReaderPage.fileNameFromUri(uris[0]).replace(/[\\/:*?"<>|]/g, ' ').trim();
+    if (fileName.length === 0) {
+      promptAction.showToast({ message: '导入字体失败' });
+      return;
+    }
+    let dst: string = '';
+    try {
+      const dir: string = await fqEnsureDownloadSubdir(context, 'fonts');
+      dst = `${dir}/${fileName}`;
+      if (ReaderPage.fileExists(dst)) {
+        ReaderPage.deleteFileQuietly(dst);
+      }
+      await fileIo.copyFile(new fileUri.FileUri(uris[0]).path, dst);
+    } catch (error) {
+      hilog.warn(0x0001, 'ReaderPage', 'copy custom font failed: %{public}s', fileName);
+      promptAction.showToast({ message: '导入字体失败' });
+      return;
+    }
+    const name: string = fileName.replace(/\.(ttf|otf|ttc)$/i, '');
+    const entry: FqCustomReaderFont | null = FqReaderStore.addCustomFont(name, fileName);
+    if (entry === null) {
+      promptAction.showToast({ message: '导入字体失败' });
+      return;
+    }
+    this.customFonts = FqReaderStore.getSettings().customFonts;
+    fqReaderSettingsBus.customFonts = this.customFonts;
+    hilog.info(0x0001, 'ReaderPage', 'custom font imported: %{public}s', fileName);
+    await this.selectCustomFont(entry.id);
+  }
+
+  /** 选中自定义字体（字体档 3）：注册字体后保位重排。 */
+  private async selectCustomFont(id: string): Promise<void> {
+    if (this.fontIndex === 3 && this.customFontId === id) {
+      return;
+    }
+    this.customFontId = id;
+    this.fontIndex = 3;
+    FqReaderStore.selectCustomFont(id);
+    await this.prepareReaderFont();
+    this.applySettingChange(true);
+    fqReaderSettingsBus.fontIndex = this.fontIndex;
+    fqReaderSettingsBus.customFontId = this.customFontId;
+  }
+
+  /** 长按自定义字体：确认后删除字体文件与条目（删除当前使用项时回退系统字体）。 */
+  private confirmRemoveCustomFont(id: string): void {
+    const font: FqCustomReaderFont | null = FqReaderStore.fontById(id);
+    const name: string = font !== null ? font.name : '该字体';
+    DialogManager.ShowConfirm('删除自定义字体', `将删除「${name}」字体文件与条目，删除后不可恢复`,
+      '删除', (): void => {
+        void this.performRemoveCustomFont(id);
+      });
+  }
+
+  /** 自定义字体删除执行：删 Download 文件与条目；正使用时回退系统字体并保位重排。 */
+  private async performRemoveCustomFont(id: string): Promise<void> {
+    const font: FqCustomReaderFont | null = FqReaderStore.fontById(id);
+    if (font !== null) {
+      try {
+        const dir: string = await fqEnsureDownloadSubdir(getContext(this), 'fonts');
+        ReaderPage.deleteFileQuietly(`${dir}/${font.fileName}`);
+      } catch (error) {
+        // 目录不可用仅跳过文件删除
+      }
+    }
+    const wasActive: boolean = this.fontIndex === 3 && this.customFontId === id;
+    if (!FqReaderStore.removeCustomFont(id)) {
+      return;
+    }
+    this.customFonts = FqReaderStore.getSettings().customFonts;
+    this.customFontId = FqReaderStore.getSettings().customFontId;
+    fqReaderSettingsBus.customFonts = this.customFonts;
+    fqReaderSettingsBus.customFontId = this.customFontId;
+    if (wasActive) {
+      this.customFontId = '';
+      this.fontIndex = 0;
+      await this.prepareReaderFont();
+      this.applySettingChange(true);
+      fqReaderSettingsBus.fontIndex = this.fontIndex;
     }
   }
 
@@ -2392,6 +2541,8 @@ export struct ReaderPage {
     fqReaderSettingsBus.showParagraphComment = this.showParagraphComment;
     fqReaderSettingsBus.customThemes = this.customThemes;
     fqReaderSettingsBus.customThemeId = this.customThemeId;
+    fqReaderSettingsBus.customFonts = this.customFonts;
+    fqReaderSettingsBus.customFontId = this.customFontId;
     fqReaderSettingsBus.handler = {
       changeFontSize: (delta: number): void => {
         this.changeFontSize(delta);
@@ -2424,6 +2575,15 @@ export struct ReaderPage {
       },
       editCustomTheme: (id: string): void => {
         this.openCustomThemeEditor(id);
+      },
+      pickCustomFont: (): void => {
+        void this.pickCustomFont();
+      },
+      selectCustomFont: (id: string): void => {
+        void this.selectCustomFont(id);
+      },
+      removeCustomFont: (id: string): void => {
+        this.confirmRemoveCustomFont(id);
       },
     };
   }

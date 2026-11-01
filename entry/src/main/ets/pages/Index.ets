@@ -308,6 +308,8 @@ struct Index {
         volumeKeyPaging: appState.volumeKeyPaging,
         customThemes: fqReaderSettingsBus.customThemes,
         customThemeId: fqReaderSettingsBus.customThemeId,
+        customFonts: fqReaderSettingsBus.customFonts,
+        customFontId: fqReaderSettingsBus.customFontId,
         followThemeBg: fqEffectiveReaderTheme(fqReaderSettingsBus.themeIndex, appState.isDark).background,
         followThemeFont: fqEffectiveReaderTheme(fqReaderSettingsBus.themeIndex, appState.isDark).fontColor,
         fontSizeChange: (delta: number): void => {
@@ -365,6 +367,24 @@ struct Index {
           const handler: FqReaderSettingsHandler | null = fqReaderSettingsBus.handler;
           if (handler !== null) {
             handler.editCustomTheme(id);
+          }
+        },
+        addCustomFontChange: (): void => {
+          const handler: FqReaderSettingsHandler | null = fqReaderSettingsBus.handler;
+          if (handler !== null) {
+            handler.pickCustomFont();
+          }
+        },
+        selectCustomFontChange: (id: string): void => {
+          const handler: FqReaderSettingsHandler | null = fqReaderSettingsBus.handler;
+          if (handler !== null) {
+            handler.selectCustomFont(id);
+          }
+        },
+        removeCustomFontChange: (id: string): void => {
+          const handler: FqReaderSettingsHandler | null = fqReaderSettingsBus.handler;
+          if (handler !== null) {
+            handler.removeCustomFont(id);
           }
         },
       })

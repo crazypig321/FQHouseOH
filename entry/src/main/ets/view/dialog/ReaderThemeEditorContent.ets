@@ -40,6 +40,14 @@ export struct ReaderThemeEditorContent {
   @Local editorDarkLineHeight: number = 0;
   /** 自定义字色板（新色在前；打开时并入当前主题双模式旧自定义色保证可见）。 */
   @Local customColors: string[] = [];
+  /** 字色列表滚动控制器（打开/切模式/选中变化时滚到选中项）。 */
+  private colorScroller: Scroller = new Scroller();
+
+  /** 选中项/模式变化：字色列表滚到选中项（已在可视区时 AUTO 不动）。 */
+  @Monitor('editorMode', 'editorLightFontColor', 'editorDarkFontColor')
+  onColorSelectionChanged(): void {
+    this.scrollToColorSelection();
+  }
 
   aboutToAppear(): void {
     this.editorName = DialogManager.readerThemeName;
@@ -192,7 +200,7 @@ export struct ReaderThemeEditorContent {
               this.confirmPickedColor(hex);
             });
         })
-        List({ space: 8 }) {
+        List({ space: 8, scroller: this.colorScroller }) {
           ListItem() {
             Column({ space: 3 }) {
               Column()
@@ -258,6 +266,10 @@ export struct ReaderThemeEditorContent {
               .onClick((): void => {
                 this.applyCurFontColor(color);
               })
+              .gesture(LongPressGesture()
+                .onAction((): void => {
+                  this.confirmRemoveCustomColor(color);
+                }))
             }
           }, (color: string): string => `c_${color}`)
         }
@@ -267,6 +279,9 @@ export struct ReaderThemeEditorContent {
         .scrollBar(BarState.Off)
         .edgeEffect(EdgeEffect.Spring)
         .alignListItem(ListItemAlign.Center)
+        .onAppear((): void => {
+          this.scrollToColorSelection();
+        })
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
@@ -448,6 +463,39 @@ export struct ReaderThemeEditorContent {
     FqReaderStore.addCustomFontColor(normalized);
     this.customColors = FqReaderStore.getCustomFontColors();
     this.applyCurFontColor(normalized);
+  }
+
+  /** 长按自定义字色：确认弹窗删除（色板移除落盘；当前选中/主题已用色保持不变，重新打开并入逻辑保证仍可见）。 */
+  private confirmRemoveCustomColor(color: string): void {
+    DialogManager.ShowConfirm('删除自定义字色', `将删除自定义字色 ${color}，删除后不可恢复`, '删除', (): void => {
+      FqReaderStore.removeCustomFontColor(color);
+      const next: string[] = [];
+      for (const item of this.customColors) {
+        if (item !== color) {
+          next.push(item);
+        }
+      }
+      this.customColors = next;
+    });
+  }
+
+  /** 字色列表滚到当前选中项（空=默认；预设色按档位；自定义色按色板下标；未命中不动）。 */
+  private scrollToColorSelection(): void {
+    const color: string = this.curFontColor();
+    let index: number = 0;
+    if (color.length > 0) {
+      const presetPos: number = FQ_EDITOR_FONT_COLORS.indexOf(color);
+      if (presetPos >= 0) {
+        index = 1 + presetPos;
+      } else {
+        const customPos: number = this.customColors.indexOf(color);
+        if (customPos < 0) {
+          return;
+        }
+        index = 6 + customPos;
+      }
+    }
+    this.colorScroller.scrollToIndex(index, false, ScrollAlign.AUTO);
   }
 
   /** 旧自定义字色并入色板（非预设、非重复时插最前，仅本次显示不落盘）。 */

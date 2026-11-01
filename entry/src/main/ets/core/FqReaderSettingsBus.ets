@@ -3,7 +3,7 @@
  * 阅读页存活期间镜像设置值（@Trace 驱动弹窗内容实时刷新）并注册变更处理器；
  * 变更动作（重排/持久化/换字体）仍由阅读页完成。
  */
-import { FqCustomReaderTheme } from './FqReaderStore';
+import { FqCustomReaderFont, FqCustomReaderTheme } from './FqReaderStore';
 
 @ObservedV2
 export class FqReaderSettingsBus {
@@ -17,6 +17,10 @@ export class FqReaderSettingsBus {
   @Trace customThemes: FqCustomReaderTheme[] = [];
   /** 当前选中的自定义主题 id（themeIndex=3 时生效）。 */
   @Trace customThemeId: string = '';
+  /** 自定义阅读字体列表（镜像阅读页，数组整体替换驱动刷新）。 */
+  @Trace customFonts: FqCustomReaderFont[] = [];
+  /** 当前选中的自定义字体 id（fontIndex=3 时生效）。 */
+  @Trace customFontId: string = '';
   /** 阅读页注册的变更处理器（aboutToAppear 注册、aboutToDisappear 注销）。 */
   public handler: FqReaderSettingsHandler | null = null;
 }
@@ -36,6 +40,12 @@ export interface FqReaderSettingsHandler {
   selectCustomTheme: (id: string) => void;
   /** 长按自定义主题：打开编辑弹窗（名称/字色/字号/字体/行距/删除）。 */
   editCustomTheme: (id: string) => void;
+  /** 字体行「添加」chip：文档选择器选 ttf/otf/ttc → 拷入 Download/包名/fonts/ → 新增条目并选中。 */
+  pickCustomFont: () => void;
+  /** 选中指定自定义字体（fontIndex 切到 3）。 */
+  selectCustomFont: (id: string) => void;
+  /** 长按自定义字体：确认后删除字体文件与条目（删除当前使用项时回退系统字体）。 */
+  removeCustomFont: (id: string) => void;
 }
 
 export const fqReaderSettingsBus: FqReaderSettingsBus = new FqReaderSettingsBus();

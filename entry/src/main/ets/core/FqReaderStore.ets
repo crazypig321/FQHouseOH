@@ -57,6 +57,17 @@ export class FqReaderSettings {
   customThemeId: string = '';
   /** 自定义字色板（取色器新增字色，新色在前；阅读主题编辑弹窗字色列表共用）。 */
   customFontColors: string[] = [];
+  /** 自定义阅读字体列表（Download/包名/fonts/ 下的字体文件；fontIndex=3 生效）。 */
+  customFonts: FqCustomReaderFont[] = [];
+  /** 当前选中的自定义字体 id（fontIndex=3 时生效；空 = 无选中）。 */
+  customFontId: string = '';
+}
+
+/** 自定义阅读字体：条目（name 展示名 + fileName 文件名），文件本体存 Download/包名/fonts/。 */
+export class FqCustomReaderFont {
+  id: string = '';
+  name: string = '';
+  fileName: string = '';
 }
 
 /** 自定义阅读主题：浅色/深色双模式（各配背景图 + 独立排版参数，0/-1/空 = 跟随全局阅读设置）。 */
@@ -196,7 +207,7 @@ export class FqReaderStore {
       }
       const fontIndex: Object | undefined = rec['fontIndex'];
       if (typeof fontIndex === 'number') {
-        FqReaderStore.settings.fontIndex = Math.max(0, Math.trunc(fontIndex));
+        FqReaderStore.settings.fontIndex = Math.min(3, Math.max(0, Math.trunc(fontIndex)));
       }
       // v2→v3：字体档位重排（系统档提前）——旧 0 书宋→1、旧 1 黑体→2、旧 2 系统→0
       if (typeof version !== 'number' || Math.trunc(version) < 3) {
@@ -275,6 +286,39 @@ export class FqReaderStore {
           // 列表损坏按空处理
         }
       }
+      // 自定义字体列表（JSON 数组，字段逐条校验，坏条目跳过）
+      const customFontsRaw: Object | undefined = rec['customFonts'];
+      if (typeof customFontsRaw === 'string' && customFontsRaw.length > 0) {
+        try {
+          const parsedFonts: Object | null = JSON.parse(customFontsRaw);
+          const fontArray: Object[] | null = fqAsArray(parsedFonts);
+          if (fontArray !== null) {
+            const ids: Set<string> = new Set<string>();
+            const fonts: FqCustomReaderFont[] = [];
+            for (const item of fontArray) {
+              const entry: FqCustomReaderFont | null = FqReaderStore.decodeCustomFont(item);
+              if (entry === null || ids.has(entry.id)) {
+                continue;
+              }
+              ids.add(entry.id);
+              fonts.push(entry);
+            }
+            FqReaderStore.settings.customFonts = fonts;
+          }
+        } catch (error) {
+          // 列表损坏按空处理
+        }
+      }
+      const customFontId: Object | undefined = rec['customFontId'];
+      if (typeof customFontId === 'string') {
+        FqReaderStore.settings.customFontId = customFontId;
+      }
+      // fontIndex=3（自定义字体）但列表为空或 id 未命中时回退系统字体
+      if (FqReaderStore.settings.fontIndex === 3
+        && FqReaderStore.fontById(FqReaderStore.settings.customFontId) === null) {
+        FqReaderStore.settings.fontIndex = 0;
+        FqReaderStore.settings.customFontId = '';
+      }
     } catch (error) {
       // 损坏配置按默认处理
     }
@@ -290,7 +334,7 @@ export class FqReaderStore {
     FqReaderStore.settings.lineHeight = fqClampLineHeight(lineHeight);
     FqReaderStore.settings.themeIndex = Math.min(3, Math.max(-1, Math.trunc(themeIndex)));
     FqReaderStore.settings.flipIndex = Math.min(2, Math.max(0, Math.trunc(flipIndex)));
-    FqReaderStore.settings.fontIndex = Math.max(0, Math.trunc(fontIndex));
+    FqReaderStore.settings.fontIndex = Math.min(3, Math.max(0, Math.trunc(fontIndex)));
     FqReaderStore.settings.showParagraphComment = showParagraphComment;
     FqReaderStore.persistSettings();
   }
@@ -327,6 +371,48 @@ export class FqReaderStore {
     }
     FqReaderStore.settings.customFontColors = next;
     FqReaderStore.persistSettings();
+  }
+
+  /** 删除自定义字色（色板移除，落盘）；不在色板返回 false。 */
+  public static removeCustomFontColor(color: string): boolean {
+    const normalized: string = fqNormalizeThemeFontColor(color);
+    if (normalized.length === 0) {
+      return false;
+    }
+    const next: string[] = [];
+    let found: boolean = false;
+    for (const item of FqReaderStore.settings.customFontColors) {
+      if (item === normalized) {
+        found = true;
+      } else {
+        next.push(item);
+      }
+    }
+    if (!found) {
+      return false;
+    }
+    FqReaderStore.settings.customFontColors = next;
+    FqReaderStore.persistSettings();
+    return true;
+  }
+
+  /** 自定义字体条目解析（JSON 记录 → 模型；id/fileName 缺失返回 null）。 */
+  private static decodeCustomFont(item: Object): FqCustomReaderFont | null {
+    const rec: Record<string, Object> | null = fqAsRecord(item);
+    if (rec === null) {
+      return null;
+    }
+    const id: string = fqStr(rec, 'id');
+    const fileName: string = fqStr(rec, 'fileName');
+    if (id.trim().length === 0 || fileName.trim().length === 0) {
+      return null;
+    }
+    const entry: FqCustomReaderFont = new FqCustomReaderFont();
+    entry.id = id.trim();
+    entry.fileName = fileName.trim();
+    const name: string = fqStr(rec, 'name').trim().substring(0, 12);
+    entry.name = name.length > 0 ? name : entry.fileName;
+    return entry;
   }
 
   /** 自定义主题条目解析（JSON 记录 → 模型；id 缺失或无任何背景图返回 null，参数越界钳制）。
@@ -746,6 +832,69 @@ export class FqReaderStore {
     FqReaderStore.persistSettings();
   }
 
+  /** 按 id 查找自定义字体（未命中返回 null）。 */
+  public static fontById(id: string): FqCustomReaderFont | null {
+    if (id.length === 0) {
+      return null;
+    }
+    for (const item of FqReaderStore.settings.customFonts) {
+      if (item.id === id) {
+        return item;
+      }
+    }
+    return null;
+  }
+
+  /** 新增自定义字体条目（fileName 去重：命中返回既有条目）；
+   * name 展示名、fileName 为 Download/包名/fonts/ 下文件名。 */
+  public static addCustomFont(name: string, fileName: string): FqCustomReaderFont | null {
+    const cleanName: string = name.trim().substring(0, 12);
+    const cleanFile: string = fileName.trim();
+    if (cleanFile.length === 0) {
+      return null;
+    }
+    for (const item of FqReaderStore.settings.customFonts) {
+      if (item.fileName === cleanFile) {
+        return item;
+      }
+    }
+    const entry: FqCustomReaderFont = new FqCustomReaderFont();
+    entry.id = `cf${Date.now()}`;
+    entry.name = cleanName.length > 0 ? cleanName : cleanFile;
+    entry.fileName = cleanFile;
+    FqReaderStore.settings.customFonts = FqReaderStore.settings.customFonts.concat([entry]);
+    FqReaderStore.persistSettings();
+    return entry;
+  }
+
+  /** 选中自定义字体（fontIndex 由调用方切到 3）。 */
+  public static selectCustomFont(id: string): void {
+    FqReaderStore.settings.customFontId = id;
+    FqReaderStore.persistSettings();
+  }
+
+  /** 删除自定义字体条目（Download 文件由调用方删除；若为当前选中同时清空 customFontId）。 */
+  public static removeCustomFont(id: string): boolean {
+    const next: FqCustomReaderFont[] = [];
+    let found: boolean = false;
+    for (const item of FqReaderStore.settings.customFonts) {
+      if (item.id === id) {
+        found = true;
+      } else {
+        next.push(item);
+      }
+    }
+    if (!found) {
+      return false;
+    }
+    FqReaderStore.settings.customFonts = next;
+    if (FqReaderStore.settings.customFontId === id) {
+      FqReaderStore.settings.customFontId = '';
+    }
+    FqReaderStore.persistSettings();
+    return true;
+  }
+
   /** 备份恢复合并：按模式校验背景图文件仍在本机沙箱时重建条目
    *  （单模式缺图自动降级为只保留另一模式，双模式图均缺失跳过）。 */
   public static mergeCustomTheme(id: string, name: string,
@@ -846,6 +995,16 @@ export class FqReaderStore {
     rec['customThemes'] = JSON.stringify(themes);
     rec['customThemeId'] = FqReaderStore.settings.customThemeId;
     rec['customFontColors'] = JSON.stringify(FqReaderStore.settings.customFontColors);
+    const fonts: Record<string, Object>[] = [];
+    for (const item of FqReaderStore.settings.customFonts) {
+      const fontRec: Record<string, Object> = {};
+      fontRec['id'] = item.id;
+      fontRec['name'] = item.name;
+      fontRec['fileName'] = item.fileName;
+      fonts.push(fontRec);
+    }
+    rec['customFonts'] = JSON.stringify(fonts);
+    rec['customFontId'] = FqReaderStore.settings.customFontId;
     try {
       pref.putSync(FQ_READER_KEY_SETTINGS, JSON.stringify(rec));
       pref.flush().catch((_error: BusinessError): void => {

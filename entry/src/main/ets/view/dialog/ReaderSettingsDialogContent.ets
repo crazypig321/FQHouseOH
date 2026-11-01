@@ -7,7 +7,7 @@
  * 配色跟随系统深浅色（弹窗卡片为系统色），阅读主题常量集中于此导出供宿主页共用。
  */
 import { FQ_FONT_OPTIONS, FqFontOption } from '../../core/FqOnlineParser';
-import { FqCustomReaderTheme, fqCustomThemeUseDark } from '../../core/FqReaderStore';
+import { FqCustomReaderFont, FqCustomReaderTheme, fqCustomThemeUseDark } from '../../core/FqReaderStore';
 import { FqAppSettingsStore, FQ_THEME_DARK, FQ_THEME_LIGHT } from '../../core/FqAppSettingsStore';
 import { appState } from '../../entryability/AppState';
 import { themeUtils } from '../../utils/ThemeUtils';
@@ -62,6 +62,10 @@ export struct ReaderSettingsDialogContent {
   @Param customThemes: FqCustomReaderTheme[] = [];
   /** 当前选中的自定义主题 id（themeIndex=3 时生效）。 */
   @Param customThemeId: string = '';
+  /** 自定义阅读字体列表（fontIndex=3 生效，文件存 Download/包名/fonts/）。 */
+  @Param customFonts: FqCustomReaderFont[] = [];
+  /** 当前选中的自定义字体 id（fontIndex=3 时生效）。 */
+  @Param customFontId: string = '';
   /** 「跟随系统」色卡预览背景（当前生效主题背景）。 */
   @Param followThemeBg: string = '#F6F4EF';
   /** 「跟随系统」色卡预览字色（当前生效主题字色）。 */
@@ -79,6 +83,29 @@ export struct ReaderSettingsDialogContent {
   @Event selectCustomThemeChange: (id: string) => void = (_id: string): void => {};
   /** 长按自定义主题：编辑参数（名称/字色/字号/字体/行距）。 */
   @Event editCustomThemeChange: (id: string) => void = (_id: string): void => {};
+  /** 字体行「添加」chip：文档选择器选字体文件导入。 */
+  @Event addCustomFontChange: () => void = (): void => {};
+  /** 选中指定自定义字体（fontIndex 切到 3）。 */
+  @Event selectCustomFontChange: (id: string) => void = (_id: string): void => {};
+  /** 长按自定义字体：确认后删除字体文件与条目。 */
+  @Event removeCustomFontChange: (id: string) => void = (_id: string): void => {};
+
+  /** 主题列表滚动控制器（打开/选中变化时滚到选中项）。 */
+  private themeScroller: Scroller = new Scroller();
+  /** 字体列表滚动控制器（打开/选中变化时滚到选中项）。 */
+  private fontScroller: Scroller = new Scroller();
+
+  /** 选中项变化：主题列表滚到选中项（已在可视区时 AUTO 不动）。 */
+  @Monitor('themeIndex', 'customThemeId')
+  onThemeSelectionChanged(): void {
+    this.scrollToThemeSelection();
+  }
+
+  /** 选中项变化：字体列表滚到选中项（已在可视区时 AUTO 不动）。 */
+  @Monitor('fontIndex', 'customFontId')
+  onFontSelectionChanged(): void {
+    this.scrollToFontSelection();
+  }
 
   /** 主题行滚动选项（预设 4 项 + 自定义主题列表；key 含名称/图路径，改名即重建项）。「添加」卡片固定在列表前端不随滚动。 */
   @Computed
@@ -148,7 +175,7 @@ export struct ReaderSettingsDialogContent {
           .fontColor(themeUtils.textColor)
           .width(36)
         this.AddThemeCard()
-        List({ space: 12 }) {
+        List({ space: 12, scroller: this.themeScroller }) {
           ForEach(this.themeOptions, (option: FqThemeOption) => {
             ListItem() {
               this.ThemeOptionView(option)
@@ -161,26 +188,48 @@ export struct ReaderSettingsDialogContent {
         .scrollBar(BarState.Off)
         .edgeEffect(EdgeEffect.Spring)
         .alignListItem(ListItemAlign.Center)
+        .onAppear((): void => {
+          this.scrollToThemeSelection();
+        })
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
 
-      Row({ space: 12 }) {
+      Row({ space: 8 }) {
         Text('字体')
           .fontSize(14)
           .fontColor(themeUtils.textColor)
           .width(36)
-        ForEach(FQ_FONT_OPTIONS, (option: FqFontOption, index: number) => {
-          Text(option.label)
-            .fontSize(12)
-            .fontColor(this.fontIndex === index ? '#FFFFFF' : themeUtils.textColor)
-            .backgroundColor(this.fontIndex === index ? appState.accentColor : 'transparent')
-            .borderRadius(13)
-            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-            .onClick((): void => {
-              this.fontChange(index);
-            })
-        }, (option: FqFontOption): string => option.label)
+        this.AddFontCard()
+        List({ space: 8, scroller: this.fontScroller }) {
+          ForEach(FQ_FONT_OPTIONS, (option: FqFontOption, index: number) => {
+            ListItem() {
+              Text(option.label)
+                .fontSize(12)
+                .fontColor(this.fontIndex === index ? '#FFFFFF' : themeUtils.textColor)
+                .backgroundColor(this.fontIndex === index ? appState.accentColor : 'transparent')
+                .borderRadius(13)
+                .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                .onClick((): void => {
+                  this.fontChange(index);
+                })
+            }
+          }, (option: FqFontOption): string => option.label)
+          ForEach(this.customFonts, (font: FqCustomReaderFont) => {
+            ListItem() {
+              this.CustomFontChip(font)
+            }
+          }, (font: FqCustomReaderFont): string => `cf_${font.id}_${font.name}`)
+        }
+        .listDirection(Axis.Horizontal)
+        .layoutWeight(1)
+        .height(28)
+        .scrollBar(BarState.Off)
+        .edgeEffect(EdgeEffect.Spring)
+        .alignListItem(ListItemAlign.Center)
+        .onAppear((): void => {
+          this.scrollToFontSelection();
+        })
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
@@ -252,6 +301,44 @@ export struct ReaderSettingsDialogContent {
       return `c_${option.custom.id}_${option.custom.name}_${option.custom.lightBgPath}_${option.custom.darkBgPath}`;
     }
     return `p_${option.presetIndex}`;
+  }
+
+  /** 主题列表滚到当前选中项（-1..2 预设档按档位定位；3 按选中 id 定位自定义主题；未命中不动）。 */
+  private scrollToThemeSelection(): void {
+    let index: number = this.themeIndex + 1;
+    if (this.themeIndex === 3) {
+      let pos: number = -1;
+      for (let i: number = 0; i < this.customThemes.length; i++) {
+        if (this.customThemes[i].id === this.customThemeId) {
+          pos = i;
+          break;
+        }
+      }
+      if (pos < 0) {
+        return;
+      }
+      index = 4 + pos;
+    }
+    this.themeScroller.scrollToIndex(index, false, ScrollAlign.AUTO);
+  }
+
+  /** 字体列表滚到当前选中项（0..2 预设档按档位定位；3 按选中 id 定位自定义字体；未命中不动）。 */
+  private scrollToFontSelection(): void {
+    let index: number = this.fontIndex;
+    if (this.fontIndex === 3) {
+      let pos: number = -1;
+      for (let i: number = 0; i < this.customFonts.length; i++) {
+        if (this.customFonts[i].id === this.customFontId) {
+          pos = i;
+          break;
+        }
+      }
+      if (pos < 0) {
+        return;
+      }
+      index = 3 + pos;
+    }
+    this.fontScroller.scrollToIndex(index, false, ScrollAlign.AUTO);
   }
 
   /** 自定义主题缩略图：按当前应生效模式（应用强制深/浅或系统深浅）取背景图。 */
@@ -373,5 +460,52 @@ export struct ReaderSettingsDialogContent {
     .onClick((): void => {
       this.addCustomThemeChange();
     })
+  }
+
+  /** 字体行「添加」卡片：与主题行「添加」同款虚线圆（无下方标签），固定在滚动列表前端不随滚动划走。 */
+  @Builder
+  private AddFontCard() {
+    Column() {
+      SymbolGlyph($r('sys.symbol.plus'))
+        .fontSize(18)
+        .fontColor([themeUtils.terTextColor])
+    }
+    .width(34)
+    .height(34)
+    .borderRadius(100)
+    .backgroundColor($r('app.color.reader_chip_bg'))
+    .border({
+      width: 1,
+      color: themeUtils.terTextColor,
+      style: BorderStyle.Dashed,
+    })
+    .justifyContent(FlexAlign.Center)
+    .margin({ right: 4 })
+    .onClick((): void => {
+      this.addCustomFontChange();
+    })
+  }
+
+  /** 自定义字体 chip：选中高亮（fontIndex=3 且 id 命中），长按删除。 */
+  @Builder
+  private CustomFontChip(font: FqCustomReaderFont) {
+    Text(font.name)
+      .fontSize(12)
+      .fontColor(this.fontIndex === 3 && this.customFontId === font.id
+        ? '#FFFFFF' : themeUtils.textColor)
+      .backgroundColor(this.fontIndex === 3 && this.customFontId === font.id
+        ? appState.accentColor : 'transparent')
+      .borderRadius(13)
+      .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+      .maxLines(1)
+      .textOverflow({ overflow: TextOverflow.Ellipsis })
+      .constraintSize({ maxWidth: 120 })
+      .onClick((): void => {
+        this.selectCustomFontChange(font.id);
+      })
+      .gesture(LongPressGesture()
+        .onAction((): void => {
+          this.removeCustomFontChange(font.id);
+        }))
   }
 }

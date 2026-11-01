@@ -234,6 +234,20 @@ export async function fqExportCachedEpisode(context: common.Context,
 }
 
 /**
+ * 确保 Download/<包名>/<subdir>/ 子目录就绪（复用导出根目录体系：
+ * 懒解析 + 按需 DOWNLOAD 模式重建持久授权），返回子目录绝对路径；不可用抛错。
+ * 供自定义字体等需要在公共下载目录下长期存放文件的场景使用。
+ */
+export async function fqEnsureDownloadSubdir(context: common.Context, subdir: string): Promise<string> {
+  const root: string = await ensureExportRoot(context);
+  const dir: string = `${root}/${subdir}`;
+  if (!probeWritable(dir)) {
+    throw new Error('创建目录失败，请重试');
+  }
+  return dir;
+}
+
+/**
  * 通用文本导出：直接写入 Download/<包名>/<fileName>（复用缓存导出目录体系），
  * 返回文件路径。供日志页导出 TXT 使用。
  */
