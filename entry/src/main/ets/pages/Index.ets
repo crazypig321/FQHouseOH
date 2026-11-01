@@ -153,6 +153,8 @@ struct Index {
         }
         .titleMode(HdsNavigationTitleMode.MINI)
         .mode(NavigationMode.Stack)
+        // 画中画还原锚点（PiPController navigationId）
+        .id('main_nav')
         .hideBackButton(true)
         .hideTitleBar(true)
         .navDestination(this.pageMap)

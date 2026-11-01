@@ -243,11 +243,13 @@ export default class EntryAbility extends UIAbility {
   onForeground(): void {
     // Ability has brought to foreground
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onForeground');
+    appState.appInBackground = false;
   }
 
   onBackground(): void {
     // Ability has back to background
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onBackground');
+    appState.appInBackground = true;
     // 关闭后台播放时：切后台主动暂停全部播放（状态/图标一致，回前台一键续播）
     if (!FqAppSettingsStore.isBackgroundAudio()) {
       fqAudioSession.pause();

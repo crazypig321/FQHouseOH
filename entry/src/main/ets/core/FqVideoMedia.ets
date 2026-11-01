@@ -70,8 +70,8 @@ export class FqVideoMedia {
     if (this.sessionValue !== null || this.sessionCreating || this.context === null) {
       return;
     }
-    // 设置开关：后台播放关闭时不创建 AVSession（无胶囊/播控中心通知）
-    if (!FqAppSettingsStore.isBackgroundAudio()) {
+    // 设置开关：后台播放/画中画均关闭时不创建 AVSession（无胶囊/播控中心通知）
+    if (!this.bgAllowed()) {
       return;
     }
     if (this.ensureRetryTimer !== 0) {
@@ -176,8 +176,8 @@ export class FqVideoMedia {
   /** 同步播放态（1s tick 或状态突变调用；内部 1s 节流，force 立即）。 */
   public syncPlayback(force: boolean, playing: boolean, speed: number,
     positionSec: number): void {
-    // 设置开关：后台播放关闭时停长时任务 + 销毁 AVSession（无法后台播放，无胶囊/播控中心通知）
-    if (!FqAppSettingsStore.isBackgroundAudio()) {
+    // 设置开关：后台播放/画中画均关闭时停长时任务 + 销毁 AVSession（无法后台播放）
+    if (!this.bgAllowed()) {
       if (this.bgStarted) {
         this.stopBackground();
       }
@@ -216,7 +216,7 @@ export class FqVideoMedia {
     if (session === null) {
       return;
     }
-    const enabled: boolean = FqAppSettingsStore.isBackgroundAudio();
+    const enabled: boolean = this.bgAllowed();
     if (this.bgPlayModeApplied === enabled) {
       return;
     }
@@ -227,10 +227,15 @@ export class FqVideoMedia {
       });
   }
 
+  /** 后台能力开关：后台播放或画中画任一开启即放行（画中画退后台续播同样需要 AVSession/长时任务）。 */
+  private bgAllowed(): boolean {
+    return FqAppSettingsStore.isBackgroundAudio() || FqAppSettingsStore.isPipVideoEnabled();
+  }
+
   /** 后台长时任务（audioPlayback：应用级引用计数共享，首个引用申请，release 释放）。 */
   public startBackground(): void {
-    // 设置开关：关闭后台播放后不再申请长时任务（无法后台播放）
-    if (!FqAppSettingsStore.isBackgroundAudio()) {
+    // 设置开关：后台播放/画中画均关闭后不再申请长时任务（无法后台播放）
+    if (!this.bgAllowed()) {
       return;
     }
     if (this.bgStarted || this.context === null) {

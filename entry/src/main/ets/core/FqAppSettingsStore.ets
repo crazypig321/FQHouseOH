@@ -13,6 +13,8 @@
  * - backgroundAudio：后台播放开关（开=支持后台播放：创建 AVSession（ENABLE_BACKGROUND_PLAY）
  *   + 申请 audioPlayback 长时任务；关=无法后台播放：不创建/销毁 AVSession（无胶囊/播控中心
  *   通知）+ 不申请/停掉长时任务，后台播放被系统停止）；
+ * - pipVideo：画中画开关（开=视频播放页前台创建画中画控制器并开退后台自动小窗拉起；
+ *   FqVideoMedia 后台门控按 后台播放或画中画任一开启 放行 AVSession/长时任务）；
  * - updateProxyDownload：更新包代理下载开关（关于页，仅用于下载更新软件包：
  *   开=经代理下载更新包，关=直连）；
  * - changelogShownVersion：更新日志已展示到的版本号（空 = 尚未记录，首次安装）；
@@ -30,6 +32,7 @@ const FQ_SETTINGS_KEY_THEME: string = 'themeMode';
 const FQ_SETTINGS_KEY_THEME_COLOR: string = 'themeColor';
 const FQ_SETTINGS_KEY_THEME_CUSTOM_COLOR: string = 'themeCustomColor';
 const FQ_SETTINGS_KEY_BG_AUDIO: string = 'backgroundAudio';
+const FQ_SETTINGS_KEY_PIP_VIDEO: string = 'pipVideo';
 const FQ_SETTINGS_KEY_DIRECT_READ: string = 'directRead';
 const FQ_SETTINGS_KEY_UPDATE_PROXY: string = 'updateProxyDownload';
 const FQ_SETTINGS_KEY_CHANGELOG_SHOWN: string = 'changelogShownVersion';
@@ -52,6 +55,8 @@ export class FqAppSettingsStore {
   /** 自定义主题色 hex（themeColor=custom 时的 accentColor 值；默认番茄橙）。 */
   private static themeCustomColor: string = '#FF7A3D';
   private static backgroundAudio: boolean = true;
+  /** 画中画开关（视频退后台自动小窗续播）。 */
+  private static pipVideo: boolean = false;
   private static directRead: boolean = false;
   private static updateProxyDownload: boolean = false;
   private static changelogShownVersion: string = '';
@@ -92,6 +97,10 @@ export class FqAppSettingsStore {
       const rawBg: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_BG_AUDIO, true);
       if (typeof rawBg === 'boolean') {
         FqAppSettingsStore.backgroundAudio = rawBg;
+      }
+      const rawPip: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_PIP_VIDEO, false);
+      if (typeof rawPip === 'boolean') {
+        FqAppSettingsStore.pipVideo = rawPip;
       }
       const rawDirectRead: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_DIRECT_READ, false);
       if (typeof rawDirectRead === 'boolean') {
@@ -220,6 +229,27 @@ export class FqAppSettingsStore {
     }
     try {
       pref.putSync(FQ_SETTINGS_KEY_BG_AUDIO, enabled);
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
+  }
+
+  /** 画中画开关（开=视频退后台自动小窗续播；需系统设置「智慧多窗→自动启动画中画」开启）。 */
+  public static isPipVideoEnabled(): boolean {
+    return FqAppSettingsStore.pipVideo;
+  }
+
+  public static setPipVideoEnabled(enabled: boolean): void {
+    FqAppSettingsStore.pipVideo = enabled;
+    const pref: preferences.Preferences | null = FqAppSettingsStore.pref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.putSync(FQ_SETTINGS_KEY_PIP_VIDEO, enabled);
       pref.flush().catch((_error: BusinessError): void => {
         // 落盘失败不阻断
       });

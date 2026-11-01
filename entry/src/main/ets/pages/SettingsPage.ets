@@ -67,12 +67,14 @@ export struct SettingsPage {
   private scroller: Scroller = new Scroller();
   @Local themeMode: number = FQ_THEME_FOLLOW;
   @Local backgroundAudio: boolean = true;
+  @Local pipVideo: boolean = false;
   @Local backendUrl: string = '';
   @Local backendRefreshing: boolean = false;
 
   aboutToAppear(): void {
     this.themeMode = FqAppSettingsStore.getThemeMode();
     this.backgroundAudio = FqAppSettingsStore.isBackgroundAudio();
+    this.pipVideo = FqAppSettingsStore.isPipVideoEnabled();
     this.backendUrl = FqBackend.get().baseUrl;
     // 进入设置页静默检查更新（会话内节流，与关于页共用）：
     // 发现新版本时「关于」条目显示红点，无新版本时清空红点
@@ -106,6 +108,8 @@ export struct SettingsPage {
             this.VolumeKeyPagingRow()
             this.RowDivider()
             this.BackgroundAudioRow()
+            this.RowDivider()
+            this.PipVideoRow()
             this.RowDivider()
             this.SettingRow($r('sys.symbol.waveform_headphones'), '#FF8B5CF6', '离线朗读',
               '朗读音色下载与语速设置', '', true,
@@ -593,6 +597,43 @@ export struct SettingsPage {
         .onChange((isOn: boolean): void => {
           this.backgroundAudio = isOn;
           FqAppSettingsStore.setBackgroundAudio(isOn);
+        })
+    }
+    .padding({ left: 14, right: 14, top: 11, bottom: 11 })
+    .width('100%')
+  }
+
+  /** 画中画播放行（Toggle 开关：开=视频退后台自动小窗续播，需系统智慧多窗开关配合）。 */
+  @Builder
+  private PipVideoRow() {
+    Row({ space: 12 }) {
+      Stack() {
+        SymbolGlyph($r('sys.symbol.film'))
+          .fontSize(17)
+          .fontColor(['#FF06B6D4'])
+      }
+      .width(34)
+      .height(34)
+      .borderRadius(10)
+      .backgroundColor(FqColorUtils.withOpacity('#FF06B6D4', 0.12))
+
+      Column({ space: 3 }) {
+        Text('画中画播放')
+          .fontSize(14.5)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('sys.color.font_primary'))
+        Text('开启后视频退后台自动小窗续播（需系统「智慧多窗」开关）')
+          .fontSize(11.5)
+          .fontColor($r('sys.color.font_secondary'))
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+
+      Toggle({ type: ToggleType.Switch, isOn: this.pipVideo })
+        .selectedColor(appState.accentColor)
+        .onChange((isOn: boolean): void => {
+          this.pipVideo = isOn;
+          FqAppSettingsStore.setPipVideoEnabled(isOn);
         })
     }
     .padding({ left: 14, right: 14, top: 11, bottom: 11 })

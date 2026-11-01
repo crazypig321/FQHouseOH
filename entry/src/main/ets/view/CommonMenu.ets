@@ -91,8 +91,10 @@ export class FqMenu {
    * @param uiContext 页面 UIContext
    * @param anchorId 锚点组件 id（须与触发按钮位置对齐）
    * @param items 菜单项列表
+   * @param onClose 菜单关闭回调（选中条目/点击菜单外关闭/openMenu 异常时触发）
    */
-  public static open(uiContext: UIContext, anchorId: string, items: Array<FqMenuItem>): void {
+  public static open(uiContext: UIContext, anchorId: string, items: Array<FqMenuItem>,
+    onClose?: () => void): void {
     FqMenu.dismiss();
     const params = new FqMenuParams();
     params.items = items;
@@ -108,12 +110,18 @@ export class FqMenu {
         if (FqMenu.content === content) {
           FqMenu.content = null;
           FqMenu.uiContext = null;
+          if (onClose !== undefined) {
+            onClose();
+          }
         }
       })
       .catch((_e: Object): void => {
         if (FqMenu.content === content) {
           FqMenu.content = null;
           FqMenu.uiContext = null;
+          if (onClose !== undefined) {
+            onClose();
+          }
         }
       });
   }

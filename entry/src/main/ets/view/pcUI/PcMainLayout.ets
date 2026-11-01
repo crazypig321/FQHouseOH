@@ -61,6 +61,8 @@ export struct PcMainLayout {
         }
         .titleMode(HdsNavigationTitleMode.MINI)
         .mode(NavigationMode.Stack)
+        // 画中画还原锚点（PiPController navigationId，PC 布局专用，与手机端区分避免重名）
+        .id('pc_main_nav')
         .hideBackButton(true)
         .hideTitleBar(true)
         .navDestination(this.pageMap)

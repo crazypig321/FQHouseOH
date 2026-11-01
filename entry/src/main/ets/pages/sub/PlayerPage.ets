@@ -49,7 +49,7 @@
  *   全屏控制条「弹幕」开关（官方 Toast 文案）。
  */
 
-import { display, window } from '@kit.ArkUI';
+import { display, window, PiPWindow } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { Player, PlayerSurface, Media, PlayerConfig } from '@mpv-ohos/mpv-arkts';
 import { CommonNav } from '../../view/CommonNav';
@@ -65,6 +65,7 @@ import { FqBookCommentPage, FqChapter, FqDanmaku, FqDanmakuPage, FqEpisodeCommen
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { fqAudioSession } from '../../core/FqAudioSession';
 import { FqVideoMedia } from '../../core/FqVideoMedia';
+import { FqAppSettingsStore } from '../../core/FqAppSettingsStore';
 import { FqWatchedStore, FqWatchedProgress } from '../../core/FqWatchedStore';
 import { FqDramaCacheStore } from '../../core/FqDramaCacheStore';
 import { fqDramaDownloader, FqDramaDownloader, FqDramaDownloadTask, DramaDownloadStatus } from '../../core/FqDramaDownloader';
@@ -324,6 +325,22 @@ export struct PlayerPage {
   private backgroundPause: () => void = (): void => {};
   /** 视听统计累计秒（播放中每满 15s 落一次按书统计）。 */
   private statsSec: number = 0;
+  /** 全屏底部菜单（倍速/清晰度）打开中：菜单关闭点击穿透守卫 + 暂停控件自动隐藏。 */
+  @Local fsMenuOpen: boolean = false;
+  /** 画中画控制器（设置开启且系统支持时创建；null 未启用）。 */
+  private pipController: PiPWindow.PiPController | null = null;
+  /** 画中画控制器创建中（防重复 create）。 */
+  private pipCreating: boolean = false;
+  /** 画中画小窗已拉起（退后台自动/前台手动）。 */
+  private pipStarted: boolean = false;
+  /** 画中画控制器已随离页销毁（create 迟到的结果直接停用丢弃）。 */
+  private pipDisposed: boolean = false;
+  /** 画中画自动拉起已武装（仅播放页前台显示时武装；onHidden/离页解除）。 */
+  private pipArmed: boolean = false;
+  /** 系统「自动启动画中画」开关（getPiPSettingSwitch 查询；查询失败按开处理保功能）。 */
+  private pipSystemSwitch: boolean = true;
+  /** onHidden 延迟解除武装令牌（++ 使正在等待的延迟判定作废：onShown/离页取消）。 */
+  private pipHideToken: number = 0;
 
   aboutToAppear(): void {
     this.title = PlayerNavParams.title;
@@ -413,11 +430,24 @@ export struct PlayerPage {
     };
     // 关闭后台播放：切后台主动暂停（图标/状态一致，回前台一键续播）
     this.backgroundPause = (): void => {
+      // 画中画接管后台续播：播放页前台武装中 + 系统自动小窗开关开 + 播放中
+      // 才不主动暂停（退后台自动小窗继续播）；否则照常暂停，避免后台只有声音没有小窗
+      if (this.pipArmed && this.pipSystemSwitch && this.player.state.playing) {
+        return;
+      }
       this.player.pause();
       this.saveCurrentProgress();
       this.syncMediaState(false);
     };
     appState.backgroundPauseHandlers.push(this.backgroundPause);
+    // 播放页常亮：进入开 keepScreenOn（播放视频不熄屏），离页恢复
+    window.getLastWindow(getContext(this)).then((win: window.Window): void => {
+      win.setWindowKeepScreenOn(true);
+    }).catch((): void => {
+      // 常亮设置失败不影响播放
+    });
+    // 画中画：设置开启且系统支持时前台创建控制器（退后台自动小窗续播）
+    this.setupPip();
     if (this.episodes.length === 0) {
       this.loadEpisodes();
     } else {
@@ -462,6 +492,13 @@ export struct PlayerPage {
         // 恢复失败交由系统窗口销毁兜底
       });
     }
+    // 播放页常亮恢复 + 画中画控制器销毁（停自动拉起/事件订阅/小窗）
+    window.getLastWindow(getContext(this)).then((win: window.Window): void => {
+      win.setWindowKeepScreenOn(false);
+    }).catch((): void => {
+      // 恢复失败交由系统窗口销毁兜底
+    });
+    this.teardownPip();
     this.media.release();
     this.player.destroy();
   }
@@ -473,7 +510,10 @@ export struct PlayerPage {
       pageBackgroundColor: Color.Black,
       showPlaybackBall: false,
       onShown: (): void => {
-        this.onNavShown();
+        this.onNavPipShown();
+      },
+      onHidden: (): void => {
+        this.onNavPipHidden();
       },
       backPressed: (): boolean => {
         // 全屏沉浸态先退全屏（官方返回语义），再返回上一页；
@@ -492,7 +532,13 @@ export struct PlayerPage {
       Stack() {
         // 视频区（contain；mpv 内部保持比例留黑边；全屏时撑满，面板展开时几何不变）
         Stack() {
-          PlayerSurface({ player: this.player, ignoreSafeArea: false })
+          // 非全屏：surface 只取画面 contain 矩形（区域内居中），mpv 填满 surface 即画面居中；
+          // 全屏：surface 撑满区域（沉浸黑边语义不变）
+          Stack() {
+            PlayerSurface({ player: this.player, ignoreSafeArea: false })
+          }
+          .width(this.fullScreen ? '100%' : this.videoRectWidth())
+          .height(this.fullScreen ? '100%' : this.videoRectHeight())
 
           if (this.errorMsg.length === 0 && this.loading) {
             this.LoadingOverlay()
@@ -1084,6 +1130,10 @@ export struct PlayerPage {
       colors: [['rgba(0,0,0,0.54)', 0.0], ['rgba(0,0,0,0.0)', 1.0]],
     })
     .position({ x: 0, y: 0 })
+    // 控制条触摸不触发自动隐藏（按下暂停计时，抬起恢复），仅空闲超时隐藏
+    .onTouch((event: TouchEvent): void => {
+      this.onFsBarTouch(event);
+    })
   }
 
   /** 全屏底部控制条（官方 _landscapeBar）：播放/下一集/时间/进度/总时长 + 倍速/选集。 */
@@ -1174,6 +1224,10 @@ export struct PlayerPage {
     })
     .position({ x: 0, y: '100%' })
     .markAnchor({ x: 0, y: '100%' })
+    // 控制条触摸不触发自动隐藏（按下暂停计时，抬起恢复），仅空闲超时隐藏
+    .onTouch((event: TouchEvent): void => {
+      this.onFsBarTouch(event);
+    })
   }
 
   /**
@@ -1364,6 +1418,10 @@ export struct PlayerPage {
     if (this.sidePanel.length > 0) {
       this.closeSidePanel();
     }
+    if (this.fullScreen) {
+      // 全屏（竖屏片源）缓存 sheet 打开期间暂停控件自动隐藏（关闭后恢复空闲计时）
+      this.cancelFsHide();
+    }
     this.refreshCacheSheetState();
     this.cacheOpenToken += 1;
     this.getUIContext().animateTo({ duration: 200 }, (): void => {
@@ -1454,6 +1512,7 @@ export struct PlayerPage {
         this.getUIContext().animateTo({ duration: 200 }, (): void => {
           this.cacheSheetVisible = false;
         });
+        this.resumeFsAutoHide();
       }
     }, 0);
   }
@@ -1839,9 +1898,212 @@ export struct PlayerPage {
       this.coverUrl);
   }
 
-  /** AVSession 播放态立即同步（播放意图优先，绕过 mpv 状态异步）。 */
+  /** AVSession 播放态立即同步（播放意图优先，绕过 mpv 状态异步）+ 画中画按钮状态。 */
   private syncMediaState(playing: boolean): void {
     this.media.syncPlayback(true, playing, this.player.state.speed, this.player.state.position);
+    const controller: PiPWindow.PiPController | null = this.pipController;
+    if (controller !== null) {
+      try {
+        controller.updatePiPControlStatus(PiPWindow.PiPControlType.VIDEO_PLAY_PAUSE,
+          playing ? PiPWindow.PiPControlStatus.PLAY : PiPWindow.PiPControlStatus.PAUSE);
+      } catch (error) {
+        // 控制器未创建/已销毁时忽略
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 画中画（设置开启 + 系统支持：退后台自动小窗续播；关小窗暂停保存）
+  // ---------------------------------------------------------------------------
+
+  /** 播放页回到前台显示（NavDestination onShown，含从听视频页返回）：
+   *  取消待执行的延迟解除武装，再重新武装画中画退后台自动拉起。 */
+  private onNavPipShown(): void {
+    this.onNavShown();
+    this.pipHideToken += 1;
+    this.setPipAutoStart(true);
+  }
+
+  /** 播放页被覆盖/退出（NavDestination onHidden）：延迟解除画中画自动拉起——
+   *  应用切后台也会触发 onHidden，此时须保持武装让小窗正常拉起，
+   *  延迟后按 appState.appInBackground 判定：仅页内路由覆盖（推听视频页等）才真正解除。 */
+  private onNavPipHidden(): void {
+    this.pipHideToken += 1;
+    const token: number = this.pipHideToken;
+    setTimeout((): void => {
+      if (token !== this.pipHideToken || appState.appInBackground) {
+        return;
+      }
+      this.setPipAutoStart(false);
+    }, 200);
+  }
+
+  /** 前台创建画中画控制器（XComponent 方式：画面 + 播放/暂停 + 上一集/下一集）。 */
+  private setupPip(): void {
+    if (!PiPWindow.isPiPEnabled() || !FqAppSettingsStore.isPipVideoEnabled()) {
+      return;
+    }
+    const context: common.UIAbilityContext | null = appState.abilityContext;
+    if (context === null || this.pipController !== null || this.pipCreating) {
+      return;
+    }
+    this.pipCreating = true;
+    // 画中画还原锚点：手机端 Index / PC 侧边栏 PcMainLayout 的 Navigation id
+    const pcLayout: boolean = useSidebarLayout(appState.WidthBp, appState.windowWidthVp, appState.displayWidthVp);
+    const config: PiPWindow.PiPConfiguration = {
+      context: context,
+      componentController: this.player,
+      navigationId: pcLayout ? 'pc_main_nav' : 'main_nav',
+      templateType: PiPWindow.PiPTemplateType.VIDEO_PLAY,
+      controlGroups: [PiPWindow.VideoPlayControlGroup.VIDEO_PREVIOUS_NEXT],
+    };
+    PiPWindow.create(config).then((controller: PiPWindow.PiPController): void => {
+      this.pipCreating = false;
+      // 离页后 create 才返回：控制器直接停用丢弃，绝不武装自动拉起
+      if (this.pipDisposed) {
+        try {
+          controller.setAutoStartEnabled(false);
+          controller.off('stateChange');
+          controller.off('controlEvent');
+        } catch (error) {
+          // 控制器状态异常时忽略
+        }
+        controller.stopPiP().catch((): void => {
+          // 小窗未启动时停止报错忽略
+        });
+        return;
+      }
+      this.pipController = controller;
+      controller.on('stateChange', (state: PiPWindow.PiPState, reason: string): void => {
+        this.onPipStateChange(state, reason);
+      });
+      controller.on('controlEvent', (control: PiPWindow.ControlEventParam): void => {
+        this.onPipControlEvent(control);
+      });
+      // 播放页正在显示：先武装退后台自动拉起（须前台调用），再查系统开关，
+      // 避免系统开关查询异常中断武装导致退后台小窗拉不起来
+      this.setPipAutoStart(true);
+      // 系统「自动启动画中画」开关：关时退后台不豁免暂停（小窗拉不起来，只有声音没有画面）
+      try {
+        controller.getPiPSettingSwitch().then((enabled: boolean): void => {
+          this.pipSystemSwitch = enabled;
+        }).catch((): void => {
+          // 查询失败按系统开关开启处理（保画中画功能）
+          this.pipSystemSwitch = true;
+        });
+      } catch (error) {
+        // 查询同步异常同样按系统开关开启处理
+        this.pipSystemSwitch = true;
+      }
+    }).catch((): void => {
+      // 创建失败静默降级：不影响正常播放（画中画为可选能力）
+      this.pipCreating = false;
+    });
+  }
+
+  /**
+   * 武装/解除画中画退后台自动拉起：仅播放页前台显示期间武装
+   * （onShown 武装、onHidden/离页解除），退出播放页后画中画不再生效。
+   */
+  private setPipAutoStart(enable: boolean): void {
+    const controller: PiPWindow.PiPController | null = this.pipController;
+    if (controller === null) {
+      return;
+    }
+    this.pipArmed = enable;
+    try {
+      controller.setAutoStartEnabled(enable);
+    } catch (error) {
+      // 控制器状态异常时忽略
+    }
+  }
+
+  /**
+   * 离页销毁画中画：先停播（退出播放页不再有视频声音），再解除自动拉起 +
+   * 退订事件 + 关小窗；create 迟到的结果也一并作废（pipDisposed）。
+   */
+  private teardownPip(): void {
+    this.pipDisposed = true;
+    // 作废 onHidden 可能挂起的延迟解除武装令牌（离页已同步解除）
+    this.pipHideToken += 1;
+    const controller: PiPWindow.PiPController | null = this.pipController;
+    if (controller !== null && this.player.state.playing) {
+      this.player.pause();
+      this.saveCurrentProgress();
+      this.syncMediaState(false);
+    }
+    this.pipController = null;
+    this.pipArmed = false;
+    this.pipStarted = false;
+    if (controller === null) {
+      return;
+    }
+    try {
+      controller.setAutoStartEnabled(false);
+      controller.off('stateChange');
+      controller.off('controlEvent');
+    } catch (error) {
+      // 控制器状态异常时忽略
+    }
+    controller.stopPiP().catch((): void => {
+      // 小窗未启动时停止报错忽略
+    });
+  }
+
+  /** 画中画状态回调：用户主动关小窗（关闭按钮/拖拽删除）暂停并保存续播进度；
+   *  小窗异常终止（ERROR）同样停播，避免退后台只剩声音没有小窗。 */
+  private onPipStateChange(state: PiPWindow.PiPState, reason: string): void {
+    if (state === PiPWindow.PiPState.STARTED) {
+      this.pipStarted = true;
+      return;
+    }
+    if (state === PiPWindow.PiPState.STOPPED) {
+      this.pipStarted = false;
+      if (reason === 'panelActionDelete' || reason === 'dragDelete') {
+        this.player.pause();
+        this.saveCurrentProgress();
+        this.syncMediaState(false);
+      }
+      return;
+    }
+    if (state === PiPWindow.PiPState.ERROR) {
+      this.pipStarted = false;
+      if (this.player.state.playing) {
+        this.player.pause();
+        this.saveCurrentProgress();
+        this.syncMediaState(false);
+      }
+    }
+  }
+
+  /** 画中画控制事件：播放/暂停、上一集/下一集（对齐播控中心语义）。 */
+  private onPipControlEvent(control: PiPWindow.ControlEventParam): void {
+    if (control.controlType === PiPWindow.PiPControlType.VIDEO_PLAY_PAUSE) {
+      if (control.status === PiPWindow.PiPControlStatus.PLAY) {
+        this.player.play();
+        this.syncMediaState(true);
+      } else {
+        this.player.pause();
+        this.saveCurrentProgress();
+        this.syncMediaState(false);
+      }
+      return;
+    }
+    if (control.controlType === PiPWindow.PiPControlType.VIDEO_NEXT) {
+      this.nextEpisode();
+      return;
+    }
+    if (control.controlType === PiPWindow.PiPControlType.VIDEO_PREVIOUS) {
+      if (this.player.state.position > 3) {
+        this.player.seek(0);
+        return;
+      }
+      if (this.index > 0) {
+        this.loadEpisode(this.index - 1);
+      } else {
+        this.player.seek(0);
+      }
+    }
   }
 
   /** 播控中心快进/快退 ±sec 秒（夹在 [0, 时长]；同步弹幕、续播进度与播放态）。 */
@@ -2210,6 +2472,28 @@ export struct PlayerPage {
     return this.videoTopAbs() + (regionH + videoH) / 2;
   }
 
+  /** 非全屏画面（contain 矩形）宽：surface 只取画面比例矩形（区域内居中，mpv 填满无黑边）。 */
+  private videoRectWidth(): number {
+    const regionH: number = this.videoRegionHeight();
+    const dw: number = this.player.state.videoParams.dw;
+    const dh: number = this.player.state.videoParams.dh;
+    const ratioW: number = dw > 0 && dh > 0 ? dw : 9;
+    const ratioH: number = dw > 0 && dh > 0 ? dh : 16;
+    const byHeight: number = regionH / ratioH * ratioW;
+    return Math.max(1, Math.min(this.screenW, byHeight));
+  }
+
+  /** 非全屏画面（contain 矩形）高：与 videoRectWidth 同一 contain 约束的另一边。 */
+  private videoRectHeight(): number {
+    const regionH: number = this.videoRegionHeight();
+    const dw: number = this.player.state.videoParams.dw;
+    const dh: number = this.player.state.videoParams.dh;
+    const ratioW: number = dw > 0 && dh > 0 ? dw : 9;
+    const ratioH: number = dw > 0 && dh > 0 ? dh : 16;
+    const byWidth: number = this.screenW / ratioW * ratioH;
+    return Math.max(1, Math.min(regionH, byWidth));
+  }
+
   /** 底部信息列内容高：剧名行 22 + 进度线 30 + 选集行 40 + 间距 12×3；原著横幅 +12+44。 */
   private bandContentHeight(): number {
     const base: number = 22 + 12 + 30 + 12 + 40;
@@ -2282,7 +2566,8 @@ export struct PlayerPage {
       this.settingsVisible = true;
     });
     if (this.fullScreen) {
-      this.scheduleFsHide();
+      // 全屏设置 sheet 打开期间暂停控件自动隐藏（关闭后恢复空闲计时）
+      this.cancelFsHide();
     }
   }
 
@@ -2313,7 +2598,8 @@ export struct PlayerPage {
   }
 
   /** 全屏底部倍速按钮：公共 FqMenu 档位直选（0.5-2.0 步进 0.25，
-   *  当前档尾勾标识；选中即提交 mpv，无需打开播放设置半模态）。 */
+   *  当前档尾勾标识；选中即提交 mpv，无需打开播放设置半模态）。
+   *  菜单打开期间暂停控件自动隐藏（关闭后恢复空闲计时）。 */
   private openSpeedMenu(): void {
     const items: Array<FqMenuItem> = [];
     const steps: number[] = fqSpeedSteps();
@@ -2328,7 +2614,12 @@ export struct PlayerPage {
       };
       items.push(item);
     }
-    FqMenu.open(this.getUIContext(), PLAYER_FS_SPEED_ANCHOR_ID, items);
+    this.fsMenuOpen = true;
+    this.cancelFsHide();
+    FqMenu.open(this.getUIContext(), PLAYER_FS_SPEED_ANCHOR_ID, items, (): void => {
+      this.fsMenuOpen = false;
+      this.resumeFsAutoHide();
+    });
   }
 
   /** 当前清晰度按钮文案：选中档显示档名；默认流显示「清晰度」。 */
@@ -2340,7 +2631,8 @@ export struct PlayerPage {
   }
 
   /** 全屏底部清晰度按钮：公共 FqMenu 档位直选（默认流 + variants 档位，
-   *  当前档尾勾标识；选中即切流，mpv 按当前位置续播）。 */
+   *  当前档尾勾标识；选中即切流，mpv 按当前位置续播）。
+   *  菜单打开期间暂停控件自动隐藏（关闭后恢复空闲计时）。 */
   private openQualityMenu(): void {
     const items: Array<FqMenuItem> = [];
     const defaultItem: FqMenuItem = new FqMenuItem();
@@ -2364,7 +2656,12 @@ export struct PlayerPage {
       };
       items.push(item);
     }
-    FqMenu.open(this.getUIContext(), PLAYER_FS_QUALITY_ANCHOR_ID, items);
+    this.fsMenuOpen = true;
+    this.cancelFsHide();
+    FqMenu.open(this.getUIContext(), PLAYER_FS_QUALITY_ANCHOR_ID, items, (): void => {
+      this.fsMenuOpen = false;
+      this.resumeFsAutoHide();
+    });
   }
 
   /**
@@ -2405,12 +2702,17 @@ export struct PlayerPage {
         this.getUIContext().animateTo({ duration: 200 }, (): void => {
           this.settingsVisible = false;
         });
+        this.resumeFsAutoHide();
       }
     }, 0);
   }
 
   /** 画面单击：锁定态只唤出锁按钮（官方 G6）；全屏切控件显隐，非全屏切播放。 */
   private onVideoTap(): void {
+    // FqMenu 关闭点击穿透守卫：全屏档位菜单打开期间画面单击不切控件显隐
+    if (this.fsMenuOpen) {
+      return;
+    }
     if (this.fullScreen && this.fsLocked) {
       this.refreshLockVisibility();
       return;
@@ -2471,6 +2773,34 @@ export struct PlayerPage {
     if (this.fsHideTimer !== 0) {
       clearTimeout(this.fsHideTimer);
       this.fsHideTimer = 0;
+    }
+  }
+
+  /**
+   * 浮层（档位菜单/半模态/侧边栏等）关闭后恢复全屏控件显隐与空闲自动隐藏：
+   * 亮出控制条，播放态重新计 3s（暂停态常驻不计时）。
+   */
+  private resumeFsAutoHide(): void {
+    if (!this.fullScreen) {
+      return;
+    }
+    this.fsControlsVisible = true;
+    this.scheduleFsHide();
+  }
+
+  /**
+   * 全屏顶/底控制条触摸：按下暂停自动隐藏，抬起/移出/取消恢复计时
+   * （控制条本身的操作不触发自动隐藏，仅空闲超时隐藏）。
+   */
+  private onFsBarTouch(event: TouchEvent): void {
+    if (!this.fullScreen) {
+      return;
+    }
+    if (event.type === TouchType.Down) {
+      this.cancelFsHide();
+    } else if (event.type === TouchType.Up || event.type === TouchType.Move ||
+      event.type === TouchType.Cancel) {
+      this.scheduleFsHide();
     }
   }
 
@@ -3231,6 +3561,10 @@ export struct PlayerPage {
       return;
     }
     // 官方面板展开 200ms：视频区随面板撑满全屏（_positionVideo panelFraction）
+    if (this.fullScreen) {
+      // 全屏（竖屏片源）选集 sheet 打开期间暂停控件自动隐藏（关闭后恢复空闲计时）
+      this.cancelFsHide();
+    }
     this.getUIContext().animateTo({ duration: 200 }, (): void => {
       this.sheetVisible = true;
     });
@@ -3278,6 +3612,7 @@ export struct PlayerPage {
         this.getUIContext().animateTo({ duration: 200 }, (): void => {
           this.sheetVisible = false;
         });
+        this.resumeFsAutoHide();
       }
     }, 0);
   }

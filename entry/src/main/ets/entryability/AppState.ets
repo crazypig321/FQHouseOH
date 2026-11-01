@@ -105,6 +105,10 @@ export class AppState {
    * 播放页 aboutToAppear 注册、aboutToDisappear 注销）。 */
   public backgroundPauseHandlers: Array<() => void> = [];
 
+  /** 应用是否在后台（EntryAbility onBackground/onForeground 置位；
+   * 播放页画中画 onHidden 延迟判定用：切后台保持武装让小窗拉起）。 */
+  public appInBackground: boolean = false;
+
   /** 主 Tab 切换回调（Index 注入 tabsController.changeIndex；页面内跳转一级 Tab 用，如我的-应用设置）。 */
   public switchMainTab: ((index: number) => void) | null = null;
 }
