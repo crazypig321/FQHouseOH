@@ -25,7 +25,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { HdsAnimationMode, HdsTabsController, TitleBarContentOptions } from '@kit.UIDesignKit';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { FqChapter, fqFormatCountInt, fqKindToTab } from '../../model/FqModels';
-import { FqReaderProgress, FqReaderStore, FqCustomReaderFont, FqCustomReaderTheme, fqCustomThemeUseDark } from '../../core/FqReaderStore';
+import { FqReaderProgress, FqReaderStore, FqCustomReaderFont, FqCustomReaderTheme, fqCustomThemeUseDark, fqCustomThemeBothModesSet } from '../../core/FqReaderStore';
 import { fqEnsureDownloadSubdir } from '../../core/FqCacheExport';
 import { FqAppSettingsStore, FQ_THEME_DARK, FQ_THEME_LIGHT } from '../../core/FqAppSettingsStore';
 import { FqReadStatsStore } from '../../core/FqReadStatsStore';
@@ -458,8 +458,8 @@ export struct ReaderPage {
       },
     }) {
       Stack() {
-        // 自定义背景图（主题档 3）：垫底全幅 Cover，正文层背景透明承接
-        if (this.hasCustomBg()) {
+        // 自定义背景图（主题档 4）：垫底全幅 Cover，正文层背景透明承接（纯色背景主题无图）
+        if (this.customBgPathOf().length > 0) {
           Image(`file://${this.customBgPathOf()}`)
             .objectFit(ImageFit.Cover)
             .width('100%')
@@ -477,7 +477,7 @@ export struct ReaderPage {
             headerZoneVp: this.cachedMetrics.headerZoneVp,
             footerZoneVp: this.cachedMetrics.footerZoneVp,
             pageBgColor: this.pageBg(),
-            bgImage: this.hasCustomBg() ? `file://${this.customBgPathOf()}` : '',
+            bgImage: this.customBgPathOf().length > 0 ? `file://${this.customBgPathOf()}` : '',
             pageRenderer: (slot: number): void => {
               this.pageOf(slot);
             },
@@ -860,7 +860,7 @@ export struct ReaderPage {
             .borderRadius(this.verticalParaHighlighted(item) ? 6 : 0)
           }
         }, (item: FqVerticalTextItem): string =>
-          `${item.chapterIndex}_${item.paraIndex}_${this.effFontSize()}_${this.effLineHeight()}_${this.effFontIndex()}`)
+          `${item.chapterIndex}_${item.paraIndex}_${this.effFontSize()}_${this.effLineHeight()}_${this.effFontIndex()}_${this.effCustomFontId()}`)
       }
       .width('100%')
       .layoutWeight(1)
@@ -1374,10 +1374,10 @@ export struct ReaderPage {
       this.applySettingChange(false);
       return;
     }
-    // 双模式自定义主题：系统深浅翻转 → 变体切换（背景图/排版参数可能变化，保位重排）
-    if (this.themeIndex === 3) {
+    // 双模式自定义主题：系统深浅翻转 → 变体切换（背景/排版参数可能变化，保位重排）
+    if (this.themeIndex === 4) {
       const custom: FqCustomReaderTheme | null = this.activeCustomTheme();
-      if (custom !== null && custom.lightBgPath.length > 0 && custom.darkBgPath.length > 0) {
+      if (custom !== null && fqCustomThemeBothModesSet(custom)) {
         void this.applyThemeSelection((): void => {
         });
       }
@@ -1766,10 +1766,10 @@ export struct ReaderPage {
   }
 
   /** 实际生效的主题下标：-1 跟随应用深浅模式（深 → 夜间，浅 → 纸白）；
-   *  3 自定义背景图字色同样随深浅；应用档位跟随系统时随系统。 */
+   *  4 自定义主题字色同样随深浅；应用档位跟随系统时随系统。 */
   private effectiveThemeIndex(): number {
-    return this.themeIndex === -1 || this.themeIndex === 3
-      ? (this.systemDark ? 2 : 0)
+    return this.themeIndex === -1 || this.themeIndex === 4
+      ? (this.systemDark ? 3 : 0)
       : this.themeIndex;
   }
 
@@ -1777,9 +1777,9 @@ export struct ReaderPage {
     return FQ_READER_THEMES[this.effectiveThemeIndex()] ?? FQ_READER_THEMES[0];
   }
 
-  /** 当前生效的自定义主题条目（主题档 3 且 id 匹配；未选中/未找到返回 null）。 */
+  /** 当前生效的自定义主题条目（主题档 4 且 id 匹配；未选中/未找到返回 null）。 */
   private activeCustomTheme(): FqCustomReaderTheme | null {
-    if (this.themeIndex !== 3) {
+    if (this.themeIndex !== 4) {
       return null;
     }
     for (const item of this.customThemes) {
@@ -1799,7 +1799,7 @@ export struct ReaderPage {
     return this.usingDarkVariant() ? entry.darkBgPath : entry.lightBgPath;
   }
 
-  /** 自定义图片背景生效中（主题档 3 且选中条目存在）。 */
+  /** 自定义主题背景生效中（主题档 4 且选中条目存在）。 */
   private hasCustomBg(): boolean {
     return this.activeCustomTheme() !== null;
   }
@@ -1825,9 +1825,21 @@ export struct ReaderPage {
     return fqCustomThemeUseDark(entry, this.readerBaseDark());
   }
 
-  /** 正文层背景色：图片背景时透明（由根 Stack 底层背景图承接），否则主题背景色。 */
+  /** 正文层背景色：图片背景时透明（由根 Stack 底层背景图承接）；纯色自定义背景返回
+   *  当前模式背景色；其余返回主题背景色。 */
   private pageBg(): string {
-    return this.hasCustomBg() ? 'transparent' : this.theme().background;
+    const entry: FqCustomReaderTheme | null = this.activeCustomTheme();
+    if (entry !== null) {
+      if (this.customBgPathOf().length > 0) {
+        return 'transparent';
+      }
+      const color: string = this.usingDarkVariant() ? entry.darkBgColor : entry.lightBgColor;
+      if (color.length > 0) {
+        return color;
+      }
+      return this.theme().background;
+    }
+    return this.theme().background;
   }
 
   /** 生效正文字号：自定义主题当前模式覆盖（>0）优先，否则全局字号。 */
@@ -1864,6 +1876,18 @@ export struct ReaderPage {
       }
     }
     return this.fontIndex;
+  }
+
+  /** 生效自定义字体 id：自定义主题当前模式覆盖字体档位（含 3）时取主题对应 id，否则全局 id。 */
+  private effCustomFontId(): string {
+    const entry: FqCustomReaderTheme | null = this.activeCustomTheme();
+    if (entry !== null) {
+      const index: number = this.usingDarkVariant() ? entry.darkFontIndex : entry.lightFontIndex;
+      if (index >= 0) {
+        return this.usingDarkVariant() ? entry.darkCustomFontId : entry.lightCustomFontId;
+      }
+    }
+    return this.customFontId;
   }
 
   /** 生效正文字色：自定义主题当前模式覆盖（非空）优先，否则模式预设色（浅墨黑/深夜间灰）。 */
@@ -1907,10 +1931,10 @@ export struct ReaderPage {
     let mode: ConfigurationConstant.ColorMode;
     if (this.themeIndex === -1) {
       mode = this.appColorMode();
-    } else if (this.themeIndex === 3 && custom !== null) {
+    } else if (this.themeIndex === 4 && custom !== null) {
       const appMode: number = FqAppSettingsStore.getThemeMode();
       const followSystem: boolean = appMode !== FQ_THEME_DARK && appMode !== FQ_THEME_LIGHT;
-      if (followSystem && custom.lightBgPath.length > 0 && custom.darkBgPath.length > 0) {
+      if (followSystem && fqCustomThemeBothModesSet(custom)) {
         mode = ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET;
       } else {
         mode = this.usingDarkVariant()
@@ -2311,7 +2335,7 @@ export struct ReaderPage {
   private async prepareReaderFont(): Promise<void> {
     const effIndex: number = this.effFontIndex();
     if (effIndex === 3) {
-      await this.prepareCustomReaderFont();
+      await this.prepareCustomReaderFont(this.effCustomFontId());
       return;
     }
     const option: FqFontOption | undefined = FQ_FONT_OPTIONS[effIndex];
@@ -2351,10 +2375,10 @@ export struct ReaderPage {
     }
   }
 
-  /** 自定义字体准备（字体档 3）：注册 Download/包名/fonts/ 下选中字体文件；
-   *  文件缺失/目录不可用时清空字体族（渲染回退系统字体，同书宋缺失行为）。 */
-  private async prepareCustomReaderFont(): Promise<void> {
-    const font: FqCustomReaderFont | null = FqReaderStore.fontById(this.customFontId);
+  /** 自定义字体准备（字体档 3，字体 id 可来自全局或自定义主题）：注册 Download/包名/fonts/
+   *  下选中字体文件；文件缺失/目录不可用时清空字体族（渲染回退系统字体，同书宋缺失行为）。 */
+  private async prepareCustomReaderFont(fontId: string): Promise<void> {
+    const font: FqCustomReaderFont | null = FqReaderStore.fontById(fontId);
     if (font === null) {
       this.readerFontFamily = '';
       return;
@@ -2598,24 +2622,24 @@ export struct ReaderPage {
     });
   }
 
-  /** 选中自定义主题（主题档 3，持久化选中 id）：生效排版参数变化时保位重排。 */
+  /** 选中自定义主题（主题档 4，持久化选中 id）：生效排版参数变化时保位重排。 */
   private selectCustomTheme(id: string): void {
-    if (this.themeIndex === 3 && this.customThemeId === id) {
+    if (this.themeIndex === 4 && this.customThemeId === id) {
       return;
     }
     void this.applyThemeSelection((): void => {
       this.customThemeId = id;
-      this.themeIndex = 3;
+      this.themeIndex = 4;
       FqReaderStore.selectCustomTheme(id);
     });
   }
 
-  /** 主题切换统一收口：先记生效排版参数基线 → 应用变更 → 字体档变化重备字体、参数变化保位重排。 */
+  /** 主题切换统一收口：先记生效排版参数基线 → 应用变更 → 字体档/自定义字体变化重备字体、参数变化保位重排。 */
   private async applyThemeSelection(mutate: () => void): Promise<void> {
-    const beforeFontIndex: number = this.effFontIndex();
+    const beforeFontKey: string = `${this.effFontIndex()}_${this.effCustomFontId()}`;
     const beforeMetricsKey: string = `${this.effFontSize()}_${this.effLineHeight()}`;
     mutate();
-    const fontChanged: boolean = this.effFontIndex() !== beforeFontIndex;
+    const fontChanged: boolean = `${this.effFontIndex()}_${this.effCustomFontId()}` !== beforeFontKey;
     if (fontChanged) {
       await this.prepareReaderFont();
     }
@@ -2666,14 +2690,18 @@ export struct ReaderPage {
     const draft: FqCustomReaderTheme = new FqCustomReaderTheme();
     draft.name = DialogManager.readerThemeName;
     draft.lightBgPath = DialogManager.readerThemeLightBg;
+    draft.lightBgColor = DialogManager.readerThemeLightBgColor;
     draft.lightFontColor = DialogManager.readerThemeLightFontColor;
     draft.lightFontSize = DialogManager.readerThemeLightFontSize;
     draft.lightFontIndex = DialogManager.readerThemeLightFontIndex;
+    draft.lightCustomFontId = DialogManager.readerThemeLightCustomFontId;
     draft.lightLineHeight = DialogManager.readerThemeLightLineHeight;
     draft.darkBgPath = DialogManager.readerThemeDarkBg;
+    draft.darkBgColor = DialogManager.readerThemeDarkBgColor;
     draft.darkFontColor = DialogManager.readerThemeDarkFontColor;
     draft.darkFontSize = DialogManager.readerThemeDarkFontSize;
     draft.darkFontIndex = DialogManager.readerThemeDarkFontIndex;
+    draft.darkCustomFontId = DialogManager.readerThemeDarkCustomFontId;
     draft.darkLineHeight = DialogManager.readerThemeDarkLineHeight;
     return draft;
   }
@@ -2698,8 +2726,9 @@ export struct ReaderPage {
   /** 保存自定义主题编辑草稿：新建追加并选中新主题 / 编辑原位替换（被换下的旧图回收）；
    *  当前生效主题排版参数变化时保位重排。 */
   private async saveCustomThemeDraft(draft: FqCustomReaderTheme): Promise<void> {
-    if (draft.lightBgPath.length === 0 && draft.darkBgPath.length === 0) {
-      promptAction.showToast({ message: '请至少选择一张背景图', duration: 2000 });
+    if (draft.lightBgPath.length === 0 && draft.darkBgPath.length === 0
+      && draft.lightBgColor.length === 0 && draft.darkBgColor.length === 0) {
+      promptAction.showToast({ message: '请至少选择一张背景图或一个背景色', duration: 2000 });
       return;
     }
     if (draft.id.length === 0) {
@@ -2714,8 +2743,8 @@ export struct ReaderPage {
       this.selectCustomTheme(created.id);
       return;
     }
-    const active: boolean = this.themeIndex === 3 && this.customThemeId === draft.id;
-    const beforeFontIndex: number = this.effFontIndex();
+    const active: boolean = this.themeIndex === 4 && this.customThemeId === draft.id;
+    const beforeFontKey: string = `${this.effFontIndex()}_${this.effCustomFontId()}`;
     const beforeMetricsKey: string = `${this.effFontSize()}_${this.effLineHeight()}`;
     let replacedLight: string = '';
     let replacedDark: string = '';
@@ -2749,7 +2778,7 @@ export struct ReaderPage {
     if (!active) {
       return;
     }
-    const fontChanged: boolean = this.effFontIndex() !== beforeFontIndex;
+    const fontChanged: boolean = `${this.effFontIndex()}_${this.effCustomFontId()}` !== beforeFontKey;
     if (fontChanged) {
       await this.prepareReaderFont();
     }
@@ -2760,7 +2789,7 @@ export struct ReaderPage {
   /** 删除自定义主题：确认弹窗 → 删条目与背景图 → 删除的是当前主题时回退跟随系统并保位重排。 */
   private confirmRemoveCustomTheme(id: string): void {
     DialogManager.ShowConfirm('删除自定义主题', '将删除该主题及其背景图，删除后不可恢复', '删除', (): void => {
-      const wasActive: boolean = this.themeIndex === 3 && this.customThemeId === id;
+      const wasActive: boolean = this.themeIndex === 4 && this.customThemeId === id;
       if (!FqReaderStore.removeCustomTheme(id)) {
         return;
       }

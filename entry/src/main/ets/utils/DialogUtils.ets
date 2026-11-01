@@ -57,22 +57,30 @@ export class DialogManager {
   public static readerThemeName: string = '';
   /** 编辑中浅色模式背景图路径。 */
   public static readerThemeLightBg: string = '';
+  /** 编辑中浅色模式背景色（空 = 透明/未设置）。 */
+  public static readerThemeLightBgColor: string = '';
   /** 编辑中浅色模式正文字色（空 = 默认墨黑）。 */
   public static readerThemeLightFontColor: string = '';
   /** 编辑中浅色模式字号（0 = 跟随全局）。 */
   public static readerThemeLightFontSize: number = 0;
   /** 编辑中浅色模式字体档位（-1 = 跟随全局）。 */
   public static readerThemeLightFontIndex: number = -1;
+  /** 编辑中浅色模式自定义字体 id（fontIndex=3 时生效）。 */
+  public static readerThemeLightCustomFontId: string = '';
   /** 编辑中浅色模式行距（0 = 跟随全局）。 */
   public static readerThemeLightLineHeight: number = 0;
   /** 编辑中深色模式背景图路径。 */
   public static readerThemeDarkBg: string = '';
+  /** 编辑中深色模式背景色（空 = 透明/未设置）。 */
+  public static readerThemeDarkBgColor: string = '';
   /** 编辑中深色模式正文字色（空 = 默认夜间灰）。 */
   public static readerThemeDarkFontColor: string = '';
   /** 编辑中深色模式字号（0 = 跟随全局）。 */
   public static readerThemeDarkFontSize: number = 0;
   /** 编辑中深色模式字体档位（-1 = 跟随全局）。 */
   public static readerThemeDarkFontIndex: number = -1;
+  /** 编辑中深色模式自定义字体 id（fontIndex=3 时生效）。 */
+  public static readerThemeDarkCustomFontId: string = '';
   /** 编辑中深色模式行距（0 = 跟随全局）。 */
   public static readerThemeDarkLineHeight: number = 0;
   /** 保存回调（保存按钮触发，回传双模式草稿；取消/关闭不触发）。 */
@@ -173,14 +181,18 @@ export class DialogManager {
     DialogManager.readerThemeEditId = initial === null ? '' : initial.id;
     DialogManager.readerThemeName = initial === null ? '' : initial.name;
     DialogManager.readerThemeLightBg = initial === null ? '' : initial.lightBgPath;
+    DialogManager.readerThemeLightBgColor = initial === null ? '' : initial.lightBgColor;
     DialogManager.readerThemeLightFontColor = initial === null ? '' : initial.lightFontColor;
     DialogManager.readerThemeLightFontSize = initial === null ? 0 : initial.lightFontSize;
     DialogManager.readerThemeLightFontIndex = initial === null ? -1 : initial.lightFontIndex;
+    DialogManager.readerThemeLightCustomFontId = initial === null ? '' : initial.lightCustomFontId;
     DialogManager.readerThemeLightLineHeight = initial === null ? 0 : initial.lightLineHeight;
     DialogManager.readerThemeDarkBg = initial === null ? '' : initial.darkBgPath;
+    DialogManager.readerThemeDarkBgColor = initial === null ? '' : initial.darkBgColor;
     DialogManager.readerThemeDarkFontColor = initial === null ? '' : initial.darkFontColor;
     DialogManager.readerThemeDarkFontSize = initial === null ? 0 : initial.darkFontSize;
     DialogManager.readerThemeDarkFontIndex = initial === null ? -1 : initial.darkFontIndex;
+    DialogManager.readerThemeDarkCustomFontId = initial === null ? '' : initial.darkCustomFontId;
     DialogManager.readerThemeDarkLineHeight = initial === null ? 0 : initial.darkLineHeight;
     DialogManager.readerThemeImportedFiles = [];
     DialogManager.readerThemeSaveCallback = onSave;
@@ -243,17 +255,22 @@ export class DialogManager {
     draft.id = id;
     draft.name = DialogManager.readerThemeName;
     draft.lightBgPath = DialogManager.readerThemeLightBg;
+    draft.lightBgColor = DialogManager.readerThemeLightBgColor;
     draft.lightFontColor = DialogManager.readerThemeLightFontColor;
     draft.lightFontSize = DialogManager.readerThemeLightFontSize;
     draft.lightFontIndex = DialogManager.readerThemeLightFontIndex;
+    draft.lightCustomFontId = DialogManager.readerThemeLightCustomFontId;
     draft.lightLineHeight = DialogManager.readerThemeLightLineHeight;
     draft.darkBgPath = DialogManager.readerThemeDarkBg;
+    draft.darkBgColor = DialogManager.readerThemeDarkBgColor;
     draft.darkFontColor = DialogManager.readerThemeDarkFontColor;
     draft.darkFontSize = DialogManager.readerThemeDarkFontSize;
     draft.darkFontIndex = DialogManager.readerThemeDarkFontIndex;
+    draft.darkCustomFontId = DialogManager.readerThemeDarkCustomFontId;
     draft.darkLineHeight = DialogManager.readerThemeDarkLineHeight;
-    if (draft.lightBgPath.length === 0 && draft.darkBgPath.length === 0) {
-      DialogManager.Toast('请至少选择一张背景图');
+    if (draft.lightBgPath.length === 0 && draft.darkBgPath.length === 0
+      && draft.lightBgColor.length === 0 && draft.darkBgColor.length === 0) {
+      DialogManager.Toast('请至少选择一张背景图或一个背景色');
       return;
     }
     cb(draft);
@@ -283,14 +300,18 @@ export class DialogManager {
     DialogManager.readerThemeEditId = '';
     DialogManager.readerThemeName = '';
     DialogManager.readerThemeLightBg = '';
+    DialogManager.readerThemeLightBgColor = '';
     DialogManager.readerThemeLightFontColor = '';
     DialogManager.readerThemeLightFontSize = 0;
     DialogManager.readerThemeLightFontIndex = -1;
+    DialogManager.readerThemeLightCustomFontId = '';
     DialogManager.readerThemeLightLineHeight = 0;
     DialogManager.readerThemeDarkBg = '';
+    DialogManager.readerThemeDarkBgColor = '';
     DialogManager.readerThemeDarkFontColor = '';
     DialogManager.readerThemeDarkFontSize = 0;
     DialogManager.readerThemeDarkFontIndex = -1;
+    DialogManager.readerThemeDarkCustomFontId = '';
     DialogManager.readerThemeDarkLineHeight = 0;
     DialogManager.readerThemeSaveCallback = null;
     DialogManager.readerThemeDeleteCallback = null;

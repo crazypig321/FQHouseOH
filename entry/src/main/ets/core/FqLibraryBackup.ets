@@ -20,7 +20,7 @@ import { fqAsArray, fqAsRecord, fqStr } from './FqJson';
 
 const FQ_BACKUP_FORMAT: string = 'fqhouse.library-backup';
 /** 备份格式版本：v2 起包含应用设置段（外观/阅读偏好）；decode 兼容 v1（无设置段）。 */
-const FQ_BACKUP_VERSION: number = 2;
+const FQ_BACKUP_VERSION: number = 3;
 /** 备份文件体积上限（导入侧文件大小检查用）。 */
 export const FQ_BACKUP_MAX_BYTES: number = 16 * 1024 * 1024;
 const FQ_BACKUP_MAX_RECORDS: number = 10000;
@@ -192,13 +192,23 @@ export class FqBackupCustomTheme {
   readonly lightBgData: string;
   /** 深色背景图 base64（预算耗尽或本机文件缺失时为空串）。 */
   readonly darkBgData: string;
+  /** 浅色模式背景色（#RRGGBB，空 = 未设置）。 */
+  readonly lightBgColor: string;
+  /** 深色模式背景色（#RRGGBB，空 = 未设置）。 */
+  readonly darkBgColor: string;
+  /** 浅色模式自定义字体 id（lightFontIndex=3 时生效，空 = 未设置）。 */
+  readonly lightCustomFontId: string;
+  /** 深色模式自定义字体 id（darkFontIndex=3 时生效，空 = 未设置）。 */
+  readonly darkCustomFontId: string;
 
   constructor(id: string, name: string,
     lightBgFile: string, lightFontColor: string, lightFontSize: number,
     lightFontIndex: number, lightLineHeight: number,
     darkBgFile: string, darkFontColor: string, darkFontSize: number,
     darkFontIndex: number, darkLineHeight: number,
-    lightBgData: string = '', darkBgData: string = '') {
+    lightBgData: string = '', darkBgData: string = '',
+    lightBgColor: string = '', darkBgColor: string = '',
+    lightCustomFontId: string = '', darkCustomFontId: string = '') {
     this.id = id;
     this.name = name;
     this.lightBgFile = lightBgFile;
@@ -213,6 +223,10 @@ export class FqBackupCustomTheme {
     this.darkLineHeight = darkLineHeight;
     this.lightBgData = lightBgData;
     this.darkBgData = darkBgData;
+    this.lightBgColor = lightBgColor;
+    this.darkBgColor = darkBgColor;
+    this.lightCustomFontId = lightCustomFontId;
+    this.darkCustomFontId = darkCustomFontId;
   }
 }
 
@@ -435,7 +449,8 @@ export class FqLibraryBackup {
         theme.lightFontIndex, theme.lightLineHeight,
         darkBgFile, theme.darkFontColor, theme.darkFontSize,
         theme.darkFontIndex, theme.darkLineHeight,
-        lightBgData, darkBgData));
+        lightBgData, darkBgData, theme.lightBgColor, theme.darkBgColor,
+        theme.lightCustomFontId, theme.darkCustomFontId));
     }
     const settings: FqBackupAppSettings = new FqBackupAppSettings(
       FqAppSettingsStore.getThemeMode(),
@@ -556,15 +571,19 @@ export class FqLibraryBackup {
         themeRec['id'] = theme.id;
         themeRec['name'] = theme.name;
         themeRec['lightBgFile'] = theme.lightBgFile;
+        themeRec['lightBgColor'] = theme.lightBgColor;
         themeRec['lightFontColor'] = theme.lightFontColor;
         themeRec['lightFontSize'] = theme.lightFontSize;
         themeRec['lightFontIndex'] = theme.lightFontIndex;
         themeRec['lightLineHeight'] = theme.lightLineHeight;
         themeRec['darkBgFile'] = theme.darkBgFile;
+        themeRec['darkBgColor'] = theme.darkBgColor;
         themeRec['darkFontColor'] = theme.darkFontColor;
         themeRec['darkFontSize'] = theme.darkFontSize;
         themeRec['darkFontIndex'] = theme.darkFontIndex;
         themeRec['darkLineHeight'] = theme.darkLineHeight;
+        themeRec['lightCustomFontId'] = theme.lightCustomFontId;
+        themeRec['darkCustomFontId'] = theme.darkCustomFontId;
         if (theme.lightBgData.length > 0) {
           themeRec['lightBgData'] = theme.lightBgData;
         }
@@ -602,9 +621,12 @@ export class FqLibraryBackup {
     }
     const versionRaw: Object | undefined = root['version'];
     if (fqStr(root, 'format') !== FQ_BACKUP_FORMAT ||
-      (versionRaw !== 1 && versionRaw !== 2)) {
+      (versionRaw !== 1 && versionRaw !== 2 && versionRaw !== 3)) {
       throw new Error('不是受支持的备份文件，请使用本应用导出的备份');
     }
+    // 备份版本号（1/2/3）：v3 起阅读主题含青绿预设与主题级自定义字体，
+    // v2 及以前的 readerThemeIndex（2=夜间 3=自定义）需迁移到新档位（3=夜间 4=自定义）。
+    const backupVersion: number = versionRaw === 3 ? 3 : (versionRaw === 2 ? 2 : 1);
     const createdAt: number = fqBackupCheckInt(root, 'createdAt', FQ_BACKUP_MAX_TIME);
     const appVersion: string = root['appVersion'] === undefined
       ? '' : fqBackupCheckText(root, 'appVersion');
@@ -790,6 +812,8 @@ export class FqLibraryBackup {
           themeIds.add(themeId);
           let lightBgFile: string = fqStr(themeRec, 'lightBgFile');
           let darkBgFile: string = fqStr(themeRec, 'darkBgFile');
+          let lightBgColor: string = fqNormalizeThemeFontColor(fqStr(themeRec, 'lightBgColor'));
+          let darkBgColor: string = fqNormalizeThemeFontColor(fqStr(themeRec, 'darkBgColor'));
           let lightFontColor: string = '';
           let lightFontSize: number = 0;
           let lightFontIndex: number = -1;
@@ -798,7 +822,15 @@ export class FqLibraryBackup {
           let darkFontSize: number = 0;
           let darkFontIndex: number = -1;
           let darkLineHeight: number = 0;
-          if (lightBgFile.length === 0 && darkBgFile.length === 0) {
+          // 主题级自定义字体 id（fontIndex=3 时生效；v3 起携带，空或合法 id）
+          let lightCustomFontId: string = fqStr(themeRec, 'lightCustomFontId');
+          let darkCustomFontId: string = fqStr(themeRec, 'darkCustomFontId');
+          if ((lightCustomFontId.length > 0 && !FQ_BACKUP_ID_PATTERN.test(lightCustomFontId))
+            || (darkCustomFontId.length > 0 && !FQ_BACKUP_ID_PATTERN.test(darkCustomFontId))) {
+            throw new Error('备份字段 customFontId 无效');
+          }
+          if (lightBgFile.length === 0 && darkBgFile.length === 0
+            && lightBgColor.length === 0 && darkBgColor.length === 0) {
             // 旧版单模式备份（bgFile + dark 标记）：按 dark 路由到对应模式
             const legacyBgFile: string = fqStr(themeRec, 'bgFile');
             if (legacyBgFile.length === 0) {
@@ -861,7 +893,8 @@ export class FqLibraryBackup {
             || darkBgFile.indexOf('\\') >= 0)) {
             throw new Error('备份字段 darkBgFile 无效');
           }
-          if (lightBgFile.length === 0 && darkBgFile.length === 0) {
+          if (lightBgFile.length === 0 && darkBgFile.length === 0
+            && lightBgColor.length === 0 && darkBgColor.length === 0) {
             throw new Error('备份字段 bgFile 无效');
           }
           // 背景图 base64 内嵌（旧备份缺省为空串；需有对应文件名；单张与总量设上限）
@@ -884,18 +917,29 @@ export class FqLibraryBackup {
             fqBackupCheckText(themeRec, 'name'),
             lightBgFile, lightFontColor, lightFontSize, lightFontIndex, lightLineHeight,
             darkBgFile, darkFontColor, darkFontSize, darkFontIndex, darkLineHeight,
-            lightBgData, darkBgData));
+            lightBgData, darkBgData, lightBgColor, darkBgColor,
+            lightCustomFontId, darkCustomFontId));
         }
       }
       const customThemeId: string = fqStr(settingsRec, 'readerCustomThemeId');
       if (customThemeId.length > 0 && !FQ_BACKUP_ID_PATTERN.test(customThemeId)) {
         throw new Error('备份字段 readerCustomThemeId 无效');
       }
+      // 旧备份（v1/v2）主题档位迁移：2=夜间→3，3=自定义→4；v3 备份已是新档位。
+      let readerThemeIndex: number =
+        fqBackupCheckRange(settingsRec, 'readerThemeIndex', -1, backupVersion < 3 ? 3 : 4);
+      if (backupVersion < 3) {
+        if (readerThemeIndex === 3) {
+          readerThemeIndex = 4;
+        } else if (readerThemeIndex === 2) {
+          readerThemeIndex = 3;
+        }
+      }
       settings = new FqBackupAppSettings(themeMode, themeColor, themeCustomColor,
         settingsRec['backgroundAudio'] === true,
         readerFontSize,
         readerLineHeight,
-        fqBackupCheckRange(settingsRec, 'readerThemeIndex', -1, 3),
+        readerThemeIndex,
         fqBackupCheckRange(settingsRec, 'readerFlipIndex', 0, 2),
         fqBackupCheckRange(settingsRec, 'readerComicFlipIndex', 0, 2),
         fqBackupCheckRange(settingsRec, 'readerFontIndex', 0, 8),
@@ -973,7 +1017,9 @@ export class FqLibraryBackup {
           theme.lightBgFile, theme.lightFontColor, theme.lightFontSize,
           theme.lightFontIndex, theme.lightLineHeight,
           theme.darkBgFile, theme.darkFontColor, theme.darkFontSize,
-          theme.darkFontIndex, theme.darkLineHeight);
+          theme.darkFontIndex, theme.darkLineHeight,
+          theme.lightBgColor, theme.darkBgColor,
+          theme.lightCustomFontId, theme.darkCustomFontId);
       }
       if (settings.readerCustomThemeId.length > 0
         && FqReaderStore.hasCustomTheme(settings.readerCustomThemeId)) {

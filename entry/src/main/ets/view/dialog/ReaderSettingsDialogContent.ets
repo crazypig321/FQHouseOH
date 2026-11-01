@@ -21,19 +21,20 @@ export interface FqReaderTheme {
   readonly label: string;
 }
 
-/** 阅读主题档位（下标与 themeIndex 对应，-1 为跟随系统）。 */
+/** 阅读主题档位（下标与 themeIndex 对应，-1 为跟随系统，4 为自定义主题）。 */
 export const FQ_READER_THEMES: FqReaderTheme[] = [
   { fontColor: '#1F2329', background: '#F6F4EF', night: false, label: '纸白' },
   { fontColor: '#3E2F1C', background: '#F0E4C8', night: false, label: '米黄' },
+  { fontColor: '#273128', background: '#E8F1DF', night: false, label: '青绿' },
   { fontColor: '#9AA0A6', background: '#151719', night: true, label: '夜间' },
 ];
 
 /** 翻页模式标签（下标与 flipIndex 对应）。 */
 export const FQ_READER_FLIP_LABELS: string[] = ['仿真', '横滑', '上下'];
 
-/** 生效阅读主题（-1 跟随系统：深色→夜间，浅色→纸白；3 自定义背景图：字色随系统；供弹窗宿主计算跟随色卡预览）。 */
+/** 生效阅读主题（-1 跟随系统：深色→夜间，浅色→纸白；4 自定义主题：字色随系统；供弹窗宿主计算跟随色卡预览）。 */
 export function fqEffectiveReaderTheme(themeIndex: number, systemDark: boolean): FqReaderTheme {
-  const index: number = themeIndex === -1 || themeIndex === 3 ? (systemDark ? 2 : 0) : themeIndex;
+  const index: number = themeIndex === -1 || themeIndex === 4 ? (systemDark ? 3 : 0) : themeIndex;
   return FQ_READER_THEMES[index] ?? FQ_READER_THEMES[0];
 }
 
@@ -41,7 +42,7 @@ export function fqEffectiveReaderTheme(themeIndex: number, systemDark: boolean):
 export class FqThemeOption {
   /** 'preset' 预设档 / 'custom' 自定义主题。 */
   kind: string = 'preset';
-  /** 预设档主题下标（-1 跟随 / 0 纸白 / 1 米黄 / 2 夜间）。 */
+  /** 预设档主题下标（-1 跟随 / 0 纸白 / 1 米黄 / 2 青绿 / 3 夜间）。 */
   presetIndex: number = 0;
   /** 自定义主题条目（kind='custom' 时非空）。 */
   custom: FqCustomReaderTheme | null = null;
@@ -111,7 +112,7 @@ export struct ReaderSettingsDialogContent {
   @Computed
   get themeOptions(): FqThemeOption[] {
     const options: FqThemeOption[] = [];
-    const presetIndexes: number[] = [-1, 0, 1, 2];
+    const presetIndexes: number[] = [-1, 0, 1, 2, 3];
     for (const presetIndex of presetIndexes) {
       const option: FqThemeOption = new FqThemeOption();
       option.kind = 'preset';
@@ -295,18 +296,18 @@ export struct ReaderSettingsDialogContent {
     .alignItems(HorizontalAlign.Start)
   }
 
-  /** 主题行选项键（ForEach 稳定键：自定义主题键含名称/双模式图路径，改名或换图即重建该项）。 */
+  /** 主题行选项键（ForEach 稳定键：自定义主题键含名称/双模式图路径与背景色，改名/换图/换色即重建该项）。 */
   private optionKeyOf(option: FqThemeOption): string {
     if (option.kind === 'custom' && option.custom !== null) {
-      return `c_${option.custom.id}_${option.custom.name}_${option.custom.lightBgPath}_${option.custom.darkBgPath}`;
+      return `c_${option.custom.id}_${option.custom.name}_${option.custom.lightBgPath}_${option.custom.darkBgPath}_${option.custom.lightBgColor}_${option.custom.darkBgColor}`;
     }
     return `p_${option.presetIndex}`;
   }
 
-  /** 主题列表滚到当前选中项（-1..2 预设档按档位定位；3 按选中 id 定位自定义主题；未命中不动）。 */
+  /** 主题列表滚到当前选中项（-1..3 预设档按档位定位；4 按选中 id 定位自定义主题；未命中不动）。 */
   private scrollToThemeSelection(): void {
     let index: number = this.themeIndex + 1;
-    if (this.themeIndex === 3) {
+    if (this.themeIndex === 4) {
       let pos: number = -1;
       for (let i: number = 0; i < this.customThemes.length; i++) {
         if (this.customThemes[i].id === this.customThemeId) {
@@ -317,7 +318,7 @@ export struct ReaderSettingsDialogContent {
       if (pos < 0) {
         return;
       }
-      index = 4 + pos;
+      index = 5 + pos;
     }
     this.themeScroller.scrollToIndex(index, false, ScrollAlign.AUTO);
   }
@@ -347,6 +348,16 @@ export struct ReaderSettingsDialogContent {
     const baseDark: boolean = mode === FQ_THEME_DARK ? true
       : (mode === FQ_THEME_LIGHT ? false : appState.isDark);
     return fqCustomThemeUseDark(theme, baseDark) ? theme.darkBgPath : theme.lightBgPath;
+  }
+
+  /** 自定义主题纯色缩略图：按当前应生效模式取背景色（无图也无色时透明）。 */
+  private thumbBgColorOf(theme: FqCustomReaderTheme): string {
+    const mode: number = FqAppSettingsStore.getThemeMode();
+    const baseDark: boolean = mode === FQ_THEME_DARK ? true
+      : (mode === FQ_THEME_LIGHT ? false : appState.isDark);
+    const color: string = fqCustomThemeUseDark(theme, baseDark)
+      ? theme.darkBgColor : theme.lightBgColor;
+    return color.length > 0 ? color : 'transparent';
   }
 
   /** 主题行选项卡片：34 色位 + 名称标签（自定义主题显示背景图缩略图，长按编辑）。 */
@@ -392,12 +403,19 @@ export struct ReaderSettingsDialogContent {
     } else if (option.kind === 'custom' && option.custom !== null) {
       Column({ space: 4 }) {
         Stack() {
-          Image(`file://${this.thumbPathOf(option.custom)}`)
-            .objectFit(ImageFit.Cover)
-            .width(34)
-            .height(34)
-            .draggable(false)
-          if (this.themeIndex === 3 && this.customThemeId === option.custom.id) {
+          if (this.thumbPathOf(option.custom).length > 0) {
+            Image(`file://${this.thumbPathOf(option.custom)}`)
+              .objectFit(ImageFit.Cover)
+              .width(34)
+              .height(34)
+              .draggable(false)
+          } else {
+            Column()
+              .width(34)
+              .height(34)
+              .backgroundColor(this.thumbBgColorOf(option.custom))
+          }
+          if (this.themeIndex === 4 && this.customThemeId === option.custom.id) {
             SymbolGlyph($r('sys.symbol.checkmark'))
               .fontSize(14)
               .fontColor([appState.accentColor])
@@ -408,14 +426,14 @@ export struct ReaderSettingsDialogContent {
         .borderRadius(17)
         .clip(true)
         .border({
-          width: this.themeIndex === 3 && this.customThemeId === option.custom.id ? 2 : 1,
-          color: this.themeIndex === 3 && this.customThemeId === option.custom.id
+          width: this.themeIndex === 4 && this.customThemeId === option.custom.id ? 2 : 1,
+          color: this.themeIndex === 4 && this.customThemeId === option.custom.id
             ? appState.accentColor : themeUtils.terTextColor,
         })
         Text(option.custom.name)
           .fontSize(10)
           .fontColor(themeUtils.textColor)
-          .opacity(this.themeIndex === 3 && this.customThemeId === option.custom.id ? 1 : 0.6)
+          .opacity(this.themeIndex === 4 && this.customThemeId === option.custom.id ? 1 : 0.6)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .constraintSize({ maxWidth: 44 })

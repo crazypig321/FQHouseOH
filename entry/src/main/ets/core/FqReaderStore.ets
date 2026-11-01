@@ -39,7 +39,7 @@ export class FqReaderProgress {
 export class FqReaderSettings {
   fontSize: number = 19;
   lineHeight: number = 1.9;
-  /** -1 跟随系统深浅色 / 0 纸白 / 1 米黄 / 2 夜间 / 3 自定义背景图（customThemeId 指定）。 */
+  /** -1 跟随系统深浅色 / 0 纸白 / 1 米黄 / 2 青绿 / 3 夜间 / 4 自定义主题（customThemeId 指定）。 */
   themeIndex: number = -1;
   /** 0 仿真翻页 / 1 横滑翻页 / 2 上下滚动。 */
   flipIndex: number = 0;
@@ -51,9 +51,9 @@ export class FqReaderSettings {
   showParagraphComment: boolean = true;
   /** 音量键翻页开关（阅读页/漫画页共用；分页模式拦截音量上/下 = 上/下一页，上下滚动模式不拦截）。 */
   volumeKeyPaging: boolean = false;
-  /** 自定义阅读主题列表（背景图 + 独立排版参数；themeIndex=3 生效）。 */
+  /** 自定义阅读主题列表（背景图/背景色 + 独立排版参数；themeIndex=4 生效）。 */
   customThemes: FqCustomReaderTheme[] = [];
-  /** 当前选中的自定义主题 id（themeIndex=3 时生效；空 = 无选中）。 */
+  /** 当前选中的自定义主题 id（themeIndex=4 时生效；空 = 无选中）。 */
   customThemeId: string = '';
   /** 自定义字色板（取色器新增字色，新色在前；阅读主题编辑弹窗字色列表共用）。 */
   customFontColors: string[] = [];
@@ -74,37 +74,57 @@ export class FqCustomReaderFont {
 export class FqCustomReaderTheme {
   id: string = '';
   name: string = '自定义';
-  /** 浅色模式背景图沙箱绝对路径（空 = 未设置浅色模式）。 */
+  /** 浅色模式背景图沙箱绝对路径（空 = 未设置浅色模式背景图）。 */
   lightBgPath: string = '';
+  /** 浅色模式背景色（#RRGGBB，空 = 未设置；图片背景优先于背景色）。 */
+  lightBgColor: string = '';
   /** 浅色模式正文字色（空 = 默认墨黑 #1F2329）。 */
   lightFontColor: string = '';
   /** 浅色模式字号（0 = 跟随全局）。 */
   lightFontSize: number = 0;
-  /** 浅色模式字体档位（-1 = 跟随全局）。 */
+  /** 浅色模式字体档位（-1 = 跟随全局；3 = 自定义字体，配 lightCustomFontId）。 */
   lightFontIndex: number = -1;
+  /** 浅色模式自定义字体 id（lightFontIndex=3 时生效）。 */
+  lightCustomFontId: string = '';
   /** 浅色模式行距（0 = 跟随全局）。 */
   lightLineHeight: number = 0;
-  /** 深色模式背景图沙箱绝对路径（空 = 未设置深色模式）。 */
+  /** 深色模式背景图沙箱绝对路径（空 = 未设置深色模式背景图）。 */
   darkBgPath: string = '';
+  /** 深色模式背景色（#RRGGBB，空 = 未设置；图片背景优先于背景色）。 */
+  darkBgColor: string = '';
   /** 深色模式正文字色（空 = 默认夜间灰 #9AA0A6）。 */
   darkFontColor: string = '';
   /** 深色模式字号（0 = 跟随全局）。 */
   darkFontSize: number = 0;
-  /** 深色模式字体档位（-1 = 跟随全局）。 */
+  /** 深色模式字体档位（-1 = 跟随全局；3 = 自定义字体，配 darkCustomFontId）。 */
   darkFontIndex: number = -1;
+  /** 深色模式自定义字体 id（darkFontIndex=3 时生效）。 */
+  darkCustomFontId: string = '';
   /** 深色模式行距（0 = 跟随全局）。 */
   darkLineHeight: number = 0;
 }
 
-/** 双模式主题当前应使用的模式：仅设深色图 → 深；仅设浅色图 → 浅；双设 → systemDark。 */
+/** 模式背景齐备（该模式有背景图或背景色）。 */
+export function fqCustomThemeModeSet(theme: FqCustomReaderTheme, dark: boolean): boolean {
+  return dark
+    ? (theme.darkBgPath.length > 0 || theme.darkBgColor.length > 0)
+    : (theme.lightBgPath.length > 0 || theme.lightBgColor.length > 0);
+}
+
+/** 双模式主题当前应使用的模式：仅设深色背景 → 深；仅设浅色背景 → 浅；双设 → systemDark。 */
 export function fqCustomThemeUseDark(theme: FqCustomReaderTheme, systemDark: boolean): boolean {
-  if (theme.darkBgPath.length === 0) {
+  if (!fqCustomThemeModeSet(theme, true)) {
     return false;
   }
-  if (theme.lightBgPath.length === 0) {
+  if (!fqCustomThemeModeSet(theme, false)) {
     return true;
   }
   return systemDark;
+}
+
+/** 双模式背景齐备（浅/深模式各有背景图或背景色其一）。 */
+export function fqCustomThemeBothModesSet(theme: FqCustomReaderTheme): boolean {
+  return fqCustomThemeModeSet(theme, false) && fqCustomThemeModeSet(theme, true);
 }
 
 /** 字色规范化：仅收 6 位 #RRGGBB（8 位视为 #AARRGGBB 取 RGB 段），非法返回空串。 */
@@ -190,12 +210,17 @@ export class FqReaderStore {
       }
       const themeIndex: Object | undefined = rec['themeIndex'];
       if (typeof themeIndex === 'number') {
-        FqReaderStore.settings.themeIndex = Math.min(3, Math.max(-1, Math.trunc(themeIndex)));
+        FqReaderStore.settings.themeIndex = Math.min(4, Math.max(-1, Math.trunc(themeIndex)));
       }
       // 旧版本数据（无版本号）迁移：主题重置为跟随系统（旧版无跟随档，存值语义已变化）
       const version: Object | undefined = rec['v'];
       if (typeof version !== 'number' || Math.trunc(version) < 2) {
         FqReaderStore.settings.themeIndex = -1;
+      }
+      // v5→v6：预设新增青绿档（插在米黄与夜间之间）——旧 2 夜间→3、旧 3 自定义→4
+      if (typeof version !== 'number' || Math.trunc(version) < 6) {
+        const oldTheme: number = FqReaderStore.settings.themeIndex;
+        FqReaderStore.settings.themeIndex = oldTheme === 2 ? 3 : (oldTheme === 3 ? 4 : oldTheme);
       }
       const flipIndex: Object | undefined = rec['flipIndex'];
       if (typeof flipIndex === 'number') {
@@ -231,7 +256,7 @@ export class FqReaderStore {
         migrated.name = '自定义';
         migrated.lightBgPath = customBgPath;
         FqReaderStore.settings.customThemes.push(migrated);
-        if (FqReaderStore.settings.themeIndex === 3) {
+        if (FqReaderStore.settings.themeIndex === 4) {
           FqReaderStore.settings.customThemeId = migrated.id;
         }
       }
@@ -332,7 +357,7 @@ export class FqReaderStore {
     themeIndex: number, flipIndex: number, fontIndex: number, showParagraphComment: boolean): void {
     FqReaderStore.settings.fontSize = fqClampFontSize(fontSize);
     FqReaderStore.settings.lineHeight = fqClampLineHeight(lineHeight);
-    FqReaderStore.settings.themeIndex = Math.min(3, Math.max(-1, Math.trunc(themeIndex)));
+    FqReaderStore.settings.themeIndex = Math.min(4, Math.max(-1, Math.trunc(themeIndex)));
     FqReaderStore.settings.flipIndex = Math.min(2, Math.max(0, Math.trunc(flipIndex)));
     FqReaderStore.settings.fontIndex = Math.min(3, Math.max(0, Math.trunc(fontIndex)));
     FqReaderStore.settings.showParagraphComment = showParagraphComment;
@@ -429,7 +454,10 @@ export class FqReaderStore {
     const lightBgPath: string = fqStr(rec, 'lightBgPath');
     const darkBgPath: string = fqStr(rec, 'darkBgPath');
     const legacyBgPath: string = fqStr(rec, 'bgPath');
-    if (lightBgPath.length === 0 && darkBgPath.length === 0 && legacyBgPath.length === 0) {
+    const lightBgColor: string = fqNormalizeThemeFontColor(fqStr(rec, 'lightBgColor'));
+    const darkBgColor: string = fqNormalizeThemeFontColor(fqStr(rec, 'darkBgColor'));
+    if (lightBgPath.length === 0 && darkBgPath.length === 0 && legacyBgPath.length === 0
+      && lightBgColor.length === 0 && darkBgColor.length === 0) {
       return null;
     }
     const entry: FqCustomReaderTheme = new FqCustomReaderTheme();
@@ -461,18 +489,22 @@ export class FqReaderStore {
       }
     } else {
       entry.lightBgPath = lightBgPath;
-      entry.darkBgPath = darkBgPath;
+      entry.lightBgColor = lightBgColor;
       entry.lightFontColor = fqNormalizeThemeFontColor(fqStr(rec, 'lightFontColor'));
       entry.lightFontSize = fqClampThemeFontSize(fqNum(rec, 'lightFontSize'));
       const lightFontIndexRaw: number = fqNum(rec, 'lightFontIndex');
       entry.lightFontIndex = Number.isFinite(lightFontIndexRaw) && lightFontIndexRaw >= -1
         ? Math.trunc(lightFontIndexRaw) : -1;
+      entry.lightCustomFontId = fqStr(rec, 'lightCustomFontId').trim();
       entry.lightLineHeight = fqClampThemeLineHeight(fqNum(rec, 'lightLineHeight'));
+      entry.darkBgPath = darkBgPath;
+      entry.darkBgColor = darkBgColor;
       entry.darkFontColor = fqNormalizeThemeFontColor(fqStr(rec, 'darkFontColor'));
       entry.darkFontSize = fqClampThemeFontSize(fqNum(rec, 'darkFontSize'));
       const darkFontIndexRaw: number = fqNum(rec, 'darkFontIndex');
       entry.darkFontIndex = Number.isFinite(darkFontIndexRaw) && darkFontIndexRaw >= -1
         ? Math.trunc(darkFontIndexRaw) : -1;
+      entry.darkCustomFontId = fqStr(rec, 'darkCustomFontId').trim();
       entry.darkLineHeight = fqClampThemeLineHeight(fqNum(rec, 'darkLineHeight'));
     }
     return entry;
@@ -483,14 +515,18 @@ export class FqReaderStore {
     const entry: FqCustomReaderTheme = new FqCustomReaderTheme();
     entry.name = fqClampThemeName(draft.name);
     entry.lightBgPath = draft.lightBgPath;
+    entry.lightBgColor = fqNormalizeThemeFontColor(draft.lightBgColor);
     entry.lightFontColor = fqNormalizeThemeFontColor(draft.lightFontColor);
     entry.lightFontSize = fqClampThemeFontSize(draft.lightFontSize);
     entry.lightFontIndex = draft.lightFontIndex >= -1 ? Math.trunc(draft.lightFontIndex) : -1;
+    entry.lightCustomFontId = draft.lightCustomFontId.trim();
     entry.lightLineHeight = fqClampThemeLineHeight(draft.lightLineHeight);
     entry.darkBgPath = draft.darkBgPath;
+    entry.darkBgColor = fqNormalizeThemeFontColor(draft.darkBgColor);
     entry.darkFontColor = fqNormalizeThemeFontColor(draft.darkFontColor);
     entry.darkFontSize = fqClampThemeFontSize(draft.darkFontSize);
     entry.darkFontIndex = draft.darkFontIndex >= -1 ? Math.trunc(draft.darkFontIndex) : -1;
+    entry.darkCustomFontId = draft.darkCustomFontId.trim();
     entry.darkLineHeight = fqClampThemeLineHeight(draft.darkLineHeight);
     return entry;
   }
@@ -731,12 +767,13 @@ export class FqReaderStore {
     }
   }
 
-  /** 新建自定义主题（draft 需至少一张背景图）；返回新条目（失败返回 null）。 */
+  /** 新建自定义主题（draft 需至少一张背景图或一个背景色）；返回新条目（失败返回 null）。 */
   public static createCustomTheme(draft: FqCustomReaderTheme): FqCustomReaderTheme | null {
-    if (draft.lightBgPath.length === 0 && draft.darkBgPath.length === 0) {
+    const entry: FqCustomReaderTheme = FqReaderStore.sanitizeTheme(draft);
+    if (entry.lightBgPath.length === 0 && entry.darkBgPath.length === 0
+      && entry.lightBgColor.length === 0 && entry.darkBgColor.length === 0) {
       return null;
     }
-    const entry: FqCustomReaderTheme = FqReaderStore.sanitizeTheme(draft);
     entry.id = `ct${Date.now()}`;
     if (FqReaderStore.hasCustomTheme(entry.id)) {
       return null;
@@ -826,7 +863,7 @@ export class FqReaderStore {
     return true;
   }
 
-  /** 选中自定义主题（themeIndex 由调用方切换到 3）。 */
+  /** 选中自定义主题（themeIndex 由调用方切换到 4）。 */
   public static selectCustomTheme(id: string): void {
     FqReaderStore.settings.customThemeId = id;
     FqReaderStore.persistSettings();
@@ -891,6 +928,22 @@ export class FqReaderStore {
     if (FqReaderStore.settings.customFontId === id) {
       FqReaderStore.settings.customFontId = '';
     }
+    // 自定义主题引用了被删字体时清引用：fontIndex 3 回退跟随全局（-1），
+    // 避免主题继续指向已删除的字体 id 而静默回退系统字体。
+    for (const theme of FqReaderStore.settings.customThemes) {
+      if (theme.lightCustomFontId === id) {
+        theme.lightCustomFontId = '';
+        if (theme.lightFontIndex === 3) {
+          theme.lightFontIndex = -1;
+        }
+      }
+      if (theme.darkCustomFontId === id) {
+        theme.darkCustomFontId = '';
+        if (theme.darkFontIndex === 3) {
+          theme.darkFontIndex = -1;
+        }
+      }
+    }
     FqReaderStore.persistSettings();
     return true;
   }
@@ -901,7 +954,9 @@ export class FqReaderStore {
     lightBgFile: string, lightFontColor: string, lightFontSize: number,
     lightFontIndex: number, lightLineHeight: number,
     darkBgFile: string, darkFontColor: string, darkFontSize: number,
-    darkFontIndex: number, darkLineHeight: number): boolean {
+    darkFontIndex: number, darkLineHeight: number,
+    lightBgColor: string = '', darkBgColor: string = '',
+    lightCustomFontId: string = '', darkCustomFontId: string = ''): boolean {
     const cleanId: string = id.trim();
     if (cleanId.length === 0) {
       return false;
@@ -914,21 +969,31 @@ export class FqReaderStore {
     const entry: FqCustomReaderTheme = new FqCustomReaderTheme();
     entry.id = cleanId;
     entry.name = fqClampThemeName(name);
-    if (FqReaderStore.themeBgFileExists(lightBgFile)) {
-      entry.lightBgPath = `${FqReaderStore.filesDir}/fq_reader_bg/${lightBgFile.trim()}`;
+    const cleanLightColor: string = fqNormalizeThemeFontColor(lightBgColor);
+    const cleanDarkColor: string = fqNormalizeThemeFontColor(darkBgColor);
+    if (FqReaderStore.themeBgFileExists(lightBgFile) || cleanLightColor.length > 0) {
+      if (FqReaderStore.themeBgFileExists(lightBgFile)) {
+        entry.lightBgPath = `${FqReaderStore.filesDir}/fq_reader_bg/${lightBgFile.trim()}`;
+      }
+      entry.lightBgColor = cleanLightColor;
       entry.lightFontColor = fqNormalizeThemeFontColor(lightFontColor);
       entry.lightFontSize = fqClampThemeFontSize(lightFontSize);
       entry.lightFontIndex = lightFontIndex >= -1 ? Math.trunc(lightFontIndex) : -1;
+      entry.lightCustomFontId = lightCustomFontId.trim();
       entry.lightLineHeight = fqClampThemeLineHeight(lightLineHeight);
     }
-    if (FqReaderStore.themeBgFileExists(darkBgFile)) {
-      entry.darkBgPath = `${FqReaderStore.filesDir}/fq_reader_bg/${darkBgFile.trim()}`;
+    if (FqReaderStore.themeBgFileExists(darkBgFile) || cleanDarkColor.length > 0) {
+      if (FqReaderStore.themeBgFileExists(darkBgFile)) {
+        entry.darkBgPath = `${FqReaderStore.filesDir}/fq_reader_bg/${darkBgFile.trim()}`;
+      }
+      entry.darkBgColor = cleanDarkColor;
       entry.darkFontColor = fqNormalizeThemeFontColor(darkFontColor);
       entry.darkFontSize = fqClampThemeFontSize(darkFontSize);
       entry.darkFontIndex = darkFontIndex >= -1 ? Math.trunc(darkFontIndex) : -1;
+      entry.darkCustomFontId = darkCustomFontId.trim();
       entry.darkLineHeight = fqClampThemeLineHeight(darkLineHeight);
     }
-    if (entry.lightBgPath.length === 0 && entry.darkBgPath.length === 0) {
+    if (!fqCustomThemeModeSet(entry, false) && !fqCustomThemeModeSet(entry, true)) {
       return false;
     }
     FqReaderStore.settings.customThemes = FqReaderStore.settings.customThemes.concat([entry]);
@@ -966,7 +1031,7 @@ export class FqReaderStore {
       return;
     }
     const rec: Record<string, Object> = {};
-    rec['v'] = 5;
+    rec['v'] = 6;
     rec['fontSize'] = FqReaderStore.settings.fontSize;
     rec['lineHeight'] = FqReaderStore.settings.lineHeight;
     rec['themeIndex'] = FqReaderStore.settings.themeIndex;
@@ -981,14 +1046,18 @@ export class FqReaderStore {
       themeRec['id'] = item.id;
       themeRec['name'] = item.name;
       themeRec['lightBgPath'] = item.lightBgPath;
+      themeRec['lightBgColor'] = item.lightBgColor;
       themeRec['lightFontColor'] = item.lightFontColor;
       themeRec['lightFontSize'] = item.lightFontSize;
       themeRec['lightFontIndex'] = item.lightFontIndex;
+      themeRec['lightCustomFontId'] = item.lightCustomFontId;
       themeRec['lightLineHeight'] = item.lightLineHeight;
       themeRec['darkBgPath'] = item.darkBgPath;
+      themeRec['darkBgColor'] = item.darkBgColor;
       themeRec['darkFontColor'] = item.darkFontColor;
       themeRec['darkFontSize'] = item.darkFontSize;
       themeRec['darkFontIndex'] = item.darkFontIndex;
+      themeRec['darkCustomFontId'] = item.darkCustomFontId;
       themeRec['darkLineHeight'] = item.darkLineHeight;
       themes.push(themeRec);
     }
