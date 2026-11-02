@@ -18,7 +18,9 @@
  * - updateProxyDownload：更新包代理下载开关（关于页，仅用于下载更新软件包：
  *   开=经代理下载更新包，关=直连）；
  * - changelogShownVersion：更新日志已展示到的版本号（空 = 尚未记录，首次安装）；
- *   Index 冷启动比对当前版本号，不同则自动弹出更新日志 sheet。
+ *   Index 冷启动比对当前版本号，不同则自动弹出更新日志 sheet；
+ * - chapterCacheLimitMb：章节自动缓存大小上限（MB，默认 80，1-102400 即 1MB-100GB；
+ *   章节缓存页右上角调节，仅约束阅读自动缓存，整本下载 pin 在预算外不受限）。
  */
 
 import preferences from '@ohos.data.preferences';
@@ -39,6 +41,14 @@ const FQ_SETTINGS_KEY_CHANGELOG_SHOWN: string = 'changelogShownVersion';
 const FQ_SETTINGS_KEY_TTS_PERSON: string = 'ttsPerson';
 const FQ_SETTINGS_KEY_TTS_RATE: string = 'ttsRate';
 const FQ_SETTINGS_KEY_SMART_REACH: string = 'smartReach';
+const FQ_SETTINGS_KEY_CHAPTER_CACHE_LIMIT: string = 'chapterCacheLimitMb';
+
+/** 章节自动缓存大小上限默认值（MB）。 */
+export const FQ_CHAPTER_CACHE_LIMIT_DEFAULT_MB: number = 80;
+/** 章节自动缓存大小上限最小值（MB）。 */
+export const FQ_CHAPTER_CACHE_LIMIT_MIN_MB: number = 1;
+/** 章节自动缓存大小上限最大值（MB，100GB）。 */
+export const FQ_CHAPTER_CACHE_LIMIT_MAX_MB: number = 102400;
 
 /** 深色模式档位：跟随系统。 */
 export const FQ_THEME_FOLLOW: number = 0;
@@ -66,6 +76,8 @@ export class FqAppSettingsStore {
   private static ttsRate: number = 1;
   /** 智感握姿开关。 */
   private static smartReach: boolean = false;
+  /** 章节自动缓存大小上限（MB）。 */
+  private static chapterCacheLimitMb: number = FQ_CHAPTER_CACHE_LIMIT_DEFAULT_MB;
 
   public static init(context: common.Context): void {
     if (FqAppSettingsStore.pref !== null) {
@@ -125,6 +137,12 @@ export class FqAppSettingsStore {
       const rawSmartReach: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_SMART_REACH, false);
       if (typeof rawSmartReach === 'boolean') {
         FqAppSettingsStore.smartReach = rawSmartReach;
+      }
+      const rawCacheLimit: preferences.ValueType =
+        pref.getSync(FQ_SETTINGS_KEY_CHAPTER_CACHE_LIMIT, FQ_CHAPTER_CACHE_LIMIT_DEFAULT_MB);
+      if (typeof rawCacheLimit === 'number' && rawCacheLimit >= FQ_CHAPTER_CACHE_LIMIT_MIN_MB
+        && rawCacheLimit <= FQ_CHAPTER_CACHE_LIMIT_MAX_MB) {
+        FqAppSettingsStore.chapterCacheLimitMb = rawCacheLimit;
       }
     } catch (error) {
       // 损坏数据按默认值处理
@@ -283,6 +301,32 @@ export class FqAppSettingsStore {
   /** 智感握姿开关（开=识别握持手，播控球与底部标签栏随握持侧适配）。 */
   public static isSmartReachEnabled(): boolean {
     return FqAppSettingsStore.smartReach;
+  }
+
+  /** 章节自动缓存大小上限（MB；仅约束阅读自动缓存，整本下载不受限）。 */
+  public static getChapterCacheLimitMb(): number {
+    return FqAppSettingsStore.chapterCacheLimitMb;
+  }
+
+  /** 设置章节自动缓存大小上限（MB，范围外静默忽略；页面负责随后触发预算收敛）。 */
+  public static setChapterCacheLimitMb(limitMb: number): void {
+    if (!Number.isFinite(limitMb) || limitMb < FQ_CHAPTER_CACHE_LIMIT_MIN_MB
+      || limitMb > FQ_CHAPTER_CACHE_LIMIT_MAX_MB) {
+      return;
+    }
+    FqAppSettingsStore.chapterCacheLimitMb = Math.round(limitMb);
+    const pref: preferences.Preferences | null = FqAppSettingsStore.pref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.putSync(FQ_SETTINGS_KEY_CHAPTER_CACHE_LIMIT, FqAppSettingsStore.chapterCacheLimitMb);
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
   }
 
   public static setSmartReachEnabled(enabled: boolean): void {

@@ -17,6 +17,7 @@ import { FqComicSettingsHandler, fqComicSettingsBus } from '../core/FqComicSetti
 import { ComicSettingsDialogContent } from '../view/dialog/ComicSettingsDialogContent';
 import { WebDavBackupListDialogContent } from '../view/dialog/WebDavBackupListDialogContent';
 import { WebDavBackupCountDialogContent } from '../view/dialog/WebDavBackupCountDialogContent';
+import { ChapterCacheLimitDialogContent } from '../view/dialog/ChapterCacheLimitDialogContent';
 import { FqPlaybackBall } from '../view/FqPlaybackBall';
 import { FqSheetOptions } from '../view/sheet/CommonSheet';
 import { FqChangelogSheet } from '../view/sheet/FqChangelogSheet';
@@ -422,6 +423,8 @@ struct Index {
       WebDavBackupListDialogContent()
     } else if (key === '备份保留数量') {
       WebDavBackupCountDialogContent()
+    } else if (key === '章节缓存限制') {
+      ChapterCacheLimitDialogContent()
     }
   }
 }

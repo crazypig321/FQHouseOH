@@ -4,9 +4,9 @@
  * - 目录：files/chapter_cache/<bookId>/catalog.json（书名/封面/类型/章节表，
  *   阅读页目录加载成功后写入；离线打开缓存书与管理页展示的兜底数据源）；
  * - 阅读页 fetchChapterText 成功后自动 write（阅读即缓存）；
- * - 详情页「下载」走 downloadBook 整本顺序缓存（markPinned 标记，LRU 预算外）；
- * - 自动缓存 LRU 预算（对齐 fqapp ChapterCacheStore）：500 章 / 80MB，
- *   超限按最久未读淘汰（read 命中刷新 mtime），init 时收敛一次；
+ * - 详情页「下载」走 downloadBook 整本顺序缓存（markPinned 标记，大小限制外）；
+ * - 自动缓存大小上限（FqAppSettingsStore.chapterCacheLimitMb，章节缓存页可调，
+ *   默认 80MB）：超限按最久未读淘汰（read 命中刷新 mtime），init 与上限调整时收敛；
  * - 变更后 fqStoreBus.chapterCacheVersion++ 驱动管理页刷新。
  * 明文落盘（后端已解密，存应用沙箱）。
  */
@@ -19,17 +19,14 @@ import { FqChapter } from '../model/FqModels';
 import { FqBackend } from './FqBackend';
 import { fqAsArray, fqAsRecord, fqParseObject, fqStr } from './FqJson';
 import { fqStoreBus } from './FqStoreBus';
+import { FqAppSettingsStore } from './FqAppSettingsStore';
 
 const TAG: string = 'FqChapterCache';
 const FQ_CACHE_DIR: string = 'chapter_cache';
 const FQ_CATALOG_FILE: string = 'catalog.json';
 /** 目录/章节文件名安全字符（防路径穿越）。 */
 const FQ_SAFE_ID: RegExp = /^[A-Za-z0-9_-]{1,128}$/;
-/** 自动缓存章数上限（超出按最久未读淘汰；对齐 fqapp ChapterCacheStore maxEntries）。 */
-const FQ_MAX_CHAPTERS: number = 500;
-/** 自动缓存字节预算（对齐 fqapp maxBytes = 80MB）。 */
-const FQ_MAX_CACHE_BYTES: number = 80 * 1024 * 1024;
-/** 整本下载 pin 标记文件名（pin 的书在预算外，永不淘汰）。 */
+/** 整本下载 pin 标记文件名（pin 的书在自动缓存大小限制外，不受限）。 */
 const FQ_PINNED_FILE: string = 'pinned';
 
 /** 缓存书目录元数据（catalog.json 反解；离线打开缓存书的兜底数据）。 */
@@ -404,11 +401,13 @@ export class FqChapterCacheStore {
   }
 
   /**
-   * LRU 预算收敛（对齐 fqapp ChapterCacheStore）：自动缓存超 500 章或 80MB
-   * 时按最久未读淘汰；整本下载 pin 的书在预算外不参与淘汰。
-   * init 时执行一次（单次会话内的少量超出由下次启动收敛）。
+   * 自动缓存大小上限收敛：阅读自动缓存总占用超过 FqAppSettingsStore
+   * 上限（章节缓存页可调）时按最久未读淘汰；整本下载 pin 的书在限制外
+   * 不参与淘汰、不做限制。init 与上限调整时执行（单次会话内的少量超出
+   * 由下次收敛）。
    */
   public static enforceBudget(): void {
+    const limitBytes: number = FqAppSettingsStore.getChapterCacheLimitMb() * 1024 * 1024;
     const bookIds: string[] = [];
     try {
       const all: string[] = fs.listFileSync(FqChapterCacheStore.cacheRoot());
@@ -441,23 +440,21 @@ export class FqChapterCacheStore {
         }
       }
     }
-    let count: number = files.length;
     let bytes: number = 0;
     for (const file of files) {
       bytes += file.size;
     }
-    if (count <= FQ_MAX_CHAPTERS && bytes <= FQ_MAX_CACHE_BYTES) {
+    if (bytes <= limitBytes) {
       return;
     }
     files.sort((a: FqChapterFileRec, b: FqChapterFileRec): number => a.mtime - b.mtime);
     let removedAny: boolean = false;
     for (const file of files) {
-      if (count <= FQ_MAX_CHAPTERS && bytes <= FQ_MAX_CACHE_BYTES) {
+      if (bytes <= limitBytes) {
         break;
       }
       try {
         fs.unlinkSync(file.path);
-        count--;
         bytes -= file.size;
         removedAny = true;
       } catch (error) {

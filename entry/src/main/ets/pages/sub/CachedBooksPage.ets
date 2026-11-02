@@ -1,15 +1,17 @@
 /**
  * 章节缓存页（我的-章节缓存入口，对齐 fqapp cached_books_page）：
- * 统计卡（N 本 · M 章 · 占用 + 清空）+ 书卡列表（LazyForEach）；
+ * 统计卡（N 本 · M 章 · 占用/上限 + 清空）+ 书卡列表（LazyForEach）；
  * 点击书卡离线续读（目录/正文命中章节缓存）；行尾 trash 删单本（确认）；
+ * 右上角「自动缓存上限」调节（数值 + MB/GB 单位弹窗，仅约束阅读自动缓存）；
  * 阅读时自动缓存 + 详情页「下载」整本缓存是数据来源；空态引导文案。
  */
 
 import { CommonNav } from '../../view/CommonNav';
-import { FqTitleBarOptions } from '../../model/FqNavModels';
+import { FqTitleBarMenuOptions } from '../../model/FqNavModels';
 import { ROUTE_READER2, ReaderNavParams } from '../../model/FqNavModels';
 import { FqCacheEmptyView, FqCacheStatsCard, fqFormatCacheBytes } from '../../view/FqCacheCommon';
 import { FqChapterCacheStore, FqCachedBookSummary } from '../../core/FqChapterCacheStore';
+import { FqAppSettingsStore } from '../../core/FqAppSettingsStore';
 import { fqExportCachedBook, fqExportDirName, FqExportedBook } from '../../core/FqCacheExport';
 import { fqStoreBus, FqStoreBus } from '../../core/FqStoreBus';
 import { DialogManager } from '../../utils/DialogUtils';
@@ -78,6 +80,8 @@ export struct CachedBooksPage {
   @Local bookCount: number = 0;
   @Local chapterCount: number = 0;
   @Local totalBytes: number = 0;
+  /** 自动缓存上限（字节；弹窗确认后即时刷新统计卡）。 */
+  @Local limitBytes: number = 0;
   /** 导出进行中（防重复点击）。 */
   @Local exporting: boolean = false;
 
@@ -105,12 +109,26 @@ export struct CachedBooksPage {
     this.bookCount = rows.length;
     this.chapterCount = chapters;
     this.totalBytes = bytes;
+    this.limitBytes = FqAppSettingsStore.getChapterCacheLimitMb() * 1024 * 1024;
     this.dataSource.reload(rows);
+  }
+
+  /** 右上角「自动缓存上限」：数值 + 单位弹窗，确认后落库并立即收敛预算。 */
+  private showLimitDialog(): void {
+    DialogManager.InputChapterCacheLimit(this.limitBytes, (bytes: number): void => {
+      FqAppSettingsStore.setChapterCacheLimitMb(Math.round(bytes / (1024 * 1024)));
+      this.limitBytes = FqAppSettingsStore.getChapterCacheLimitMb() * 1024 * 1024;
+      FqChapterCacheStore.enforceBudget();
+      this.getUIContext().getPromptAction().showToast({ message: '已更新自动缓存上限', duration: 2000 });
+    });
   }
 
   build() {
     CommonNav({
-      titleBarOp: FqTitleBarOptions('章节缓存', false),
+      titleBarOp: FqTitleBarMenuOptions('章节缓存', $r('sys.symbol.gearshape'), 'limit',
+        (): void => {
+          this.showLimitDialog();
+        }),
       scroller: this.scroller,
     }) {
       if (this.bookCount === 0) {
@@ -127,7 +145,7 @@ export struct CachedBooksPage {
               icon: $r('sys.symbol.book'),
               tint: '#FF3B82F6',
               title: `已缓存 ${this.bookCount} 本 · 共 ${this.chapterCount} 章`,
-              subtitle: `占用空间：${fqFormatCacheBytes(this.totalBytes)} · 点击可离线续读`,
+              subtitle: `占用 ${fqFormatCacheBytes(this.totalBytes)} / 上限 ${fqFormatCacheBytes(this.limitBytes)} · 点击可离线续读`,
             }) {
               Text('清空')
                 .fontSize(13)

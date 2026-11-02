@@ -52,6 +52,14 @@ export class DialogManager {
   /** 保留数量确认回调（回传 1-50 整数；取消/关闭不触发）。 */
   private static webdavCountConfirm: ((count: number) => void) | null = null;
 
+  // ===== 章节缓存限制弹窗参数（打开前由调用方赋值，弹窗关闭后自动清空） =====
+  /** 缓存上限输入文本（数值部分）。 */
+  public static chapterCacheLimitValue: string = '';
+  /** 缓存上限单位下标（0=MB，1=GB）。 */
+  public static chapterCacheLimitUnitIndex: number = 0;
+  /** 缓存上限确认回调（回传字节数；取消/关闭不触发）。 */
+  private static chapterCacheLimitConfirm: ((bytes: number) => void) | null = null;
+
   // ===== 自定义阅读主题编辑弹窗参数（独立宿主弹窗，打开前由调用方赋值，关闭后自动清空） =====
   /** 编辑中主题名称（输入框双向值）。 */
   public static readerThemeName: string = '';
@@ -169,6 +177,22 @@ export class DialogManager {
     DialogManager.webdavCountValue = current.toString();
     DialogManager.webdavCountConfirm = onConfirm;
     DialogManager.OpenDialog('备份保留数量');
+  }
+
+  /** 章节缓存限制弹窗：currentBytes 当前上限（字节），onConfirm 确认后回传新上限（字节）。
+   *  数值 + 单位（MB/GB）拆分预填：整 GB 优先 GB 档，否则 MB 整数档。 */
+  public static InputChapterCacheLimit(currentBytes: number, onConfirm: (bytes: number) => void): void {
+    const mb: number = 1024 * 1024;
+    const gb: number = mb * 1024;
+    if (currentBytes >= gb && currentBytes % gb === 0) {
+      DialogManager.chapterCacheLimitValue = (currentBytes / gb).toString();
+      DialogManager.chapterCacheLimitUnitIndex = 1;
+    } else {
+      DialogManager.chapterCacheLimitValue = Math.max(1, Math.round(currentBytes / mb)).toString();
+      DialogManager.chapterCacheLimitUnitIndex = 0;
+    }
+    DialogManager.chapterCacheLimitConfirm = onConfirm;
+    DialogManager.OpenDialog('章节缓存限制');
   }
 
   /** 自定义阅读主题编辑弹窗：initial 为待编辑主题（null = 新建模式，无删除行），
@@ -332,13 +356,17 @@ export class DialogManager {
     if (key === '备份保留数量') {
       return '备份保留数量';
     }
+    if (key === '章节缓存限制') {
+      return '自动缓存上限';
+    }
     return '';
   }
 
   /** 弹窗底部按钮（宿主渲染时读取；CustomContentDialog 点击按钮后自动关闭）。 */
   public static DialogButtons(key: string): Array<ButtonOptions> {
     if (key === '通用确认' || key === '自定义颜色' ||
-      key === '选择WebDAV备份' || key === '备份保留数量' || key === '自定义主题编辑') {
+      key === '选择WebDAV备份' || key === '备份保留数量' || key === '自定义主题编辑' ||
+      key === '章节缓存限制') {
       const cancel: ButtonOptions = {
         value: '取消',
         fontColor: appState.accentColor,
@@ -354,6 +382,8 @@ export class DialogManager {
       } else if (key === '备份保留数量') {
         confirmLabel = '确定';
       } else if (key === '自定义主题编辑') {
+        confirmLabel = '保存';
+      } else if (key === '章节缓存限制') {
         confirmLabel = '保存';
       }
       const confirm: ButtonOptions = {
@@ -406,6 +436,28 @@ export class DialogManager {
         cb(count);
       }
     }
+    if (key === '章节缓存限制') {
+      const mb: number = 1024 * 1024;
+      const gb: number = mb * 1024;
+      const value: number = parseFloat(DialogManager.chapterCacheLimitValue);
+      if (Number.isNaN(value) || value <= 0) {
+        DialogManager.Toast('请输入大于 0 的数值');
+        return;
+      }
+      const bytes: number = DialogManager.chapterCacheLimitUnitIndex === 1 ? value * gb : value * mb;
+      if (bytes < mb) {
+        DialogManager.Toast('自动缓存上限最小 1 MB');
+        return;
+      }
+      if (bytes > 100 * gb) {
+        DialogManager.Toast('自动缓存上限最大 100 GB');
+        return;
+      }
+      const cb: ((limitBytes: number) => void) | null = DialogManager.chapterCacheLimitConfirm;
+      if (cb !== null) {
+        cb(bytes);
+      }
+    }
   }
 
   /** 弹窗消失清理（宿主 onWillDisappear 调用）：清标识、触发一次性关闭回调。 */
@@ -437,6 +489,12 @@ export class DialogManager {
     if (key === '备份保留数量') {
       DialogManager.webdavCountValue = '';
       DialogManager.webdavCountConfirm = null;
+    }
+    // 章节缓存限制弹窗参数一次性，关闭后清理
+    if (key === '章节缓存限制') {
+      DialogManager.chapterCacheLimitValue = '';
+      DialogManager.chapterCacheLimitUnitIndex = 0;
+      DialogManager.chapterCacheLimitConfirm = null;
     }
     const cb: (() => void) | null = DialogManager.onDialogClosed;
     DialogManager.onDialogClosed = null;

@@ -66,3 +66,20 @@ export class SearchImmersiveModifier implements AttributeModifier<SearchAttribut
 
 /** 共享的无状态 Search 材质适配器实例。 */
 export const searchImmersiveModifier: SearchImmersiveModifier = new SearchImmersiveModifier();
+
+/** Select 沉浸式材质（ULTRA_THIN + colorInvert）版本兼容适配器：仅在 API >= 26 时生效（控件 + 下拉菜单材质）。 */
+export class SelectImmersiveModifier implements AttributeModifier<SelectAttribute> {
+  applyNormalAttribute(instance: SelectAttribute): void {
+    if (IsApiVersion_26()) {
+      const material = new uiMaterial.ImmersiveMaterial({
+        style: uiMaterial.ImmersiveStyle.ULTRA_THIN,
+        colorInvert: true
+      });
+      //instance.systemMaterial(material);
+      instance.menuSystemMaterial(material);
+    }
+  }
+}
+
+/** 共享的无状态 Select 材质适配器实例。 */
+export const selectImmersiveModifier: SelectImmersiveModifier = new SelectImmersiveModifier();
