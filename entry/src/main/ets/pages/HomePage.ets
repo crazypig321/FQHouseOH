@@ -119,7 +119,9 @@ const FQ_CHANNELS: FqChannelDef[] = [
       new FqCategoryGroup('女频', ['古言', '现言', '甜宠', '萌宝', '悬疑']),
       new FqCategoryGroup('出版', ['相声', '评书', '文学', '儿童']),
     ],
-    (category: string): FqHomeSource[] => [FqHomeSource.pagedSearch(category, 'audio')]),
+    // 分类词走 v1 t2（听书分栏）：旧版 /api/search 的各分栏是通用结果拷贝，audio 过滤后大半词为空（探针实证）；
+    // t2 对全部 15 词均返回 10/10 条纯 audio 且可翻页。
+    (category: string): FqHomeSource[] => [FqHomeSource.search(category, 2, 'audio')]),
 ];
 
 const FQ_CAPTIONS: string[] = [
