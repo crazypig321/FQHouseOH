@@ -422,9 +422,17 @@ export struct SearchPage {
       }
       let page: FqSearchTab | null = null;
       for (const tab of tabs) {
-        if (tab.title === category.sourceTitle || tab.title === category.title) {
+        if (tab.title === category.title) {
           page = tab;
           break;
+        }
+      }
+      if (page === null) {
+        for (const tab of tabs) {
+          if (tab.title === category.sourceTitle) {
+            page = tab;
+            break;
+          }
         }
       }
       if (page === null) {
