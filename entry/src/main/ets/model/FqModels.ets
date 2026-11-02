@@ -459,6 +459,28 @@ export class FqRankTab {
   get isDrama(): boolean {
     return this.name.indexOf('短剧') >= 0 || this.name.indexOf('漫剧') >= 0;
   }
+
+  /** 剧集榜上游 genre_tab：短剧 4 / 漫剧 5；书籍榜 0（后端默认 2 = 小说）。 */
+  get genreTab(): number {
+    if (this.name.indexOf('短剧') >= 0) {
+      return 4;
+    }
+    if (this.name.indexOf('漫剧') >= 0) {
+      return 5;
+    }
+    return 0;
+  }
+
+  /** 剧集榜条目强制类型：短剧 'video' / 漫剧 'manju'；书籍榜空（自动推断）。 */
+  get forcedKind(): string {
+    if (this.name.indexOf('短剧') >= 0) {
+      return 'video';
+    }
+    if (this.name.indexOf('漫剧') >= 0) {
+      return 'manju';
+    }
+    return '';
+  }
 }
 
 /** 排行榜分类：info_id 即请求参数 rank_sub_info_id。 */
@@ -485,12 +507,14 @@ export class FqRankEntry {
   readonly creationStatus: number;
   readonly wordNumber: number;
   readonly readCount: number;
+  /** 读者评分 0-10；0 = 无评分。 */
+  readonly score: number;
   readonly kind: string;
   readonly seriesId: string;
 
   constructor(
     position: number,
-    id: string,
+    id: number | string,
     title: string,
     cover: string,
     author: string,
@@ -499,11 +523,12 @@ export class FqRankEntry {
     creationStatus: number,
     wordNumber: number,
     readCount: number,
+    score: number,
     kind: string,
     seriesId: string,
   ) {
     this.position = position;
-    this.id = id;
+    this.id = `${id}`;
     this.title = title;
     this.cover = cover;
     this.author = author;
@@ -512,6 +537,7 @@ export class FqRankEntry {
     this.creationStatus = creationStatus;
     this.wordNumber = wordNumber;
     this.readCount = readCount;
+    this.score = score;
     this.kind = kind;
     this.seriesId = seriesId;
   }

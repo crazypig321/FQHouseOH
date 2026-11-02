@@ -577,16 +577,21 @@ export class FqBackend {
    * @param categoryId rank_sub_info_id。
    * @param offset 已加载条数（服务端续拉游标）。
    * @param startAt 第一名的名次（首页 1）。
+   * @param genreTab 剧集榜上游 genre_tab（短剧 4 / 漫剧 5）；0 = 不传（后端默认 2 小说）。
+   * @param forcedKind 剧集榜条目强制类型（'video'/'manju'）；空 = 自动推断。
    */
   public async rankBoard(rankId: string, algo: number, categoryId: number, offset: number,
-    startAt: number): Promise<FqRankBoard> {
+    startAt: number, genreTab: number, forcedKind: string): Promise<FqRankBoard> {
     let query: string = `algo_type=${algo}&rank_sub_info_id=${categoryId}`;
     if (offset > 0) {
       query = `${query}&offset=${offset}`;
     }
+    if (genreTab > 0) {
+      query = `${query}&genre_tab=${genreTab}`;
+    }
     const payload: Record<string, Object> =
       await this.getJson(`/api/v1/rank/${encodeURIComponent(rankId)}`, query);
-    return fqParseRankBoard(payload, startAt);
+    return fqParseRankBoard(payload, startAt, forcedKind);
   }
 
   /** 目录章节（/api/directory，多卷平铺）。 */

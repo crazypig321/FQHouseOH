@@ -43,12 +43,12 @@ export function titleBarOf(mainTitle: ResourceStr, subTitle?: ResourceStr,
 @ComponentV2
 export struct CommonNav {
   private tabsController: HdsTabsController = new HdsTabsController();
-    @Param titleBarOp?: TitleBarContentOptions = undefined
-    @Param isHideBackButton: boolean = false
-    /** 内嵌模式：作为 TabContent 内容挂载（主 Tab 页），非路由 NavDestination。
-     *  不参与 PC 路由转场（scale/opacity/systemTransition 全部旁路）——
-     *  PC pop 退场会把全局 pcNavExit* 动画到 0，内嵌实例若绑定会跟着变透明且无人复位，导致整页空白 */
-    @Param embedded: boolean = false
+  @Param titleBarOp?: TitleBarContentOptions = undefined
+  @Param isHideBackButton: boolean = false
+  /** 内嵌模式：作为 TabContent 内容挂载（主 Tab 页），非路由 NavDestination。
+   *  不参与 PC 路由转场（scale/opacity/systemTransition 全部旁路）——
+   *  PC pop 退场会把全局 pcNavExit* 动画到 0，内嵌实例若绑定会跟着变透明且无人复位，导致整页空白 */
+  @Param embedded: boolean = false
   /** 标题栏背景延伸至状态栏，内容区从标题栏下方起排 */
   @Param avoidLayoutSafeArea: boolean = true
   /** 绑定页面滚动器（驱动标题栏滚动模糊与上滑隐藏） */

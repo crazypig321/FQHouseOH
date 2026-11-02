@@ -1438,6 +1438,7 @@ function fqRankEntryFromBook(bd: Record<string, Object>): FqRankEntry | null {
     fqAsInt(bd['creation_status'], -1),
     fqAsInt(bd['word_number'], 0),
     fqAsInt(bd['read_count'], 0),
+    fqValidScore(bd['score']),
     'book',
     '',
   );
@@ -1450,8 +1451,18 @@ function fqLooksLikeVideoCell(cell: Record<string, Object>): boolean {
   return fqFirstString(cell, ['series_id_str', 'pseries_id', 'video_id']).length > 0;
 }
 
-function fqRankVideoEntry(cell: Record<string, Object>): FqRankEntry | null {
-  const item: FqMediaItem = fqItemFromRaw(cell, '');
+function fqRankVideoEntry(cell: Record<string, Object>, forcedKind: string): FqRankEntry | null {
+  // 剧集榜（短剧/漫剧）单元格把条目包在 video_data 里：身份字段在子条目上，
+  // 父 cell + 首个子条目浅合并后解析；forcedKind 强制区分漫剧/短剧（卡片无文字标记）。
+  const child: Record<string, Object> | null = fqMapFrom(cell['video_data']);
+  let source: Record<string, Object> = cell;
+  if (child !== null) {
+    const merged: Record<string, Object> = {};
+    fqShallowMergeInto(merged, cell);
+    fqShallowMergeInto(merged, child);
+    source = merged;
+  }
+  const item: FqMediaItem = fqItemFromRaw(source, forcedKind);
   if (item.kind !== 'video' && item.kind !== 'manju') {
     return null;
   }
@@ -1469,6 +1480,7 @@ function fqRankVideoEntry(cell: Record<string, Object>): FqRankEntry | null {
     -1,
     0,
     item.followerCount,
+    item.score,
     item.kind,
     item.seriesId,
   );
@@ -1479,6 +1491,7 @@ function fqCollectRankCell(
   entries: FqRankEntry[],
   seen: Set<string>,
   startAt: number,
+  forcedKind: string,
 ): void {
   let entry: FqRankEntry | null = null;
 
@@ -1499,7 +1512,7 @@ function fqCollectRankCell(
     entry = fqRankEntryFromBook(cell);
   }
   if (entry === null && fqLooksLikeVideoCell(cell)) {
-    entry = fqRankVideoEntry(cell);
+    entry = fqRankVideoEntry(cell, forcedKind);
   }
   if (entry === null) {
     return;
@@ -1521,6 +1534,7 @@ function fqCollectRankCell(
     entry.creationStatus,
     entry.wordNumber,
     entry.readCount,
+    entry.score,
     entry.kind,
     entry.seriesId,
   ));
@@ -1529,8 +1543,10 @@ function fqCollectRankCell(
 /**
  * 解析 /api/v1/rank/{rankId} 载荷为榜单一页。
  * @param startAt 第一名的名次（首页 1，翻页 = 已有条数 + 1）。
+ * @param forcedKind 剧集榜条目强制类型（'video'/'manju'）；空 = 自动推断。
  */
-export function fqParseRankBoard(payload: Record<string, Object>, startAt: number): FqRankBoard {
+export function fqParseRankBoard(payload: Record<string, Object>, startAt: number,
+  forcedKind: string): FqRankBoard {
   const codeRaw: Object | undefined = payload['code'];
   if (codeRaw !== undefined && codeRaw !== null) {
     const code: number = fqAsInt(codeRaw, -1);
@@ -1556,11 +1572,11 @@ export function fqParseRankBoard(payload: Record<string, Object>, startAt: numbe
         for (const nestedValue of nested) {
           const nestedCell: Record<string, Object> | null = fqAsRecord(nestedValue);
           if (nestedCell !== null) {
-            fqCollectRankCell(nestedCell, entries, seen, startAt);
+            fqCollectRankCell(nestedCell, entries, seen, startAt, forcedKind);
           }
         }
       }
-      fqCollectRankCell(cell, entries, seen, startAt);
+      fqCollectRankCell(cell, entries, seen, startAt, forcedKind);
     }
   }
 

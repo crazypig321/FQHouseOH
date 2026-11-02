@@ -142,16 +142,16 @@ export struct RankPage {
                     .textAlign(TextAlign.Center)
                   if (entry.cover.length > 0) {
                     Image(FqBackend.get().resourceUrl(entry.cover))
-                      .width(56)
-                      .height(78)
+                      .width(62)
+                      .height(84)
                       .borderRadius(8)
                       .objectFit(ImageFit.Cover)
                       .autoResize(true)
                       .draggable(false)
                   } else {
                     Column()
-                      .width(56)
-                      .height(78)
+                      .width(62)
+                      .height(84)
                       .borderRadius(8)
                       .backgroundColor($r('sys.color.comp_background_secondary'))
                   }
@@ -168,6 +168,18 @@ export struct RankPage {
                         .fontColor($r('sys.color.font_tertiary'))
                         .maxLines(1)
                         .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    }
+                    if (entry.score > 0) {
+                      Row({ space: 3 }) {
+                        SymbolGlyph($r('sys.symbol.star_fill'))
+                          .fontSize(12)
+                          .fontColor(['#FFA000'])
+                        Text(entry.score.toFixed(1))
+                          .fontSize(12)
+                          .fontWeight(600)
+                          .fontColor('#FFA000')
+                      }
+                      .alignItems(VerticalAlign.Center)
                     }
                     if (entry.abstractText.length > 0) {
                       Text(entry.abstractText)
@@ -409,6 +421,8 @@ export struct RankPage {
         categoryId,
         reset ? 0 : count,
         reset ? 1 : count + 1,
+        rank.genreTab,
+        rank.forcedKind,
       );
       if (token !== this.loadToken) {
         return;
