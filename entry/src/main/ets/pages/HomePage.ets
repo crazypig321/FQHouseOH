@@ -54,7 +54,7 @@ const FQ_CHANNELS: FqChannelDef[] = [
     ['热门', '高分', '完结', '新书', '连载', '免费', '经典', '爆款'],
     (category: string): FqHomeSource[] => [
       FqHomeSource.pagedSearch(category, 'book'),
-      FqHomeSource.pagedSearch(category, 'video'),
+      FqHomeSource.search(category, 11, 'video'),
       FqHomeSource.pagedSearch(category, 'audio'),
       FqHomeSource.search(category, 8, 'manga'),
       FqHomeSource.search(category, 11, 'manju'),
@@ -68,12 +68,13 @@ const FQ_CHANNELS: FqChannelDef[] = [
     FqHomeSource.homepageFallback(8, 'video', FQ_SOURCE_SEARCH_PAGED, '短剧', 0),
   ],
     ['甜宠', '逆袭', '战神', '豪门', '萌宝', '复仇', '穿越', '重生', '神豪', '打脸'],
-    (category: string): FqHomeSource[] => [FqHomeSource.pagedSearch(category, 'video')]),
+    (category: string): FqHomeSource[] => [FqHomeSource.search(category, 11, 'video')]),
   new FqChannelDef('漫剧', (): FqHomeSource[] => [
     FqHomeSource.homepageFallback(24, 'manju', FQ_SOURCE_SEARCH, '漫剧', 11),
   ],
     ['古风', '恋爱', '玄幻', '都市', '搞笑', '热血', '悬疑', '奇幻', '治愈', '冒险'],
-    (category: string): FqHomeSource[] => [FqHomeSource.search(category, 11, 'manju')]),
+    // 检索词带「漫剧」后缀：裸分类词的 t11 结果全是短剧，无 manju 条目（探针实证）。
+    (category: string): FqHomeSource[] => [FqHomeSource.search(`${category}漫剧`, 11, 'manju')]),
   new FqChannelDef('漫画', (): FqHomeSource[] => [FqHomeSource.search('漫画', 8, 'manga')],
     ['恋爱', '搞笑', '热血', '玄幻', '都市', '古风', '科幻', '冒险', '悬疑', '治愈'],
     (category: string): FqHomeSource[] => [FqHomeSource.search(category, 8, 'manga')]),

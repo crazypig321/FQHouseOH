@@ -338,24 +338,31 @@ export class FqHomeFeed {
     return items;
   }
 
-  /** v1 /api/v1/search 游标阶段（漫画/漫剧）。 */
+  /** v1 /api/v1/search 游标阶段（漫画/漫剧/短剧）。
+   * 分栏标题是频道名（短剧/漫画/漫剧）而非检索词，不做标题匹配：
+   * 聚合各分栏按 kind 过滤，翻页游标取首个命中分栏。 */
   private async loadCursorStage(source: FqHomeSource): Promise<FqMediaItem[]> {
     const backend: FqBackend = FqBackend.get();
     const tabs: FqSearchTab[] = await backend.searchTabs(source.query, source.tabType, source.offset);
-    let matched: FqSearchTab | null = null;
+    const items: FqMediaItem[] = [];
+    let hasMore: boolean = false;
+    let nextOffset: number = 0;
     for (const tab of tabs) {
-      if (tab.title === source.query) {
-        matched = tab;
-        break;
+      const matched: FqMediaItem[] = this.filterByKind(tab.items, source.forcedKind);
+      for (const item of matched) {
+        items.push(item);
+      }
+      if (matched.length > 0 && !hasMore) {
+        hasMore = tab.hasMore;
+        nextOffset = tab.nextOffset;
       }
     }
-    if (matched === null) {
+    if (items.length === 0) {
       source.hasMore = false;
-      return [];
+      return items;
     }
-    const items: FqMediaItem[] = this.filterByKind(matched.items, source.forcedKind);
-    if (matched.hasMore !== false && matched.nextOffset > source.offset) {
-      source.offset = matched.nextOffset;
+    if (hasMore && nextOffset > source.offset) {
+      source.offset = nextOffset;
     } else {
       source.hasMore = false;
     }
