@@ -4,9 +4,11 @@
  * - 目录：files/chapter_cache/<bookId>/catalog.json（书名/封面/类型/章节表，
  *   阅读页目录加载成功后写入；离线打开缓存书与管理页展示的兜底数据源）；
  * - 阅读页 fetchChapterText 成功后自动 write（阅读即缓存）；
- * - 详情页「下载」走 downloadBook 整本顺序缓存；
+ * - 详情页「下载」走 downloadBook 整本顺序缓存（markPinned 标记，LRU 预算外）；
+ * - 自动缓存 LRU 预算（对齐 fqapp ChapterCacheStore）：500 章 / 80MB，
+ *   超限按最久未读淘汰（read 命中刷新 mtime），init 时收敛一次；
  * - 变更后 fqStoreBus.chapterCacheVersion++ 驱动管理页刷新。
- * v1 无 LRU 淘汰与加密落盘（后端已解密明文，存应用沙箱），清理靠用户手动。
+ * 明文落盘（后端已解密，存应用沙箱）。
  */
 
 import { common } from '@kit.AbilityKit';
@@ -23,6 +25,12 @@ const FQ_CACHE_DIR: string = 'chapter_cache';
 const FQ_CATALOG_FILE: string = 'catalog.json';
 /** 目录/章节文件名安全字符（防路径穿越）。 */
 const FQ_SAFE_ID: RegExp = /^[A-Za-z0-9_-]{1,128}$/;
+/** 自动缓存章数上限（超出按最久未读淘汰；对齐 fqapp ChapterCacheStore maxEntries）。 */
+const FQ_MAX_CHAPTERS: number = 500;
+/** 自动缓存字节预算（对齐 fqapp maxBytes = 80MB）。 */
+const FQ_MAX_CACHE_BYTES: number = 80 * 1024 * 1024;
+/** 整本下载 pin 标记文件名（pin 的书在预算外，永不淘汰）。 */
+const FQ_PINNED_FILE: string = 'pinned';
 
 /** 缓存书目录元数据（catalog.json 反解；离线打开缓存书的兜底数据）。 */
 export class FqCachedCatalog {
@@ -59,6 +67,19 @@ export class FqCachedBookSummary {
   }
 }
 
+/** 预算收敛用的章节文件记录（路径 + 最后读取时间 + 字节数）。 */
+class FqChapterFileRec {
+  public readonly path: string;
+  public readonly mtime: number;
+  public readonly size: number;
+
+  constructor(path: string, mtime: number, size: number) {
+    this.path = path;
+    this.mtime = mtime;
+    this.size = size;
+  }
+}
+
 export class FqChapterCacheStore {
   private static filesDir: string = '';
 
@@ -72,6 +93,7 @@ export class FqChapterCacheStore {
     } catch (error) {
       // 已存在或创建失败（后续写按需再建）
     }
+    FqChapterCacheStore.enforceBudget();
   }
 
   private static cacheRoot(): string {
@@ -136,13 +158,16 @@ export class FqChapterCacheStore {
     }
   }
 
-  /** 读一章缓存正文（未命中返回空串）。 */
+  /** 读一章缓存正文（未命中返回空串；命中刷新 mtime 作为 LRU「最近读取」依据）。 */
   public static read(bookId: string, chapterId: string): string {
     if (!FQ_SAFE_ID.test(bookId) || !FQ_SAFE_ID.test(chapterId)) {
       return '';
     }
+    const path: string = FqChapterCacheStore.chapterPath(bookId, chapterId);
     try {
-      return fs.readTextSync(FqChapterCacheStore.chapterPath(bookId, chapterId));
+      const text: string = fs.readTextSync(path);
+      fs.utimes(path, Date.now());
+      return text;
     } catch (error) {
       return '';
     }
@@ -344,6 +369,127 @@ export class FqChapterCacheStore {
     fqStoreBus.chapterCacheVersion++;
   }
 
+  /** 标记整本下载（pin：LRU 预算外，永不淘汰）。 */
+  public static markPinned(bookId: string): void {
+    if (!FQ_SAFE_ID.test(bookId) || !FqChapterCacheStore.ensureBookDir(bookId)) {
+      return;
+    }
+    let file: fs.File | null = null;
+    try {
+      file = fs.openSync(`${FqChapterCacheStore.bookDir(bookId)}/${FQ_PINNED_FILE}`,
+        fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE);
+    } catch (error) {
+      // pin 标记失败退化为预算内（不影响下载本身）
+    } finally {
+      if (file !== null) {
+        try {
+          fs.closeSync(file);
+        } catch (closeError) {
+          // 忽略
+        }
+      }
+    }
+  }
+
+  /** 是否整本下载（pin 在 LRU 预算外）。 */
+  public static isPinned(bookId: string): boolean {
+    if (!FQ_SAFE_ID.test(bookId)) {
+      return false;
+    }
+    try {
+      return fs.accessSync(`${FqChapterCacheStore.bookDir(bookId)}/${FQ_PINNED_FILE}`);
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * LRU 预算收敛（对齐 fqapp ChapterCacheStore）：自动缓存超 500 章或 80MB
+   * 时按最久未读淘汰；整本下载 pin 的书在预算外不参与淘汰。
+   * init 时执行一次（单次会话内的少量超出由下次启动收敛）。
+   */
+  public static enforceBudget(): void {
+    const bookIds: string[] = [];
+    try {
+      const all: string[] = fs.listFileSync(FqChapterCacheStore.cacheRoot());
+      for (const bookId of all) {
+        if (FQ_SAFE_ID.test(bookId) && !FqChapterCacheStore.isPinned(bookId)) {
+          bookIds.push(bookId);
+        }
+      }
+    } catch (error) {
+      return;
+    }
+    const files: FqChapterFileRec[] = [];
+    for (const bookId of bookIds) {
+      const dir: string = FqChapterCacheStore.bookDir(bookId);
+      let names: string[] = [];
+      try {
+        names = fs.listFileSync(dir);
+      } catch (error) {
+        continue;
+      }
+      for (const name of names) {
+        if (!name.endsWith('.txt')) {
+          continue;
+        }
+        try {
+          const stat: fs.Stat = fs.statSync(`${dir}/${name}`);
+          files.push(new FqChapterFileRec(`${dir}/${name}`, stat.mtime, stat.size));
+        } catch (error) {
+          // 单文件统计失败跳过
+        }
+      }
+    }
+    let count: number = files.length;
+    let bytes: number = 0;
+    for (const file of files) {
+      bytes += file.size;
+    }
+    if (count <= FQ_MAX_CHAPTERS && bytes <= FQ_MAX_CACHE_BYTES) {
+      return;
+    }
+    files.sort((a: FqChapterFileRec, b: FqChapterFileRec): number => a.mtime - b.mtime);
+    let removedAny: boolean = false;
+    for (const file of files) {
+      if (count <= FQ_MAX_CHAPTERS && bytes <= FQ_MAX_CACHE_BYTES) {
+        break;
+      }
+      try {
+        fs.unlinkSync(file.path);
+        count--;
+        bytes -= file.size;
+        removedAny = true;
+      } catch (error) {
+        // 单文件删除失败继续
+      }
+    }
+    if (removedAny) {
+      // 被淘汰一空的残书（无正文）连目录/catalog 一起清掉，避免空目录累积。
+      for (const bookId of bookIds) {
+        FqChapterCacheStore.dropEmptyBook(bookId);
+      }
+      fqStoreBus.chapterCacheVersion++;
+    }
+  }
+
+  /** 无正文的残书连 catalog 一起移除（预算收敛后置清理）。 */
+  private static dropEmptyBook(bookId: string): void {
+    const dir: string = FqChapterCacheStore.bookDir(bookId);
+    let names: string[] = [];
+    try {
+      names = fs.listFileSync(dir);
+    } catch (error) {
+      return;
+    }
+    for (const name of names) {
+      if (name.endsWith('.txt')) {
+        return;
+      }
+    }
+    FqChapterCacheStore.removeBook(bookId);
+  }
+
   /**
    * 整本缓存（详情页「下载」）：顺序拉取目录章节正文写入缓存，
    * 已缓存章节跳过；onProgress 汇报累计完成/总数。
@@ -358,6 +504,7 @@ export class FqChapterCacheStore {
       throw new Error('未获取到目录章节');
     }
     FqChapterCacheStore.saveCatalog(bookId, title, cover, kind, chapters, true);
+    FqChapterCacheStore.markPinned(bookId);
     const cached: Set<string> = FqChapterCacheStore.cachedChapterIds(bookId);
     let done: number = 0;
     for (const chapter of chapters) {
