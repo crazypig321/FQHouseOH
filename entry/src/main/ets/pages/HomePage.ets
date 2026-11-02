@@ -4,7 +4,10 @@
  * 各 homepage 源推荐游标停走后转入 search 兜底续页
  * （小说/短剧/听书 = 旧版 /api/search 页码；漫剧 = v1 搜索游标，
  * 对齐 fqapp home_provider.dart `_loadInitial`/`_loadNext`）。
- * 布局：标题栏 bottomBuilder 搜索框 + 药丸频道条 + 今日焦点轮播 + 分区头 + 3 列封面网格。
+ * 频道分类：每频道硬编码分类关键词，频道条下方横向分类条（排行榜同款文本样式）；
+ * 点「全部」回频道默认推荐流（缓存/持久化复用），点分类用关键词直搜该频道内容
+ * （小说/短剧/听书 = 页码搜索；漫剧/漫画 = v1 搜索游标；推荐 = 五类同词聚合搜索）。
+ * 布局：标题栏 bottomBuilder 搜索框 + 药丸频道条 + 分类条 + 今日焦点轮播 + 分区头 + 3 列封面网格。
  */
 
 import { FqBackend, fqErrorMessage } from '../core/FqBackend';
@@ -26,10 +29,17 @@ import { LengthMetrics } from '@kit.ArkUI';
 class FqChannelDef {
   readonly label: string;
   readonly buildSources: () => FqHomeSource[];
+  /** 频道分类关键词（不含首位「全部」）。 */
+  readonly categories: string[];
+  /** 分类搜索源构建（分类关键词直搜该频道内容）。 */
+  readonly buildCategorySources: (category: string) => FqHomeSource[];
 
-  constructor(label: string, buildSources: () => FqHomeSource[]) {
+  constructor(label: string, buildSources: () => FqHomeSource[],
+    categories: string[], buildCategorySources: (category: string) => FqHomeSource[]) {
     this.label = label;
     this.buildSources = buildSources;
+    this.categories = categories;
+    this.buildCategorySources = buildCategorySources;
   }
 }
 
@@ -40,20 +50,38 @@ const FQ_CHANNELS: FqChannelDef[] = [
     FqHomeSource.homepageFallback(24, 'manju', FQ_SOURCE_SEARCH, '漫剧', 11),
     FqHomeSource.search('漫画', 8, 'manga'),
     FqHomeSource.homepageFallback(5, 'audio', FQ_SOURCE_SEARCH_PAGED, '听书', 0),
-  ]),
+  ],
+    ['热门', '高分', '完结', '新书', '连载', '免费', '经典', '爆款'],
+    (category: string): FqHomeSource[] => [
+      FqHomeSource.pagedSearch(category, 'book'),
+      FqHomeSource.pagedSearch(category, 'video'),
+      FqHomeSource.pagedSearch(category, 'audio'),
+      FqHomeSource.search(category, 8, 'manga'),
+      FqHomeSource.search(category, 11, 'manju'),
+    ]),
   new FqChannelDef('小说', (): FqHomeSource[] => [
     FqHomeSource.homepageFallback(2, 'book', FQ_SOURCE_SEARCH_PAGED, '小说', 0),
-  ]),
+  ],
+    ['都市', '玄幻', '仙侠', '奇幻', '武侠', '历史', '科幻', '悬疑', '轻小说', '古言', '现言'],
+    (category: string): FqHomeSource[] => [FqHomeSource.pagedSearch(category, 'book')]),
   new FqChannelDef('短剧', (): FqHomeSource[] => [
     FqHomeSource.homepageFallback(8, 'video', FQ_SOURCE_SEARCH_PAGED, '短剧', 0),
-  ]),
+  ],
+    ['甜宠', '逆袭', '战神', '豪门', '萌宝', '复仇', '穿越', '重生', '神豪', '打脸'],
+    (category: string): FqHomeSource[] => [FqHomeSource.pagedSearch(category, 'video')]),
   new FqChannelDef('漫剧', (): FqHomeSource[] => [
     FqHomeSource.homepageFallback(24, 'manju', FQ_SOURCE_SEARCH, '漫剧', 11),
-  ]),
-  new FqChannelDef('漫画', (): FqHomeSource[] => [FqHomeSource.search('漫画', 8, 'manga')]),
+  ],
+    ['古风', '恋爱', '玄幻', '都市', '搞笑', '热血', '悬疑', '奇幻', '治愈', '冒险'],
+    (category: string): FqHomeSource[] => [FqHomeSource.search(category, 11, 'manju')]),
+  new FqChannelDef('漫画', (): FqHomeSource[] => [FqHomeSource.search('漫画', 8, 'manga')],
+    ['恋爱', '搞笑', '热血', '玄幻', '都市', '古风', '科幻', '冒险', '悬疑', '治愈'],
+    (category: string): FqHomeSource[] => [FqHomeSource.search(category, 8, 'manga')]),
   new FqChannelDef('听书', (): FqHomeSource[] => [
     FqHomeSource.homepageFallback(5, 'audio', FQ_SOURCE_SEARCH_PAGED, '听书', 0),
-  ]),
+  ],
+    ['都市', '玄幻', '仙侠', '悬疑', '历史', '官场', '相声', '评书', '文学', '儿童'],
+    (category: string): FqHomeSource[] => [FqHomeSource.pagedSearch(category, 'audio')]),
 ];
 
 const FQ_CAPTIONS: string[] = [
@@ -65,15 +93,17 @@ const FQ_CAPTIONS: string[] = [
   '让好故事，陪你走过日常',
 ];
 
-/** 列表内容起始偏移：标题栏 56 + 搜索行 52（Search 40 + 上下 padding 12） */
-const FQ_HOME_TOP_INSET: number = 175;
+/** 列表内容起始偏移：标题栏 56 + bottomBuilder 插槽（搜索行 + 频道条 + 分类条）。 */
+const FQ_HOME_TOP_INSET: number = 200;
 
-/** bottomBuilder（108vp）完全收起所需滚动距离（hideRatio 默认 2，滚动 216vp 收完） */
-const FQ_SEARCH_HIDE_OFFSET: number = 216;
+/** bottomBuilder（140vp 插槽）完全收起所需滚动距离（hideRatio 默认 2）。 */
+const FQ_SEARCH_HIDE_OFFSET: number = 256;
 
 @ComponentV2
 export struct HomePage {
   @Local channelIndex: number = 0;
+  /** 频道分类下标：0 = 全部（频道默认推荐流），>0 = categories 下标 + 1。 */
+  @Local categoryIndex: number = 0;
   @Local itemCount: number = 0;
   @Local loading: boolean = false;
   @Local loadingMore: boolean = false;
@@ -114,7 +144,7 @@ export struct HomePage {
         builder: (): void => {
           this.SearchBar();
         },
-        height: 100
+        height: 125
       }, (): void => {
         this.startRefresh();
       }, true),
@@ -158,7 +188,7 @@ export struct HomePage {
                     .fontSize(20)
                     .fontWeight(800)
                     .fontColor($r('sys.color.font_primary'))
-                  Text(`值得一看的${FQ_CHANNELS[this.channelIndex].label}`)
+                  Text(this.sectionSubtitle())
                     .fontSize(12)
                     .fontColor($r('sys.color.font_secondary'))
                 }
@@ -248,13 +278,17 @@ export struct HomePage {
     }
   }
 
-  /** 右上角刷新入口：展示全屏覆盖 loading 并重载当前频道。 */
+  /** 右上角刷新入口：展示全屏覆盖 loading 并按当前模式重载。 */
   private startRefresh(): void {
     if (this.loading || this.refreshing) {
       return;
     }
     this.refreshing = true;
-    this.loadFirst();
+    if (this.categoryIndex > 0) {
+      this.loadCategoryFirst();
+    } else {
+      this.loadFirst();
+    }
   }
 
   /** 标题栏 bottomBuilder：搜索框（点击进搜索页，不可聚焦）。 */
@@ -269,7 +303,10 @@ export struct HomePage {
           NavPathUtils.push(ROUTE_SEARCH);
         },
       }).height(30)
-      this.ChannelStrip()
+      Stack({alignContent: Alignment.Center}){
+        this.ChannelStrip()
+        this.CategoryStrip()
+      }
     }.padding({ left: 16, right: 16 })
   }
 
@@ -307,6 +344,39 @@ export struct HomePage {
     .fadingEdge(true, { fadingEdgeLength: LengthMetrics.vp(30) })
   }
 
+  /** 频道分类条（排行榜同款文本样式，横向 List）：首位「全部」= 频道默认推荐流。 */
+  @Builder
+  private CategoryStrip() {
+    List({ space: 4 }) {
+      ListItem() {
+        Text('全部')
+          .fontSize(12)
+          .fontWeight(this.categoryIndex === 0 ? 700 : 400)
+          .fontColor(this.categoryIndex === 0 ? appState.accentColor : $r('sys.color.font_tertiary'))
+          .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+          .onClick(() => this.selectCategory(0))
+      }
+      ForEach(FQ_CHANNELS[this.channelIndex].categories, (category: string, index: number) => {
+        ListItem() {
+          Text(category)
+            .fontSize(12)
+            .fontWeight(this.categoryIndex === index + 1 ? 700 : 400)
+            .fontColor(this.categoryIndex === index + 1 ? appState.accentColor : $r('sys.color.font_tertiary'))
+            .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+            .onClick(() => this.selectCategory(index + 1))
+        }
+      }, (category: string): string => category)
+    }
+    .listDirection(Axis.Horizontal)
+    .scrollBar(BarState.Off)
+    .edgeEffect(EdgeEffect.None)
+    .width('100%')
+    .height(30)
+    .alignListItem(ListItemAlign.Center)
+    .fadingEdge(true, { fadingEdgeLength: LengthMetrics.vp(24) })
+    .offset({ y: 45 })
+  }
+
   /** 首屏加载占位。 */
   @Builder
   private FeedLoading() {
@@ -339,7 +409,7 @@ export struct HomePage {
           .padding({ left: 32, right: 32 })
         Button('重试')
           .backgroundColor(appState.accentColor)
-          .onClick(() => this.loadFirst())
+          .onClick(() => this.retryLoadFirst())
       }
       .width('100%')
       .padding({ top: 48 })
@@ -375,7 +445,7 @@ export struct HomePage {
           .borderRadius(18)
           .border({ width: 1, color: appState.accentColor })
           .margin({ top: 6 })
-          .onClick(() => this.loadFirst())
+          .onClick(() => this.retryLoadFirst())
       }
       .width('100%')
       .padding({ top: 40 })
@@ -427,17 +497,42 @@ export struct HomePage {
     return FQ_CAPTIONS[this.channelIndex];
   }
 
+  /** 分区头副标题：分类态带上分类词。 */
+  private sectionSubtitle(): string {
+    const channel: FqChannelDef = FQ_CHANNELS[this.channelIndex];
+    if (this.categoryIndex > 0) {
+      return `值得一看的${channel.categories[this.categoryIndex - 1]}${channel.label}`;
+    }
+    return `值得一看的${channel.label}`;
+  }
+
+  /** 失败/空态重试：按当前模式分派首屏加载。 */
+  private retryLoadFirst(): void {
+    if (this.categoryIndex > 0) {
+      this.loadCategoryFirst();
+    } else {
+      this.loadFirst();
+    }
+  }
+
   private rowKey(row: FqMediaItem, index: number): string {
     return `${index}:${row.kind}:${row.id}`;
   }
 
   private selectChannel(index: number): void {
-    if (this.channelIndex === index) {
+    if (this.channelIndex === index && this.categoryIndex === 0) {
       return;
     }
     this.loadToken += 1;
     this.channelIndex = index;
+    this.categoryIndex = 0;
     FqHomeCache.saveChannelIndex(index);
+    this.activateDefaultFeed();
+  }
+
+  /** 激活当前频道默认推荐流：内存缓存 → 磁盘持久化 → 网络重载。 */
+  private activateDefaultFeed(): void {
+    const index: number = this.channelIndex;
     this.loading = false;
     this.loadingMore = false;
     this.refreshing = false;
@@ -472,6 +567,65 @@ export struct HomePage {
     this.scroller.scrollEdge(Edge.Top);
     this.searchBarHidden = false;
     this.loadFirst();
+  }
+
+  /** 分类条点击：0 = 频道默认推荐流；>0 = 分类关键词直搜该频道。 */
+  private selectCategory(index: number): void {
+    if (this.categoryIndex === index) {
+      return;
+    }
+    this.loadToken += 1;
+    this.categoryIndex = index;
+    if (index === 0) {
+      this.activateDefaultFeed();
+      return;
+    }
+    // 分类搜索流：清空展示后加载；不写内存/磁盘频道缓存。
+    this.loading = false;
+    this.loadingMore = false;
+    this.refreshing = false;
+    this.feed = new FqHomeFeed([]);
+    this.spotlightItems = [];
+    this.rowSource.setItems([]);
+    this.itemCount = 0;
+    this.errorMsg = '';
+    this.hasMore = false;
+    this.scroller.scrollEdge(Edge.Top);
+    this.searchBarHidden = false;
+    this.loadCategoryFirst();
+  }
+
+  /** 分类流首屏：分类关键词直搜当前频道；不写 channelFeeds 与磁盘缓存。 */
+  private async loadCategoryFirst(): Promise<void> {
+    const token: number = ++this.loadToken;
+    const channel: number = this.channelIndex;
+    const category: string = FQ_CHANNELS[channel].categories[this.categoryIndex - 1];
+    this.loading = true;
+    this.loadingMore = false;
+    this.errorMsg = '';
+    this.feed = new FqHomeFeed(FQ_CHANNELS[channel].buildCategorySources(category));
+    try {
+      await FqBackend.get().start(getContext(this));
+      await this.feed.loadFirst();
+      if (token !== this.loadToken) {
+        return;
+      }
+      this.errorMsg = '';
+      this.applyFeed();
+      this.maybeAutoLoadMore(token);
+    } catch (error) {
+      if (token !== this.loadToken) {
+        return;
+      }
+      FqLog.w('home', `频道「${FQ_CHANNELS[channel].label}·${category}」分类加载失败: ${fqErrorMessage(error)}`);
+      this.errorMsg = fqErrorMessage(error);
+    } finally {
+      if (token === this.loadToken) {
+        this.loading = false;
+        this.loadingMore = false;
+        this.refreshing = false;
+      }
+    }
   }
 
   /** 滚动时同步搜索条隐藏状态：完全收起后在标题栏菜单透出搜索入口。 */
@@ -554,7 +708,7 @@ export struct HomePage {
         return;
       }
       this.applyFeed();
-      if (added > 0) {
+      if (added > 0 && this.categoryIndex === 0) {
         FqHomeCache.saveFeedItems(channel, this.feed.items());
       }
       this.maybeAutoLoadMore(token);

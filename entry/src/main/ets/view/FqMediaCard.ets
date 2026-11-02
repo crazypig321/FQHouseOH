@@ -8,6 +8,8 @@ import { FqMediaItem, fqEmptyMediaItem, fqKindLabel } from '../model/FqModels';
 import { appState } from '../entryability/AppState';
 import { FqColorUtils } from '../utils/FqColorUtils';
 
+const MARGIN_LABEL: Length = 5
+
 @ComponentV2
 export struct FqMediaCard {
   @Param item: FqMediaItem = fqEmptyMediaItem();
@@ -24,22 +26,39 @@ export struct FqMediaCard {
   build() {
     Column({ space: 6 }) {
       Stack({ alignContent: Alignment.TopStart }) {
-        if (this.item.cover.length > 0) {
-          Image(FqBackend.get().resourceUrl(this.item.cover))
+        Stack({ alignContent: Alignment.BottomStart }) {
+          if (this.item.cover.length > 0) {
+            Image(FqBackend.get().resourceUrl(this.item.cover))
+              .width('100%')
+              .aspectRatio(5 / 7)
+              .objectFit(ImageFit.Cover)
+              .autoResize(true)
+              .draggable(false)
+          } else {
+            Stack({ alignContent: Alignment.Center }) {
+              SymbolGlyph(this.kindIcon())
+                .fontSize(22)
+                .fontColor([$r('sys.color.icon_tertiary')])
+            }
             .width('100%')
             .aspectRatio(5 / 7)
-            .objectFit(ImageFit.Cover)
-            .autoResize(true)
-            .draggable(false)
-        } else {
-          Stack({ alignContent: Alignment.Center }) {
-            SymbolGlyph(this.kindIcon())
-              .fontSize(22)
-              .fontColor([$r('sys.color.icon_tertiary')])
+            .backgroundColor($r('sys.color.comp_background_secondary'))
           }
-          .width('100%')
-          .aspectRatio(5 / 7)
-          .backgroundColor($r('sys.color.comp_background_secondary'))
+
+          if (!this.batchMode && this.item.score){
+            Text(){
+              Span('评分 ')
+              Span(`${this.item.score}`)
+            }
+            .fontSize(9)
+            .fontColor(Color.White)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .padding({ left: 5, right: 5, top: 2, bottom: 2 })
+            .borderRadius(5)
+            .backgroundColor('#B81C1B1A')
+            .margin(MARGIN_LABEL)
+          }
         }
         if (this.batchMode && this.selected) {
           Column()
@@ -62,7 +81,7 @@ export struct FqMediaCard {
             .padding({ left: 5, right: 5, top: 2, bottom: 2 })
             .borderRadius(5)
             .backgroundColor('#A61C1B1A')
-            .margin(5)
+            .margin(MARGIN_LABEL)
             .transition(TransitionEffect.OPACITY)
         }
         if (!this.batchMode && this.badgePercent >= 0) {
@@ -80,7 +99,7 @@ export struct FqMediaCard {
           }
           .width('100%')
           .alignItems(HorizontalAlign.End)
-          .padding(4)
+          .padding(MARGIN_LABEL)
           .transition(TransitionEffect.OPACITY)
         }
         if (!this.batchMode && this.item.ep.length > 0) {
@@ -97,7 +116,7 @@ export struct FqMediaCard {
           .width('100%')
           .justifyContent(FlexAlign.End)
           .alignItems(HorizontalAlign.End)
-          .padding(5)
+          .padding(MARGIN_LABEL)
           .transition(TransitionEffect.OPACITY)
         }
       }

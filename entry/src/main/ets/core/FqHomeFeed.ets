@@ -89,6 +89,11 @@ export class FqHomeSource {
     return new FqHomeSource(FQ_SOURCE_SEARCH, tabType, query, forcedKind, -1, '', 0);
   }
 
+  /** 纯旧版页码搜索源（首页频道分类模式：分类关键词直搜，无推荐阶段）。 */
+  public static pagedSearch(query: string, forcedKind: string): FqHomeSource {
+    return new FqHomeSource(FQ_SOURCE_SEARCH_PAGED, 0, query, forcedKind, -1, '', 0);
+  }
+
   /** 回到初始阶段（loadFirst/restore 前调用）。 */
   public reset(): void {
     this.mode = this.primaryMode;
