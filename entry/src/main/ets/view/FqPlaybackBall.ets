@@ -2,8 +2,10 @@
  * 全局悬浮播控球（听书 / 听视频）：
  * - 圆形态：封面 + 封面外缘一圈环形进度（当前章节播放比例）
  * - 点击球体展开控制排：播放/暂停、下一章/下一集、停止、收起
- * - 展开/收回动画：单容器宽度属性动画（64 ↔ 胶囊宽），封面常驻容器右端，
- *   随布局动画平滑左移缩小（同节点在树，天然一镜到底）；按钮组随宽度展开淡入
+ * - 展开/收回动画：单容器宽度属性动画（64 ↔ 胶囊宽），封面常驻容器靠屏幕侧一端，
+ *   随布局动画平滑移动缩小（同节点在树，天然一镜到底）；按钮组随宽度展开淡入
+ * - 左侧停靠（智感握姿左手握持）时展开态整体镜像：
+ *   封面在最左，按钮组反序（关闭 + 停止 + 下一曲 + 播放），向右展开
  * - 展开态 7s 无操作自动收回
  * - 会话关闭（fqAudioSession.close / hasSession=false）后整体消失
  * - 悬于底部悬浮栏（tabbar/工具栏）上方；左右侧由「智感握姿」决定——
@@ -17,6 +19,7 @@ import { ListenNavParams, ROUTE_LISTEN } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import { FqColorUtils } from '../utils/FqColorUtils';
 import { hdsEffect } from '@kit.UIDesignKit';
+import { rowImmersiveModifier } from '../utils/ModifierUtils';
 
 /** 球直径（vp）。 */
 const FQ_BALL_SIZE: number = 64;
@@ -79,75 +82,124 @@ export struct FqPlaybackBall {
     .hitTestBehavior(HitTestMode.None)
   }
 
-  /** 单容器：圆 ↔ 胶囊宽度属性动画；封面常驻右端随布局移动，按钮组展开淡入。 */
+  /** 单容器：圆 ↔ 胶囊宽度属性动画；封面常驻靠屏幕侧一端，按钮组展开淡入；
+   *  左侧停靠（atRightAnim=false）时镜像：封面在最左，按钮组反序。 */
   @Builder
   private BallPanel() {
     Row() {
-      if (this.expanded) {
-        Row({ space: 2 }) {
-          Stack() {
-            SymbolGlyph(fqAudioSession.wantPlay && !fqAudioSession.completed
-              ? $r('sys.symbol.pause_fill')
-              : $r('sys.symbol.play_fill'))
-              .fontSize(28)
-              .fontColor([$r('sys.color.icon_primary')])
-          }
-          .width(44)
-          .height(44)
-          .borderRadius(22)
-          .onClick(() => {
-            fqAudioSession.togglePlayPause();
-            this.armAutoCollapse();
-          })
-          Stack() {
-            SymbolGlyph($r('sys.symbol.forward_end_fill'))
-              .fontSize(20)
-              .fontColor([$r('sys.color.icon_primary')])
-          }
-          .width(44)
-          .height(44)
-          .borderRadius(22)
-          .opacity(fqAudioSession.hasNextChapter ? 1 : 0.35)
-          .onClick(() => {
-            if (fqAudioSession.hasNextChapter) {
-              fqAudioSession.next();
-              this.armAutoCollapse();
-            }
-          })
-          this.PanelButton($r('sys.symbol.stop_circle'), (): void => {
-            fqAudioSession.close();
-            this.collapse();
-          }, true, '#FFE84026')
-          this.PanelButton($r('sys.symbol.xmark'), (): void => {
-            this.collapse();
-          })
-        }
-        .margin({ left: 8, right: 6 })
-        .transition(TransitionEffect.OPACITY
-          .animation({ duration: 150, curve: Curve.EaseOut }))
-      }
-      Row() {
-        this.CoverWithProgress()
-      }
-      .margin({ right: this.ballCoverRightInset() })
-      .onClick(() => {
+      if (this.atRightAnim) {
         if (this.expanded) {
-          this.openPlayingPage();
-        } else {
-          this.setExpanded(true);
-          this.armAutoCollapse();
+          this.ControlGroup(false)
         }
-      })
+        this.CoverTapArea()
+      } else {
+        this.CoverTapArea()
+        if (this.expanded) {
+          this.ControlGroup(true)
+        }
+      }
     }
     .width(this.ballPanelWidth())
     .height(FQ_BALL_SIZE)
     .borderRadius(FQ_BALL_SIZE / 2)
     .clip(true)
-    .backdropBlur(45, { grayscale: [0,1] })
-    .backgroundColor(this.expanded ? '#12ffffff' : Color.Transparent)
+    .backdropBlur(60, { grayscale: [0,1] })
+    .backgroundColor(this.expanded ? '#1affffff' : Color.Transparent)
     .border({ width: 1, color: $r('sys.color.comp_background_list_card') })
     .shadow({ radius: 12, color: '#40000000', offsetY: 2 })
     .margin(this.ballMargin())
+    .visualEffect(new hdsEffect.HdsEffectBuilder().pointLight({
+     // sourceType: hdsEffect.PointLightSourceType.SOFT,
+      illuminatedType: hdsEffect.PointLightIlluminatedType.BORDER,
+    }).buildEffect())
+    .attributeModifier(rowImmersiveModifier)
+  }
+
+  /** 控制排（展开态）：右侧停靠顺序 播放/下一曲/停止/关闭；左侧停靠整体反序。 */
+  @Builder
+  private ControlGroup(atLeft: boolean) {
+    Row({ space: 2 }) {
+      if (atLeft) {
+        this.PanelButton($r('sys.symbol.xmark'), (): void => {
+          this.collapse();
+        })
+        this.PanelButton($r('sys.symbol.stop_circle'), (): void => {
+          fqAudioSession.close();
+          this.collapse();
+        }, true, '#FFE84026')
+        this.NextButton()
+        this.PlayPauseButton()
+      } else {
+        this.PlayPauseButton()
+        this.NextButton()
+        this.PanelButton($r('sys.symbol.stop_circle'), (): void => {
+          fqAudioSession.close();
+          this.collapse();
+        }, true, '#FFE84026')
+        this.PanelButton($r('sys.symbol.xmark'), (): void => {
+          this.collapse();
+        })
+      }
+    }
+    .margin(this.controlGroupMargin(atLeft))
+    .transition(TransitionEffect.OPACITY
+      .animation({ duration: 150, curve: Curve.EaseOut }))
+  }
+
+  /** 播放/暂停按钮（顺序随停靠侧由 ControlGroup 决定）。 */
+  @Builder
+  private PlayPauseButton() {
+    Stack() {
+      SymbolGlyph(fqAudioSession.wantPlay && !fqAudioSession.completed
+        ? $r('sys.symbol.pause_fill')
+        : $r('sys.symbol.play_fill'))
+        .fontSize(28)
+        .fontColor([$r('sys.color.icon_primary')])
+    }
+    .width(44)
+    .height(44)
+    .borderRadius(22)
+    .onClick(() => {
+      fqAudioSession.togglePlayPause();
+      this.armAutoCollapse();
+    })
+  }
+
+  /** 下一章/下一集按钮（末章置灰不可点）。 */
+  @Builder
+  private NextButton() {
+    Stack() {
+      SymbolGlyph($r('sys.symbol.forward_end_fill'))
+        .fontSize(20)
+        .fontColor([$r('sys.color.icon_primary')])
+    }
+    .width(44)
+    .height(44)
+    .borderRadius(22)
+    .opacity(fqAudioSession.hasNextChapter ? 1 : 0.35)
+    .onClick(() => {
+      if (fqAudioSession.hasNextChapter) {
+        fqAudioSession.next();
+        this.armAutoCollapse();
+      }
+    })
+  }
+
+  /** 封面点击区：圆态点击展开，展开态点击进听书页；贴容器靠屏幕侧一端。 */
+  @Builder
+  private CoverTapArea() {
+    Row() {
+      this.CoverWithProgress()
+    }
+    .margin(this.coverWrapMargin())
+    .onClick(() => {
+      if (this.expanded) {
+        this.openPlayingPage();
+      } else {
+        this.setExpanded(true);
+        this.armAutoCollapse();
+      }
+    })
   }
 
   /** 封面 + 外缘环形进度（圆/展开态共用）：
@@ -274,6 +326,17 @@ export struct FqPlaybackBall {
   /** 封面右距：圆态贴边 0，展开态缩进 4。 */
   private ballCoverRightInset(): number {
     return this.expanded ? FQ_PANEL_COVER_INSET : 0;
+  }
+
+  /** 封面贴容器靠屏幕侧：右侧停靠右缩进，左侧停靠（镜像）左缩进。 */
+  private coverWrapMargin(): Margin {
+    const inset: number = this.ballCoverRightInset();
+    return this.atRightAnim ? { right: inset } : { left: inset };
+  }
+
+  /** 控制组与封面/容器边缘间距：左侧停靠镜像（8/6 反转）。 */
+  private controlGroupMargin(atLeft: boolean): Margin {
+    return atLeft ? { left: 6, right: 8 } : { left: 8, right: 6 };
   }
 
   /** 悬浮位置：底栏上沿再抬高；水平恒用 margin left 定位——
