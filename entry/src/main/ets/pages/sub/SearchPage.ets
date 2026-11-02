@@ -16,6 +16,7 @@ import { fqPushBookOrDetail, FqTitleBarOptions } from '../../model/FqNavModels';
 import { CommonSearch, CommonLoading } from '../../view/CommonCom';
 import { CommonNav } from '../../view/CommonNav';
 import { appState } from '../../entryability/AppState';
+import { FqLog } from '../../core/FqLogStore';
 
 interface FqSearchCategoryDef {
   readonly title: string;
@@ -464,6 +465,7 @@ export struct SearchPage {
       if (token !== this.loadToken) {
         return;
       }
+      FqLog.w('search', `搜索「${query}」(${category.title})加载失败: ${fqErrorMessage(error)}`);
       this.errorMsg = fqErrorMessage(error);
     } finally {
       if (token === this.loadToken) {

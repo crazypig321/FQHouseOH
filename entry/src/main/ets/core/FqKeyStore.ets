@@ -8,8 +8,12 @@
 import asset from '@ohos.security.asset';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { util } from '@kit.ArkTS';
+import { BusinessError } from '@kit.BasicServicesKit';
+import { FqLog } from './FqLogStore';
 
 const DEVICE_POOL_KEY_ALIAS: string = 'fqoh_device_pool_key_v1';
+/** Asset 查询「关键资产不存在」错误码（首启查询必然抛出，视为无记录而非失败）。 */
+const FQ_ASSET_ERR_NOT_FOUND: number = 24000002;
 
 export class FqKeyStore {
   private static readonly instance: FqKeyStore = new FqKeyStore();
@@ -27,11 +31,20 @@ export class FqKeyStore {
     if (this.cached !== null) {
       return this.cached;
     }
+    let rows: Array<asset.AssetMap> = [];
     try {
       const query: asset.AssetMap = new Map();
       query.set(asset.Tag.RETURN_TYPE, asset.ReturnType.ALL);
       query.set(asset.Tag.ALIAS, FqKeyStore.aliasBytes());
-      const rows: Array<asset.AssetMap> = await asset.query(query);
+      rows = await asset.query(query);
+    } catch (error) {
+      const err: BusinessError = error as BusinessError;
+      if (err.code !== FQ_ASSET_ERR_NOT_FOUND) {
+        FqLog.e('keystore', `设备池密钥查询失败: ${err.code} ${err.message}`);
+        return null;
+      }
+    }
+    try {
       if (rows.length > 0) {
         const secret: boolean | number | Uint8Array | undefined = rows[0].get(asset.Tag.SECRET);
         if (secret instanceof Uint8Array && secret.length === 32) {
@@ -49,6 +62,8 @@ export class FqKeyStore {
       this.cached = fresh;
       return fresh;
     } catch (error) {
+      const err: BusinessError = error as BusinessError;
+      FqLog.e('keystore', `设备池密钥写入失败: ${err.code} ${err.message}`);
       return null;
     }
   }

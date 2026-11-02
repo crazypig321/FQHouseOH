@@ -141,7 +141,9 @@ export class FqBackend {
       const poolKey: Uint8Array | null = await FqKeyStore.get().devicePoolKey();
       if (poolKey !== null) {
         fq.setDevicePoolKey(poolKey);
+        FqLog.i('backend', '设备池加密密钥已注入');
       }
+      FqLog.i('backend', '初始化 Rust 核心...');
       const result: string = await fq.init(
         `${backendDir}/config/config.json`,
         `${backendDir}/config/device_pool.json`,

@@ -128,6 +128,24 @@ struct FqLogRowItem {
         .maxLines(this.expanded ? 9999 : 3)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
         .width('100%')
+
+      if (this.expanded) {
+        Row({ space: 4 }) {
+          SymbolGlyph($r('sys.symbol.doc_text_on_doc_text'))
+            .fontSize(13)
+            .fontColor([$r('sys.color.font_secondary')])
+          Text('复制本条')
+            .fontSize(12)
+            .fontColor($r('sys.color.font_secondary'))
+        }
+        .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+        .borderRadius(12)
+        .backgroundColor($r('sys.color.comp_background_tertiary'))
+        .hitTestBehavior(HitTestMode.Block)
+        .onClick((): void => {
+          this.copyEntry();
+        })
+      }
     }
     .alignItems(HorizontalAlign.Start)
     .padding(12)
@@ -137,6 +155,17 @@ struct FqLogRowItem {
     .onClick((): void => {
       this.expanded = !this.expanded;
     })
+  }
+
+  /** 复制本条日志到剪贴板。 */
+  private copyEntry(): void {
+    const data: pasteboard.PasteData =
+      pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, fqFormatLogLines([this.row.entry]));
+    pasteboard.getSystemPasteboard().setData(data).then((): void => {
+      this.getUIContext().getPromptAction().showToast({ message: '已复制本条日志', duration: 2000 });
+    }).catch((): void => {
+      this.getUIContext().getPromptAction().showToast({ message: '复制失败，请重试', duration: 2000 });
+    });
   }
 }
 

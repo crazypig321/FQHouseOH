@@ -18,6 +18,7 @@ import { fqPushBookOrDetail, ROUTE_SEARCH, FqTitleBarOptions } from '../model/Fq
 import { NavPathUtils } from '../utils/NavPathUtils';
 import { CommonNav } from '../view/CommonNav';
 import { appState } from '../entryability/AppState';
+import { FqLog } from '../core/FqLogStore';
 import { rowImmersiveModifier } from '../utils/ModifierUtils';
 import { feedColumns } from '../utils/BreakpointUtils';
 import { LengthMetrics } from '@kit.ArkUI';
@@ -527,6 +528,7 @@ export struct HomePage {
       if (token !== this.loadToken) {
         return;
       }
+      FqLog.w('home', `频道「${FQ_CHANNELS[channel].label}」加载失败: ${fqErrorMessage(error)}`);
       this.errorMsg = fqErrorMessage(error);
     } finally {
       if (token === this.loadToken) {

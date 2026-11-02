@@ -15,6 +15,7 @@
  */
 
 import { FqBackend, FqRequestError, fqErrorMessage } from './FqBackend';
+import { FqLog } from './FqLogStore';
 import { FqHomePage, FqMediaItem, FqSearchTab } from '../model/FqModels';
 
 export const FQ_SOURCE_HOMEPAGE: number = 0;
@@ -218,6 +219,7 @@ export class FqHomeFeed {
     } catch (error) {
       source.loaded = true;
       source.hasMore = false;
+      FqLog.w('home', `首页源加载失败(${source.query.length > 0 ? source.query : `t${source.tabType}`}): ${fqErrorMessage(error)}`);
       if (this.pendingErrorMessage.length === 0) {
         this.pendingErrorMessage = fqErrorMessage(error);
       }
@@ -237,6 +239,7 @@ export class FqHomeFeed {
         }
         // 推荐接口故障不应让整个频道停摆（fqapp：fall through to search）。
         failed = true;
+        FqLog.w('home', `推荐流请求失败，转入搜索兜底(${source.fallbackQuery}): ${fqErrorMessage(error)}`);
         this.enterFallback(source);
       }
       if (!failed && (items.length > 0 || source.mode === FQ_SOURCE_HOMEPAGE)) {
