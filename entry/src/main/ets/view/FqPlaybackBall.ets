@@ -142,6 +142,7 @@ export struct FqPlaybackBall {
       }
     }
     .margin(this.controlGroupMargin(atLeft))
+    .animation({duration: 250, curve: Curve.EaseOut})
     .transition(TransitionEffect.OPACITY
       .animation({ duration: 150, curve: Curve.EaseOut }))
   }
