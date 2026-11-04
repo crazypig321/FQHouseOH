@@ -19,6 +19,8 @@ export class FqStoreBus {
   @Trace comicCacheVersion: number = 0;
   /** 已看剧集/续播进度数据版本（FqWatchedStore 每次变更 +1）。 */
   @Trace watchedVersion: number = 0;
+  /** 阅读进度版本（FqReaderStore.saveProgress 整书百分比变化 +1；驱动书架角标实时刷新）。 */
+  @Trace readerProgressVersion: number = 0;
 }
 
 export const fqStoreBus: FqStoreBus = new FqStoreBus();

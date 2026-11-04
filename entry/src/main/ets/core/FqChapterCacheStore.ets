@@ -24,8 +24,8 @@ import { FqAppSettingsStore } from './FqAppSettingsStore';
 const TAG: string = 'FqChapterCache';
 const FQ_CACHE_DIR: string = 'chapter_cache';
 const FQ_CATALOG_FILE: string = 'catalog.json';
-/** 目录/章节文件名安全字符（防路径穿越）。 */
-const FQ_SAFE_ID: RegExp = /^[A-Za-z0-9_-]{1,128}$/;
+/** 目录/章节文件名安全字符（防路径穿越；含 ':' 允许 shuqi: 前缀命名空间）。 */
+const FQ_SAFE_ID: RegExp = /^[A-Za-z0-9_:-]{1,128}$/;
 /** 整本下载 pin 标记文件名（pin 的书在自动缓存大小限制外，不受限）。 */
 const FQ_PINNED_FILE: string = 'pinned';
 

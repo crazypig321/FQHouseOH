@@ -11,6 +11,7 @@ import { fileIo } from '@kit.CoreFileKit';
 import { image } from '@kit.ImageKit';
 import { fqAsRecord, fqAsArray, fqKeys, fqStr, fqNum } from './FqJson';
 import { appState } from '../entryability/AppState';
+import { fqStoreBus } from './FqStoreBus';
 
 const FQ_READER_STORE_NAME: string = 'fq_reader';
 const FQ_READER_KEY_SETTINGS: string = 'settings';
@@ -1129,12 +1130,13 @@ export class FqReaderStore {
     if (pref === null || bookId.length === 0) {
       return;
     }
+    const prevPercent: number = FqReaderStore.getProgress(bookId).percent;
+    // percent < 0：调用方未提供（导入/恢复/进度回填等），保留既有整书百分比
+    const eff: number = percent >= 0 ? Math.min(100, Math.max(0, Math.trunc(percent)))
+      : prevPercent;
     const rec: Record<string, Object> = {};
     rec['chapterIndex'] = chapterIndex;
     rec['domPos'] = domPos;
-    // percent < 0：调用方未提供（导入/恢复/进度回填等），保留既有整书百分比
-    const eff: number = percent >= 0 ? Math.min(100, Math.max(0, Math.trunc(percent)))
-      : FqReaderStore.getProgress(bookId).percent;
     if (eff >= 0) {
       rec['percent'] = eff;
     }
@@ -1145,6 +1147,10 @@ export class FqReaderStore {
       });
     } catch (error) {
       // 忽略写入失败
+    }
+    // 整书百分比变化（含首次记录）→ 版本总线 +1，书架封面角标实时刷新
+    if (prevPercent !== eff) {
+      fqStoreBus.readerProgressVersion++;
     }
   }
 

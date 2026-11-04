@@ -13,7 +13,9 @@ import { CommonNav } from '../../view/CommonNav';
 import { FqTitleBarMenuOptions } from '../../model/FqNavModels';
 import { ROUTE_READER2, ReaderNavParams } from '../../model/FqNavModels';
 import { FqCacheEmptyView, FqCacheStatsCard, fqFormatCacheBytes } from '../../view/FqCacheCommon';
-import { FqChapterCacheStore, FqCachedBookSummary } from '../../core/FqChapterCacheStore';
+import { FqChapterCacheStore, FqCachedBookSummary, FqCachedCatalog } from '../../core/FqChapterCacheStore';
+import { FqBackend } from '../../core/FqBackend';
+import { FqChapter } from '../../model/FqModels';
 import { FqAppSettingsStore } from '../../core/FqAppSettingsStore';
 import { fqExportCachedBook, fqExportDirName, FqExportedBook } from '../../core/FqCacheExport';
 import { fqStoreBus, FqStoreBus } from '../../core/FqStoreBus';
@@ -281,14 +283,42 @@ export struct CachedBooksPage {
     }
   }
 
-  /** 点击离线续读：阅读页目录/正文优先命中章节缓存。 */
+  /** 点击离线续读：书旗缓存书（shuqi: 前缀）走只读阅读器（缓存目录预载 + 加载器，离线回退缓存正文）；
+   *  其余走阅读页目录/正文优先命中章节缓存。 */
   private openBook(row: CachedBookRow): void {
+    if (row.summary.bookId.startsWith('shuqi:')) {
+      this.openShuqiBook(row);
+      return;
+    }
     ReaderNavParams.id = row.summary.bookId;
     ReaderNavParams.kind = row.summary.kind.length > 0 ? row.summary.kind : 'book';
     ReaderNavParams.title = row.summary.title;
     ReaderNavParams.cover = row.summary.cover;
     ReaderNavParams.chapterIndex = -1;
     ReaderNavParams.listenAlong = false;
+    NavPathUtils.push(ROUTE_READER2);
+  }
+
+  /** 书旗缓存书离线续读：缓存目录预载 + 注入正文加载器（在线拉最新并补缓存，离线回退缓存正文续读）。 */
+  private openShuqiBook(row: CachedBookRow): void {
+    const bookId: string = row.summary.bookId;
+    const catalog: FqCachedCatalog | null = FqChapterCacheStore.catalog(bookId);
+    if (catalog === null || catalog.chapters.length === 0) {
+      this.getUIContext().getPromptAction().showToast({ message: '缓存目录不可用，无法续读', duration: 1500 });
+      return;
+    }
+    const rawBookId: string = bookId.substring('shuqi:'.length);
+    ReaderNavParams.id = bookId;
+    ReaderNavParams.kind = 'book';
+    ReaderNavParams.title = row.summary.title;
+    ReaderNavParams.cover = row.summary.cover;
+    ReaderNavParams.chapterIndex = -1;
+    ReaderNavParams.listenAlong = false;
+    ReaderNavParams.readOnly = true;
+    ReaderNavParams.presetChapters = catalog.chapters;
+    ReaderNavParams.chapterLoader = (chapter: FqChapter): Promise<string> => {
+      return FqBackend.get().shuqiChapterText(rawBookId, chapter.itemId);
+    };
     NavPathUtils.push(ROUTE_READER2);
   }
 

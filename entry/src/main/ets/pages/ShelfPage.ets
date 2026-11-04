@@ -6,7 +6,7 @@
  * 批量多选以 appState.isBatchMode 为单一数据源（Index 返回手势退出多选、主 TabBar 显隐共享）。
  */
 
-import { ROUTE_READER2, ROUTE_CACHE_MANAGE, fqPushBookOrDetail, ReaderNavParams } from '../model/FqNavModels';
+import { ROUTE_READER2, ROUTE_CACHE_MANAGE, ROUTE_DETAIL, DetailNavParams, fqPushBookOrDetail, ReaderNavParams } from '../model/FqNavModels';
 import { CommonNav, titleBarOf } from '../view/CommonNav';
 import { CommonSearch, CommonBlur } from '../view/CommonCom';
 import { FqMenu, FqMenuItem } from '../view/CommonMenu';
@@ -116,8 +116,9 @@ export struct ShelfPage {
   /** 已尝试封面匹配的本地书（会话内去重，避免重复搜索）。 */
   private coverMatchTried: Set<string> = new Set<string>();
 
-  /** 书架/浏览历史/已看剧集数据变化（详情页收藏、阅读记录、看剧进度、批量移除等）实时刷新列表。 */
-  @Monitor('storeBus.shelfVersion', 'storeBus.browseVersion', 'storeBus.watchedVersion')
+  /** 书架/浏览历史/已看剧集/阅读进度数据变化（详情页收藏、阅读记录、看剧/阅读进度、批量移除等）实时刷新列表。 */
+  @Monitor('storeBus.shelfVersion', 'storeBus.browseVersion', 'storeBus.watchedVersion',
+    'storeBus.readerProgressVersion')
   onStoreDataChange(): void {
     this.refreshData();
   }
@@ -184,7 +185,7 @@ export struct ShelfPage {
               } else {
                 FqMediaCard({
                   item: this.rowToMediaItem(row),
-                  chipText: FqLocalBookStore.isLocalBookId(row.id) ? '本地书籍' : '',
+                  chipText: this.rowChip(row),
                   badgePercent: row.percent,
                   onItemClick: (clicked: FqMediaItem): void => {
                     this.onRowTap(row);
@@ -362,6 +363,17 @@ export struct ShelfPage {
 
   private rowToMediaItem(row: ShelfRow): FqMediaItem {
     return new FqMediaItem(row.id, row.title, row.cover, '', '', '', row.kind, 0, '', '', '', 0);
+  }
+
+  /** 封面角标文案：本地导入书 / 书旗来源；其余空。 */
+  private rowChip(row: ShelfRow): string {
+    if (FqLocalBookStore.isLocalBookId(row.id)) {
+      return '本地书籍';
+    }
+    if (row.id.startsWith('shuqi:')) {
+      return '书旗';
+    }
+    return '';
   }
 
   /** titleBar 菜单按钮：添加（导入本地书籍）+ 搜索 + 更多。 */
@@ -712,6 +724,16 @@ export struct ShelfPage {
       ReaderNavParams.chapterIndex = -1;
       ReaderNavParams.listenAlong = false;
       NavPathUtils.push(ROUTE_READER2);
+      return;
+    }
+    // 书旗来源（shuqi: 前缀 id）：进书旗只读详情
+    if (row.id.startsWith('shuqi:')) {
+      DetailNavParams.id = row.id.substring('shuqi:'.length);
+      DetailNavParams.kind = 'book';
+      DetailNavParams.title = row.title;
+      DetailNavParams.cover = row.cover;
+      DetailNavParams.shuqi = true;
+      NavPathUtils.push(ROUTE_DETAIL);
       return;
     }
     fqPushBookOrDetail(row.id, row.kind, row.title, row.cover);

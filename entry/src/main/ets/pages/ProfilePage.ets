@@ -12,9 +12,11 @@ import { RefreshOverlay } from '../view/CommonCom';
 import {
   FqTitleBarOptions,
   fqPushBookOrDetail,
+  DetailNavParams,
   ROUTE_ABOUT,
   ROUTE_CACHED_BOOKS,
   ROUTE_CACHED_DRAMAS,
+  ROUTE_DETAIL,
 } from '../model/FqNavModels';
 import { SETTINGS_TAB_INDEX } from '../model/FqTabsModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
@@ -391,6 +393,16 @@ export struct ProfilePage {
 
   private openEntry(entry: FqStatsEntry): void {
     if (entry.kind.length === 0) {
+      return;
+    }
+    // 书旗来源（shuqi: 前缀 id）：进书旗只读详情
+    if (entry.id.startsWith('shuqi:')) {
+      DetailNavParams.id = entry.id.substring('shuqi:'.length);
+      DetailNavParams.kind = 'book';
+      DetailNavParams.title = entry.title;
+      DetailNavParams.cover = entry.cover;
+      DetailNavParams.shuqi = true;
+      NavPathUtils.push(ROUTE_DETAIL);
       return;
     }
     fqPushBookOrDetail(entry.id, entry.kind, entry.title, entry.cover);

@@ -71,7 +71,8 @@ export struct DetailPage {
   private itemId: string = '';
   private itemKind: string = 'book';
   private itemCover: string = '';
-  /** 书旗来源（只读第三方源）：详情/目录走书旗端点，旁路书架/历史/缓存/书评。 */
+  /** 书旗来源（只读第三方源）：详情/目录/正文走书旗端点，旁路详情缓存/书评；
+   *  书架/浏览历史用 shuqi: 前缀 id 照常写入。 */
   private shuqiMode: boolean = false;
   private loadToken: number = 0;
   private scroller: Scroller = new Scroller();
@@ -85,10 +86,13 @@ export struct DetailPage {
     this.itemCover = DetailNavParams.cover;
     this.shuqiMode = DetailNavParams.shuqi;
     DetailNavParams.shuqi = false;
-    this.headerTitle = this.shuqiMode ? '书旗详情' : `${fqKindLabel(this.itemKind)}详情`;
+    this.headerTitle = this.shuqiMode ? '书旗小说详情' : `${fqKindLabel(this.itemKind)}详情`;
     this.stableTopInset = appState.topRect;
     if (this.shuqiMode) {
-      // 书旗只读链路：不初始化书架/历史/详情缓存
+      // 书旗只读链路：不初始化详情缓存；书架/浏览历史照常（shuqi: 前缀 id 隔离命名空间）
+      FqShelfStore.init(getContext(this));
+      FqBrowseStore.init(getContext(this));
+      this.refreshShelfState();
       this.load();
       return;
     }
@@ -103,7 +107,7 @@ export struct DetailPage {
     CommonNav({
       titleBarOp: FqTitleBarOptions(this.headerTitle, false, undefined, (): void => {
         this.load(true);
-      }, false, this.shuqiMode ? undefined : (): void => {
+      }, false, (): void => {
         this.toggleShelf();
       }, this.inShelf),
       scroller: this.scroller,
@@ -696,8 +700,12 @@ export struct DetailPage {
     this.catalogSheetVisible = true;
   }
 
-  /** 书架判定/切换统一使用的内容 ID（与听书页 fqAudioSession.bookId 一致）。 */
+  /** 书架判定/切换统一使用的内容 ID（与听书页 fqAudioSession.bookId 一致）；
+   *  书旗来源加 shuqi: 前缀隔离命名空间（bookId 纯数字，与番茄 id 可能撞号）。 */
   private shelfId(): string {
+    if (this.shuqiMode) {
+      return `shuqi:${this.itemId}`;
+    }
     return this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId;
   }
 
@@ -709,9 +717,7 @@ export struct DetailPage {
   /** 页面重新显示（从阅读页返回等）：List 回到顶部 + 书架态刷新。 */
   private onPageShown(): void {
     this.scroller.scrollEdge(Edge.Top);
-    if (!this.shuqiMode) {
-      this.refreshShelfState();
-    }
+    this.refreshShelfState();
   }
 
   private coverUrl(): string {
@@ -952,19 +958,19 @@ export struct DetailPage {
   }
 
   /** 书旗进阅读器（只读模式）：shuqi 前缀 id + 预载目录 + 注入正文加载器，
-   *  阅读器旁路全部本地写入与番茄网络请求（不写进度/缓存/历史）。 */
+   *  阅读器旁路番茄网络请求/段评/听书/统计；进度与章节缓存照常落本机（shuqi: 前缀键隔离），
+   *  chapterIndex -1 未指定时阅读页按本机进度续读。 */
   private openShuqiReader(chapterIndex: number): void {
     const chapters: FqChapter[] = this.chapters;
     if (chapters.length === 0) {
       return;
     }
-    const index: number = chapterIndex < 0 ? 0 : (chapterIndex >= chapters.length ? 0 : chapterIndex);
     const rawBookId: string = this.itemId;
     ReaderNavParams.id = `shuqi:${rawBookId}`;
     ReaderNavParams.kind = 'book';
     ReaderNavParams.title = this.detail.title;
     ReaderNavParams.cover = this.detail.cover;
-    ReaderNavParams.chapterIndex = index;
+    ReaderNavParams.chapterIndex = chapterIndex;
     ReaderNavParams.listenAlong = false;
     ReaderNavParams.readOnly = true;
     ReaderNavParams.presetChapters = chapters;
@@ -975,7 +981,7 @@ export struct DetailPage {
   }
 
   /** 书旗详情加载（只读来源）：详情 + 目录顺序拉取，目录失败不阻断详情（章节区为空，
-   *  可点标题栏刷新重试）；无书评/试读预览/浏览历史/详情缓存。 */
+   *  可点标题栏刷新重试）；无书评/试读预览/详情缓存；浏览历史照常记录（shuqi: 前缀 id）。 */
   private async loadShuqi(): Promise<void> {
     if (this.itemId.length === 0) {
       this.errorMsg = '无效的作品';
@@ -996,6 +1002,9 @@ export struct DetailPage {
         return;
       }
       this.detail = fqShuqiBookToDetail(book);
+      this.refreshShelfState();
+      FqBrowseStore.record(new FqBrowseItem(this.shelfId(), this.itemKind,
+        book.name, book.coverUrl, Date.now()));
       let chapters: FqChapter[] = [];
       try {
         const toc: FqShuqiToc = await FqBackend.get().shuqiToc(this.itemId);

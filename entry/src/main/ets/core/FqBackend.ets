@@ -70,7 +70,7 @@ import {
   fqParseShuqiToc,
 } from '../model/FqShuqiModels';
 
-const PORT: number = 18921;
+const PORT: number = 52166;
 const REQUEST_TIMEOUT_MS: number = 20000;
 /** 短超时（ms）：装饰性数据（失败静默降级）与可回退链路（chapterText v1→legacy）。 */
 export const FQ_SHORT_TIMEOUT_MS: number = 10000;

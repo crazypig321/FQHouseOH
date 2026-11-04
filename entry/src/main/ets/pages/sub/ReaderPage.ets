@@ -274,7 +274,7 @@ export struct ReaderPage {
   @Local highlightParaIndex: number = -1;
   /** 边听边读模式（进入时消费 ReaderNavParams.listenAlong）。 */
   private listenAlong: boolean = false;
-  /** 只读来源（书旗）：旁路全部本地写入与番茄网络请求（进度/章页/已读/统计/段评）。 */
+  /** 只读来源（书旗）：旁路番茄网络请求/段评/听书/阅读时长统计；进度与章节缓存照常落本机（shuqi: 前缀键隔离）。 */
   private readOnly: boolean = false;
   /** 只读模式正文加载器（章节正文由来源页注入，null 时章节正文为空）。 */
   private chapterLoader: ((chapter: FqChapter) => Promise<string>) | null = null;
@@ -380,8 +380,8 @@ export struct ReaderPage {
     this.customFontId = settings.customFontId;
     this.syncReaderColorMode();
     this.filesDir = getContext(this).filesDir;
-    // 只读来源不读本机页数键（shuqi: 前缀键无历史数据，直接空表起算）
-    this.chapterPages = this.readOnly ? new Map<number, number>() : FqReaderStore.getChapterPages(this.bookId);
+    // 章页表按 bookId 键隔离（书旗 shuqi: 前缀与番茄互不干扰）
+    this.chapterPages = FqReaderStore.getChapterPages(this.bookId);
     this.refreshFooterStatus();
     this.clockTimer = setInterval((): void => {
       this.refreshFooterStatus();
@@ -779,19 +779,12 @@ export struct ReaderPage {
     this.saveProgressNow();
   }
 
-  /** 整书页数持久化（只读来源旁路，不写本机键）。 */
+  /** 整书页数持久化。 */
   private persistChapterPages(): void {
-    if (this.readOnly) {
-      return;
-    }
     FqReaderStore.saveChapterPages(this.bookId, this.chapterPages);
   }
 
   private saveProgressNow(): void {
-    // 只读来源（书旗）不落本机进度：第三方 id 不该出现在进度/历史里
-    if (this.readOnly) {
-      return;
-    }
     const layout: FqChapterLayout | null = this.curLayout;
     if (layout === null || this.pageIndex < 0 || this.pageIndex >= layout.pages.length) {
       return;
@@ -1019,11 +1012,9 @@ export struct ReaderPage {
       this.pageIndex = pageIdx;
       this.afterPageShown();
     }
-    // 段级精确进度（覆盖页级保存）；只读来源不落本机
-    if (!this.readOnly) {
-      FqReaderStore.saveProgress(this.bookId, this.chapterIndex, `p2:${item.paraIndex}:0`,
-        this.bookPercent());
-    }
+    // 段级精确进度（覆盖页级保存）
+    FqReaderStore.saveProgress(this.bookId, this.chapterIndex, `p2:${item.paraIndex}:0`,
+      this.bookPercent());
   }
 
   /** 滚到已载内容末尾：兜底重试追加下一章（预取失败/未完成时）；无下章提示一次。 */
@@ -2910,9 +2901,10 @@ export struct ReaderPage {
     const token: number = ++this.loadToken;
     this.loadingState = true;
     this.errorMsg = '';
-    this.readChapters = this.readOnly ? new Set<number>() : FqReaderStore.getReadChapters(this.bookId);
+    this.readChapters = FqReaderStore.getReadChapters(this.bookId);
     try {
-      // 只读来源（书旗）：目录由来源页预载注入，不请求番茄后端、不写目录缓存
+      // 只读来源（书旗）：目录由来源页预载注入，不请求番茄后端；
+      // 目录写入章节缓存（章节缓存页展示/离线续读兜底，shuqi: 前缀键隔离）
       if (this.readOnly) {
         if (this.chapters.length === 0) {
           this.errorMsg = '未获取到目录章节';
@@ -2920,10 +2912,19 @@ export struct ReaderPage {
           return;
         }
         this.totalChapters = this.chapters.length;
+        FqChapterCacheStore.saveCatalog(this.bookId, this.bookTitle, this.readerCover, this.kind,
+          this.chapters, false);
         this.buildChapterEstimates();
-        const start: number = this.startChapterIndex >= 0 && this.startChapterIndex < this.chapters.length
-          ? this.startChapterIndex : 0;
-        await this.openChapter(start, '');
+        // 续读：未指定起始章时按本机进度恢复（进度键同库，shuqi: 前缀隔离）
+        const progress: FqReaderProgress = FqReaderStore.getProgress(this.bookId);
+        let start: number = this.startChapterIndex;
+        let domPos: string = '';
+        if (start < 0 || start >= this.chapters.length) {
+          start = progress.chapterIndex >= 0 && progress.chapterIndex < this.chapters.length
+            ? progress.chapterIndex : 0;
+          domPos = start === progress.chapterIndex ? progress.domPos : '';
+        }
+        await this.openChapter(start, domPos);
         return;
       }
       // 本地导入书籍：目录/正文均来自本地文件，不请求后端
@@ -3076,17 +3077,27 @@ export struct ReaderPage {
     if (FqLocalBookStore.isLocalBookId(this.bookId)) {
       return new FqNormalizedChapter(FqLocalBookStore.chapterText(this.bookId, index), []);
     }
-    // 只读来源（书旗）正文由注入加载器拉取（无缓存、无段 id；对齐 fqapp chapterLoader）
+    // 只读来源（书旗）：加载器拉取最新正文、成功即写章节缓存（阅读即缓存）；
+    // 失败（离线）回退已缓存正文续读；无段 id，对齐 fqapp chapterLoader
     if (this.readOnly) {
       const loader: ((chapter: FqChapter) => Promise<string>) | null = this.chapterLoader;
       if (loader === null) {
         return new FqNormalizedChapter('', []);
       }
-      const text: string = await loader(chapter);
-      if (text.trim().length === 0) {
-        throw new Error(`这一章没有取到正文（${chapter.title}）`);
+      try {
+        const text: string = await loader(chapter);
+        if (text.trim().length === 0) {
+          throw new Error(`这一章没有取到正文（${chapter.title}）`);
+        }
+        FqChapterCacheStore.write(this.bookId, chapter.itemId, chapter.title, text);
+        return new FqNormalizedChapter(text, []);
+      } catch (error) {
+        const cached: string = FqChapterCacheStore.read(this.bookId, chapter.itemId);
+        if (cached.trim().length > 0) {
+          return new FqNormalizedChapter(cached, []);
+        }
+        throw new Error(fqErrorMessage(error));
       }
-      return new FqNormalizedChapter(text, []);
     }
     // 网络优先：在线拉取最新正文并写章节缓存；失败（离线）回退缓存正文离线续读
     try {
@@ -3126,10 +3137,7 @@ export struct ReaderPage {
       return;
     }
     this.readChapters.add(index);
-    // 只读来源：已读集合仅内存（目录进度展示），不落本机键
-    if (!this.readOnly) {
-      FqReaderStore.saveReadChapters(this.bookId, this.readChapters);
-    }
+    FqReaderStore.saveReadChapters(this.bookId, this.readChapters);
   }
 
   private openPrev(): void {
