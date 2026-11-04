@@ -42,6 +42,7 @@ import {
   FqRankTab,
   FqSearchTab,
   FqSeriesRelateBook,
+  FqRelatedSeries,
   fqEmptyRankCatalog,
   fqFormatCounter,
   FqChapterIdeaMeta,
@@ -1806,6 +1807,60 @@ export function fqParseSeriesRelateBook(payload: Record<string, Object>): FqSeri
     return null;
   }
   return new FqSeriesRelateBook(id, title, fqStr(info, 'thumb_url'));
+}
+
+// ---------------------------------------------------------------------------
+// 同系列剧（fqapp lib/models/related_series.dart RelatedSeries.fromPayload）
+// ---------------------------------------------------------------------------
+
+/**
+ * 解析同系列剧（/api/v1/series/{id}/related，scene=10 的 data[0].video_data，
+ * 官方 lo3/f.java:281-285）。只取第一个 cell——后续 cell 是一般推荐，不混入；
+ * 解析规则对齐 fqapp：id/title 缺失或重复跳过（含当前 seriesId）、
+ * content_type 白名单 {1,1002,1004,1007}（1004/1007 为漫剧 manju）、
+ * disable_play / 1002 / 1007 置 unavailable（仍展示）。
+ */
+export function fqParseRelatedSeries(payload: Record<string, Object>,
+  currentSeriesId: string): FqRelatedSeries[] {
+  const result: FqRelatedSeries[] = [];
+  const cells: Object[] | null = fqAsArray(payload['data']);
+  if (cells === null || cells.length === 0) {
+    return result;
+  }
+  const cell: Record<string, Object> | null = fqAsRecord(cells[0]);
+  if (cell === null) {
+    return result;
+  }
+  const entries: Object[] | null = fqAsArray(cell['video_data']);
+  if (entries === null) {
+    return result;
+  }
+  const seen: Set<string> = new Set<string>();
+  seen.add(currentSeriesId);
+  for (const raw of entries) {
+    const entry: Record<string, Object> | null = fqAsRecord(raw);
+    if (entry === null) {
+      continue;
+    }
+    // 19 位 id 双精度不可靠：series_id_str 优先，字符串原样校验
+    const id: string = fqFirstString(entry, ['series_id_str', 'series_id']).trim();
+    const title: string = fqStr(entry, 'title').trim();
+    if (id.length === 0 || !/^[1-9][0-9]*$/.test(id) || title.length === 0 || seen.has(id)) {
+      continue;
+    }
+    const type: number = fqAsInt(entry['content_type'], -1);
+    if (type !== 1 && type !== 1002 && type !== 1004 && type !== 1007) {
+      continue;
+    }
+    seen.add(id);
+    const episodes: number = Math.max(0, fqAsInt(entry['episode_cnt'], 0));
+    const disablePlay: Object | undefined = entry['disable_play'];
+    const unavailable: boolean = disablePlay === true || fqAsInt(disablePlay, 0) === 1 ||
+      type === 1002 || type === 1007;
+    result.push(new FqRelatedSeries(id, title, fqStr(entry, 'cover'), episodes,
+      type === 1004 || type === 1007 ? 'manju' : 'video', unavailable));
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------

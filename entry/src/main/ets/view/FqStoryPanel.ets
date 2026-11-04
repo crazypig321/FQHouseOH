@@ -34,6 +34,8 @@ export struct FqStoryPanel {
   /** 选集回调。 */
   @Param onSelectEpisode: (index: number) => void = (index: number): void => {
   };
+  /** 同系列入口（选集 tab 行右端「同系列」按钮；null 不显示，官方 StoryPlayerPanel）。 */
+  @Param onOpenRelatedSeries: (() => void) | null = null;
 
   /** 分页条选中页（可视区顶部所在段）。 */
   @Local page: number = 0;
@@ -68,6 +70,21 @@ export struct FqStoryPanel {
           .fontSize(14)
           .fontWeight(FontWeight.Bold)
           .padding({ left: 20 })
+          .layoutWeight(1)
+
+        // 官方同系列入口（story_player_panel.dart：tab 行右端 TextButton）
+        if (this.onOpenRelatedSeries !== null) {
+          Text('同系列')
+            .fontSize(14)
+            .fontColor('#FFFA6725')
+            .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+            .onClick((): void => {
+              const open: (() => void) | null = this.onOpenRelatedSeries;
+              if (open !== null) {
+                open();
+              }
+            })
+        }
       }
       .width('100%')
       .padding({ bottom: 10 })

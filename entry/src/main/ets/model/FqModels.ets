@@ -379,6 +379,31 @@ export class FqSeriesRelateBook {
   }
 }
 
+/**
+ * 同系列剧条目（/api/v1/series/{id}/related，官方 scene=10 lo3/f.java 的
+ * data[0].video_data 子集：series_id_str/title/cover/episode_cnt/content_type/
+ * disable_play）。kind：'video' 短剧 / 'manju' 漫剧；unavailable 仍展示但不可点
+ * （即将上线 1002 / 内容不可播 1007 / disable_play）。
+ */
+export class FqRelatedSeries {
+  readonly id: string;
+  readonly title: string;
+  readonly cover: string;
+  readonly episodeCount: number;
+  readonly kind: string;
+  readonly unavailable: boolean;
+
+  constructor(id: string, title: string, cover: string, episodeCount: number,
+    kind: string, unavailable: boolean) {
+    this.id = id;
+    this.title = title;
+    this.cover = cover;
+    this.episodeCount = episodeCount;
+    this.kind = kind;
+    this.unavailable = unavailable;
+  }
+}
+
 /** 对齐 fqapp formatCounter：纯数字 79528 -> 7.9万，非数字原样返回。 */
 export function fqFormatCounter(raw: string): string {
   const text: string = raw.trim();

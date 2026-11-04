@@ -29,6 +29,10 @@
  *   播放设置「离线缓存」行呼出缓存选集半模态（已缓存集置灰打勾、任务态
  *   实时进度、默认全选未缓存集、头部「管理」进剧集缓存管理页）；
  *   已缓存集 loadEpisode 直接播本地文件，在线取流失败也回退缓存文件。
+ * - 同系列（fqapp RelatedSeriesSheet/_switchRelatedSeries 语义）：选集面板
+ *   「同系列」入口呼出同系列剧列表（/api/v1/series/{id}/related，双列卡片：
+ *   封面 + 标题 + 集数；不可播置灰文案仍展示），选中先暂停存进度再进新剧
+ *   详情页；横屏全屏改走右侧边栏深色面板。
  * - 播完自动连播；aboutToDisappear 销毁 mpv 实例并恢复沉浸前的系统 UI。
  * - 长按屏幕右侧 2 倍速快进（官方 jq3 长按带外分支 / fqapp _startBoost）：
  *   按住期间 2x、松开恢复原倍速，画面中央「2倍速快进中」指示。
@@ -55,13 +59,14 @@ import { Player, PlayerSurface, Media, PlayerConfig } from '@mpv-ohos/mpv-arkts'
 import { CommonNav } from '../../view/CommonNav';
 import { CommonSheet, FqSheetOptions } from '../../view/sheet/CommonSheet';
 import { FqCacheSheet } from '../../view/sheet/FqCacheSheet';
+import { FqRelatedSheet, FqRelatedList } from '../../view/sheet/FqRelatedSheet';
 import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/sheet/FqCommentSheet';
 import { FqMenu, FqMenuItem } from '../../view/CommonMenu';
 import { FqDanmakuView } from '../../view/FqDanmakuView';
 import { FqSettingRow } from '../../view/FqSettingRow';
 import { FqStoryPanel } from '../../view/FqStoryPanel';
-import { fqPushBookOrDetail, PlayerNavParams, ListenVideoNavParams, ROUTE_LISTEN_VIDEO, ROUTE_CACHED_DRAMAS } from '../../model/FqNavModels';
-import { FqBookCommentPage, FqChapter, FqDanmaku, FqDanmakuPage, FqEpisodeCommentPage, FqEpisodeSource, FqEpisodeVariant, FqSeriesRelateBook, fqKindToTab, FqCacheTaskView } from '../../model/FqModels';
+import { fqPushBookOrDetail, PlayerNavParams, ListenVideoNavParams, ROUTE_LISTEN_VIDEO, ROUTE_CACHED_DRAMAS, DetailNavParams, ROUTE_DETAIL } from '../../model/FqNavModels';
+import { FqBookCommentPage, FqChapter, FqDanmaku, FqDanmakuPage, FqEpisodeCommentPage, FqEpisodeSource, FqEpisodeVariant, FqSeriesRelateBook, FqRelatedSeries, fqKindToTab, FqCacheTaskView } from '../../model/FqModels';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { fqAudioSession } from '../../core/FqAudioSession';
 import { FqVideoMedia } from '../../core/FqVideoMedia';
@@ -225,6 +230,14 @@ export struct PlayerPage {
   @Local cacheDownloadedIds: Set<string> = new Set<string>();
   /** 缓存 sheet 打开令牌（每次打开 +1，FqCacheSheet 据此重置勾选并定位当前集）。 */
   @Local cacheOpenToken: number = 0;
+  /** 同系列半模态（选集面板「同系列」呼出；横屏全屏改走右侧边栏）。 */
+  @Local relatedSheetVisible: boolean = false;
+  /** 同系列条目（/api/v1/series/{id}/related，打开面板时加载）。 */
+  @Local relatedList: FqRelatedSeries[] = [];
+  /** 同系列加载中。 */
+  @Local relatedLoading: boolean = false;
+  /** 同系列加载错误文案（空串无错；展示重试按钮）。 */
+  @Local relatedErrorMsg: string = '';
   /** 侧边栏缓存分页条当前段。 */
   @Local sideCachePage: number = 0;
   /** 侧边栏选集分页条当前段。 */
@@ -254,6 +267,10 @@ export struct PlayerPage {
   @Local dl: FqDramaDownloader = fqDramaDownloader;
   /** 剧评半模态关闭令牌。 */
   private commentCloseToken: number = 0;
+  /** 同系列请求令牌（重开作废旧请求）。 */
+  private relatedLoadToken: number = 0;
+  /** 同系列半模态关闭令牌。 */
+  private relatedCloseToken: number = 0;
   /** 剧评游标（/api/v1/series/{id}/comments 不透明续拉串；重开由加载器重置）。 */
   private seriesCommentCursor: string = '';
   /** 全屏控件自动隐藏定时器（0 无任务）。 */
@@ -706,6 +723,16 @@ export struct PlayerPage {
               this.closeCacheSheet();
             }, fqPlayerSheetHeightVp(), false))
 
+        // 同系列 sheet 常驻宿主：选集面板「同系列」呼出，横屏全屏走侧边栏不出此 sheet
+        Column()
+          .width(1)
+          .height(1)
+          .hitTestBehavior(HitTestMode.None)
+          .bindSheet(this.relatedSheetVisible, this.RelatedSheetBuilder(),
+            FqSheetOptions((): void => {
+              this.closeRelatedSheet();
+            }, fqPlayerSheetHeightVp(), false))
+
         // 横屏全屏右侧边栏（选集/播放设置）：全屏遮罩点击收起，深色面板贴右滑入；
         // 底部 sheet 遮幅大影响观看，侧边栏只占右侧一条，视频不停播
         if (this.fullScreen && this.isLandscapeVideo() && this.sidePanel.length > 0) {
@@ -723,6 +750,8 @@ export struct PlayerPage {
               this.SideEpisodes()
             } else if (this.sidePanel === 'cache') {
               this.SideCache()
+            } else if (this.sidePanel === 'related') {
+              this.SideRelated()
             } else {
               this.SideSettings()
             }
@@ -1348,9 +1377,31 @@ export struct PlayerPage {
       seriesCover: this.coverUrl,
       seriesIntro: PlayerNavParams.intro,
       episodeLabel: this.episodeLabel(),
+      onOpenRelatedSeries: (): void => {
+        this.openRelatedSeries();
+      },
       onSelectEpisode: (index: number): void => {
         this.closeSheet();
         this.loadEpisode(index);
+      },
+    })
+  }
+
+  /** 同系列半模态（公共 FqRelatedSheet：加载/错误重试/空态/双列卡片）。 */
+  @Builder
+  private RelatedSheetBuilder() {
+    FqRelatedSheet({
+      items: this.relatedList,
+      loading: this.relatedLoading,
+      errorMsg: this.relatedErrorMsg,
+      closeClick: (): void => {
+        this.closeRelatedSheet();
+      },
+      retryClick: (): void => {
+        this.loadRelatedSeries();
+      },
+      itemClick: (entry: FqRelatedSeries): void => {
+        this.switchRelatedSeries(entry);
       },
     })
   }
@@ -2166,15 +2217,25 @@ export struct PlayerPage {
   // 横屏全屏右侧边栏（选集/播放设置）
   // ---------------------------------------------------------------------------
 
-  /** 侧边栏头：标题 + 右上关闭。 */
+  /** 侧边栏头：标题 + 选集面板「同系列」入口 + 右上关闭。 */
   @Builder
-  private SidePanelHeader(title: string) {
+  private SidePanelHeader(title: string, showRelated: boolean) {
     Row() {
       Text(title)
         .fontSize(16)
         .fontWeight(FontWeight.Bold)
         .fontColor(Color.White)
         .layoutWeight(1)
+      if (showRelated) {
+        // 官方选集抽屉头部同系列入口（story_player_panel.dart 抽屉形态）
+        Text('同系列')
+          .fontSize(14)
+          .fontColor(Color.White)
+          .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+          .onClick((): void => {
+            this.openRelatedSeries();
+          })
+      }
       SymbolGlyph($r('sys.symbol.xmark'))
         .fontSize(16)
         .fontColor([Color.White])
@@ -2193,7 +2254,7 @@ export struct PlayerPage {
   @Builder
   private SideEpisodes() {
     Column() {
-      this.SidePanelHeader('选集')
+      this.SidePanelHeader('选集', true)
 
       if (this.episodes.length === 0) {
         Column() {
@@ -2277,9 +2338,34 @@ export struct PlayerPage {
   @Builder
   private SideSettings() {
     Column() {
-      this.SidePanelHeader('播放设置')
+      this.SidePanelHeader('播放设置', false)
 
       this.SettingRows(true)
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  /** 侧边栏·同系列（横屏全屏形态）：深色双列卡片网格，选中新剧进详情页。 */
+  @Builder
+  private SideRelated() {
+    Column() {
+      this.SidePanelHeader('同系列剧', false)
+
+      FqRelatedList({
+        items: this.relatedList,
+        loading: this.relatedLoading,
+        errorMsg: this.relatedErrorMsg,
+        dark: true,
+        retryClick: (): void => {
+          this.loadRelatedSeries();
+        },
+        itemClick: (entry: FqRelatedSeries): void => {
+          this.switchRelatedSeries(entry);
+        },
+      })
+        .width('100%')
+        .layoutWeight(1)
     }
     .width('100%')
     .height('100%')
@@ -2595,6 +2681,91 @@ export struct PlayerPage {
       PlayerNavParams.contentId, cursorIn);
     this.seriesCommentCursor = page.cursor;
     return new FqBookCommentPage(page.comments, page.totalCount, 0, '', page.hasMore, 0);
+  }
+
+  // ---------------------------------------------------------------------------
+  // 同系列（fqapp RelatedSeriesSheet / _switchRelatedSeries）
+  // ---------------------------------------------------------------------------
+
+  /** 打开同系列列表（横屏全屏走右侧边栏深色面板，其余底部半模态）。 */
+  private openRelatedSeries(): void {
+    this.loadRelatedSeries();
+    if (this.fullScreen && this.isLandscapeVideo()) {
+      this.openSidePanel('related');
+      return;
+    }
+    if (this.sidePanel.length > 0) {
+      this.closeSidePanel();
+    }
+    if (this.fullScreen) {
+      // 全屏（竖屏片源）sheet 打开期间暂停控件自动隐藏（关闭后恢复空闲计时）
+      this.cancelFsHide();
+    }
+    this.getUIContext().animateTo({ duration: 200 }, (): void => {
+      this.relatedSheetVisible = true;
+    });
+  }
+
+  /** 加载同系列列表（/api/v1/series/{id}/related；失败落错误态可重试）。 */
+  private async loadRelatedSeries(): Promise<void> {
+    const seriesId: string = PlayerNavParams.contentId;
+    if (seriesId.length === 0) {
+      return;
+    }
+    const token: number = ++this.relatedLoadToken;
+    this.relatedLoading = true;
+    this.relatedErrorMsg = '';
+    try {
+      await FqBackend.get().start(getContext(this));
+      const list: FqRelatedSeries[] = await FqBackend.get().relatedSeries(seriesId);
+      if (token !== this.relatedLoadToken) {
+        return;
+      }
+      this.relatedLoading = false;
+      this.relatedList = list;
+    } catch (error) {
+      if (token !== this.relatedLoadToken) {
+        return;
+      }
+      this.relatedLoading = false;
+      this.relatedErrorMsg = fqErrorMessage(error);
+    }
+  }
+
+  /**
+   * 选中间系列剧 → 新剧详情页（fqapp _switchRelatedSeries 语义：旧剧暂停、
+   * 进度已存、详情页之上再起播）。不可播（即将上线/内容不可播）不响应；
+   * 全屏先退沉浸（窗口级方向/系统栏设置不带入详情页）。
+   */
+  private switchRelatedSeries(entry: FqRelatedSeries): void {
+    if (entry.unavailable || entry.id.length === 0) {
+      return;
+    }
+    if (this.fullScreen) {
+      this.exitFullscreen();
+    }
+    this.closeRelatedSheet();
+    this.closeSidePanel();
+    this.player.pause();
+    this.saveCurrentProgress();
+    DetailNavParams.id = entry.id;
+    DetailNavParams.kind = entry.kind;
+    DetailNavParams.title = entry.title;
+    DetailNavParams.cover = entry.cover;
+    NavPathUtils.push(ROUTE_DETAIL);
+  }
+
+  /** 关闭同系列半模态（延迟一拍置 isShow，同 closeSheet 语义）。 */
+  private closeRelatedSheet(): void {
+    const token: number = ++this.relatedCloseToken;
+    setTimeout((): void => {
+      if (token === this.relatedCloseToken) {
+        this.getUIContext().animateTo({ duration: 200 }, (): void => {
+          this.relatedSheetVisible = false;
+        });
+        this.resumeFsAutoHide();
+      }
+    }, 0);
   }
 
   /** 全屏底部倍速按钮：公共 FqMenu 档位直选（0.5-2.0 步进 0.25，
