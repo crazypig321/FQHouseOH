@@ -3,16 +3,14 @@
  * - 外观：深色模式（跟随系统/浅色/深色，FqMenu 档位直选，即时生效）；
  * - 播放：开启后台播放开关（开=支持后台播放，关=无法后台播放）；
  * - 数据：缓存与管理入口、备份与恢复入口、清除所有数据（确认弹窗提示重启，清全部 KV/缓存/设置后 restartApp）；
- * - 服务：本地后端地址展示（点击浏览器打开 + 刷新按钮）；
+ * - 服务：本地接口入口（状态/自测、地址与局域网共享、可用端点，ApiServicePage）+ 运行日志入口；
  * - 关于：关于我们入口。
  */
 
 import { CommonNav } from '../view/CommonNav';
 import { FqMenu, FqMenuItem } from '../view/CommonMenu';
-import { CommonLoading } from '../view/CommonCom';
 import { common, Want } from '@kit.AbilityKit';
-import { BusinessError } from '@kit.BasicServicesKit';
-import { FqTitleBarOptions, ROUTE_ABOUT, ROUTE_CACHE_MANAGE, ROUTE_LOGS, ROUTE_BACKUP, ROUTE_TTS_SETTINGS } from '../model/FqNavModels';
+import { FqTitleBarOptions, ROUTE_ABOUT, ROUTE_API_SERVICE, ROUTE_CACHE_MANAGE, ROUTE_LOGS, ROUTE_BACKUP, ROUTE_TTS_SETTINGS } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import {
   FQ_THEME_DARK,
@@ -23,7 +21,6 @@ import {
 import { FqReaderStore } from '../core/FqReaderStore';
 import { FQ_THEME_COLOR_OPTIONS, fqThemeColorOf, fqThemeColorNameOf } from '../core/FqThemeColors';
 import { FqDataCleaner } from '../core/FqDataCleaner';
-import { FqBackend } from '../core/FqBackend';
 import { FqUpdateChecker } from '../core/FqUpdateChecker';
 import { DialogManager } from '../utils/DialogUtils';
 import { FqSmartReach } from '../utils/FqSmartReach';
@@ -68,14 +65,11 @@ export struct SettingsPage {
   @Local themeMode: number = FQ_THEME_FOLLOW;
   @Local backgroundAudio: boolean = true;
   @Local pipVideo: boolean = false;
-  @Local backendUrl: string = '';
-  @Local backendRefreshing: boolean = false;
 
   aboutToAppear(): void {
     this.themeMode = FqAppSettingsStore.getThemeMode();
     this.backgroundAudio = FqAppSettingsStore.isBackgroundAudio();
     this.pipVideo = FqAppSettingsStore.isPipVideoEnabled();
-    this.backendUrl = FqBackend.get().baseUrl;
     // 进入设置页静默检查更新（会话内节流，与关于页共用）：
     // 发现新版本时「关于」条目显示红点，无新版本时清空红点
     FqUpdateChecker.checkLatestSilently();
@@ -138,7 +132,11 @@ export struct SettingsPage {
 
           this.SectionHeader('服务')
           FqSettingsCard() {
-            this.BackendRow()
+            this.SettingRow($r('sys.symbol.scope'), '#FF0EA5E9', '本地接口',
+              '本地接口地址与可用端点', '', true,
+              (): void => {
+                NavPathUtils.push(ROUTE_API_SERVICE);
+              })
             this.RowDivider()
             this.SettingRow($r('sys.symbol.list_bullet'), '#FF8B5CF6', '日志', '查看应用与核心运行日志', '', true,
               (): void => {
@@ -638,121 +636,6 @@ export struct SettingsPage {
     }
     .padding({ left: 14, right: 14, top: 11, bottom: 11 })
     .width('100%')
-  }
-
-  /** 本地后端地址行：点击打开浏览器访问后端地址，右侧刷新按钮重读地址。 */
-  @Builder
-  private BackendRow() {
-    Row({ space: 12 }) {
-      Stack() {
-        SymbolGlyph($r('sys.symbol.scope'))
-          .fontSize(17)
-          .fontColor(['#FF0EA5E9'])
-      }
-      .width(34)
-      .height(34)
-      .borderRadius(10)
-      .backgroundColor(FqColorUtils.withOpacity('#FF0EA5E9', 0.12))
-
-      Column({ space: 3 }) {
-        Text('本地后端')
-          .fontSize(14.5)
-          .fontWeight(FontWeight.Medium)
-          .fontColor($r('sys.color.font_primary'))
-        if (this.backendUrl.length > 0) {
-          Text(this.backendUrl)
-            .fontSize(11.5)
-            .fontColor($r('sys.color.font_secondary'))
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-        } else {
-          Text('未启动')
-            .fontSize(11.5)
-            .fontColor($r('sys.color.font_secondary'))
-        }
-      }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
-
-      Stack() {
-        if (this.backendRefreshing) {
-          CommonLoading({ sizeValue: 15, loadColor: $r('sys.color.font_secondary') })
-        } else {
-          SymbolGlyph($r('sys.symbol.arrow_clockwise'))
-            .fontSize(15)
-            .fontColor([$r('sys.color.font_secondary')])
-        }
-      }
-      .width(30)
-      .height(30)
-      .borderRadius(15)
-      .backgroundColor($r('sys.color.comp_background_tertiary'))
-      .onClick((): void => {
-        this.refreshBackendUrl();
-      })
-    }
-    .padding({ left: 14, right: 14, top: 11, bottom: 11 })
-    .width('100%')
-    .onClick((): void => {
-      this.openBackendInBrowser();
-    })
-  }
-
-  /** 打开浏览器访问内置 Web UI 入口（携带 capability，未启动时提示）。 */
-  private openBackendInBrowser(): void {
-    const url: string = FqBackend.get().webUiEntryUrl;
-    if (this.backendUrl.length === 0 || url.length === 0) {
-      this.getUIContext().getPromptAction().showToast({ message: '本地后端未启动', duration: 1500 });
-      return;
-    }
-    const context: common.UIAbilityContext | null = appState.abilityContext;
-    if (context === null) {
-      return;
-    }
-    context.openLink(url, { appLinkingOnly: false }).catch((_error: BusinessError): void => {
-      this.getUIContext().getPromptAction().showToast({ message: '打开浏览器失败', duration: 1500 });
-    });
-  }
-
-  /** 刷新本地后端地址（后端启动幂等：未启动/失败时重试拉起，期间按钮转 Loading）。 */
-  private refreshBackendUrl(): void {
-    if (this.backendRefreshing) {
-      return;
-    }
-    this.backendRefreshing = true;
-    this.backendUrl = FqBackend.get().baseUrl;
-    const context: common.UIAbilityContext | null = appState.abilityContext;
-    if (context === null) {
-      this.backendRefreshing = false;
-      return;
-    }
-    const begin: number = Date.now();
-    FqBackend.get().start(context)
-      .then((): void => {
-        this.backendUrl = FqBackend.get().baseUrl;
-        this.finishBackendRefresh(begin, '');
-      })
-      .catch((): void => {
-        // 启动失败保持原值
-        this.finishBackendRefresh(begin, '本地后端启动失败');
-      });
-  }
-
-  /**
-   * 收尾刷新：start 命中缓存 Promise 时微任务内即完成，Loading 一帧都渲染
-   * 不到（表现为“点了没反应”），故保证最少转 500ms，并给出结果 toast。
-   */
-  private finishBackendRefresh(begin: number, failedMessage: string): void {
-    const elapsed: number = Date.now() - begin;
-    const remainMs: number = elapsed >= 500 ? 0 : 500 - elapsed;
-    setTimeout((): void => {
-      this.backendRefreshing = false;
-      if (failedMessage.length > 0) {
-        this.toast(failedMessage);
-      } else {
-        this.toast('已刷新');
-      }
-    }, remainMs);
   }
 
   /** 页面内统一 toast。 */

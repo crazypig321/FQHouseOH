@@ -82,6 +82,7 @@ extern "C" {
     ) -> napi_status;
     fn napi_get_value_uint32(env: napi_env, value: napi_value, result: *mut u32) -> napi_status;
     fn napi_get_value_int64(env: napi_env, value: napi_value, result: *mut i64) -> napi_status;
+    fn napi_get_value_bool(env: napi_env, value: napi_value, result: *mut bool) -> napi_status;
     fn napi_get_boolean(env: napi_env, value: bool, result: *mut napi_value) -> napi_status;
     fn napi_get_undefined(env: napi_env, result: *mut napi_value) -> napi_status;
     fn napi_create_object(env: napi_env, result: *mut napi_value) -> napi_status;
@@ -222,6 +223,15 @@ unsafe fn arg_uint(env: napi_env, v: napi_value, default: u32) -> u32 {
 unsafe fn arg_int64(env: napi_env, v: napi_value, default: i64) -> i64 {
     let mut out: i64 = 0;
     if !v.is_null() && napi_get_value_int64(env, v, &mut out) == NAPI_OK {
+        out
+    } else {
+        default
+    }
+}
+
+unsafe fn arg_bool(env: napi_env, v: napi_value, default: bool) -> bool {
+    let mut out: bool = false;
+    if !v.is_null() && napi_get_value_bool(env, v, &mut out) == NAPI_OK {
         out
     } else {
         default
@@ -378,6 +388,7 @@ struct InitCtx {
     filter_path: String,
     runtime_dir: String,
     port: u16,
+    lan_share: bool,
     mock_upstream_origin: String,
     result: Option<Result<String, String>>,
     panicked: bool,
@@ -391,6 +402,7 @@ unsafe extern "C" fn init_execute(_env: napi_env, data: *mut c_void) {
     let runtime_dir = std::mem::take(&mut ctx.runtime_dir);
     let mock = std::mem::take(&mut ctx.mock_upstream_origin);
     let port = ctx.port;
+    let lan_share = ctx.lan_share;
     let r = catch_unwind(AssertUnwindSafe(|| {
         runtime().block_on(fqapi_core::api::init(
             config_path,
@@ -398,6 +410,7 @@ unsafe extern "C" fn init_execute(_env: napi_env, data: *mut c_void) {
             filter_path,
             runtime_dir,
             port,
+            lan_share,
             mock,
         ))
     }));
@@ -421,7 +434,7 @@ unsafe extern "C" fn init_complete(env: napi_env, _status: napi_status, data: *m
 }
 
 unsafe extern "C" fn js_init(env: napi_env, info: napi_callback_info) -> napi_value {
-    let argv = argv_of(env, info, 6);
+    let argv = argv_of(env, info, 7);
     let mut deferred: napi_deferred = 0;
     let mut promise = ptr::null_mut();
     if napi_create_promise(env, &mut deferred, &mut promise) != NAPI_OK {
@@ -429,8 +442,8 @@ unsafe extern "C" fn js_init(env: napi_env, info: napi_callback_info) -> napi_va
         napi_get_undefined(env, &mut u);
         return u;
     }
-    if argv.len() != 6 {
-        reject_string(env, deferred, "init expects 6 arguments");
+    if argv.len() != 7 {
+        reject_string(env, deferred, "init expects 7 arguments");
         return promise;
     }
     let ctx = InitCtx {
@@ -440,7 +453,8 @@ unsafe extern "C" fn js_init(env: napi_env, info: napi_callback_info) -> napi_va
         filter_path: arg_string(env, argv[2]),
         runtime_dir: arg_string(env, argv[3]),
         port: arg_uint(env, argv[4], 8080) as u16,
-        mock_upstream_origin: arg_string(env, argv[5]),
+        lan_share: arg_bool(env, argv[5], false),
+        mock_upstream_origin: arg_string(env, argv[6]),
         result: None,
         panicked: false,
     };

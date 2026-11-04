@@ -46,6 +46,8 @@ export const ROUTE_WEBDAV: string = 'webdav';
 export const ROUTE_FANQIE_IMPORT: string = 'fanqieImport';
 /** 离线朗读设置页（设置-阅读与播放-离线朗读，音色下载/语速）。 */
 export const ROUTE_TTS_SETTINGS: string = 'ttsSettings';
+/** 本地接口页（设置-服务-本地接口，接口地址/局域网共享/可用端点，对齐 fqapp ApiServicePage）。 */
+export const ROUTE_API_SERVICE: string = 'apiService';
 
 /** 详情页跳转参数（push 前由来源页赋值，详情页 aboutToAppear 读取）。 */
 export class DetailNavParams {

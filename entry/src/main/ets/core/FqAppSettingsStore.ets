@@ -42,6 +42,7 @@ const FQ_SETTINGS_KEY_TTS_PERSON: string = 'ttsPerson';
 const FQ_SETTINGS_KEY_TTS_RATE: string = 'ttsRate';
 const FQ_SETTINGS_KEY_SMART_REACH: string = 'smartReach';
 const FQ_SETTINGS_KEY_CHAPTER_CACHE_LIMIT: string = 'chapterCacheLimitMb';
+const FQ_SETTINGS_KEY_LAN_SHARE: string = 'apiLanShare';
 
 /** 章节自动缓存大小上限默认值（MB）。 */
 export const FQ_CHAPTER_CACHE_LIMIT_DEFAULT_MB: number = 80;
@@ -76,6 +77,8 @@ export class FqAppSettingsStore {
   private static ttsRate: number = 1;
   /** 智感握姿开关。 */
   private static smartReach: boolean = false;
+  /** 局域网共享开关（本地接口对局域网开放，对齐 fqapp LanSharePreferences）。 */
+  private static apiLanShare: boolean = false;
   /** 章节自动缓存大小上限（MB）。 */
   private static chapterCacheLimitMb: number = FQ_CHAPTER_CACHE_LIMIT_DEFAULT_MB;
 
@@ -137,6 +140,10 @@ export class FqAppSettingsStore {
       const rawSmartReach: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_SMART_REACH, false);
       if (typeof rawSmartReach === 'boolean') {
         FqAppSettingsStore.smartReach = rawSmartReach;
+      }
+      const rawLanShare: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_LAN_SHARE, false);
+      if (typeof rawLanShare === 'boolean') {
+        FqAppSettingsStore.apiLanShare = rawLanShare;
       }
       const rawCacheLimit: preferences.ValueType =
         pref.getSync(FQ_SETTINGS_KEY_CHAPTER_CACHE_LIMIT, FQ_CHAPTER_CACHE_LIMIT_DEFAULT_MB);
@@ -421,6 +428,27 @@ export class FqAppSettingsStore {
     }
     try {
       pref.putSync(FQ_SETTINGS_KEY_TTS_RATE, rate);
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
+  }
+
+  /** 局域网共享开关（对齐 fqapp LanSharePreferences：默认关，开=本地接口对局域网开放）。 */
+  public static isLanShareEnabled(): boolean {
+    return FqAppSettingsStore.apiLanShare;
+  }
+
+  public static setLanShare(enabled: boolean): void {
+    FqAppSettingsStore.apiLanShare = enabled;
+    const pref: preferences.Preferences | null = FqAppSettingsStore.pref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.putSync(FQ_SETTINGS_KEY_LAN_SHARE, enabled);
       pref.flush().catch((_error: BusinessError): void => {
         // 落盘失败不阻断
       });

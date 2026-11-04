@@ -18,6 +18,7 @@ export const init: (
   filterPath: string,
   runtimeDir: string,
   port: number,
+  lanShare: boolean,
   mockUpstreamOrigin: string
 ) => Promise<string>;
 export const request: (

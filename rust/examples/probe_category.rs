@@ -24,6 +24,7 @@ async fn main() -> Result<(), String> {
         filter.to_string_lossy().into_owned(),
         runtime.to_string_lossy().into_owned(),
         0,
+        false,
         String::new(),
     )
     .await?;

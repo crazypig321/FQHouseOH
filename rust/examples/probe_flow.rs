@@ -124,6 +124,7 @@ async fn main() -> Result<(), String> {
         runtime.join("config").join("filter.json").to_string_lossy().into_owned(),
         runtime.to_string_lossy().into_owned(),
         0,
+        false,
         String::new(),
     )
     .await?;

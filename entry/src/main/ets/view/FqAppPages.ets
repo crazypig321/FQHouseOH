@@ -4,7 +4,7 @@
  * - PageMapBuilder：二级路由页（Navigation.navDestination 单 builder 页表）
  */
 
-import { ROUTE_DETAIL, ROUTE_RANK, ROUTE_READER2, ROUTE_SEARCH, ROUTE_AUTHOR, ROUTE_LISTEN, ROUTE_PLAYER, ROUTE_COMIC, ROUTE_LISTEN_VIDEO, ROUTE_ABOUT, ROUTE_CACHED_BOOKS, ROUTE_CACHED_DRAMAS, ROUTE_CACHED_AUDIO, ROUTE_CACHED_COMICS, ROUTE_CACHE_MANAGE, ROUTE_LOGS, ROUTE_BACKUP, ROUTE_WEBDAV, ROUTE_FANQIE_IMPORT, ROUTE_TTS_SETTINGS } from '../model/FqNavModels';
+import { ROUTE_DETAIL, ROUTE_RANK, ROUTE_READER2, ROUTE_SEARCH, ROUTE_AUTHOR, ROUTE_LISTEN, ROUTE_PLAYER, ROUTE_COMIC, ROUTE_LISTEN_VIDEO, ROUTE_ABOUT, ROUTE_CACHED_BOOKS, ROUTE_CACHED_DRAMAS, ROUTE_CACHED_AUDIO, ROUTE_CACHED_COMICS, ROUTE_CACHE_MANAGE, ROUTE_LOGS, ROUTE_BACKUP, ROUTE_WEBDAV, ROUTE_FANQIE_IMPORT, ROUTE_TTS_SETTINGS, ROUTE_API_SERVICE } from '../model/FqNavModels';
 import { MENU_CONFIG, MenuItem, tabBarSymbolOf } from '../model/FqTabsModels';
 import { HomePage } from '../pages/HomePage';
 import { ShelfPage } from '../pages/ShelfPage';
@@ -30,6 +30,7 @@ import { BackupPage } from '../pages/sub/BackupPage';
 import { WebdavPage } from '../pages/sub/WebdavPage';
 import { FanqieImportPage } from '../pages/sub/FanqieImportPage';
 import { TtsSettingsPage } from '../pages/sub/TtsSettingsPage';
+import { ApiServicePage } from '../pages/sub/ApiServicePage';
 import { appState } from '../entryability/AppState';
 
 function tabBarOf(item: MenuItem): BottomTabBarStyle {
@@ -101,5 +102,7 @@ export function PageMapBuilder(name: string) {
     FanqieImportPage()
   } else if (name === ROUTE_TTS_SETTINGS) {
     TtsSettingsPage()
+  } else if (name === ROUTE_API_SERVICE) {
+    ApiServicePage()
   }
 }
