@@ -101,7 +101,7 @@ export struct HomeCategoryDialogContent {
             .fontSize(13)
             .fontWeight(this.groupIndex === index ? 600 : 400)
             .fontColor(this.groupIndex === index
-              ? appState.accentColor : $r('sys.color.font_primary'))
+              ? Color.White : $r('sys.color.font_primary'))
             .width('100%')
             .textAlign(TextAlign.Center)
         }
@@ -109,7 +109,7 @@ export struct HomeCategoryDialogContent {
         .height(44)
         .borderRadius(10)
         .backgroundColor(this.groupIndex === index
-          ? $r('sys.color.comp_background_tertiary') : Color.Transparent)
+          ? appState.accentColor : Color.Transparent)
         .onClick((): void => {
           this.groupIndex = index;
         })
