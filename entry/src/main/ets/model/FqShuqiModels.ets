@@ -123,7 +123,7 @@ function fqSplitShuqiKinds(raw: string): string[] {
 }
 
 /** 书旗详情 → 番茄详情模型（复用 DetailPage 展示；无评分/作者头像，评论区隐藏）。
- *  kind 逗号串：首段（分类）进书名下元信息行，其余段进简介标签区。 */
+ *  kind 逗号串：首段（分类）进书名下元信息行；全部段（含首段）进简介标签区。 */
 export function fqShuqiBookToDetail(book: FqShuqiBook): FqBookDetail {
   const kinds: string[] = fqSplitShuqiKinds(book.kind);
   return new FqBookDetail(
@@ -138,7 +138,7 @@ export function fqShuqiBookToDetail(book: FqShuqiBook): FqBookDetail {
     book.chapterTotalNum,
     '',
     '',
-    kinds.slice(1),
+    kinds,
     false,
     '',
     '',
