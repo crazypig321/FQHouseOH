@@ -148,3 +148,6 @@ const FQ_TREE_AUDIO: FqCategoryLevel1[] = [
 export const FQ_CHANNEL_TREES: FqCategoryLevel1[][] = [
   FQ_TREE_TEXT, FQ_TREE_TEXT, FQ_TREE_DRAMA, FQ_TREE_DRAMA, FQ_TREE_MANGA, FQ_TREE_AUDIO,
 ];
+
+/** 频道名（索引对齐 FQ_CHANNEL_TREES / HomePage FQ_CHANNELS，分类弹窗顶部类目 Select 用）。 */
+export const FQ_CHANNEL_LABELS: string[] = ['推荐', '小说', '短剧', '漫剧', '漫画', '听书'];

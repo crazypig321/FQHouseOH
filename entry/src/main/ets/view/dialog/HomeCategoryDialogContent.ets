@@ -1,15 +1,18 @@
 /**
  * 「分类」弹窗内容（首页右上角「分类」按钮 → DialogManager.ShowHomeCategory 打开，
  * 由宿主页 Index 的 CustomContentDialog 装配）：
- * 一级横向 tab（男生/女生/有声书/出版/短剧/漫画）+ 左侧二级竖版列表 +
- * 右侧三级词三列网格（首格「全部」= 清分类回频道默认推荐流）；
+ * 顶部类目 Select（推荐/小说/短剧/漫剧/漫画/听书，与首页频道条一致）+
+ * 一级横向 tab + 左侧二级竖版列表 + 右侧三级词三列网格；
  * 布局对齐 fqapp 官方分类页（category_page.dart：顶部频道 tab + 左维度栏 + 右词网格），
- * 收进弹窗。点词即选：经 DialogManager.PickHomeCategory 回调首页并关弹窗。
+ * 收进弹窗。点词即选：经 DialogManager.PickHomeCategory 回调首页并关弹窗
+ * （类目 Select 切换 = 换频道树并重置一级/组；回调携带类目下标，首页频道条同步切换）。
  */
 
 import { DialogManager } from '../../utils/DialogUtils';
 import { appState } from '../../entryability/AppState';
-import { FqCategoryGroup, FqCategoryLevel1 } from '../../core/FqCategoryStore';
+import { FqCategoryGroup, FqCategoryLevel1, FQ_CHANNEL_LABELS, FQ_CHANNEL_TREES }
+  from '../../core/FqCategoryStore';
+import { selectImmersiveModifier } from '../../utils/ModifierUtils';
 
 /** 左侧二级栏宽度（fqapp 官方 88dp 维度栏）。 */
 const FQ_RAIL_WIDTH: number = 75;
@@ -18,15 +21,22 @@ const FQ_PANE_HEIGHT: number = 380;
 
 @ComponentV2
 export struct HomeCategoryDialogContent {
+  /** 当前类目（频道）下标。 */
+  @Local channelIndex: number = 0;
   /** 当前一级 tab 下标。 */
   @Local l1Index: number = 0;
   /** 当前二级组下标。 */
   @Local groupIndex: number = 0;
 
   aboutToAppear(): void {
-    const tree: FqCategoryLevel1[] = DialogManager.homeCategoryTree;
+    let channel: number = DialogManager.homeCategoryChannel;
+    if (channel < 0 || channel >= FQ_CHANNEL_TREES.length) {
+      channel = 0;
+    }
+    this.channelIndex = channel;
+    const tree: FqCategoryLevel1[] = this.channelTree();
     let l1: number = DialogManager.homeCategoryL1;
-    if (tree.length === 0 || l1 < 0 || l1 >= tree.length) {
+    if (l1 < 0 || l1 >= tree.length) {
       l1 = 0;
     }
     this.l1Index = l1;
@@ -40,12 +50,17 @@ export struct HomeCategoryDialogContent {
 
   build() {
     Column() {
-      this.LevelTabs()
+      Row({space: 10}) {
+        this.ChannelPicker()
+        this.LevelTabs()
+      } .width('100%')
+
       Divider()
         .strokeWidth(0.5)
         .color($r('sys.color.comp_divider'))
         .margin({ top: 8, bottom: 14 })
-      Row() {
+
+      Row({space: 10}) {
         this.GroupRail()
         this.WordPane()
       }
@@ -56,11 +71,32 @@ export struct HomeCategoryDialogContent {
     .width('100%')
   }
 
+  /** 顶部类目 Select（与首页频道条同源：FQ_CHANNEL_LABELS/FQ_CHANNEL_TREES 同序）。 */
+  @Builder
+  private ChannelPicker() {
+    Select(this.channelOptions())
+      .value(FQ_CHANNEL_LABELS[this.channelIndex])
+      .selected(this.channelIndex)
+      .font({ size: 15, weight: FontWeight.Medium })
+      .fontColor($r('sys.color.font_primary'))
+      .selectedOptionFont({ size: 15, weight: FontWeight.Medium })
+      .selectedOptionFontColor(appState.accentColor)
+      .optionFont({ size: 15 })
+      .optionFontColor($r('sys.color.font_primary'))
+      .backgroundColor(Color.Transparent)
+      .height(36)
+      .padding({ left: 0, right: 0 })
+      .onSelect((index: number, text: string) => {
+        this.selectChannel(index);
+      })
+      .attributeModifier(selectImmersiveModifier)
+  }
+
   /** 一级横向 tab（fqapp：选中黑加粗、未选灰，选中下挂主题色小横条）。 */
   @Builder
   private LevelTabs() {
     List({ space: 22 }) {
-      ForEach(DialogManager.homeCategoryTree, (level1: FqCategoryLevel1, index: number) => {
+      ForEach(this.channelTree(), (level1: FqCategoryLevel1, index: number) => {
         ListItem() {
           Column({ space: 4 }) {
             Text(level1.label)
@@ -121,13 +157,10 @@ export struct HomeCategoryDialogContent {
     .edgeEffect(EdgeEffect.None)
   }
 
-  /** 右侧三级词三列网格（首格「全部」= 清分类；点词即选并关弹窗）。 */
+  /** 右侧三级词三列网格（点词即选并关弹窗）。 */
   @Builder
   private WordPane() {
     Grid() {
-     // GridItem() {
-      //  this.WordChip('全部', DialogManager.homeCategoryWord === 0, -1)
-      //}
       ForEach(this.currentGroup().categories, (word: string, index: number) => {
         GridItem() {
           this.WordChip(word, this.wordSelected(index), index)
@@ -160,8 +193,28 @@ export struct HomeCategoryDialogContent {
       .backgroundColor(selected
         ? appState.accentColor : $r('sys.color.comp_background_tertiary'))
       .onClick((): void => {
-        DialogManager.PickHomeCategory(this.l1Index, this.groupIndex, wordIndex + 1);
+        DialogManager.PickHomeCategory(this.channelIndex, this.l1Index, this.groupIndex, wordIndex + 1);
       })
+  }
+
+  /** 类目 Select 选项（频道名表）。 */
+  private channelOptions(): SelectOption[] {
+    const options: SelectOption[] = [];
+    for (const label of FQ_CHANNEL_LABELS) {
+      const option: SelectOption = { value: label };
+      options.push(option);
+    }
+    return options;
+  }
+
+  /** 类目切换：换频道树，一级/组回零。 */
+  private selectChannel(index: number): void {
+    if (this.channelIndex === index) {
+      return;
+    }
+    this.channelIndex = index;
+    this.l1Index = 0;
+    this.groupIndex = 0;
   }
 
   /** 一级 tab 切换：二级组回首组。 */
@@ -173,9 +226,17 @@ export struct HomeCategoryDialogContent {
     this.groupIndex = 0;
   }
 
+  /** 当前类目的分类树（越界回退首类目）。 */
+  private channelTree(): FqCategoryLevel1[] {
+    if (this.channelIndex > 0 && this.channelIndex < FQ_CHANNEL_TREES.length) {
+      return FQ_CHANNEL_TREES[this.channelIndex];
+    }
+    return FQ_CHANNEL_TREES[0];
+  }
+
   /** 当前一级（越界回退首项；树空回退空定义）。 */
   private currentLevel1(): FqCategoryLevel1 {
-    const tree: FqCategoryLevel1[] = DialogManager.homeCategoryTree;
+    const tree: FqCategoryLevel1[] = this.channelTree();
     if (this.l1Index >= 0 && this.l1Index < tree.length) {
       return tree[this.l1Index];
     }
@@ -191,9 +252,10 @@ export struct HomeCategoryDialogContent {
     return groups.length > 0 ? groups[0] : new FqCategoryGroup('', []);
   }
 
-  /** 三级词选中态：一级/二级组/词均与打开时选中一致才高亮。 */
+  /** 三级词选中态：类目/一级/二级组/词均与打开时选中一致才高亮。 */
   private wordSelected(index: number): boolean {
     return DialogManager.homeCategoryWord === index + 1
+      && DialogManager.homeCategoryChannel === this.channelIndex
       && DialogManager.homeCategoryL1 === this.l1Index
       && DialogManager.homeCategoryGroup === this.groupIndex;
   }

@@ -11,7 +11,6 @@ import { fileIo } from '@kit.CoreFileKit';
 import { appState } from '../entryability/AppState';
 import { FqWebDavBackupEntry } from '../core/FqWebDav';
 import { FqCustomReaderTheme } from '../core/FqReaderStore';
-import { FqCategoryLevel1 } from '../core/FqCategoryStore';
 
 /** 公共弹窗管理器：弹窗标识/宿主动作/生命周期回调的静态集散地。 */
 export class DialogManager {
@@ -62,8 +61,8 @@ export class DialogManager {
   private static chapterCacheLimitConfirm: ((bytes: number) => void) | null = null;
 
   // ===== 首页分类弹窗参数（打开前由调用方赋值，弹窗关闭后自动清空） =====
-  /** 分类树（一级 → 二级组 → 三级词）。 */
-  public static homeCategoryTree: FqCategoryLevel1[] = [];
+  /** 当前类目（频道）下标（对齐 HomePage FQ_CHANNELS / FqCategoryStore FQ_CHANNEL_TREES）。 */
+  public static homeCategoryChannel: number = 0;
   /** 当前一级 tab 下标。 */
   public static homeCategoryL1: number = 0;
   /** 当前二级组下标。 */
@@ -71,7 +70,8 @@ export class DialogManager {
   /** 当前三级词下标（0 = 全部）。 */
   public static homeCategoryWord: number = 0;
   /** 选词回调（点三级词或「全部」后触发；取消/关闭不触发）。 */
-  private static homeCategoryPick: ((l1: number, group: number, word: number) => void) | null = null;
+  private static homeCategoryPick:
+    ((channel: number, l1: number, group: number, word: number) => void) | null = null;
 
   // ===== 自定义阅读主题编辑弹窗参数（独立宿主弹窗，打开前由调用方赋值，关闭后自动清空） =====
   /** 编辑中主题名称（输入框双向值）。 */
@@ -208,11 +208,12 @@ export class DialogManager {
     DialogManager.OpenDialog('章节缓存限制');
   }
 
-  /** 首页分类弹窗（右上角「分类」按钮）：tree 三级分类树，l1/group/word 当前选中
-   *  （word 0 = 全部），onPick 选词回调（word>0 = 三级词下标+1，word=0 = 「全部」清分类）。 */
-  public static ShowHomeCategory(tree: FqCategoryLevel1[], l1: number, group: number, word: number,
-    onPick: (l1: number, group: number, word: number) => void): void {
-    DialogManager.homeCategoryTree = tree;
+  /** 首页分类弹窗（右上角「分类」按钮）：channel 类目（频道）下标，l1/group/word
+   *  当前选中（word 0 = 全部），onPick 选词回调（channel 可与打开时不同 = 弹窗内
+   *  切换了类目；word>0 = 三级词下标+1，word=0 = 「全部」清分类回该类目默认流）。 */
+  public static ShowHomeCategory(channel: number, l1: number, group: number, word: number,
+    onPick: (channel: number, l1: number, group: number, word: number) => void): void {
+    DialogManager.homeCategoryChannel = channel;
     DialogManager.homeCategoryL1 = l1;
     DialogManager.homeCategoryGroup = group;
     DialogManager.homeCategoryWord = word;
@@ -221,11 +222,12 @@ export class DialogManager {
   }
 
   /** 分类弹窗选词（弹窗内点词/「全部」触发）：先关弹窗再回调（回调内不再开弹窗）。 */
-  public static PickHomeCategory(l1: number, group: number, word: number): void {
-    const cb: ((l1: number, group: number, word: number) => void) | null = DialogManager.homeCategoryPick;
+  public static PickHomeCategory(channel: number, l1: number, group: number, word: number): void {
+    const cb: ((channel: number, l1: number, group: number, word: number) => void) | null =
+      DialogManager.homeCategoryPick;
     DialogManager.CloseDialog();
     if (cb !== null) {
-      cb(l1, group, word);
+      cb(channel, l1, group, word);
     }
   }
 
@@ -532,7 +534,7 @@ export class DialogManager {
     }
     // 首页分类弹窗参数一次性，关闭后清理
     if (key === '首页分类') {
-      DialogManager.homeCategoryTree = [];
+      DialogManager.homeCategoryChannel = 0;
       DialogManager.homeCategoryL1 = 0;
       DialogManager.homeCategoryGroup = 0;
       DialogManager.homeCategoryWord = 0;

@@ -132,7 +132,7 @@ export struct HomePage {
         height: 105
       }, (): void => {
         this.startRefresh();
-      }, true, undefined, undefined, undefined, (): void => {
+      }, true, undefined, undefined, this.titleSubTitle(), (): void => {
         this.openCategoryDialog();
       }, this.categoryIndex > 0),
       embedded: true,
@@ -448,14 +448,19 @@ export struct HomePage {
     return FQ_CAPTIONS[this.channelIndex];
   }
 
-  /** 分区头副标题：分类态显示当前分类词。 */
+  /** 分区头副标题。 */
   private sectionSubtitle(): string {
     const channel: FqChannelDef = FQ_CHANNELS[this.channelIndex];
-    const word: string = this.currentCategoryWord();
-    if (word.length > 0) {
-      return `当前分类：${word}`;
-    }
     return `值得一看的${channel.label}`;
+  }
+
+  /** 标题栏副标题：分类态显示当前分类词。 */
+  private titleSubTitle(): ResourceStr | undefined {
+    if (this.categoryIndex <= 0) {
+      return undefined;
+    }
+    const word: string = this.currentCategoryWord();
+    return word.length > 0 ? `当前分类：${word}` : undefined;
   }
 
   /** 失败/空态重试：按当前模式分派首屏加载。 */
@@ -537,26 +542,29 @@ export struct HomePage {
     return [FqHomeSource.pagedSearch(category, '')];
   }
 
-  /** 打开「分类」弹窗（右上角分类按钮）：当前频道树 + 选中传入，选词回本页。 */
+  /** 打开「分类」弹窗（右上角分类按钮）：当前类目/一级/组/词传入，选词回本页。 */
   private openCategoryDialog(): void {
-    DialogManager.ShowHomeCategory(this.channelTree(), this.novelL1, this.groupIndex, this.categoryIndex,
-      (l1: number, group: number, word: number): void => {
-        if (word <= 0) {
-          this.enterCategory(0);
-          return;
-        }
-        this.selectNovelCategory(l1, group, word - 1);
+    DialogManager.ShowHomeCategory(this.channelIndex, this.novelL1, this.groupIndex, this.categoryIndex,
+      (channel: number, l1: number, group: number, word: number): void => {
+        this.applyCategoryPick(channel, l1, group, word);
       });
   }
 
-  /** 分类弹窗选词：切一级/二级组后进入对应分类流。 */
-  private selectNovelCategory(l1: number, groupIdx: number, wordIdx: number): void {
-    if (this.novelL1 === l1 && this.groupIndex === groupIdx && this.categoryIndex === wordIdx + 1) {
+  /** 分类弹窗选词回调：channel 可与当前类目不同（弹窗内切了类目 Select），
+   *  先同步频道条再进分类流；word 1 基（0 = 全部 = 该类目默认推荐流）。 */
+  private applyCategoryPick(channel: number, l1: number, group: number, word: number): void {
+    if (channel === this.channelIndex && this.novelL1 === l1 && this.groupIndex === group
+      && this.categoryIndex === word) {
       return;
     }
+    if (channel !== this.channelIndex) {
+      this.loadToken += 1;
+      this.channelIndex = channel;
+      FqHomeCache.saveChannelIndex(channel);
+    }
     this.novelL1 = l1;
-    this.groupIndex = groupIdx;
-    this.enterCategory(wordIdx + 1);
+    this.groupIndex = group;
+    this.enterCategory(word);
   }
 
   /** 激活当前频道默认推荐流：内存缓存 → 磁盘持久化 → 网络重载。 */
