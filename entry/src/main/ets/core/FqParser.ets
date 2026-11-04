@@ -41,6 +41,7 @@ import {
   FqRankEntry,
   FqRankTab,
   FqSearchTab,
+  FqHotSearchEntry,
   FqSeriesRelateBook,
   FqRelatedSeries,
   FqMediaTag,
@@ -782,6 +783,80 @@ function fqRequestedTitleOf(tabType: number): string {
   }
   if (tabType === 2) {
     return '听书';
+  }
+  return '';
+}
+
+// ---------------------------------------------------------------------------
+// 热搜榜（官方 472 榜单，fqapp HotSearch.fromPayload）
+// ---------------------------------------------------------------------------
+
+/**
+ * 解析热搜榜（/api/v1/search/hot）：data[].search_tag_data[] 两层嵌套，
+ * 可含无 tag 的空 cell（跳过）；按 title 去重，最多 50 条。
+ */
+export function fqParseHotSearch(payload: Record<string, Object>): FqHotSearchEntry[] {
+  const code: number = fqAsInt(payload['code'], 0);
+  if (code !== 0 && code !== 200) {
+    return [];
+  }
+  const cells: Object[] | null = fqAsArray(payload['data']);
+  if (cells === null) {
+    return [];
+  }
+  const out: FqHotSearchEntry[] = [];
+  const seen: Set<string> = new Set<string>();
+  for (const cellValue of cells) {
+    const cell: Record<string, Object> | null = fqAsRecord(cellValue);
+    if (cell === null) {
+      continue;
+    }
+    const tags: Object[] | null = fqAsArray(cell['search_tag_data']);
+    if (tags === null) {
+      continue;
+    }
+    for (const tagValue of tags) {
+      const tag: Record<string, Object> | null = fqAsRecord(tagValue);
+      if (tag === null) {
+        continue;
+      }
+      const title: string = fqStr(tag, 'tag_title').trim();
+      if (title.length === 0 || seen.has(title)) {
+        continue;
+      }
+      seen.add(title);
+      out.push(new FqHotSearchEntry(title,
+        fqHotSearchValueOf(fqStr(tag, 'tag_attached')),
+        fqHotSearchBadgeOf(tag['display_tag'])));
+    }
+  }
+  return out;
+}
+
+/** `183.8万热搜值` → `183.8万`；其余形态返回空串（编辑文案不进数值列）。 */
+function fqHotSearchValueOf(attached: string): string {
+  const suffix: string = '热搜值';
+  if (!attached.endsWith(suffix)) {
+    return '';
+  }
+  return attached.substring(0, attached.length - suffix.length).trim();
+}
+
+/** display_tag 首个非空 text；无则空串。 */
+function fqHotSearchBadgeOf(displayTag: Object | undefined): string {
+  const list: Object[] | null = fqAsArray(displayTag);
+  if (list === null) {
+    return '';
+  }
+  for (const entryValue of list) {
+    const entry: Record<string, Object> | null = fqAsRecord(entryValue);
+    if (entry === null) {
+      continue;
+    }
+    const text: string = fqStr(entry, 'text').trim();
+    if (text.length > 0) {
+      return text;
+    }
   }
   return '';
 }

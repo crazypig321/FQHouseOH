@@ -129,6 +129,26 @@ export class FqSearchTab {
   }
 }
 
+/**
+ * 热搜榜词条（官方 472 榜单 search/rank_list/v）。
+ * 两层嵌套 data[].search_tag_data[]，每条带 tag_title / tag_attached / display_tag；
+ * 空 cell 跳过、按 title 去重。
+ */
+export class FqHotSearchEntry {
+  /** 搜索词（tag_title）。 */
+  readonly title: string;
+  /** 热搜值（`183.8万`；tag_attached 非「…热搜值」形态时为空，编辑文案不进数值列）。 */
+  readonly hotValue: string;
+  /** 榜单角标（巅峰榜/热聊/霸榜/新…；display_tag 首个非空 text，无则空）。 */
+  readonly badge: string;
+
+  constructor(title: string, hotValue: string, badge: string) {
+    this.title = title;
+    this.hotValue = hotValue;
+    this.badge = badge;
+  }
+}
+
 /** 书籍详情（/api/detail）。 */
 export class FqBookDetail {
   readonly bookId: string;

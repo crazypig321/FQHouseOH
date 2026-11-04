@@ -136,6 +136,8 @@ const FQ_DARK_TRACK: string = '#33FFFFFF';
 const FQ_DARK_TERTIARY_TEXT: string = '#99FFFFFF';
 /** 离线缓存 sheet/侧边栏分页条粒度（与选集面板 FqStoryPanel 一致 30/段）。 */
 const FQ_CACHE_PAGE_SIZE: number = 30;
+/** 预热下一集提前量（秒；fqapp player_page_preload _warmLead = 30s）。 */
+const FQ_WARM_LEAD_SEC: number = 30;
 
 /** 播放设置行描述（key 决定右侧控件：speed 滑杆 / cache、listen 箭头 / danmaku 开关）。 */
 class FqSettingItem {
@@ -283,6 +285,14 @@ export struct PlayerPage {
   private hasDisplayed: boolean = false;
   /** 用户选定的清晰度档名（跨集记忆；空 = 跟默认最高档）。 */
   private qualityPreference: string = '';
+  /** 预热的下一集流（fqapp _WarmEpisode；null = 无预热；单 mpv 实例，预热=取流先行）。 */
+  private warmSource: FqEpisodeSource | null = null;
+  /** 预热对应集 itemId（takeWarm 匹配用）。 */
+  private warmItemId: string = '';
+  /** 预热时的画质偏好（偏好变了作废）。 */
+  private warmQuality: string = '';
+  /** 预热取流进行中（防重复发起）。 */
+  private warmInFlight: boolean = false;
   /** 本剧续播进度（进页恢复；暂停/切集/周期/退出保存）。 */
   private progress: FqWatchedProgress | null = null;
   /** 进页待恢复的续播位置（秒；仅首开命中的那一次消费）。 */
@@ -396,6 +406,7 @@ export struct PlayerPage {
       this.danmakuTick();
       this.progressSaveTick();
       this.mediaTick();
+      this.warmNextTick();
     }, 1000);
     // AVSession（通知栏播控中心/胶囊）播控命令 + 后台播放长时任务
     const mediaContext: common.UIAbilityContext | null = appState.abilityContext;
@@ -488,6 +499,7 @@ export struct PlayerPage {
     this.markCurrentWatched();
     this.saveCurrentProgress();
     this.loadToken += 1;
+    this.dropWarmSource();
     this.cancelFsHide();
     this.cancelCenterHide();
     this.cancelLockHide();
@@ -2854,6 +2866,67 @@ export struct PlayerPage {
     this.loadEpisode(this.index);
   }
 
+  /**
+   * 预热下一集心跳（fqapp _updateWarmNext，1s 心跳驱动）：
+   * 剩 FQ_WARM_LEAD_SEC 秒时预取下一集流地址，切集免等取流。
+   * 加载中/已预热/取流中不重复；离线缓存集不预热（本地秒开无需预热）。
+   */
+  private warmNextTick(): void {
+    if (this.loading || this.warmInFlight || this.warmSource !== null || !this.player.state.playing) {
+      return;
+    }
+    const next: FqChapter | undefined = this.episodes[this.index + 1];
+    if (next === undefined || FqDramaCacheStore.has(next.itemId)) {
+      return;
+    }
+    const duration: number = this.player.state.duration;
+    const remain: number = duration - this.player.state.position;
+    if (duration <= 0 || remain > FQ_WARM_LEAD_SEC) {
+      return;
+    }
+    this.warmNextEpisode(next);
+  }
+
+  /** 预取下一集流（fqapp _updateWarmNext 取流段）：完成后仅当仍是邻集才存，失败静默。 */
+  private async warmNextEpisode(episode: FqChapter): Promise<void> {
+    const itemId: string = episode.itemId;
+    const quality: string = this.qualityPreference;
+    this.warmInFlight = true;
+    try {
+      await FqBackend.get().start(getContext(this));
+      const source: FqEpisodeSource =
+        await FqBackend.get().episodeSource(itemId, this.tab, quality);
+      const current: FqChapter | undefined = this.episodes[this.index + 1];
+      if (current !== undefined && current.itemId === itemId && this.qualityPreference === quality) {
+        this.warmItemId = itemId;
+        this.warmQuality = quality;
+        this.warmSource = source;
+      }
+    } catch (error) {
+      // 预热失败静默：切集时走常规取流
+    } finally {
+      this.warmInFlight = false;
+    }
+  }
+
+  /** 领取预热流（fqapp _takeWarm）：itemId 且画质偏好一致才命中；否则作废返回 null。 */
+  private takeWarmSource(itemId: string): FqEpisodeSource | null {
+    const warm: FqEpisodeSource | null = this.warmSource;
+    if (warm !== null && this.warmItemId === itemId && this.warmQuality === this.qualityPreference) {
+      this.warmSource = null;
+      return warm;
+    }
+    this.dropWarmSource();
+    return null;
+  }
+
+  /** 丢弃预热（fqapp _dropWarm）。 */
+  private dropWarmSource(): void {
+    this.warmSource = null;
+    this.warmItemId = '';
+    this.warmQuality = '';
+  }
+
   /** 关闭剧评半模态：延迟一拍置 isShow（面板事件内同步改 isShow 会被框架丢弃）。 */
   private closeComments(): void {
     const token: number = ++this.commentCloseToken;
@@ -3117,6 +3190,10 @@ export struct PlayerPage {
     if (episode === undefined) {
       return;
     }
+    // 预热作废（fqapp _dropWarm）：切到非预热目标集即丢弃，避免旧预热占位挡住新邻集预热
+    if (episode.itemId !== this.warmItemId) {
+      this.dropWarmSource();
+    }
     // 离开的旧集：实际播放过才标已看/存续播进度（this.index 尚未切换）；
     // 听视频返回切集例外——续播记录以听视频页写入的（新集,听到位置）为准，
     // 跳过旧集回写，避免用进听视频前的旧位置覆盖
@@ -3156,10 +3233,13 @@ export struct PlayerPage {
       } else {
         await FqBackend.get().start(getContext(this));
         this.resolveCover();
-        // quality 携带用户选定档：后端命中 variants 档时按该档取流，
-        // 并以 quality 回显实际起播档（未命中为空 → 默认）
-        const source: FqEpisodeSource =
-          await FqBackend.get().episodeSource(episode.itemId, this.tab, this.qualityPreference);
+        // 预热命中（fqapp _takeWarm）：免取流直接用预取地址
+        let source: FqEpisodeSource | null = this.takeWarmSource(episode.itemId);
+        if (source === null) {
+          // quality 携带用户选定档：后端命中 variants 档时按该档取流，
+          // 并以 quality 回显实际起播档（未命中为空 → 默认）
+          source = await FqBackend.get().episodeSource(episode.itemId, this.tab, this.qualityPreference);
+        }
         playUrl = source.url;
         this.qualityVariants = source.variants;
         if (source.quality.length > 0) {

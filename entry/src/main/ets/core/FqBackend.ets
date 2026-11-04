@@ -17,6 +17,7 @@ import { FqKeyStore } from './FqKeyStore';
 import {   fqParseAuthorProfile, fqParseBookComments, fqParseBookDetail, fqParseChapterCommentPage, fqParseChapterIdeaCounts, fqParseChapterIdeaMeta, fqParseChapterSummaries,
   fqParseDanmaku, fqParseDirectory, fqParseEpisodeComments, fqParseEpisodeSource, fqParseHomepage, fqParseParagraphCommentPage, fqParseRankBoard, fqParseRankCatalog,
   fqParseSearchTabs, fqParseSeriesFeed, fqParseSeriesRelateBook, fqParseRelatedSeries, fqLegacyChapterText, fqNormalizeChapterWithIdx, fqParseNovelChapter,
+  fqParseHotSearch,
   fqIsValidMediaId, fqParseMediaIdResult,
   fqParseChapterImages } from './FqParser';
 import {
@@ -42,6 +43,7 @@ import {
   FqEpisodeSource,
   FqEpisodeVariant,
   FqHomePage,
+  FqHotSearchEntry,
   FqMediaItem,
   FqRankBoard,
   FqRankCatalog,
@@ -361,6 +363,12 @@ export class FqBackend {
       + `&offset=${offset < 0 ? 0 : offset}&count=10`;
     const payload: Record<string, Object> = await this.getJson('/api/v1/search', encoded);
     return fqParseSearchTabs(payload, tabType);
+  }
+
+  /** 热搜榜（/api/v1/search/hot，官方 472 榜单；最多 50 条）。 */
+  public async hotSearch(): Promise<FqHotSearchEntry[]> {
+    const payload: Record<string, Object> = await this.getJson('/api/v1/search/hot', '');
+    return fqParseHotSearch(payload);
   }
 
   /**

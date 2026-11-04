@@ -8,7 +8,7 @@
 import { preferences } from '@kit.ArkData';
 import { TitleBarContentOptions } from '@kit.UIDesignKit';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
-import { FqMediaItem, FqSearchTab } from '../../model/FqModels';
+import { FqHotSearchEntry, FqMediaItem, FqSearchTab } from '../../model/FqModels';
 import { fqMediaIdFromSearch } from '../../core/FqParser';
 import { FqMediaDataSource } from '../../core/FqMediaDataSource';
 import { FqItemCard } from '../../view/FqItemCard';
@@ -54,6 +54,8 @@ export struct SearchPage {
   @Local loadingMore: boolean = false;
   @Local errorMsg: string = '';
   @Local historyChips: string[] = [];
+  /** 热搜榜词条（官方 472 榜单，展示前 10 条；fqapp SearchPage._hot）。 */
+  @Local hotEntries: FqHotSearchEntry[] = [];
   /** ID 精确查找模式（fqapp _idQuery）：非空表示按作品 ID 查找。 */
   @Local idQuery: string = '';
   private dataSource: FqMediaDataSource = new FqMediaDataSource();
@@ -75,6 +77,7 @@ export struct SearchPage {
 
   aboutToAppear(): void {
     this.initHistory();
+    this.loadHotSearch();
   }
 
   build() {
@@ -105,6 +108,9 @@ export struct SearchPage {
         if (this.submittedQuery.length === 0) {
           ListItem() {
             this.HistoryView()
+          }
+          ListItem() {
+            this.HotSearchView()
           }
         } else if (this.errorMsg.length > 0 && this.itemCount === 0) {
           ListItem() {
@@ -217,9 +223,16 @@ export struct SearchPage {
         },
         change: (value: string): void => {
           this.keyword = value;
+          // 输入清空回到发现区（fqapp _onQueryChanged 空词 → _showHistory）
+          if (value.trim().length === 0 && this.submittedQuery.length > 0) {
+            this.backToDiscovery();
+          }
         },
         didDelete: (): void => {
           this.keyword = '';
+          if (this.submittedQuery.length > 0) {
+            this.backToDiscovery();
+          }
         },
         click: (): void => {
         },
@@ -288,6 +301,74 @@ export struct SearchPage {
     }
   }
 
+  /** 热搜榜（fqapp SearchDiscoveryView）：历史记录下方，行高 44，前三名强调色，点击即搜。 */
+  @Builder
+  private HotSearchView() {
+    if (this.hotEntries.length > 0) {
+      Column() {
+        Row() {
+          Text('热搜榜')
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('sys.color.font_tertiary'))
+        }
+        .width('100%')
+
+        ForEach(this.hotEntries, (entry: FqHotSearchEntry, index: number) => {
+          Row() {
+            Text(`${index + 1}`)
+              .fontSize(index < 3 ? 16 : 14)
+              .fontWeight(index < 3 ? FontWeight.Bold : FontWeight.Normal)
+              .fontColor(index < 3 ? appState.accentColor : $r('sys.color.font_secondary'))
+              .width(28)
+              .textAlign(TextAlign.Center)
+            Text(entry.title)
+              .fontSize(14)
+              .fontColor($r('sys.color.font_primary'))
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+            if (entry.badge.length > 0) {
+              Text(entry.badge)
+                .fontSize(10)
+                .fontColor($r('sys.color.font_secondary'))
+                .backgroundColor($r('sys.color.comp_background_tertiary'))
+                .borderRadius(4)
+                .padding({ left: 5, right: 5, top: 1, bottom: 1 })
+                .margin({ left: 6, right: 6 })
+            }
+            if (entry.hotValue.length > 0) {
+              Text(entry.hotValue)
+                .fontSize(12)
+                .fontColor($r('sys.color.font_tertiary'))
+            }
+          }
+          .width('100%')
+          .height(44)
+          .alignItems(VerticalAlign.Center)
+          .onClick(() => {
+            this.keyword = entry.title;
+            this.submit();
+          })
+        }, (entry: FqHotSearchEntry): string => `${entry.title}:${entry.badge}`)
+      }
+      .padding({ left: 16, right: 16, top: 4, bottom: 8 })
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+    }
+  }
+
+  /** 热搜榜加载：页面出现时一次，失败静默（fqapp _loadHotSearch 返回 HotSearch.empty）。 */
+  private async loadHotSearch(): Promise<void> {
+    try {
+      await FqBackend.get().start(getContext(this));
+      const entries: FqHotSearchEntry[] = await FqBackend.get().hotSearch();
+      this.hotEntries = entries.slice(0, 10);
+    } catch (error) {
+      FqLog.w('search', `热搜榜加载失败: ${fqErrorMessage(error)}`);
+    }
+  }
+
   private categoryWeight(index: number): FontWeight {
     return this.categoryIndex === index ? FontWeight.Bold : FontWeight.Normal;
   }
@@ -344,6 +425,14 @@ export struct SearchPage {
     this.idItem = null;
     this.resetFeed();
     this.load();
+  }
+
+  /** 输入清空回到发现区（fqapp _showHistory）：重置查询态，恢复历史+热搜榜。 */
+  private backToDiscovery(): void {
+    this.submittedQuery = '';
+    this.idQuery = '';
+    this.idItem = null;
+    this.resetFeed();
   }
 
   /** ID 精确查找（fqapp _loadId/lookupMediaById）：单条结果，无分页。 */
