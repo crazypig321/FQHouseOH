@@ -36,9 +36,12 @@ export class FqCachedEpisode {
   public readonly index: number;
   public readonly bytes: number;
   public readonly cachedAt: number;
+  /** 边看边往后缓存自动排进来的集（fqapp CachedEpisode.auto）：
+   *  只用来决定能不能滚动清理，用户手动下的一律不动。 */
+  public readonly auto: boolean;
 
   constructor(seriesId: string, itemId: string, title: string, seriesTitle: string,
-    cover: string, kind: string, index: number, bytes: number, cachedAt: number) {
+    cover: string, kind: string, index: number, bytes: number, cachedAt: number, auto: boolean) {
     this.seriesId = seriesId;
     this.itemId = itemId;
     this.title = title;
@@ -48,6 +51,7 @@ export class FqCachedEpisode {
     this.index = index;
     this.bytes = bytes;
     this.cachedAt = cachedAt;
+    this.auto = auto;
   }
 }
 
@@ -156,7 +160,8 @@ export class FqDramaCacheStore {
       }
       FqDramaCacheStore.cache.set(itemId, new FqCachedEpisode(seriesId, itemId,
         fqStr(rec, 'title'), fqStr(rec, 'seriesTitle'), fqStr(rec, 'cover'),
-        fqStr(rec, 'kind'), fqNum(rec, 'index'), fqNum(rec, 'bytes'), fqNum(rec, 'cachedAt')));
+        fqStr(rec, 'kind'), fqNum(rec, 'index'), fqNum(rec, 'bytes'), fqNum(rec, 'cachedAt'),
+        rec['auto'] === true));
     } catch (error) {
       // 单条损坏跳过
     }
@@ -202,6 +207,7 @@ export class FqDramaCacheStore {
     rec['index'] = episode.index;
     rec['bytes'] = episode.bytes;
     rec['cachedAt'] = episode.cachedAt;
+    rec['auto'] = episode.auto;
     try {
       pref.putSync(FQ_EPISODE_KEY_PREFIX + episode.itemId, JSON.stringify(rec));
       const ids: string[] = [];

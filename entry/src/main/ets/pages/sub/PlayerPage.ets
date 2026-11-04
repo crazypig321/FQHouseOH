@@ -29,6 +29,10 @@
  *   播放设置「离线缓存」行呼出缓存选集半模态（已缓存集置灰打勾、任务态
  *   实时进度、默认全选未缓存集、头部「管理」进剧集缓存管理页）；
  *   已缓存集 loadEpisode 直接播本地文件，在线取流失败也回退缓存文件。
+ * - 边看边往后缓存（fqapp _scheduleAutoCache/_autoCacheNext/_trimAutoCache）：
+ *   起播 2s 后把后面 N 集自动排进下载队列（剧集缓存页「边看边缓存」开关 +
+ *   3/5/10 档，默认 5，仅 Wi-Fi）；自动缓存的旧集跟着播放进度滚动清理
+ *   （只留当前集之前 2×N 集以后，手动下载不动）；入队后剧集缓存页实时显示。
  * - 同系列（fqapp RelatedSeriesSheet/_switchRelatedSeries 语义）：选集面板
  *   「同系列」入口呼出同系列剧列表（/api/v1/series/{id}/related，双列卡片：
  *   封面 + 标题 + 集数；不可播置灰文案仍展示），选中先暂停存进度再进新剧
@@ -54,6 +58,8 @@
  */
 
 import { display, window, PiPWindow } from '@kit.ArkUI';
+import { connection } from '@kit.NetworkKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { common } from '@kit.AbilityKit';
 import { Player, PlayerSurface, Media, PlayerConfig } from '@mpv-ohos/mpv-arkts';
 import { CommonNav } from '../../view/CommonNav';
@@ -118,6 +124,10 @@ const FQ_ADJUST_HIDE_MS: number = 600;
 const FQ_ADJUST_FULL_SWIPE: number = 1.2;
 /** 首次调节亮度起始百分比（窗口亮度只写不读，无从取当前值）。 */
 const FQ_ADJUST_INIT_PERCENT: number = 50;
+/** 边看边往后缓存起播延时（fqapp Timer 2s：起播稳定后再排，避免抢起播带宽）。 */
+const FQ_AUTO_CACHE_DELAY_MS: number = 2000;
+/** 边看边往后缓存诊断日志 tag。 */
+const FQ_AUTO_CACHE_LOG_TAG: string = 'FqAutoCache';
 
 /** 横滑快进/快退：滑过一整屏宽度走过的秒数。 */
 const FQ_SEEK_FULL_SWIPE_SEC: number = 90;
@@ -293,6 +303,12 @@ export struct PlayerPage {
   private warmQuality: string = '';
   /** 预热取流进行中（防重复发起）。 */
   private warmInFlight: boolean = false;
+  /** 边看边往后缓存已排过的集下标（-1 未排；同一集起播/换流/重试只排一次）。 */
+  private autoCacheFor: number = -1;
+  /** 边看边往后缓存延时定时器（0 无任务）。 */
+  private autoCacheTimer: number = 0;
+  /** 延时定时器对应集下标（同集首帧多次到达只推延不重排）。 */
+  private autoCacheTimerIndex: number = -1;
   /** 本剧续播进度（进页恢复；暂停/切集/周期/退出保存）。 */
   private progress: FqWatchedProgress | null = null;
   /** 进页待恢复的续播位置（秒；仅首开命中的那一次消费）。 */
@@ -505,6 +521,11 @@ export struct PlayerPage {
     this.cancelLockHide();
     this.cancelAdjustHide();
     this.cancelSideLocate();
+    if (this.autoCacheTimer !== 0) {
+      clearTimeout(this.autoCacheTimer);
+      this.autoCacheTimer = 0;
+      this.autoCacheTimerIndex = -1;
+    }
     if (this.danmakuTimer !== 0) {
       clearInterval(this.danmakuTimer);
       this.danmakuTimer = 0;
@@ -1131,20 +1152,22 @@ export struct PlayerPage {
           this.exitFullscreen();
         })
 
-        Text(this.title)
-          .fontSize(16)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(Color.White)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .layoutWeight(1)
-          .padding({ left: 4 })
-
-        Text(`第${this.episodes.length > 0 ? this.index + 1 : 1}集`)
-          .fontSize(16)
-          .fontColor(Color.White)
-          .maxLines(1)
-          .padding({ left: 6, right: 4 })
+        Row({ space: 6 }) {
+          Text(this.title)
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(Color.White)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .flexShrink(1)
+            .padding({ left: 4 })
+          Text(`第${this.episodes.length > 0 ? this.index + 1 : 1}集`)
+            .fontSize(16)
+            .fontColor(Color.White)
+            .maxLines(1)
+        }
+        .layoutWeight(1)
+        .alignItems(VerticalAlign.Center)
 
         Row() {
           SymbolGlyph($r('sys.symbol.dot_grid_2x2'))
@@ -1655,7 +1678,7 @@ export struct PlayerPage {
       const episode: FqChapter | undefined = this.episodes[i];
       if (episode !== undefined && itemIds.includes(episode.itemId)) {
         this.dl.enqueue(PlayerNavParams.contentId, episode.itemId, episode.title,
-          this.title, PlayerNavParams.cover, PlayerNavParams.kind, i + 1);
+          this.title, PlayerNavParams.cover, PlayerNavParams.kind, i + 1, false);
       }
     }
     this.cacheSelectedIds = new Set<string>();
@@ -2384,8 +2407,9 @@ export struct PlayerPage {
   }
 
   /** 侧边栏·离线缓存（横屏全屏形态）：头部左侧返回（回播放设置侧边栏）+ 标题 +
-   *  右上关闭；「管理」行在头部下方（进剧集缓存管理页）；>30 集分页条横向滚动直达；
-   *  集数网格 3 列复选（4 列勾选态文字超出单格宽度）/全选/下载行与底部半模态同款逻辑。 */
+   *  右上关闭；「管理」行在头部下方（进剧集缓存管理页）；
+   *  >30 集分页条横向滚动直达；集数网格 3 列复选（4 列勾选态文字超出单格宽度）/
+   *  全选/下载行与底部半模态同款逻辑。 */
   @Builder
   private SideCache() {
     Column() {
@@ -3302,6 +3326,135 @@ export struct PlayerPage {
     }
     // 弹幕整池作废（切集），按 0 起取新集首批
     this.resetDanmaku();
+    // 边看边往后缓存：起播延时 2s 排后面 N 集（同集去重，切集作废旧定时器）
+    this.scheduleAutoCache();
+  }
+
+  /**
+   * 边看边往后缓存（fqapp _scheduleAutoCache 同款）：这一集起播后延时 2s 把
+   * 后面 ahead 集排进离线下载队列（仅 Wi-Fi、只保留最近一段），断网也能接着看。
+   * 同一集起播/换流/重试只排一次；切集/离页（loadToken 变化）后旧定时器作废。
+   */
+  private scheduleAutoCache(): void {
+    if (FqAppSettingsStore.getDramaAutoCacheAhead() <= 0) {
+      hilog.info(0x0001, FQ_AUTO_CACHE_LOG_TAG, 'schedule skip: ahead=0 (off)');
+      return;
+    }
+    if (this.autoCacheFor === this.index) {
+      return;
+    }
+    if (this.autoCacheTimer !== 0 && this.autoCacheTimerIndex === this.index) {
+      return;
+    }
+    if (this.autoCacheTimer !== 0) {
+      clearTimeout(this.autoCacheTimer);
+    }
+    const token: number = this.loadToken;
+    const index: number = this.index;
+    this.autoCacheTimerIndex = index;
+    this.autoCacheTimer = setTimeout((): void => {
+      this.autoCacheTimer = 0;
+      this.autoCacheTimerIndex = -1;
+      // 切集/离页后旧定时器作废（fqapp 用播放器实例判活，这里用加载令牌等价）
+      if (token !== this.loadToken) {
+        hilog.info(0x0001, FQ_AUTO_CACHE_LOG_TAG,
+          `timer stale: token ${token} != ${this.loadToken}`);
+        return;
+      }
+      this.autoCacheNext();
+    }, FQ_AUTO_CACHE_DELAY_MS);
+    hilog.info(0x0001, FQ_AUTO_CACHE_LOG_TAG,
+      `scheduled index=${index} token=${token} in ${FQ_AUTO_CACHE_DELAY_MS}ms`);
+  }
+
+  /**
+   * 排后面 ahead 集自动缓存（fqapp autoCacheEpisodes 范围：index+1 .. index+ahead）。
+   * 仅 Wi-Fi：测不出网络形态按「不是 Wi-Fi」处理——自动缓存没有流量确认兜底；
+   * 排上了才算这一集处理过，早退不算，否则该集永远没机会再自动缓存。
+   */
+  private async autoCacheNext(): Promise<void> {
+    const index: number = this.index;
+    const ahead: number = FqAppSettingsStore.getDramaAutoCacheAhead();
+    if (ahead <= 0) {
+      hilog.info(0x0001, FQ_AUTO_CACHE_LOG_TAG, 'next skip: ahead=0 (off)');
+      return;
+    }
+    const start: number = index + 1;
+    if (start <= 0 || start >= this.episodes.length) {
+      hilog.info(0x0001, FQ_AUTO_CACHE_LOG_TAG,
+        `next skip: no upcoming (index=${index}, eps=${this.episodes.length})`);
+      return;
+    }
+    if (FqAppSettingsStore.isDramaAutoCacheWifiOnly() && !(await this.isUnmeteredOnline())) {
+      hilog.info(0x0001, FQ_AUTO_CACHE_LOG_TAG, 'next skip: wifi-only gate blocked');
+      return;
+    }
+    const end: number = Math.min(start + ahead, this.episodes.length);
+    let enqueued: number = 0;
+    for (let i: number = start; i < end; i++) {
+      const episode: FqChapter | undefined = this.episodes[i];
+      if (episode !== undefined) {
+        this.dl.enqueue(PlayerNavParams.contentId, episode.itemId, episode.title,
+          this.title, PlayerNavParams.cover, PlayerNavParams.kind, i + 1, true);
+        enqueued++;
+      }
+    }
+    hilog.info(0x0001, FQ_AUTO_CACHE_LOG_TAG,
+      `enqueued ${enqueued} auto episodes (index=${index}, ahead=${ahead})`);
+    this.autoCacheFor = index;
+    this.trimAutoCache(ahead);
+  }
+
+  /** 当前默认网络是否 Wi-Fi / 以太网承载（fqapp foldConnectivity 同款判据：
+   *  按承载类型判定而非系统 metered 标志——部分设备把 Wi-Fi 网络标为计量，
+   *  用 metered 标志会误拦自动缓存；探测失败按计量网络处理，fail-closed）。 */
+  private async isUnmeteredOnline(): Promise<boolean> {
+    try {
+      const hasNet: boolean = await connection.hasDefaultNet();
+      if (!hasNet) {
+        hilog.info(0x0001, FQ_AUTO_CACHE_LOG_TAG, 'net probe: no default net');
+        return false;
+      }
+      const netHandle: connection.NetHandle = await connection.getDefaultNet();
+      const caps: connection.NetCapabilities = await connection.getNetCapabilities(netHandle);
+      let unmetered: boolean = false;
+      const bearers: string[] = [];
+      for (const bearer of caps.bearerTypes) {
+        bearers.push(`${bearer}`);
+        if (bearer === connection.NetBearType.BEARER_WIFI
+          || bearer === connection.NetBearType.BEARER_ETHERNET) {
+          unmetered = true;
+        }
+      }
+      hilog.info(0x0001, FQ_AUTO_CACHE_LOG_TAG,
+        `net probe: bearers=${bearers.join('|')}, unmetered=${unmetered}`);
+      return unmetered;
+    } catch (error) {
+      hilog.info(0x0001, FQ_AUTO_CACHE_LOG_TAG, 'net probe: exception, treated as metered');
+      return false;
+    }
+  }
+
+  /**
+   * 跟着播放进度丢掉自动缓存的旧集（fqapp _trimAutoCache）：只删 auto 记录，
+   * 用户手动下的集一律不动；只留当前集之前 2×ahead 以后的。
+   */
+  private trimAutoCache(ahead: number): void {
+    const cutoff: number = this.index - ahead * 2;
+    if (cutoff <= 0) {
+      return;
+    }
+    const doomed: string[] = [];
+    for (const episode of FqDramaCacheStore.episodesOf(PlayerNavParams.contentId)) {
+      if (episode.auto && episode.index - 1 < cutoff) {
+        doomed.push(episode.itemId);
+      }
+    }
+    for (const itemId of doomed) {
+      FqDramaCacheStore.removeEpisode(itemId);
+    }
+    hilog.info(0x0001, FQ_AUTO_CACHE_LOG_TAG,
+      `trim: cutoff=${cutoff}, removed=${doomed.length}`);
   }
 
   /**

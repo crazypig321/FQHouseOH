@@ -20,7 +20,11 @@
  * - changelogShownVersion：更新日志已展示到的版本号（空 = 尚未记录，首次安装）；
  *   Index 冷启动比对当前版本号，不同则自动弹出更新日志 sheet；
  * - chapterCacheLimitMb：章节自动缓存大小上限（MB，默认 80，1-102400 即 1MB-100GB；
- *   章节缓存页右上角调节，仅约束阅读自动缓存，整本下载 pin 在预算外不受限）。
+ *   章节缓存页右上角调节，仅约束阅读自动缓存，整本下载 pin 在预算外不受限）；
+ * - dramaAutoCacheAhead：剧集边看边往后缓存集数（对齐 fqapp DramaCachePreferences：
+ *   默认 5，0 = 关，0-50；播放页缓存 sheet「边看边缓存」开关 + 3/5/10 档）；
+ * - dramaAutoCacheWifiOnly：剧集自动缓存仅 Wi-Fi（默认开；计量网络不自动缓存，
+ *   手动下载不受影响）。
  */
 
 import preferences from '@ohos.data.preferences';
@@ -42,6 +46,8 @@ const FQ_SETTINGS_KEY_TTS_PERSON: string = 'ttsPerson';
 const FQ_SETTINGS_KEY_TTS_RATE: string = 'ttsRate';
 const FQ_SETTINGS_KEY_SMART_REACH: string = 'smartReach';
 const FQ_SETTINGS_KEY_CHAPTER_CACHE_LIMIT: string = 'chapterCacheLimitMb';
+const FQ_SETTINGS_KEY_DRAMA_AUTO_AHEAD: string = 'dramaAutoCacheAhead';
+const FQ_SETTINGS_KEY_DRAMA_AUTO_WIFI: string = 'dramaAutoCacheWifiOnly';
 const FQ_SETTINGS_KEY_LAN_SHARE: string = 'apiLanShare';
 
 /** 章节自动缓存大小上限默认值（MB）。 */
@@ -50,6 +56,12 @@ export const FQ_CHAPTER_CACHE_LIMIT_DEFAULT_MB: number = 80;
 export const FQ_CHAPTER_CACHE_LIMIT_MIN_MB: number = 1;
 /** 章节自动缓存大小上限最大值（MB，100GB）。 */
 export const FQ_CHAPTER_CACHE_LIMIT_MAX_MB: number = 102400;
+/** 剧集边看边往后缓存默认集数（0 = 关；对齐 fqapp DramaCachePreferences.defaultAhead）。 */
+export const FQ_DRAMA_AUTO_CACHE_AHEAD_DEFAULT: number = 5;
+/** 剧集边看边往后缓存集数上限（对齐 fqapp clamp(0, 50)）。 */
+export const FQ_DRAMA_AUTO_CACHE_AHEAD_MAX: number = 50;
+/** 边看边往后缓存可选档位（fqapp presetAheads 除 0 = 关）。 */
+export const FQ_DRAMA_AUTO_CACHE_AHEAD_PRESETS: number[] = [3, 5, 10];
 
 /** 深色模式档位：跟随系统。 */
 export const FQ_THEME_FOLLOW: number = 0;
@@ -81,6 +93,10 @@ export class FqAppSettingsStore {
   private static apiLanShare: boolean = false;
   /** 章节自动缓存大小上限（MB）。 */
   private static chapterCacheLimitMb: number = FQ_CHAPTER_CACHE_LIMIT_DEFAULT_MB;
+  /** 剧集边看边往后缓存集数（0 = 关；播放中自动续存后面 N 集，仅 Wi-Fi）。 */
+  private static dramaAutoCacheAhead: number = FQ_DRAMA_AUTO_CACHE_AHEAD_DEFAULT;
+  /** 剧集自动缓存仅 Wi-Fi（计量网络不自动缓存；手动下载不受影响）。 */
+  private static dramaAutoCacheWifiOnly: boolean = true;
 
   public static init(context: common.Context): void {
     if (FqAppSettingsStore.pref !== null) {
@@ -150,6 +166,16 @@ export class FqAppSettingsStore {
       if (typeof rawCacheLimit === 'number' && rawCacheLimit >= FQ_CHAPTER_CACHE_LIMIT_MIN_MB
         && rawCacheLimit <= FQ_CHAPTER_CACHE_LIMIT_MAX_MB) {
         FqAppSettingsStore.chapterCacheLimitMb = rawCacheLimit;
+      }
+      const rawDramaAhead: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_DRAMA_AUTO_AHEAD,
+        FQ_DRAMA_AUTO_CACHE_AHEAD_DEFAULT);
+      if (typeof rawDramaAhead === 'number' && rawDramaAhead >= 0
+        && rawDramaAhead <= FQ_DRAMA_AUTO_CACHE_AHEAD_MAX) {
+        FqAppSettingsStore.dramaAutoCacheAhead = Math.round(rawDramaAhead);
+      }
+      const rawDramaWifi: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_DRAMA_AUTO_WIFI, true);
+      if (typeof rawDramaWifi === 'boolean') {
+        FqAppSettingsStore.dramaAutoCacheWifiOnly = rawDramaWifi;
       }
     } catch (error) {
       // 损坏数据按默认值处理
@@ -439,6 +465,52 @@ export class FqAppSettingsStore {
   /** 局域网共享开关（对齐 fqapp LanSharePreferences：默认关，开=本地接口对局域网开放）。 */
   public static isLanShareEnabled(): boolean {
     return FqAppSettingsStore.apiLanShare;
+  }
+
+  /** 剧集边看边往后缓存集数（0 = 不自动缓存；对齐 fqapp DramaCachePreferences.ahead）。 */
+  public static getDramaAutoCacheAhead(): number {
+    return FqAppSettingsStore.dramaAutoCacheAhead;
+  }
+
+  /** 设置边看边往后缓存集数（范围外静默忽略）。 */
+  public static setDramaAutoCacheAhead(ahead: number): void {
+    if (!Number.isFinite(ahead) || ahead < 0 || ahead > FQ_DRAMA_AUTO_CACHE_AHEAD_MAX) {
+      return;
+    }
+    FqAppSettingsStore.dramaAutoCacheAhead = Math.round(ahead);
+    const pref: preferences.Preferences | null = FqAppSettingsStore.pref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.putSync(FQ_SETTINGS_KEY_DRAMA_AUTO_AHEAD, FqAppSettingsStore.dramaAutoCacheAhead);
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
+  }
+
+  /** 剧集自动缓存仅 Wi-Fi（默认开；测不出网络形态按不满足处理）。 */
+  public static isDramaAutoCacheWifiOnly(): boolean {
+    return FqAppSettingsStore.dramaAutoCacheWifiOnly;
+  }
+
+  public static setDramaAutoCacheWifiOnly(wifiOnly: boolean): void {
+    FqAppSettingsStore.dramaAutoCacheWifiOnly = wifiOnly;
+    const pref: preferences.Preferences | null = FqAppSettingsStore.pref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.putSync(FQ_SETTINGS_KEY_DRAMA_AUTO_WIFI, wifiOnly);
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
   }
 
   public static setLanShare(enabled: boolean): void {

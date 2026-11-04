@@ -1,8 +1,9 @@
 /**
  * 缓存管理手风琴列表公共组件（剧集/听书/漫画缓存页共用）：
  * - 数据模型展示就绪（分组/明细文案由页面预拼装，组件不感知各页 store 类型）；
- * - 结构：统计卡（@BuilderParam 注入）+ 分组头行（图标块+标题+meta+删除+展开箭头）
- *   + 明细行（label+标题+meta+可选尾随按钮+删除）+ 任务行（页面 @BuilderParam 注入）；
+ * - 结构：统计卡（@BuilderParam 注入）+ 分组头行（图标块+标题+meta+可选尾随
+ *   按钮+删除+展开箭头：收起右箭头 / 展开下箭头）+ 明细行（label+标题+meta+
+ *   可选尾随按钮+删除）+ 任务行（页面 @BuilderParam 注入）；
  * - LazyForEach 懒加载；进入默认全部收起，点击头行 animateTo 展开/收起；
  * - 删除走页面回调（确认弹窗与 store 操作留在各页）。
  */
@@ -121,12 +122,16 @@ export struct FqCacheAccordionList {
   @Param bottomInset: number = 16;
   /** 滚动控制器（页面 CommonNav 共用）。 */
   @Param scroller: Scroller = new Scroller();
+  /** 列表首部设置条目（统计卡之前；缺省不渲染，剧集缓存页注入「边看边缓存」等）。 */
+  @BuilderParam settingsBuilder: () => void = fqAccordionEmptyBuilder;
   /** 统计卡（列表首项，页面注入含操作按钮的 FqCacheStatsCard）。 */
   @BuilderParam statsBuilder: () => void = fqAccordionEmptyBuilder;
   /** 任务行组（页面 @Builder，绑各页 @Trace 任务列表实时渲染）。 */
   @BuilderParam taskRowsOf: (groupId: string) => void = fqAccordionEmptyBuilder;
   /** 明细行尾随按钮（剧集页“导出”；缺省不渲染）。 */
   @BuilderParam detailTrailingOf: (detail: FqCacheDetailItem) => void = fqAccordionEmptyBuilder;
+  /** 分组头行尾随按钮（剧集页整剧“导出”；缺省不渲染）。 */
+  @BuilderParam groupTrailingOf: (group: FqCacheGroupItem) => void = fqAccordionEmptyBuilder;
   /** 删整组确认（页面弹确认并调 store）。 */
   @Event groupDeleteClick: (group: FqCacheGroupItem) => void = (group: FqCacheGroupItem) => {
   };
@@ -181,6 +186,10 @@ export struct FqCacheAccordionList {
   build() {
     List({ space: 10, scroller: this.scroller }) {
       ListItem() {
+        this.settingsBuilder()
+      }.padding({ bottom: 12 })
+
+      ListItem() {
         this.statsBuilder()
       }
 
@@ -234,6 +243,8 @@ export struct FqCacheAccordionList {
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
 
+      this.groupTrailingOf(group)
+
       SymbolGlyph($r('sys.symbol.trash'))
         .fontSize(15)
         .fontColor([$r('sys.color.font_tertiary')])
@@ -242,10 +253,10 @@ export struct FqCacheAccordionList {
           this.groupDeleteClick(group);
         })
 
-      SymbolGlyph($r('sys.symbol.chevron_right'))
+      SymbolGlyph(this.isExpanded(group.id)
+        ? $r('sys.symbol.chevron_down') : $r('sys.symbol.chevron_right'))
         .fontSize(13)
         .fontColor([$r('sys.color.font_tertiary')])
-        .rotate({ angle: this.isExpanded(group.id) ? 90 : 0 })
     }
     .padding({ left: 14, right: 14, top: 12, bottom: 12 })
     .borderRadius(16)

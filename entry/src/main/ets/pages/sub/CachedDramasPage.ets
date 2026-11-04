@@ -1,9 +1,11 @@
 /**
  * 剧集缓存页（我的-剧集缓存入口，对齐 fqapp cached_dramas_page）：
- * 统计数字聚合 + 公共手风琴 FqCacheAccordionList（剧卡头行/集明细行/任务行
- * 由组件渲染，本页只提供分组数据、任务行 @Builder 与集行尾随“导出”按钮）；
- * 任务行绑定 @ObservedV2 下载任务实时进度；单集导出/单集删除/整剧删除/清空
- * 走确认；未入库任务按剧分组为临时卡；空态引导文案。
+ * 列表首部设置条目（设置页同款样式：「边看边缓存」开关 + 3/5/10 集档位、
+ * 「仅 Wi-Fi 自动缓存」开关，空态同样展示）+ 统计数字聚合 + 公共手风琴
+ * FqCacheAccordionList（剧卡头行/集明细行/任务行由组件渲染，本页只提供
+ * 分组数据、任务行 @Builder 与集行尾随“导出”按钮）；任务行绑定 @ObservedV2
+ * 下载任务实时进度；单集导出/单集删除/整剧删除/清空走确认；未入库任务按剧
+ * 分组为临时卡；空态引导文案。
  */
 
 import { CommonNav } from '../../view/CommonNav';
@@ -14,8 +16,12 @@ import {
   FqCacheGroupItem,
   FqCacheDetailItem,
 } from '../../view/FqCacheAccordion';
+import { FqColorUtils } from '../../utils/FqColorUtils';
+import { appState } from '../../entryability/AppState';
+import { FqAppSettingsStore, FQ_DRAMA_AUTO_CACHE_AHEAD_DEFAULT,
+  FQ_DRAMA_AUTO_CACHE_AHEAD_PRESETS } from '../../core/FqAppSettingsStore';
 import { FqDramaCacheStore, FqCachedDramaSummary, FqCachedEpisode } from '../../core/FqDramaCacheStore';
-import { fqExportCachedEpisode } from '../../core/FqCacheExport';
+import { fqExportCachedEpisode, fqExportDirName } from '../../core/FqCacheExport';
 import { fqDramaDownloader, FqDramaDownloader, FqDramaDownloadTask, DramaDownloadStatus } from '../../core/FqDramaDownloader';
 import { fqStoreBus, FqStoreBus } from '../../core/FqStoreBus';
 import { DialogManager } from '../../utils/DialogUtils';
@@ -24,6 +30,10 @@ import { DialogManager } from '../../utils/DialogUtils';
 const FQ_DRAMA_TINTS: string[] = ['#FFEF5038', '#FF8B5CF6', '#FF3B82F6', '#FF10B981', '#FF0EA5E9', '#FFF43F5E'];
 const FQ_DRAMA_TINT: string = '#FFEF5038';
 const FQ_DANGER_TINT: string = '#FFF43F5E';
+/** 「边看边缓存」设置条目图标色。 */
+const FQ_AUTO_CACHE_TINT: string = '#FF10B981';
+/** 「仅 Wi-Fi 自动缓存」设置条目图标色。 */
+const FQ_WIFI_TINT: string = '#FF0EA5E9';
 
 @ComponentV2
 export struct CachedDramasPage {
@@ -36,6 +46,10 @@ export struct CachedDramasPage {
   @Local groups: FqCacheGroupItem[] = [];
   /** 集记录快查（集行导出/删除回调由 detail.id 定位完整记录）。 */
   private episodeById: Map<string, FqCachedEpisode> = new Map<string, FqCachedEpisode>();
+  /** 边看边往后缓存集数（列表首部设置条目；0 = 关）。 */
+  @Local autoAhead: number = 0;
+  /** 边看边往后缓存仅 Wi-Fi（列表首部设置条目）。 */
+  @Local autoWifiOnly: boolean = true;
   @Local dramaCount: number = 0;
   @Local episodeCount: number = 0;
   @Local totalBytes: number = 0;
@@ -51,7 +65,26 @@ export struct CachedDramasPage {
   }
 
   aboutToAppear(): void {
+    this.syncAutoCacheSettings();
     this.refresh();
+  }
+
+  /** 从设置存储同步「边看边缓存」两项开关的显示状态。 */
+  private syncAutoCacheSettings(): void {
+    this.autoAhead = FqAppSettingsStore.getDramaAutoCacheAhead();
+    this.autoWifiOnly = FqAppSettingsStore.isDramaAutoCacheWifiOnly();
+  }
+
+  /** 写边看边缓存集数（持久化 + 档位高亮刷新；范围外静默忽略）。 */
+  private setAutoAhead(ahead: number): void {
+    FqAppSettingsStore.setDramaAutoCacheAhead(ahead);
+    this.syncAutoCacheSettings();
+  }
+
+  /** 写「仅 Wi-Fi 自动缓存」开关（持久化 + 显示刷新）。 */
+  private setAutoWifiOnly(wifiOnly: boolean): void {
+    FqAppSettingsStore.setDramaAutoCacheWifiOnly(wifiOnly);
+    this.syncAutoCacheSettings();
   }
 
   /** 重聚合剧分组（含未入库任务临时组）与统计数字。 */
@@ -159,17 +192,43 @@ export struct CachedDramasPage {
       scroller: this.scroller,
     }) {
       if (!this.hasContent) {
-        FqCacheEmptyView({
-          icon: $r('sys.symbol.download'),
-          tint: FQ_DRAMA_TINT,
-          title: '暂无离线缓存',
-          subtitle: '播放页选集面板“缓存”选择想下载的集；下载的内容不会被自动清理。',
-        })
+        List() {
+          ListItem(){
+
+          }
+
+          ListItem() {
+            Stack({alignContent: Alignment.Center}){
+                FqCacheEmptyView({
+                  icon: $r('sys.symbol.download'),
+                  tint: FQ_DRAMA_TINT,
+                  title: '暂无离线缓存',
+                  subtitle: '播放页选集面板“缓存”选择想下载的集；下载的内容不会被自动清理。',
+                  heightValue: 'auto'
+                }).offset({y: '-10%'})
+
+              Row(){
+                this.AutoCacheSettings()
+              }.layoutGravity(LocalizedAlignment.TOP)// stack组件中子组件对齐位置
+            }
+            .width('100%')
+            .height('100%')
+          }
+        }
+        .width('100%')
+        .height('100%')
+        .padding({ left: 16, right: 16 })
+        .contentStartOffset(appState.topRect + 56)
+        .contentEndOffset(appState.bottomRect + 16)
+        .scrollBar(BarState.Off)
       } else {
         FqCacheAccordionList({
           groups: this.groups,
           icon: $r('sys.symbol.film'),
           scroller: this.scroller,
+          settingsBuilder: (): void => {
+            this.AutoCacheSettings()
+          },
           statsBuilder: (): void => {
             this.StatsCard()
           },
@@ -178,6 +237,9 @@ export struct CachedDramasPage {
           },
           detailTrailingOf: (detail: FqCacheDetailItem): void => {
             this.ExportButton(detail)
+          },
+          groupTrailingOf: (group: FqCacheGroupItem): void => {
+            this.GroupExportButton(group)
           },
           groupDeleteClick: (group: FqCacheGroupItem): void => {
             this.confirmRemoveDrama(group);
@@ -188,6 +250,123 @@ export struct CachedDramasPage {
         })
       }
     }
+  }
+
+  /** 列表首部设置条目组（设置页同款条目样式）：边看边缓存 + 仅 Wi-Fi 自动缓存。 */
+  @Builder
+  private AutoCacheSettings() {
+    Column({ space: 10 }) {
+      this.AutoCacheRow()
+      this.WifiOnlyRow()
+    }
+    .width('100%')
+  }
+
+  /** 设置条目：边看边缓存（开关 + 3/5/10 集档位；开 = 起播自动往后续存）。 */
+  @Builder
+  private AutoCacheRow() {
+    Column({ space: 10 }) {
+      Row({ space: 12 }) {
+        Stack() {
+          SymbolGlyph($r('sys.symbol.arrow_down_circle'))
+            .fontSize(17)
+            .fontColor([FQ_AUTO_CACHE_TINT])
+        }
+        .width(34)
+        .height(34)
+        .borderRadius(10)
+        .backgroundColor(FqColorUtils.withOpacity(FQ_AUTO_CACHE_TINT, 0.12))
+
+        Column({ space: 3 }) {
+          Text('边看边缓存')
+            .fontSize(14.5)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('sys.color.font_primary'))
+          Text(this.autoAhead > 0
+            ? `看到哪集就自动往后续存 ${this.autoAhead} 集`
+            : '已关闭，手动缓存不受影响')
+            .fontSize(11.5)
+            .fontColor($r('sys.color.font_secondary'))
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+
+        Toggle({ type: ToggleType.Switch, isOn: this.autoAhead > 0 })
+          .selectedColor(appState.accentColor)
+          .onChange((isOn: boolean): void => {
+            this.setAutoAhead(isOn ? FQ_DRAMA_AUTO_CACHE_AHEAD_DEFAULT : 0);
+          })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      if (this.autoAhead > 0) {
+        Row({ space: 8 }) {
+          Text('后续集数')
+            .fontSize(12)
+            .fontColor($r('sys.color.font_secondary'))
+          ForEach(FQ_DRAMA_AUTO_CACHE_AHEAD_PRESETS, (count: number) => {
+            Text(`${count} 集`)
+              .fontSize(12.5)
+              .fontColor(this.autoAhead === count ? Color.White : appState.accentColor)
+              .backgroundColor(this.autoAhead === count ? appState.accentColor
+                : FqColorUtils.withOpacity(appState.accentColor, 0.12))
+              .borderRadius(12)
+              .padding({ left: 12, right: 12, top: 5, bottom: 5 })
+              .onClick((): void => {
+                this.setAutoAhead(count);
+              })
+          }, (count: number) => `${count}`)
+        }
+        .width('100%')
+        .padding({ left: 46 })
+        .alignItems(VerticalAlign.Center)
+      }
+    }
+    .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+    .borderRadius(16)
+    .backgroundColor($r('sys.color.comp_background_list_card'))
+    .border({ width: 0.6, color: appState.isDark ? $r('sys.color.comp_divider') : Color.Transparent })
+    .width('100%')
+  }
+
+  /** 设置条目：仅 Wi-Fi 自动缓存（关 = 计量/移动网络也会自动缓存）。 */
+  @Builder
+  private WifiOnlyRow() {
+    Row({ space: 12 }) {
+      Stack() {
+        SymbolGlyph($r('sys.symbol.wifi'))
+          .fontSize(17)
+          .fontColor([FQ_WIFI_TINT])
+      }
+      .width(34)
+      .height(34)
+      .borderRadius(10)
+      .backgroundColor(FqColorUtils.withOpacity(FQ_WIFI_TINT, 0.12))
+
+      Column({ space: 3 }) {
+        Text('仅 Wi-Fi 自动缓存')
+          .fontSize(14.5)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('sys.color.font_primary'))
+        Text('关闭后移动数据网络也会自动缓存')
+          .fontSize(11.5)
+          .fontColor($r('sys.color.font_secondary'))
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+
+      Toggle({ type: ToggleType.Switch, isOn: this.autoWifiOnly })
+        .selectedColor(appState.accentColor)
+        .onChange((isOn: boolean): void => {
+          this.setAutoWifiOnly(isOn);
+        })
+    }
+    .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+    .borderRadius(16)
+    .backgroundColor($r('sys.color.comp_background_list_card'))
+    .border({ width: 0.6, color: appState.isDark ? $r('sys.color.comp_divider') : Color.Transparent })
+    .width('100%')
   }
 
   /** 统计卡：N 部 · M 集 · 占用 + 暂停全部/继续全部/清空。 */
@@ -242,6 +421,63 @@ export struct CachedDramasPage {
       .onClick((): void => {
         this.confirmExportEpisode(this.episodeById.get(detail.id) ?? null);
       })
+  }
+
+  /** 剧卡头行尾随“导出”按钮（groupTrailingOf 注入公共组件）：整剧一键导出；
+   *  无已缓存集的临时组（缓存中）不渲染。 */
+  @Builder
+  private GroupExportButton(group: FqCacheGroupItem) {
+    if (FqDramaCacheStore.episodesOf(group.id).length > 0) {
+      Text('导出')
+        .fontSize(12)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(FQ_DRAMA_TINT)
+        .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+        .onClick((): void => {
+          this.confirmExportDrama(group);
+        })
+    }
+  }
+
+  /** 整剧导出确认：提示导出路径后再执行。 */
+  private confirmExportDrama(group: FqCacheGroupItem): void {
+    const episodeCount: number = FqDramaCacheStore.episodesOf(group.id).length;
+    if (episodeCount === 0) {
+      return;
+    }
+    DialogManager.ShowConfirm('导出整部剧',
+      `《${group.title}》已缓存的 ${episodeCount} 集将导出到 Download/${fqExportDirName()} 文件夹里。`,
+      '导出',
+      (): void => {
+        this.exportDrama(group.id);
+      });
+  }
+
+  /** 顺序导出整部剧已缓存集（Download/包名/剧名/ 下逐集 mp4；源文件缺失跳过计数）。 */
+  private async exportDrama(seriesId: string): Promise<void> {
+    if (this.exporting) {
+      return;
+    }
+    this.exporting = true;
+    this.getUIContext().getPromptAction().showToast({ message: '正在导出…', duration: 1000 });
+    const episodes: FqCachedEpisode[] = FqDramaCacheStore.episodesOf(seriesId);
+    let done: number = 0;
+    let failed: number = 0;
+    for (const episode of episodes) {
+      try {
+        await fqExportCachedEpisode(getContext(this), episode);
+        done++;
+      } catch (error) {
+        failed++;
+      }
+    }
+    this.exporting = false;
+    if (done > 0) {
+      const message: string = failed > 0 ? `已导出 ${done} 集（${failed} 集失败）` : `已导出 ${done} 集`;
+      this.getUIContext().getPromptAction().showToast({ message: message, duration: 2500 });
+    } else {
+      this.getUIContext().getPromptAction().showToast({ message: '导出失败，请重试', duration: 2000 });
+    }
   }
 
   /** 任务行组（ForEach 绑定 @Trace taskList：进度实时、增删动态）。 */

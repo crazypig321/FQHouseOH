@@ -77,6 +77,7 @@ export struct FqCacheEmptyView {
   @Param tint: string = '#FF3B82F6';
   @Param title: string = '';
   @Param subtitle: string = '';
+  @Param heightValue: Length = '100%'
 
   build() {
     Column({ space: 16 }) {
@@ -105,6 +106,6 @@ export struct FqCacheEmptyView {
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
     .width('100%')
-    .height('100%')
+    .height(this.heightValue)
   }
 }
