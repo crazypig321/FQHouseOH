@@ -11,6 +11,7 @@ import { fileIo } from '@kit.CoreFileKit';
 import { appState } from '../entryability/AppState';
 import { FqWebDavBackupEntry } from '../core/FqWebDav';
 import { FqCustomReaderTheme } from '../core/FqReaderStore';
+import { FqCategoryLevel1 } from '../core/FqCategoryStore';
 
 /** 公共弹窗管理器：弹窗标识/宿主动作/生命周期回调的静态集散地。 */
 export class DialogManager {
@@ -59,6 +60,18 @@ export class DialogManager {
   public static chapterCacheLimitUnitIndex: number = 0;
   /** 缓存上限确认回调（回传字节数；取消/关闭不触发）。 */
   private static chapterCacheLimitConfirm: ((bytes: number) => void) | null = null;
+
+  // ===== 首页分类弹窗参数（打开前由调用方赋值，弹窗关闭后自动清空） =====
+  /** 分类树（一级 → 二级组 → 三级词）。 */
+  public static homeCategoryTree: FqCategoryLevel1[] = [];
+  /** 当前一级 tab 下标。 */
+  public static homeCategoryL1: number = 0;
+  /** 当前二级组下标。 */
+  public static homeCategoryGroup: number = 0;
+  /** 当前三级词下标（0 = 全部）。 */
+  public static homeCategoryWord: number = 0;
+  /** 选词回调（点三级词或「全部」后触发；取消/关闭不触发）。 */
+  private static homeCategoryPick: ((l1: number, group: number, word: number) => void) | null = null;
 
   // ===== 自定义阅读主题编辑弹窗参数（独立宿主弹窗，打开前由调用方赋值，关闭后自动清空） =====
   /** 编辑中主题名称（输入框双向值）。 */
@@ -193,6 +206,27 @@ export class DialogManager {
     }
     DialogManager.chapterCacheLimitConfirm = onConfirm;
     DialogManager.OpenDialog('章节缓存限制');
+  }
+
+  /** 首页分类弹窗（右上角「分类」按钮）：tree 三级分类树，l1/group/word 当前选中
+   *  （word 0 = 全部），onPick 选词回调（word>0 = 三级词下标+1，word=0 = 「全部」清分类）。 */
+  public static ShowHomeCategory(tree: FqCategoryLevel1[], l1: number, group: number, word: number,
+    onPick: (l1: number, group: number, word: number) => void): void {
+    DialogManager.homeCategoryTree = tree;
+    DialogManager.homeCategoryL1 = l1;
+    DialogManager.homeCategoryGroup = group;
+    DialogManager.homeCategoryWord = word;
+    DialogManager.homeCategoryPick = onPick;
+    DialogManager.OpenDialog('首页分类');
+  }
+
+  /** 分类弹窗选词（弹窗内点词/「全部」触发）：先关弹窗再回调（回调内不再开弹窗）。 */
+  public static PickHomeCategory(l1: number, group: number, word: number): void {
+    const cb: ((l1: number, group: number, word: number) => void) | null = DialogManager.homeCategoryPick;
+    DialogManager.CloseDialog();
+    if (cb !== null) {
+      cb(l1, group, word);
+    }
   }
 
   /** 自定义阅读主题编辑弹窗：initial 为待编辑主题（null = 新建模式，无删除行），
@@ -495,6 +529,14 @@ export class DialogManager {
       DialogManager.chapterCacheLimitValue = '';
       DialogManager.chapterCacheLimitUnitIndex = 0;
       DialogManager.chapterCacheLimitConfirm = null;
+    }
+    // 首页分类弹窗参数一次性，关闭后清理
+    if (key === '首页分类') {
+      DialogManager.homeCategoryTree = [];
+      DialogManager.homeCategoryL1 = 0;
+      DialogManager.homeCategoryGroup = 0;
+      DialogManager.homeCategoryWord = 0;
+      DialogManager.homeCategoryPick = null;
     }
     const cb: (() => void) | null = DialogManager.onDialogClosed;
     DialogManager.onDialogClosed = null;

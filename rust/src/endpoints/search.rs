@@ -175,9 +175,14 @@ fn category_front<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResu
         let category_tab =
             crate::endpoints::util::default_val(&params.get_str("category_tab"), "1");
         let mut p = crate::endpoints::home::reading724_params();
-        p.set("category_tab", category_tab);
+        p.set("category_tab", &category_tab);
         p.set("need_hot", "0");
-        p.set("last_chose_tab", "1");
+        // 「上次选择」默认跟随当前 tab：官方切 tab 时同步上报；写死 1 时
+        // 服务端按设备记忆回老频道（探针实证 6 tab 同词表）。
+        p.set(
+            "last_chose_tab",
+            &crate::endpoints::util::default_val(&params.get_str("last_chose_tab"), &category_tab),
+        );
         p.set("source", "0");
         p.set("distinct_style", "0");
         p.set("new_category_tab", "1");
@@ -187,7 +192,20 @@ fn category_front<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResu
         // sub_tabs 的新 schema，缺这几个字段时服务端回退老结构
         // （rule.categoy_tab_dic + down_category 平铺）。
         p.set("category_tab_v2", "1");
-        p.set("last_choose_tab_v2", "1");
+        p.set(
+            "last_choose_tab_v2",
+            &crate::endpoints::util::default_val(
+                &params.get_str("last_choose_tab_v2"),
+                &category_tab,
+            ),
+        );
+        // 选填透传：rule.categoy_tab_dic 的 per-tab 过滤参数，切频道备选通道。
+        for key in ["query_gender", "genre_type"] {
+            let v = params.get_str(key);
+            if !v.is_empty() {
+                p.set(key, &v);
+            }
+        }
         let spec = UpstreamRequestSpec {
             mode: UpstreamMode::DeviceSigned,
             host: crate::endpoints::base::HOST_FQNOVEL.to_string(),

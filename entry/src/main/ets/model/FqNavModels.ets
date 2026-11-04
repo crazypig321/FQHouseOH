@@ -231,13 +231,14 @@ export function FqTitleBarTwoMenusOptions(mainTitle: ResourceStr,
 
 /**
  * HDS 标题栏内容配置（样式统一由 view/CommonNav 的 CommonNav 提供）：
- * 标题 + 可选书架（onShelf，shelfActive 控制实心图标）/刷新（onRefresh）/
- * 搜索（showSearch）/排行（showRank）菜单 + 可选 bottomBuilder。
+ * 标题 + 书架（onShelf，shelfActive 控制实心图标）/刷新（onRefresh）/
+ * 搜索（showSearch）/排行（showRank）菜单 + 可选分类（onCategory，
+ * categoryActive 控制主题色高亮，置于菜单末位 = 顶部最右侧）+ 可选 bottomBuilder。
  */
 export function FqTitleBarOptions(mainTitle: ResourceStr, showSearch: boolean,
   bottomBuilder?: BottomBuilderParams, onRefresh?: () => void,
   showRank?: boolean, onShelf?: () => void, shelfActive?: boolean,
-  subTitle?: ResourceStr): TitleBarContentOptions {
+  subTitle?: ResourceStr, onCategory?: () => void, categoryActive?: boolean): TitleBarContentOptions {
   const title: HdsNavigationTitle = {
     mainTitle: mainTitle,
   };
@@ -285,10 +286,22 @@ export function FqTitleBarOptions(mainTitle: ResourceStr, showSearch: boolean,
     menus.push({
       content: {
         icon: $r('sys.symbol.medal'),
-        label: 'rank',
+        label: '榜单',
         action: (): void => {
           NavPathUtils.push(ROUTE_RANK);
         },
+      },
+    });
+  }
+  if (onCategory !== undefined) {
+    menus.push({
+      content: {
+        // 分类浏览中用主题色高亮（SymbolGlyphModifier 携带 fontColor）
+        icon: categoryActive === true
+          ? new SymbolGlyphModifier($r('sys.symbol.square_grid_2x2')).fontColor([appState.accentColor])
+          : $r('sys.symbol.square_grid_2x2'),
+        label: '分类',
+        action: onCategory,
       },
     });
   }

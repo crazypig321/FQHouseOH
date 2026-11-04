@@ -382,7 +382,8 @@ export class FqHomeFeed {
     source.page = 1;
   }
 
-  /** fqapp `_searchItems`：标题互含匹配（无匹配取全部分栏），按 kind 过滤。 */
+  /** fqapp `_searchItems`：标题互含匹配（无匹配取全部分栏），按 kind 过滤
+   *  （kind 为空 = 不过滤，首页推荐频道分类不限类目）。 */
   private searchStageItems(tabs: FqSearchTab[], label: string, kind: string): FqMediaItem[] {
     const matching: FqSearchTab[] = [];
     for (const tab of tabs) {
@@ -394,7 +395,7 @@ export class FqHomeFeed {
     const out: FqMediaItem[] = [];
     for (const tab of selected) {
       for (const item of tab.items) {
-        if (item.kind === kind) {
+        if (kind.length === 0 || item.kind === kind) {
           out.push(item);
         }
       }

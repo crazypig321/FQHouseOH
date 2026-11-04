@@ -18,6 +18,7 @@ import { ComicSettingsDialogContent } from '../view/dialog/ComicSettingsDialogCo
 import { WebDavBackupListDialogContent } from '../view/dialog/WebDavBackupListDialogContent';
 import { WebDavBackupCountDialogContent } from '../view/dialog/WebDavBackupCountDialogContent';
 import { ChapterCacheLimitDialogContent } from '../view/dialog/ChapterCacheLimitDialogContent';
+import { HomeCategoryDialogContent } from '../view/dialog/HomeCategoryDialogContent';
 import { FqPlaybackBall } from '../view/FqPlaybackBall';
 import { FqSheetOptions } from '../view/sheet/CommonSheet';
 import { FqChangelogSheet } from '../view/sheet/FqChangelogSheet';
@@ -74,6 +75,8 @@ struct Index {
         this.settingsDialog.open()
       } else if (DialogManager.dialogChangeKey === '自定义主题编辑') {
         this.readerThemeEditorDialog.open()
+      } else if (DialogManager.dialogChangeKey === '首页分类') {
+        this.homeCategoryDialog.open()
       } else {
         this.dataDialog.open()
       }
@@ -84,6 +87,8 @@ struct Index {
         this.settingsDialog.close()
       } else if (DialogManager.dialogChangeKey === '自定义主题编辑') {
         this.readerThemeEditorDialog.close()
+      } else if (DialogManager.dialogChangeKey === '首页分类') {
+        this.homeCategoryDialog.close()
       } else {
         this.dataDialog.close()
       }
@@ -292,6 +297,27 @@ struct Index {
     },
   });
 
+  /** 「分类」弹窗（首页右上角分类按钮）：一级横向 tab + 左二级栏 + 右三级词网格。 */
+  private homeCategoryDialog: CustomDialogController = new CustomDialogController({
+    builder: CustomContentDialog({
+      primaryTitle: '分类',
+      contentBuilder: (): void => {
+        this.DialogContentBuilder('首页分类')
+      },
+      contentAreaPadding: { top: 6, bottom: 10, left: 12, right: 12 },
+    }),
+    onWillDismiss: (dialog: DismissDialogAction): void => {
+      dialog.dismiss()
+    },
+    onWillAppear: (): void => {
+      appState.pushForegroundBlur()
+    },
+    onWillDisappear: (): void => {
+      appState.popForegroundBlur()
+      DialogManager.DisappearDialog('首页分类')
+    },
+  });
+
   /** 弹窗中间自定义组件（按 DialogManager 标识分发）。 */
   @Builder
   DialogContentBuilder(key: string) {
@@ -300,6 +326,8 @@ struct Index {
         .fontSize(14)
         .fontColor($r('sys.color.font_primary'))
         .width('100%')
+    } else if (key === '首页分类') {
+      HomeCategoryDialogContent()
     } else if (key === '阅读设置') {
       ReaderSettingsDialogContent({
         fontSize: fqReaderSettingsBus.fontSize,

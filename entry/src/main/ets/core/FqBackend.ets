@@ -16,7 +16,7 @@ import { FqDeployer } from './FqDeployer';
 import { FqKeyStore } from './FqKeyStore';
 import {   fqParseAuthorProfile, fqParseBookComments, fqParseBookDetail, fqParseChapterCommentPage, fqParseChapterIdeaCounts, fqParseChapterIdeaMeta, fqParseChapterSummaries,
   fqParseDanmaku, fqParseDirectory, fqParseEpisodeComments, fqParseEpisodeSource, fqParseHomepage, fqParseParagraphCommentPage, fqParseRankBoard, fqParseRankCatalog,
-  fqParseSearchTabs, fqParseSeriesFeed, fqParseSeriesRelateBook, fqLegacyChapterText, fqNormalizeChapterWithIdx, fqParseNovelChapter,
+  fqParseSearchTabs, fqParseSeriesFeed, fqParseSeriesRelateBook, fqParseRelatedSeries, fqLegacyChapterText, fqNormalizeChapterWithIdx, fqParseNovelChapter,
   fqIsValidMediaId, fqParseMediaIdResult,
   fqParseChapterImages } from './FqParser';
 import {
@@ -30,6 +30,7 @@ import {
 } from './FqAudioParser';
 import { fqParseObject } from './FqJson';
 import { FqLog } from './FqLogStore';
+import { FqAppSettingsStore } from './FqAppSettingsStore';
 import {
   FqAuthorProfile,
   FqBookCommentPage,
@@ -46,6 +47,7 @@ import {
   FqRankCatalog,
   FqSearchTab,
   FqSeriesRelateBook,
+  FqRelatedSeries,
 } from '../model/FqModels';
 import { FqNormalizedChapter, FqParagraphCommentPage } from '../reader/ReaderTypes';
 import {
@@ -106,18 +108,6 @@ export class FqBackend {
   }
 
   /**
-   * 内置 Web UI 入口（对齐 fqapp BackendService.webUiEntryUrl）：
-   * loopback 适配器只响应携带 capability 的请求，浏览器打开此入口会以会话
-   * cookie 形式下发 capability 后重定向到 /；直接打开裸 baseUrl 会 401。
-   */
-  public get webUiEntryUrl(): string {
-    const capPrefix: string = this.capabilityValue.length > 0
-      ? `/_session/${this.capabilityValue}`
-      : '';
-    return `${this.baseUrlValue}${capPrefix}/`;
-  }
-
-  /**
    * 启动后端。幂等：并发/重复调用共享同一次启动；失败后清除缓存，允许重试。
    */
   public start(context: common.Context): Promise<void> {
@@ -150,6 +140,7 @@ export class FqBackend {
         `${backendDir}/config/filter.json`,
         backendDir,
         PORT,
+        FqAppSettingsStore.isLanShareEnabled(),
         '',
       );
       if (result !== 'running') {
@@ -162,6 +153,21 @@ export class FqBackend {
       FqLog.e('backend', `本地后端启动失败: ${error instanceof Error ? error.message : String(error)}`);
       throw error instanceof Error ? error : new Error(String(error));
     }
+  }
+
+  /**
+   * 重建监听以切换监听模式（对齐 fqapp restartForListenMode）：
+   * 核心在 init 时绑定监听地址，切换回环/局域网必须整体停启核心；
+   * 进行中的请求会被中断，由调用方先弹确认。
+   */
+  public async restartForListenMode(context: common.Context): Promise<void> {
+    this.startPromise = null;
+    try {
+      await fq.shutdown();
+    } catch (error) {
+      // 关闭失败继续启动：init 幂等，核心仍在时直接返回 running
+    }
+    await this.start(context);
   }
 
   /**
@@ -400,6 +406,15 @@ export class FqBackend {
     return fqParseSearchTabs(payload, 0);
   }
 
+  /**
+   * 官方分类页原始载荷（/api/v1/category，代理 /reading/bookapi/new_category/front/v）。
+   * category_tab 恒传 1：切频道参数对设备身份不生效（探针实证），一份男频词表即可。
+   */
+  public categoryFront(categoryTab: number): Promise<Record<string, Object>> {
+    const query: string = `category_tab=${categoryTab < 0 ? 0 : categoryTab}`;
+    return this.getJson('/api/v1/category', query);
+  }
+
   /** 书籍详情（/api/detail）。 */
   public async bookDetail(bookId: string, tab: string): Promise<FqBookDetail> {
     const query: string = `source=${encodeURIComponent('番茄')}&book_id=${encodeURIComponent(bookId)}`
@@ -478,6 +493,17 @@ export class FqBackend {
     const payload: Record<string, Object> =
       await this.getJson(`/api/v1/series/${encodeURIComponent(seriesId)}`, '', FQ_SHORT_TIMEOUT_MS);
     return fqParseSeriesRelateBook(payload);
+  }
+
+  /**
+   * 同系列剧（/api/v1/series/{id}/related，官方 scene=10 lo3/f.java 的
+   * data[0].video_data）。无同系列关联返回空列表；解析规则见
+   * fqParseRelatedSeries（去重当前剧、content_type 白名单、不可播仍展示）。
+   */
+  public async relatedSeries(seriesId: string): Promise<FqRelatedSeries[]> {
+    const payload: Record<string, Object> = await this.getJson(
+      `/api/v1/series/${encodeURIComponent(seriesId)}/related`, '', FQ_SHORT_TIMEOUT_MS);
+    return fqParseRelatedSeries(payload, seriesId);
   }
 
   /** 章段评气泡计数（/api/v1/chapters/{itemId}/reviews?comment_source=3，data.data 按段 map）；
