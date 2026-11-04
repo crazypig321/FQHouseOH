@@ -273,10 +273,10 @@ export struct AboutPage {
         }),
     ]));
     sections.push(new FqAboutSection('其他', [
-      new FqAboutItem($r('sys.symbol.exclamationmark_circle'), '#FFF59E0B', '温馨提醒', '不可与同类软件共用', '', true,
+     /* new FqAboutItem($r('sys.symbol.exclamationmark_circle'), '#FFF59E0B', '温馨提醒', '不可与同类软件共用', '', true,
         (): void => {
           this.openSheet(FqAboutSheetKind.notice);
-        }),
+        }),*/
       new FqAboutItem($r('sys.symbol.hand_thumbsup'), '#FFF43F5E', '支持作者', '感谢每一份支持', '', true,
         (): void => {
           this.openSheet(FqAboutSheetKind.support);
