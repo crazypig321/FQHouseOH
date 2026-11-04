@@ -26,6 +26,7 @@ pub mod shuqi;
 pub mod toutiao;
 pub mod util;
 pub mod video;
+pub mod webui;
 pub mod wkcontent;
 
 use std::collections::HashMap;

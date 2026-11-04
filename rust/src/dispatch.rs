@@ -207,6 +207,13 @@ pub async fn dispatch(server: &Server, req: &Request) -> Response {
         return crate::endpoints::account_library::handle(ctx, req).await;
     }
 
+    // Legacy `/api/*` Web bridge (fqapp 9132732 removed the built-in Web UI
+    // and this bridge upstream; the ArkTS client still addresses these paths,
+    // so the local webui bridge stays).
+    if path.starts_with("/api/") && !path.starts_with("/api/v1/") {
+        return crate::endpoints::webui::handle(server, path, &Params::parse(&req.query)).await;
+    }
+
     if path == "/health" {
         let devices = ctx.pool.count().await;
         return Response::json(200, &json!({ "status": "ok", "devices": devices }));
