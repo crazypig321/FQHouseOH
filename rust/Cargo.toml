@@ -35,7 +35,6 @@ zeroize = { version = "1", features = ["derive"] }
 regex = "1"
 url = "2"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "query"] }
-tower = "0.5"
 tower-http = { version = "0.6", default-features = false, features = ["fs", "set-header"] }
 http-body-util = "0.1"
 futures = "0.3"
@@ -46,6 +45,14 @@ log = "0.4"
 # no-ops (no logger is installed there).
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.14"
+
+[build-dependencies]
+cc = "1"
+
+# Windows 桌面媒体会话（desktop_fetch/desktop_media）用同步 reqwest 走 CDN
+# range 请求；其余平台不编译这两个模块。
+[target.'cfg(windows)'.dependencies]
+reqwest = { version = "0.13", default-features = false, features = ["blocking"] }
 
 [profile.release]
 # Size-conscious but not size-obsessed: chapter/crypto work must not regress.

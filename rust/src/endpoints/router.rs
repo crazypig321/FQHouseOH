@@ -110,6 +110,18 @@ fn match_chapters(parts: &[&str], q: &Params) -> Option<RouteMatch> {
                 params: p,
             })
         }
+        // 听书与正文的同步映射（官方 AudioTimePointResponse）：
+        // 按音频毫秒直出「第几段第几个字符」，是听书高亮的唯一数据源。
+        //
+        // 少了这一条，Dart 侧的 /chapters/{id}/timepoints 会 404 —— 高亮整片
+        // 不亮，而且没有任何报错，看起来就像「这本书没有时间轴」。
+        "timepoints" => {
+            p.set("item_id", id);
+            Some(RouteMatch {
+                api: "audio_timepoint",
+                params: p,
+            })
+        }
         "reviews" => {
             p.set("item_id", id);
             Some(RouteMatch {
@@ -253,6 +265,10 @@ fn match_search(parts: &[&str], q: &Params) -> Option<RouteMatch> {
         }
         "hot" => Some(RouteMatch {
             api: "hot_search",
+            params: p,
+        }),
+        "cue" => Some(RouteMatch {
+            api: "search_cue",
             params: p,
         }),
         _ => None,

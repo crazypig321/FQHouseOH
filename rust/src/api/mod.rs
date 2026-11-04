@@ -152,7 +152,10 @@ pub(crate) async fn init_core(
     let root = resolve_runtime_dir(&config_path, &runtime_dir);
     let src_dir = root.join("src");
     let _ = std::fs::create_dir_all(&src_dir);
-    let web_dir = root.join("web");
+    // P1-7 one-time sweep: remove plaintext video cache files left by the
+    // old in-place decrypt (see endpoints::video). Best-effort and quick —
+    // it must never block or fail startup.
+    crate::endpoints::video::migrate_plaintext_video_cache(&src_dir);
 
     let pool = match mock_origin.as_ref() {
         Some(origin) => DevicePool::with_mock_origin(&pool_path, origin.clone()).await?,
@@ -176,7 +179,6 @@ pub(crate) async fn init_core(
         pool,
         cfg: cfg.clone(),
         src_dir: src_dir.to_string_lossy().into_owned(),
-        web_dir: web_dir.to_string_lossy().into_owned(),
         filters,
     });
     let server = Arc::new(Server::new(ctx));
@@ -186,11 +188,12 @@ pub(crate) async fn init_core(
     // configured 8080 explicitly. The loopback adapter is always part of the
     // core because resource URLs (`/src/...`) depend on it.
     let _ = cfg.port;
-    let (actual_port, token, task) = match crate::server::serve(server.clone(), port).await {
-        Ok(handle) => (handle.port, handle.token, Some(handle.task)),
-        Err(e) => return Err(e),
-    };
-
+    let (actual_port, token, task) =
+        match crate::server::serve(server.clone(), port, crate::server::ListenMode::Loopback).await
+        {
+            Ok(handle) => (handle.port, handle.token, Some(handle.task)),
+            Err(e) => return Err(e),
+        };
     // The generation is read after the resource is fully built, so a stale
     // shutdown (which takes the same lock and bumps the counter) can never
     // retire this core.

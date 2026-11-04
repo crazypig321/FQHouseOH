@@ -6,7 +6,7 @@
 //! src dir and returns the served URLs (or an HTML page when show_html=1).
 //!
 //! Signed and device-bound. Query params: item_ids (required),
-//! api_type ("full"|"batch"), custom_url, show_html ("1").
+//! api_type ("full"|"batch"), book_id (optional), show_html ("1").
 
 use std::collections::{HashMap, HashSet};
 
@@ -22,19 +22,17 @@ use sha2::{Digest, Sha256};
 use crate::endpoints::base::{
     dragon_read_headers, Upstream, UpstreamMode, UpstreamRequestSpec, UA_WINDOWS_BROWSER,
 };
-use crate::endpoints::util::{default_val, go_query_escape, user_agent_headers};
+use crate::endpoints::content::full_item_content;
+use crate::endpoints::full;
+use crate::endpoints::util::{default_val, user_agent_headers};
 use crate::endpoints::{Ctx, Params, Server};
 use crate::error::{ApiError, ApiResult};
+
+mod download;
 
 const CONTENT_FULL_URL: &str = "https://reading.snssdk.com/reading/reader/full/v/";
 const CONTENT_BATCH_URL: &str =
     "https://api5-normal-sinfonlineb.fqnovel.com/reading/reader/batch_full/v";
-
-/// bookDetailLegacyURLPrefix (hostFQNovel + the legacy detail path).
-const BOOK_DETAIL_LEGACY_URL_PREFIX: &str =
-    "https://api5-normal-sinfonlineb.fqnovel.com/reading/bookapi/detail/v?book_id=";
-/// bookDetailLegacyQuerySuffix.
-const BOOK_DETAIL_LEGACY_QUERY_SUFFIX: &str = "&aid=1967&app_name=novelapp&channel=xiaomi_1967_64&version_code=65132&version_name=6.5.1.32&device_platform=android&os=android&device_id={device_id}&iid={install_id}&ssmix=a&device_type=FRD-AL10&device_brand=honor&language=zh&os_api=28&os_version=9&manifest_version_code=65132&resolution=1080*1920&dpi=480&update_version_code=65132&pv_player=65132&ac=wifi&host_abi=arm64-v8a&dragon_device_type=phone&rom_version=FRD-AL10%2B8.0.0.556%28C00%29&compliance_status=0";
 
 /// buildContentURL (shared with the content endpoint).
 fn build_content_url(item_id: &str, api_type: &str) -> String {
@@ -117,8 +115,12 @@ async fn get_content(ctx: &Ctx, item_id: &str, q: &Params) -> ApiResult<String> 
     }
 }
 
-/// Manga.fallbackFromBookDetail.
-async fn fallback_from_book_detail(
+/// Chapter-specific fallback: ask the `full` endpoint for the requested item
+/// id. Its content is the chapter's own `materials` JSON (HTML-escaped), unlike
+/// `book_detail`, whose material list is book-level and therefore identical for
+/// every chapter. This is what makes "next chapter" advance instead of
+/// redisplaying chapter one.
+async fn fallback_from_full_chapter(
     ctx: &Ctx,
     item_id: &str,
     q: &Params,
@@ -128,38 +130,34 @@ async fn fallback_from_book_detail(
     if book_id.is_empty() {
         book_id = fetch_manga_book_id(ctx, item_id, q).await?;
     }
+    let full = full::get_chapters(ctx, &book_id, &[item_id.to_string()]).await?;
+    let (content, _title, ok) = full_item_content(&full, item_id);
+    if !ok {
+        return Err(ApiError::Internal(
+            "full chapter content missing".to_string(),
+        ));
+    }
 
-    let detail = fetch_book_detail_legacy(ctx, &book_id).await?;
-    let content = book_detail_content(&detail)
-        .ok_or_else(|| ApiError::Internal("book detail content missing".to_string()))?;
+    if content.contains("picInfos") {
+        let (imgs, html) = parse_and_download(ctx, &content, show_html).await;
+        if !imgs.is_empty() {
+            if show_html {
+                return Ok(json!({ "content": html }));
+            }
+            return Ok(json!({ "images": imgs }));
+        }
+    }
+
     let images = extract_manga_material_image_urls(&content);
     if images.is_empty() {
         return Err(ApiError::Internal(
-            "manga material images missing".to_string(),
+            "manga chapter images missing from full fallback".to_string(),
         ));
     }
     if show_html {
         return Ok(json!({ "content": manga_image_html(&images) }));
     }
     Ok(json!({ "images": images }))
-}
-
-/// BookDetailLegacy.Handle (see book_detail_legacy.go): reading-API
-/// device-fingerprint request for the multi-detail payload.
-async fn fetch_book_detail_legacy(ctx: &Ctx, book_id: &str) -> ApiResult<Value> {
-    if book_id.is_empty() {
-        return Err(ApiError::BadRequest("缺少book_id参数".to_string()));
-    }
-    let escaped = go_query_escape(book_id);
-    let u = format!("{BOOK_DETAIL_LEGACY_URL_PREFIX}{escaped}{BOOK_DETAIL_LEGACY_QUERY_SUFFIX}");
-    Upstream::new(ctx.up.clone())
-        .json(&UpstreamRequestSpec {
-            mode: UpstreamMode::DeviceSigned,
-            raw_url: Some(u),
-            headers: dragon_read_headers(),
-            ..Default::default()
-        })
-        .await
 }
 
 /// Manga.fetchMangaBookID.
@@ -179,15 +177,6 @@ async fn fetch_manga_book_id(ctx: &Ctx, item_id: &str, q: &Params) -> ApiResult<
         return Err(ApiError::Internal("manga book_id missing".to_string()));
     }
     Ok(resp.data.novel_data.book_id)
-}
-
-/// bookDetailContent.
-fn book_detail_content(v: &Value) -> Option<String> {
-    let content = v.get("data")?.get("content")?.as_str()?;
-    if content.trim().is_empty() {
-        return None;
-    }
-    Some(content.to_string())
 }
 
 /// mangaMaterialPayload.
@@ -341,12 +330,6 @@ struct MangaPicInfo {
     pic_url: String,
 }
 
-/// Upper bound on concurrent chapter-image downloads. A long-strip chapter
-/// carries dozens of images and the serial loop pushed the whole
-/// /api/content?tab=漫画&cmd=1 call past the app-side request timeout on
-/// first load, so the chapter never finished loading.
-const IMAGE_FETCH_CONCURRENCY: usize = 6;
-
 /// Manga.parseAndDownload: extracts the picInfos JSON, downloads and decrypts
 /// every image, writes them to the src dir, and returns the served URLs / HTML.
 async fn parse_and_download(ctx: &Ctx, content: &str, show_html: bool) -> (Vec<String>, String) {
@@ -379,59 +362,13 @@ async fn parse_and_download(ctx: &Ctx, content: &str, show_html: bool) -> (Vec<S
         return (Vec::new(), String::new());
     }
 
-    // Bounded-parallel download, results kept in pic_infos order: reading
-    // order must match the upstream chapter, and one slow image must not
-    // block the rest of the batch.
-    let total = pic_infos.len();
-    let mut bodies: Vec<Option<Vec<u8>>> = vec![None; total];
-    let mut next = 0usize;
-    while next < total {
-        let end = (next + IMAGE_FETCH_CONCURRENCY).min(total);
-        let mut batch = tokio::task::JoinSet::new();
-        for i in next..end {
-            let url = pic_infos[i].pic_url.clone();
-            let up = ctx.up.clone();
-            batch.spawn(async move {
-                (i, download_image(up, &url).await)
-            });
-        }
-        while let Some(joined) = batch.join_next().await {
-            if let Ok((i, body)) = joined {
-                if let Ok(data) = body {
-                    bodies[i] = Some(data);
-                }
-            }
-        }
-        next = end;
-    }
+    let downloaded = download::download_pictures(ctx, &key_bytes, &pic_infos).await;
 
     let mut urls: Vec<String> = Vec::new();
     let mut html = String::new();
     let mut last_written: Option<std::path::PathBuf> = None;
-    for (i, pic) in pic_infos.iter().enumerate() {
-        if pic.pic_url.is_empty() {
-            continue;
-        }
-        let enc = match bodies[i].take() {
-            Some(d) => d,
-            None => continue,
-        };
-        if enc.len() <= 100 {
-            continue;
-        }
-        let dec = match decrypt_manga_image(&enc, &key_bytes) {
-            Ok(d) => d,
-            Err(_) => continue,
-        };
-        let format = detect_image_format(&dec, &pic.pic_url);
-        // Note: content-addressed manga files prevent chapter URL basename
-        // collisions; see .agents/notes/implemented/bug-fix/2026-09-28-manga-image-collisions.md.
-        let name = image_file_name(&dec, &format);
-        let fp = std::path::Path::new(&ctx.src_dir).join(&name);
-        if write_image_once(&fp, &dec).await.is_err() {
-            continue;
-        }
-        last_written = Some(fp.clone());
+    for (i, name) in downloaded.into_iter().flatten() {
+        last_written = Some(std::path::Path::new(&ctx.src_dir).join(&name));
         let served = format!("/src/{name}");
         urls.push(served.clone());
         if show_html {
@@ -447,9 +384,11 @@ async fn parse_and_download(ctx: &Ctx, content: &str, show_html: bool) -> (Vec<S
     // P1-6: manga images share `src_dir` with the video cache, so run the
     // same eviction pass — otherwise plaintext images accumulate with no
     // budget and no eviction. The newest image is kept; older files go
-    // first. Images are re-downloadable, so eviction is safe.
+    // first. Images are re-downloadable, so eviction is safe. The pass scans
+    // the whole directory, so it is scheduled in the background rather than
+    // run on the request path.
     if let Some(last) = last_written {
-        crate::endpoints::video::prune_src_cache(&ctx.src_dir, &last);
+        crate::endpoints::video::schedule_prune_src_cache(&ctx.src_dir, last);
     }
     (urls, html)
 }
@@ -478,8 +417,8 @@ async fn write_image_once(path: &std::path::Path, image: &[u8]) -> Result<(), St
 }
 
 /// Manga.download: fetches an image body with the Windows browser UA.
-async fn download_image(up: std::sync::Arc<crate::upstream::UpstreamClient>, url: &str) -> ApiResult<Vec<u8>> {
-    Upstream::new(up)
+async fn download_image(ctx: &Ctx, url: &str) -> ApiResult<Vec<u8>> {
+    Upstream::new(ctx.up.clone())
         .raw(&UpstreamRequestSpec {
             mode: UpstreamMode::NoSign,
             raw_url: Some(url.to_string()),
@@ -3074,14 +3013,23 @@ fn handle<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult<Value
         let content = match get_content(ctx, &item_id, params).await {
             Ok(c) => c,
             Err(err) => {
-                return match fallback_from_book_detail(ctx, &item_id, params, show_html).await {
-                    Ok(result) => Ok(result),
-                    Err(_) => Err(err),
-                };
+                log::debug!("manga primary content failed: {err}");
+                // Book-level materials cannot identify this chapter. A failed
+                // chapter fallback must stay an error, never another chapter.
+                return fallback_from_full_chapter(ctx, &item_id, params, show_html).await;
             }
         };
 
         if !content.contains("picInfos") {
+            // Some upstream variants return the same `materials` JSON through
+            // the primary content route instead of `picInfos`.
+            let images = extract_manga_material_image_urls(&content);
+            if !images.is_empty() {
+                if show_html {
+                    return Ok(json!({ "content": manga_image_html(&images) }));
+                }
+                return Ok(json!({ "images": images }));
+            }
             return Ok(json!({ "content": content }));
         }
 

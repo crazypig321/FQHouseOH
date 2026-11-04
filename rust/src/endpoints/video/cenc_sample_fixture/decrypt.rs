@@ -19,6 +19,80 @@ fn detects_encrypted_tracks_and_rewrites_the_sample_entry() {
 }
 
 #[test]
+fn renames_the_sample_entry_to_the_original_format_from_frma() {
+    let f = fixture();
+    let c = &f["cenc"];
+    let mut file = b64(c, "full_sample_b64");
+    let key = hex::decode(c["key_hex"].as_str().unwrap()).unwrap();
+    // Turn the fixture into the TTS-voice shape: an audio entry whose
+    // original format is Opus. The fixture entry is a video one, so the
+    // 78-byte fixed part is reinterpreted: the first 28 bytes stay as the
+    // audio fixed fields and the rest becomes a dOps config box, matching
+    // the real device files (dOps + sinf/frma=opus).
+    let entry = file
+        .windows(4)
+        .position(|w| w == b"encv")
+        .expect("encv sample entry");
+    file[entry..entry + 4].copy_from_slice(b"enca");
+    // The audio fixed part is 28 bytes (video uses 78), so the bytes
+    // between the audio fixed fields and sinf become a dOps config box,
+    // matching the real device files (dOps + sinf/frma=opus).
+    let dops = entry + 32;
+    file[dops..dops + 4].copy_from_slice(&((170 - dops) as u32).to_be_bytes());
+    file[dops + 4..dops + 8].copy_from_slice(b"dOps");
+    for byte in &mut file[dops + 8..170] {
+        *byte = 0;
+    }
+    let frma = file.windows(4).position(|w| w == b"frma").expect("frma");
+    file[frma + 4..frma + 8].copy_from_slice(b"opus");
+    assert!(mp4_needs_cenc_decrypt(&file));
+
+    decrypt_cenc_mp4(&mut file, &key).expect("decrypt");
+
+    // The entry must carry the frma tag, not the hardcoded mp4a fallback
+    // (an mp4a entry without esds is undecodable).
+    assert!(
+        file.windows(4).any(|w| w == b"opus"),
+        "entry must be renamed to the frma tag"
+    );
+    assert!(
+        !file.windows(4).any(|w| w == b"mp4a"),
+        "must not fall back to mp4a when frma is present"
+    );
+    assert!(!mp4_needs_cenc_decrypt(&file));
+}
+
+#[test]
+fn keeps_the_hardcoded_fallback_when_frma_is_unreadable() {
+    let f = fixture();
+    let c = &f["cenc"];
+    let mut file = b64(c, "full_sample_b64");
+    let key = hex::decode(c["key_hex"].as_str().unwrap()).unwrap();
+    let entry = file
+        .windows(4)
+        .position(|w| w == b"encv")
+        .expect("encv sample entry");
+    file[entry..entry + 4].copy_from_slice(b"enca");
+    let dops = entry + 8 + 28;
+    let dops_size = (170 - dops) as u32;
+    file[dops..dops + 4].copy_from_slice(&dops_size.to_be_bytes());
+    file[dops + 4..dops + 8].copy_from_slice(b"dOps");
+    for byte in &mut file[dops + 8..170] {
+        *byte = 0;
+    }
+    let frma = file.windows(4).position(|w| w == b"frma").expect("frma");
+    file[frma + 4..frma + 8].copy_from_slice(&[0, 0, 0, 0]);
+
+    decrypt_cenc_mp4(&mut file, &key).expect("decrypt");
+
+    assert!(
+        file.windows(4).any(|w| w == b"mp4a"),
+        "unreadable frma must keep the mp4a fallback"
+    );
+    assert!(!mp4_needs_cenc_decrypt(&file));
+}
+
+#[test]
 fn decrypts_every_whole_encrypted_sample_with_the_go_plaintext() {
     let f = fixture();
     let c = &f["cenc"];
