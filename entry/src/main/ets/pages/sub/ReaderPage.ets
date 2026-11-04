@@ -2612,9 +2612,9 @@ export struct ReaderPage {
     };
   }
 
-  /** 切换预设主题（-1 跟随 / 0 纸白 / 1 米黄 / 2 夜间）：生效排版参数变化时保位重排。 */
+  /** 切换预设主题（-1 跟随 / 0 纸白 / 1 米黄 / 2 青绿 / 3 夜间）：生效排版参数变化时保位重排。 */
   private changeThemePreset(index: number): void {
-    if (index < -1 || index > 2 || index === this.themeIndex) {
+    if (index < -1 || index > 3 || index === this.themeIndex) {
       return;
     }
     void this.applyThemeSelection((): void => {
