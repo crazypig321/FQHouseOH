@@ -63,6 +63,8 @@ export class FqMediaItem {
   readonly followerCount: number;
   /** 封面角标（tag_info：上新/爆款等带渐变的促销标签）；null 无。 */
   readonly tag: FqMediaTag | null;
+  /** 数据来源：'fanqie' 番茄（默认）| 'shuqi' 书旗（只读第三方源，fqapp MediaItem.source）。 */
+  readonly source: string;
 
   constructor(
     id: string,
@@ -78,6 +80,7 @@ export class FqMediaItem {
     episodeId: string,
     followerCount: number,
     tag: FqMediaTag | null = null,
+    source: string = 'fanqie',
   ) {
     this.id = id;
     this.title = title;
@@ -92,6 +95,7 @@ export class FqMediaItem {
     this.episodeId = episodeId;
     this.followerCount = followerCount;
     this.tag = tag;
+    this.source = source;
   }
 }
 

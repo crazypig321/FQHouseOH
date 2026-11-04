@@ -61,6 +61,14 @@ import {
   FqSubtitleTrack,
   fqEmptySubtitleTrack,
 } from '../model/FqAudioModels';
+import {
+  FqShuqiBook,
+  FqShuqiToc,
+  fqParseShuqiBook,
+  fqParseShuqiChapterText,
+  fqParseShuqiSearch,
+  fqParseShuqiToc,
+} from '../model/FqShuqiModels';
 
 const PORT: number = 8080;
 const REQUEST_TIMEOUT_MS: number = 20000;
@@ -404,6 +412,38 @@ export class FqBackend {
       throw failure;
     }
     return null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 书旗数据源（/api/v1/shuqi/*，只读第三方源；对齐 fqapp ApiClient.shuqi*）
+  // ---------------------------------------------------------------------------
+
+  /** 书旗搜索（/api/v1/shuqi/search；单次返回全量，服务端不支持分页）。 */
+  public async shuqiSearch(key: string): Promise<FqMediaItem[]> {
+    const query: string = `key=${encodeURIComponent(key)}`;
+    const payload: Record<string, Object> = await this.getJson('/api/v1/shuqi/search', query);
+    return fqParseShuqiSearch(payload);
+  }
+
+  /** 书旗书籍详情（/api/v1/shuqi/book）。 */
+  public async shuqiBook(bookId: string): Promise<FqShuqiBook> {
+    const query: string = `book_id=${encodeURIComponent(bookId)}`;
+    const payload: Record<string, Object> = await this.getJson('/api/v1/shuqi/book', query);
+    return fqParseShuqiBook(payload);
+  }
+
+  /** 书旗目录（/api/v1/shuqi/toc；path='index' 时章名为「第N章」占位）。 */
+  public async shuqiToc(bookId: string): Promise<FqShuqiToc> {
+    const query: string = `book_id=${encodeURIComponent(bookId)}`;
+    const payload: Record<string, Object> = await this.getJson('/api/v1/shuqi/toc', query);
+    return fqParseShuqiToc(payload);
+  }
+
+  /** 书旗章节正文（/api/v1/shuqi/chapter；失败抛错，无本地缓存回退）。 */
+  public async shuqiChapterText(bookId: string, chapterId: string): Promise<string> {
+    const query: string = `book_id=${encodeURIComponent(bookId)}&chapter_id=${encodeURIComponent(chapterId)}`;
+    const payload: Record<string, Object> = await this.getJson('/api/v1/shuqi/chapter', query);
+    return fqParseShuqiChapterText(payload);
   }
 
   /** 旧版搜索（/api/search，页码分页：offset=(page-1)*9）。 */

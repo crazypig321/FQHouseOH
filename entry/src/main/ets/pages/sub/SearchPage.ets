@@ -6,15 +6,18 @@
  */
 
 import { preferences } from '@kit.ArkData';
-import { TitleBarContentOptions } from '@kit.UIDesignKit';
+import { HdsNavigationMenuItemOptions, TitleBarContentOptions } from '@kit.UIDesignKit';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { FqHotSearchEntry, FqMediaItem, FqSearchTab } from '../../model/FqModels';
 import { fqMediaIdFromSearch } from '../../core/FqParser';
 import { FqMediaDataSource } from '../../core/FqMediaDataSource';
 import { FqItemCard } from '../../view/FqItemCard';
-import { fqPushBookOrDetail, FqTitleBarOptions } from '../../model/FqNavModels';
+import { DetailNavParams, fqPushBookOrDetail, ROUTE_DETAIL } from '../../model/FqNavModels';
+import { fqIsShuqiItem } from '../../model/FqShuqiModels';
+import { NavPathUtils } from '../../utils/NavPathUtils';
 import { CommonSearch, CommonLoading } from '../../view/CommonCom';
-import { CommonNav } from '../../view/CommonNav';
+import { CommonNav, titleBarOf } from '../../view/CommonNav';
+import { FqMenu, FqMenuItem } from '../../view/CommonMenu';
 import { appState } from '../../entryability/AppState';
 import { FqLog } from '../../core/FqLogStore';
 
@@ -44,6 +47,9 @@ const FQ_SEARCH_BOTTOM_BUILDER_HEIGHT: number = 110;
 /** 列表内容起始偏移：标题栏 56 + bottomBuilder 96 */
 const FQ_SEARCH_TOP_INSET: number = 160;
 
+/** 「来源」菜单锚点 id（对齐书架页更多菜单模式）。 */
+const FQ_SEARCH_SOURCE_ANCHOR_ID: string = 'search_source_anchor';
+
 @ComponentV2
 export struct SearchPage {
   @Local keyword: string = '';
@@ -58,6 +64,10 @@ export struct SearchPage {
   @Local hotEntries: FqHotSearchEntry[] = [];
   /** ID 精确查找模式（fqapp _idQuery）：非空表示按作品 ID 查找。 */
   @Local idQuery: string = '';
+  /** 搜索来源：false 番茄 / true 书旗（fqapp _shuqiSource；只读第三方源）。 */
+  @Local shuqiSource: boolean = false;
+  /** 切入书旗前记住的番茄分类，切回「番茄」时恢复（fqapp _fanqieTab）。 */
+  private fanqieCategoryIndex: number = 0;
   private dataSource: FqMediaDataSource = new FqMediaDataSource();
   /** ID 模式查得的单条结果（切分类时本地过滤，不重新请求）。 */
   private idItem: FqMediaItem | null = null;
@@ -68,14 +78,15 @@ export struct SearchPage {
   private historyStore: preferences.Preferences | null = null;
   private scroller: Scroller = new Scroller();
   /** 标题栏配置缓存：引用稳定避免每次渲染重建 HdsTitleBar 底部插槽（导致输入焦点丢失/分类条滚动复位） */
-  private titleBarOp: TitleBarContentOptions = FqTitleBarOptions('搜索', false, {
-    builder: (): void => {
-      this.SearchBar();
-    },
-    height: FQ_SEARCH_BOTTOM_BUILDER_HEIGHT,
-  });
+  private titleBarOp: TitleBarContentOptions = titleBarOf('搜索');
 
   aboutToAppear(): void {
+    this.titleBarOp = titleBarOf('搜索', undefined, this.sourceMenus(), {
+      builder: (): void => {
+        this.SearchBar();
+      },
+      height: FQ_SEARCH_BOTTOM_BUILDER_HEIGHT,
+    });
     this.initHistory();
     this.loadHotSearch();
   }
@@ -87,7 +98,8 @@ export struct SearchPage {
       doubleTapToTop: true,
       isSearchBarScroller: false,
     }) {
-      List({ space: 0, scroller: this.scroller }) {
+      Stack({ alignContent: Alignment.Top }) {
+        List({ space: 0, scroller: this.scroller }) {
         if (this.idQuery.length > 0 && this.submittedQuery.length > 0) {
           ListItem() {
             Row() {
@@ -205,6 +217,21 @@ export struct SearchPage {
       .contentStartOffset(appState.topRect + FQ_SEARCH_TOP_INSET)
       .contentEndOffset(appState.bottomRect + 60)
       .onReachEnd(() => this.loadMore())
+
+        // 「来源」菜单锚点（对齐书架页更多按钮：右缘 16、垂直居中于 56 高标题栏）
+        Row() {
+          Column()
+            .id(FQ_SEARCH_SOURCE_ANCHOR_ID)
+            .width(24)
+            .height(24)
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.End)
+        .padding({ right: 16 })
+        .margin({ top: appState.topRect + 16 })
+      }
+      .width('100%')
+      .height('100%')
     }
   }
 
@@ -260,6 +287,46 @@ export struct SearchPage {
     .scrollable(ScrollDirection.Horizontal)
     .scrollBar(BarState.Off)
     .width('100%')
+    .opacity(this.shuqiSource ? 0.4 : 1)
+  }
+
+  /** 标题栏「来源」菜单按钮（对齐书架页更多按钮模式）。 */
+  private sourceMenus(): Array<HdsNavigationMenuItemOptions> {
+    const menu: HdsNavigationMenuItemOptions = {
+      content: {
+        icon: $r('sys.symbol.dot_grid_2x2'),
+        label: '来源',
+        action: (): void => {
+          this.openSourceMenu();
+        },
+      },
+    };
+    return [menu];
+  }
+
+  /** 搜索来源菜单（书架页 FqMenu 模式）：番茄/书旗两档，当前档尾勾标识。 */
+  private openSourceMenu(): void {
+    const items: Array<FqMenuItem> = [];
+
+    const fanqieItem = new FqMenuItem();
+    fanqieItem.label = '番茄小说';
+    fanqieItem.endIcon = !this.shuqiSource ? $r('sys.symbol.checkmark') : '';
+    fanqieItem.onAction = (): void => {
+      FqMenu.dismiss();
+      this.selectSource(false);
+    };
+    items.push(fanqieItem);
+
+    const shuqiItem = new FqMenuItem();
+    shuqiItem.label = '书旗小说';
+    shuqiItem.endIcon = this.shuqiSource ? $r('sys.symbol.checkmark') : '';
+    shuqiItem.onAction = (): void => {
+      FqMenu.dismiss();
+      this.selectSource(true);
+    };
+    items.push(shuqiItem);
+
+    FqMenu.open(this.getUIContext(), FQ_SEARCH_SOURCE_ANCHOR_ID, items);
   }
 
   @Builder
@@ -301,10 +368,10 @@ export struct SearchPage {
     }
   }
 
-  /** 热搜榜（fqapp SearchDiscoveryView）：历史记录下方，行高 44，前三名强调色，点击即搜。 */
+  /** 热搜榜（fqapp SearchDiscoveryView）：历史记录下方，行高 44，前三名强调色，点击即搜；书旗来源无番茄热搜，隐藏。 */
   @Builder
   private HotSearchView() {
-    if (this.hotEntries.length > 0) {
+    if (this.hotEntries.length > 0 && !this.shuqiSource) {
       Column() {
         Row() {
           Text('热搜榜')
@@ -378,6 +445,10 @@ export struct SearchPage {
   }
 
   private selectCategory(index: number): void {
+    // 书旗来源下分类条置灰不可点，退出书旗只能点「番茄」（fqapp _selectTab）
+    if (this.shuqiSource) {
+      return;
+    }
     if (this.categoryIndex === index) {
       return;
     }
@@ -388,6 +459,33 @@ export struct SearchPage {
       return;
     }
     this.load();
+  }
+
+  /**
+   * 切换搜索来源（fqapp _selectSource）。进入书旗时记住当前番茄分类并清掉
+   * 作品 ID 状态；点回「番茄」恢复那个分类，避免用户被悄悄重置到综合。
+   */
+  private selectSource(shuqi: boolean): void {
+    if (shuqi === this.shuqiSource) {
+      return;
+    }
+    if (shuqi) {
+      this.fanqieCategoryIndex = this.categoryIndex;
+    }
+    this.shuqiSource = shuqi;
+    this.categoryIndex = shuqi ? 0 : this.fanqieCategoryIndex;
+    // 书旗 id 是另一套命名空间，切来源后 ID 提示与 ID 结果都失效
+    this.idQuery = '';
+    this.idItem = null;
+    this.resetFeed();
+    if (this.submittedQuery.length === 0) {
+      return;
+    }
+    if (shuqi) {
+      this.loadShuqi();
+    } else {
+      this.load();
+    }
   }
 
   private resetFeed(): void {
@@ -406,12 +504,15 @@ export struct SearchPage {
       return;
     }
     this.submittedQuery = query;
-    // ID 识别（fqapp mediaIdFromSearch）：`id:` 前缀显式或 15~20 位纯数字
-    const mediaId: string | null = fqMediaIdFromSearch(query);
+    // ID 识别（fqapp mediaIdFromSearch）：`id:` 前缀显式或 15~20 位纯数字；
+    // 书旗 id 是另一套命名空间，按 id 直查不适用（fqapp _search）
+    const mediaId: string | null = this.shuqiSource ? null : fqMediaIdFromSearch(query);
     this.idQuery = mediaId !== null ? mediaId : '';
     this.idItem = null;
     this.resetFeed();
-    if (this.idQuery.length > 0) {
+    if (this.shuqiSource) {
+      this.loadShuqi();
+    } else if (this.idQuery.length > 0) {
       this.loadId();
     } else {
       this.load();
@@ -484,6 +585,51 @@ export struct SearchPage {
     }
     this.dataSource.append(fresh);
     this.itemCount = this.dataSource.totalCount();
+  }
+
+  /** 书旗搜索（fqapp _searchShuqi）：单次返回全量、无分页，结果全量落当前 feed。 */
+  private async loadShuqi(): Promise<void> {
+    const query: string = this.submittedQuery;
+    if (query.length === 0) {
+      return;
+    }
+    const token: number = ++this.loadToken;
+    this.loadingState = true;
+    this.loadingMore = false;
+    this.errorMsg = '';
+    try {
+      await FqBackend.get().start(getContext(this));
+      const items: FqMediaItem[] = await FqBackend.get().shuqiSearch(query);
+      if (token !== this.loadToken) {
+        return;
+      }
+      const fresh: FqMediaItem[] = [];
+      for (const item of items) {
+        if (item.id.length === 0) {
+          continue;
+        }
+        const key: string = `${item.kind}:${item.id}`;
+        if (this.seen.has(key)) {
+          continue;
+        }
+        this.seen.add(key);
+        fresh.push(item);
+      }
+      this.dataSource.append(fresh);
+      this.itemCount = this.dataSource.totalCount();
+      this.hasMore = false;
+    } catch (error) {
+      if (token !== this.loadToken) {
+        return;
+      }
+      FqLog.w('search', `书旗搜索「${query}」加载失败: ${fqErrorMessage(error)}`);
+      this.errorMsg = fqErrorMessage(error);
+    } finally {
+      if (token === this.loadToken) {
+        this.loadingState = false;
+        this.loadingMore = false;
+      }
+    }
   }
 
   private loadMore(): void {
@@ -565,6 +711,16 @@ export struct SearchPage {
   }
 
   private openDetail(item: FqMediaItem): void {
+    // 书旗条目复用详情页（shuqi 标记走只读加载链路）；番茄条目照旧分流
+    if (fqIsShuqiItem(item)) {
+      DetailNavParams.id = item.id;
+      DetailNavParams.kind = 'book';
+      DetailNavParams.title = item.title;
+      DetailNavParams.cover = item.cover;
+      DetailNavParams.shuqi = true;
+      NavPathUtils.push(ROUTE_DETAIL);
+      return;
+    }
     fqPushBookOrDetail(item.id, item.kind, item.title, item.cover);
   }
 

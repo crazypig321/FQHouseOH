@@ -55,6 +55,8 @@ export class DetailNavParams {
   static kind: string = 'book';
   static title: string = '';
   static cover: string = '';
+  /** 书旗来源（只读第三方源）：详情页走书旗加载链路（消费后由详情页复位）。 */
+  static shuqi: boolean = false;
 }
 
 /** 阅读页跳转参数。 */
@@ -68,6 +70,12 @@ export class ReaderNavParams {
   static chapterIndex: number = -1;
   /** 边听边读模式：跟随 fqAudioSession 高亮朗读段落（消费后由阅读页复位）。 */
   static listenAlong: boolean = false;
+  /** 只读来源（书旗）：目录预载 + 注入正文加载器，旁路全部本地写入与番茄网络请求。 */
+  static readOnly: boolean = false;
+  /** 只读模式预载目录（进入时由阅读页消费）。 */
+  static presetChapters: FqChapter[] = [];
+  /** 只读模式正文加载器（null 时章节正文为空）。 */
+  static chapterLoader: ((chapter: FqChapter) => Promise<string>) | null = null;
 }
 
 /** 作者主页跳转参数。 */
