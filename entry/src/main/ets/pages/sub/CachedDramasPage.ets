@@ -1,11 +1,13 @@
 /**
  * 剧集缓存页（我的-剧集缓存入口，对齐 fqapp cached_dramas_page）：
  * 列表首部设置条目（设置页同款样式：「边看边缓存」开关 + 3/5/10 集档位、
- * 「仅 Wi-Fi 自动缓存」开关，空态同样展示）+ 统计数字聚合 + 公共手风琴
+ * 「仅 Wi-Fi 自动缓存」开关，空态同样展示；条目下接「缓存内容」小标题，
+ * 设置页 SectionHeader 同款）+ 统计数字聚合 + 公共手风琴
  * FqCacheAccordionList（剧卡头行/集明细行/任务行由组件渲染，本页只提供
- * 分组数据、任务行 @Builder 与集行尾随“导出”按钮）；任务行绑定 @ObservedV2
- * 下载任务实时进度；单集导出/单集删除/整剧删除/清空走确认；未入库任务按剧
- * 分组为临时卡；空态引导文案。
+ * 分组数据、任务行 @Builder 与左滑「导出/删除」回调）；头行/明细行左滑
+ * 呼出操作（HDS 样式，对齐 musicfreeoh 插件页）；任务行绑定 @ObservedV2
+ * 下载任务实时进度；单集导出/单集删除/整剧导出/整剧删除/清空走确认；
+ * 未入库任务按剧分组为临时卡；空态引导文案。
  */
 
 import { CommonNav } from '../../view/CommonNav';
@@ -226,8 +228,9 @@ export struct CachedDramasPage {
           groups: this.groups,
           icon: $r('sys.symbol.film'),
           scroller: this.scroller,
+          showExportAction: true,
           settingsBuilder: (): void => {
-            this.AutoCacheSettings()
+            this.SettingsWithHeader()
           },
           statsBuilder: (): void => {
             this.StatsCard()
@@ -235,11 +238,11 @@ export struct CachedDramasPage {
           taskRowsOf: (seriesId: string): void => {
             this.TaskRows(seriesId)
           },
-          detailTrailingOf: (detail: FqCacheDetailItem): void => {
-            this.ExportButton(detail)
+          groupExportClick: (group: FqCacheGroupItem): void => {
+            this.confirmExportDrama(group);
           },
-          groupTrailingOf: (group: FqCacheGroupItem): void => {
-            this.GroupExportButton(group)
+          detailExportClick: (detail: FqCacheDetailItem): void => {
+            this.confirmExportEpisode(this.episodeById.get(detail.id) ?? null);
           },
           groupDeleteClick: (group: FqCacheGroupItem): void => {
             this.confirmRemoveDrama(group);
@@ -369,6 +372,33 @@ export struct CachedDramasPage {
     .width('100%')
   }
 
+  /** 列表首部设置条目组 + 「缓存内容」小标题（settingsBuilder 注入公共组件）。 */
+  @Builder
+  private SettingsWithHeader() {
+    Column({ space: 12 }) {
+      this.AutoCacheSettings()
+      this.SectionHeader('缓存内容')
+    }
+    .width('100%')
+  }
+
+  /** 小标题（设置页 SectionHeader 同款：强调色竖条 + 加粗标题）。 */
+  @Builder
+  private SectionHeader(title: string) {
+    Row({ space: 8 }) {
+      Column()
+        .width(3.5)
+        .height(15)
+        .borderRadius(2)
+        .backgroundColor(appState.accentColor)
+      Text(title)
+        .fontSize(16)
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('sys.color.font_primary'))
+    }
+    .width('100%')
+  }
+
   /** 统计卡：N 部 · M 集 · 占用 + 暂停全部/继续全部/清空。 */
   @Builder
   private StatsCard() {
@@ -410,36 +440,7 @@ export struct CachedDramasPage {
     }
   }
 
-  /** 集行尾随“导出”按钮（detailTrailingOf 注入公共组件）。 */
-  @Builder
-  private ExportButton(detail: FqCacheDetailItem) {
-    Text('导出')
-      .fontSize(12)
-      .fontWeight(FontWeight.Medium)
-      .fontColor(FQ_DRAMA_TINT)
-      .padding({ left: 10, right: 2, top: 6, bottom: 6 })
-      .onClick((): void => {
-        this.confirmExportEpisode(this.episodeById.get(detail.id) ?? null);
-      })
-  }
-
-  /** 剧卡头行尾随“导出”按钮（groupTrailingOf 注入公共组件）：整剧一键导出；
-   *  无已缓存集的临时组（缓存中）不渲染。 */
-  @Builder
-  private GroupExportButton(group: FqCacheGroupItem) {
-    if (FqDramaCacheStore.episodesOf(group.id).length > 0) {
-      Text('导出')
-        .fontSize(12)
-        .fontWeight(FontWeight.Medium)
-        .fontColor(FQ_DRAMA_TINT)
-        .padding({ left: 10, right: 10, top: 6, bottom: 6 })
-        .onClick((): void => {
-          this.confirmExportDrama(group);
-        })
-    }
-  }
-
-  /** 整剧导出确认：提示导出路径后再执行。 */
+  /** 整剧导出确认（左滑呼出）：提示导出路径后再执行。 */
   private confirmExportDrama(group: FqCacheGroupItem): void {
     const episodeCount: number = FqDramaCacheStore.episodesOf(group.id).length;
     if (episodeCount === 0) {

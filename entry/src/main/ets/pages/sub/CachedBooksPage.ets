@@ -1,11 +1,14 @@
 /**
  * 章节缓存页（我的-章节缓存入口，对齐 fqapp cached_books_page）：
  * 统计卡（N 本 · M 章 · 占用/上限 + 清空）+ 书卡列表（LazyForEach）；
- * 点击书卡离线续读（目录/正文命中章节缓存）；行尾 trash 删单本（确认）；
+ * 点击书卡离线续读（目录/正文命中章节缓存）；书行左滑呼出「导出/删除」
+ * （HdsListItem + HdsSwipeActionOptions，对齐 musicfreeoh 插件页，按钮不常驻条目）；
  * 右上角「自动缓存上限」调节（数值 + MB/GB 单位弹窗，仅约束阅读自动缓存）；
  * 阅读时自动缓存 + 详情页「下载」整本缓存是数据来源；空态引导文案。
  */
 
+import { SymbolGlyphModifier } from '@kit.ArkUI';
+import { HdsListItem, HdsSwipeActionOptions, SwipeIconConfigurations } from '@kit.UIDesignKit';
 import { CommonNav } from '../../view/CommonNav';
 import { FqTitleBarMenuOptions } from '../../model/FqNavModels';
 import { ROUTE_READER2, ReaderNavParams } from '../../model/FqNavModels';
@@ -159,9 +162,12 @@ export struct CachedBooksPage {
           }
 
           LazyForEach(this.dataSource, (row: CachedBookRow) => {
-            ListItem() {
-              this.BookRow(row)
-            }
+            HdsListItem({
+              customItemBuilder: (): void => {
+                this.BookRow(row)
+              },
+              swipeActionOptions: this.bookSwipeOptions(row)
+            })
           }, (row: CachedBookRow) => `${row.summary.bookId}-${row.summary.chapterCount}`)
         }
         .padding({ left: 16, right: 16 })
@@ -175,7 +181,29 @@ export struct CachedBooksPage {
     }
   }
 
-  /** 单本缓存书行：图标块 + 书名 + 章数/大小 + trash 删除。 */
+  /** 书行左滑操作：「导出」（accent 底 download 图标）+「删除」（HDS 删除图标）。 */
+  private bookSwipeOptions(row: CachedBookRow): HdsSwipeActionOptions {
+    const options: HdsSwipeActionOptions = {
+      icons: [
+        {
+          icon: new SymbolGlyphModifier($r('sys.symbol.download'))
+            .fontColor([Color.White]).fontSize(20),
+          backgroundColor: appState.accentColor,
+          onAction: (): void => {
+            this.confirmExportBook(row);
+          }
+        }
+      ],
+      deleteIconOptions: {
+        onAction: (): void => {
+          this.confirmRemove(row);
+        }
+      }
+    };
+    return options;
+  }
+
+  /** 单本缓存书行：图标块 + 书名 + 章数/大小 + 右箭头（导出/删除左滑呼出）。 */
   @Builder
   private BookRow(row: CachedBookRow) {
     Row({ space: 12 }) {
@@ -204,26 +232,9 @@ export struct CachedBooksPage {
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
 
-      Text('导出')
-        .fontSize(12.5)
-        .fontWeight(FontWeight.Medium)
-        .fontColor(appState.accentColor)
-        .padding({ left: 10, right: 2, top: 8, bottom: 8 })
-        .onClick((): void => {
-        this.confirmExportBook(row);
-        })
-
       SymbolGlyph($r('sys.symbol.chevron_right'))
         .fontSize(13)
         .fontColor([$r('sys.color.font_tertiary')])
-
-      SymbolGlyph($r('sys.symbol.trash'))
-        .fontSize(15)
-        .fontColor([$r('sys.color.font_tertiary')])
-        .padding({ left: 4, top: 8, bottom: 8 })
-        .onClick((): void => {
-          this.confirmRemove(row);
-        })
     }
     .padding({ left: 14, right: 14, top: 10, bottom: 10 })
     .borderRadius(16)

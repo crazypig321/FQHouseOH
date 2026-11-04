@@ -1,13 +1,17 @@
 /**
  * 缓存管理手风琴列表公共组件（剧集/听书/漫画缓存页共用）：
  * - 数据模型展示就绪（分组/明细文案由页面预拼装，组件不感知各页 store 类型）；
- * - 结构：统计卡（@BuilderParam 注入）+ 分组头行（图标块+标题+meta+可选尾随
- *   按钮+删除+展开箭头：收起右箭头 / 展开下箭头）+ 明细行（label+标题+meta+
- *   可选尾随按钮+删除）+ 任务行（页面 @BuilderParam 注入）；
- * - LazyForEach 懒加载；进入默认全部收起，点击头行 animateTo 展开/收起；
- * - 删除走页面回调（确认弹窗与 store 操作留在各页）。
+ * - 结构：统计卡（@BuilderParam 注入）+ 分组头行（图标块+标题+meta+展开箭头：
+ *   收起右箭头 / 展开下箭头）+ 明细行（label+标题+meta）+ 任务行（页面
+ *   @BuilderParam 注入）；
+ * - 左滑操作（HdsListItem + HdsSwipeActionOptions，对齐 musicfreeoh 插件页）：
+ *   头行/明细行左滑呼出「导出（可选）+ 删除」，按钮不常驻条目；删除/导出走
+ *   页面回调（确认弹窗与 store 操作留在各页）；
+ * - LazyForEach 懒加载；进入默认全部收起，点击头行 animateTo 展开/收起。
  */
 
+import { SymbolGlyphModifier } from '@kit.ArkUI';
+import { HdsListItem, HdsSwipeActionOptions, SwipeIconConfigurations } from '@kit.UIDesignKit';
 import { FqColorUtils } from '../utils/FqColorUtils';
 import { appState } from '../entryability/AppState';
 
@@ -122,20 +126,24 @@ export struct FqCacheAccordionList {
   @Param bottomInset: number = 16;
   /** 滚动控制器（页面 CommonNav 共用）。 */
   @Param scroller: Scroller = new Scroller();
+  /** 左滑操作是否含「导出」图标（剧集页 true；听书/漫画页缺省仅删除）。 */
+  @Param showExportAction: boolean = false;
   /** 列表首部设置条目（统计卡之前；缺省不渲染，剧集缓存页注入「边看边缓存」等）。 */
   @BuilderParam settingsBuilder: () => void = fqAccordionEmptyBuilder;
   /** 统计卡（列表首项，页面注入含操作按钮的 FqCacheStatsCard）。 */
   @BuilderParam statsBuilder: () => void = fqAccordionEmptyBuilder;
   /** 任务行组（页面 @Builder，绑各页 @Trace 任务列表实时渲染）。 */
   @BuilderParam taskRowsOf: (groupId: string) => void = fqAccordionEmptyBuilder;
-  /** 明细行尾随按钮（剧集页“导出”；缺省不渲染）。 */
-  @BuilderParam detailTrailingOf: (detail: FqCacheDetailItem) => void = fqAccordionEmptyBuilder;
-  /** 分组头行尾随按钮（剧集页整剧“导出”；缺省不渲染）。 */
-  @BuilderParam groupTrailingOf: (group: FqCacheGroupItem) => void = fqAccordionEmptyBuilder;
-  /** 删整组确认（页面弹确认并调 store）。 */
+  /** 左滑「导出」分组（剧集页整剧导出确认）。 */
+  @Event groupExportClick: (group: FqCacheGroupItem) => void = (group: FqCacheGroupItem) => {
+  };
+  /** 左滑「导出」明细（剧集页单集导出确认）。 */
+  @Event detailExportClick: (detail: FqCacheDetailItem) => void = (detail: FqCacheDetailItem) => {
+  };
+  /** 左滑删整组确认（页面弹确认并调 store）。 */
   @Event groupDeleteClick: (group: FqCacheGroupItem) => void = (group: FqCacheGroupItem) => {
   };
-  /** 删单条确认（detail.id 由页面映射 store 记录键）。 */
+  /** 左滑删单条确认（detail.id 由页面映射 store 记录键）。 */
   @Event detailDeleteClick: (detail: FqCacheDetailItem) => void = (detail: FqCacheDetailItem) => {
   };
 
@@ -183,6 +191,56 @@ export struct FqCacheAccordionList {
     this.rebuild();
   }
 
+  /** 分组头行左滑操作：可选「导出」+「删除」（无缓存集的临时组只有删除）。 */
+  private groupSwipeOptions(group: FqCacheGroupItem): HdsSwipeActionOptions {
+    const options: HdsSwipeActionOptions = {
+      deleteIconOptions: {
+        onAction: (): void => {
+          this.groupDeleteClick(group);
+        }
+      }
+    };
+    if (this.showExportAction && group.details.length > 0) {
+      const icons: SwipeIconConfigurations[] = [
+        {
+          icon: new SymbolGlyphModifier($r('sys.symbol.download'))
+            .fontColor([Color.White]).fontSize(20),
+          backgroundColor: appState.accentColor,
+          onAction: (): void => {
+            this.groupExportClick(group);
+          }
+        }
+      ];
+      options.icons = icons;
+    }
+    return options;
+  }
+
+  /** 明细行左滑操作：可选「导出」+「删除」。 */
+  private detailSwipeOptions(detail: FqCacheDetailItem): HdsSwipeActionOptions {
+    const options: HdsSwipeActionOptions = {
+      deleteIconOptions: {
+        onAction: (): void => {
+          this.detailDeleteClick(detail);
+        }
+      }
+    };
+    if (this.showExportAction) {
+      const icons: SwipeIconConfigurations[] = [
+        {
+          icon: new SymbolGlyphModifier($r('sys.symbol.download'))
+            .fontColor([Color.White]).fontSize(20),
+          backgroundColor: appState.accentColor,
+          onAction: (): void => {
+            this.detailExportClick(detail);
+          }
+        }
+      ];
+      options.icons = icons;
+    }
+    return options;
+  }
+
   build() {
     List({ space: 10, scroller: this.scroller }) {
       ListItem() {
@@ -194,12 +252,22 @@ export struct FqCacheAccordionList {
       }
 
       LazyForEach(this.source, (row: FqAccordionRow) => {
-        ListItem() {
-          if (row.kind === FQ_ACCORDION_HEADER) {
-            this.HeaderRow(row.group)
-          } else if (row.kind === FQ_ACCORDION_DETAIL) {
-            this.DetailRow(row.detail)
-          } else {
+        if (row.kind === FQ_ACCORDION_HEADER) {
+          HdsListItem({
+            customItemBuilder: (): void => {
+              this.HeaderRow(row.group)
+            },
+            swipeActionOptions: this.groupSwipeOptions(row.group)
+          })
+        } else if (row.kind === FQ_ACCORDION_DETAIL) {
+          HdsListItem({
+            customItemBuilder: (): void => {
+              this.DetailRow(row.detail)
+            },
+            swipeActionOptions: this.detailSwipeOptions(row.detail)
+          })
+        } else {
+          ListItem() {
             this.taskRowsOf(row.group.id)
           }
         }
@@ -214,7 +282,7 @@ export struct FqCacheAccordionList {
     .contentEndOffset(appState.bottomRect + this.bottomInset)
   }
 
-  /** 分组头行：图标块 + 标题 + 说明 + 删除整组 + 展开箭头。 */
+  /** 分组头行：图标块 + 标题 + 说明 + 展开箭头（删除/导出左滑呼出）。 */
   @Builder
   private HeaderRow(group: FqCacheGroupItem) {
     Row({ space: 12 }) {
@@ -243,16 +311,6 @@ export struct FqCacheAccordionList {
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
 
-      this.groupTrailingOf(group)
-
-      SymbolGlyph($r('sys.symbol.trash'))
-        .fontSize(15)
-        .fontColor([$r('sys.color.font_tertiary')])
-        .padding({ left: 4, top: 8, bottom: 8 })
-        .onClick((): void => {
-          this.groupDeleteClick(group);
-        })
-
       SymbolGlyph(this.isExpanded(group.id)
         ? $r('sys.symbol.chevron_down') : $r('sys.symbol.chevron_right'))
         .fontSize(13)
@@ -270,7 +328,7 @@ export struct FqCacheAccordionList {
     })
   }
 
-  /** 明细行：label · 标题 + 说明 + 尾随按钮（可选）+ 单条删除。 */
+  /** 明细行：label · 标题 + 说明（删除/导出左滑呼出）。 */
   @Builder
   private DetailRow(detail: FqCacheDetailItem) {
     Row({ space: 10 }) {
@@ -289,16 +347,8 @@ export struct FqCacheAccordionList {
       Text(detail.metaText)
         .fontSize(11.5)
         .fontColor($r('sys.color.font_tertiary'))
-      this.detailTrailingOf(detail)
-      SymbolGlyph($r('sys.symbol.trash'))
-        .fontSize(14)
-        .fontColor([$r('sys.color.font_tertiary')])
-        .padding({ left: 4, top: 8, bottom: 8 })
-        .onClick((): void => {
-          this.detailDeleteClick(detail);
-        })
     }
-    .padding({ left: 16, right: 14, top: 9, bottom: 9 })
+    .padding({ left: 16, right: 14, top: 16, bottom: 16 })
     .borderRadius(12)
     .backgroundColor($r('sys.color.comp_background_tertiary'))
     .width('100%')
