@@ -13,7 +13,7 @@ import { fqMediaIdFromSearch } from '../../core/FqParser';
 import { FqMediaDataSource } from '../../core/FqMediaDataSource';
 import { FqItemCard } from '../../view/FqItemCard';
 import { DetailNavParams, fqPushBookOrDetail, ROUTE_DETAIL } from '../../model/FqNavModels';
-import { fqIsShuqiItem } from '../../model/FqShuqiModels';
+import { FqShuqiBook, fqIsShuqiItem, fqShuqiIdFromSearch } from '../../model/FqShuqiModels';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { CommonSearch, CommonLoading } from '../../view/CommonCom';
 import { CommonNav, titleBarOf } from '../../view/CommonNav';
@@ -504,16 +504,16 @@ export struct SearchPage {
       return;
     }
     this.submittedQuery = query;
-    // ID 识别（fqapp mediaIdFromSearch）：`id:` 前缀显式或 15~20 位纯数字；
-    // 书旗 id 是另一套命名空间，按 id 直查不适用（fqapp _search）
-    const mediaId: string | null = this.shuqiSource ? null : fqMediaIdFromSearch(query);
+    // ID 识别（fqapp mediaIdFromSearch）：番茄 `id:` 前缀显式或 15~20 位纯数字；
+    // 书旗仅认 `id:` 前缀（bookId 短、无长度特征，纯数字由 loadShuqi 做「直查置顶+关键词」合并）
+    const mediaId: string | null = this.shuqiSource ? fqShuqiIdFromSearch(query) : fqMediaIdFromSearch(query);
     this.idQuery = mediaId !== null ? mediaId : '';
     this.idItem = null;
     this.resetFeed();
-    if (this.shuqiSource) {
-      this.loadShuqi();
-    } else if (this.idQuery.length > 0) {
+    if (this.idQuery.length > 0) {
       this.loadId();
+    } else if (this.shuqiSource) {
+      this.loadShuqi();
     } else {
       this.load();
     }
@@ -525,7 +525,11 @@ export struct SearchPage {
     this.idQuery = '';
     this.idItem = null;
     this.resetFeed();
-    this.load();
+    if (this.shuqiSource) {
+      this.loadShuqi();
+    } else {
+      this.load();
+    }
   }
 
   /** 输入清空回到发现区（fqapp _showHistory）：重置查询态，恢复历史+热搜榜。 */
@@ -536,7 +540,7 @@ export struct SearchPage {
     this.resetFeed();
   }
 
-  /** ID 精确查找（fqapp _loadId/lookupMediaById）：单条结果，无分页。 */
+  /** ID 精确查找（fqapp _loadId/lookupMediaById）：单条结果，无分页；书旗走详情端点直查。 */
   private async loadId(): Promise<void> {
     const id: string = this.idQuery;
     if (id.length === 0) {
@@ -549,7 +553,9 @@ export struct SearchPage {
     this.errorMsg = '';
     try {
       await FqBackend.get().start(getContext(this));
-      const item: FqMediaItem | null = await FqBackend.get().lookupMediaById(id);
+      const item: FqMediaItem | null = this.shuqiSource
+        ? await this.lookupShuqiById(id)
+        : await FqBackend.get().lookupMediaById(id);
       if (token !== this.loadToken) {
         return;
       }
@@ -587,7 +593,8 @@ export struct SearchPage {
     this.itemCount = this.dataSource.totalCount();
   }
 
-  /** 书旗搜索（fqapp _searchShuqi）：单次返回全量、无分页，结果全量落当前 feed。 */
+  /** 书旗搜索（fqapp _searchShuqi）：单次返回全量、无分页，结果全量落当前 feed。
+   *  纯数字查询并行做 ID 直查命中置顶（书旗 bookId 短、无长度特征，数字书名仍可关键词搜到）。 */
   private async loadShuqi(): Promise<void> {
     const query: string = this.submittedQuery;
     if (query.length === 0) {
@@ -599,11 +606,20 @@ export struct SearchPage {
     this.errorMsg = '';
     try {
       await FqBackend.get().start(getContext(this));
-      const items: FqMediaItem[] = await FqBackend.get().shuqiSearch(query);
+      const searchTask: Promise<FqMediaItem[]> = FqBackend.get().shuqiSearch(query);
+      const directTask: Promise<FqMediaItem | null> = /^[0-9]+$/.test(query) && /[1-9]/.test(query)
+        ? this.lookupShuqiById(query).catch((): FqMediaItem | null => null)
+        : Promise.resolve<FqMediaItem | null>(null);
+      const direct: FqMediaItem | null = await directTask;
+      const items: FqMediaItem[] = await searchTask;
       if (token !== this.loadToken) {
         return;
       }
       const fresh: FqMediaItem[] = [];
+      if (direct !== null && direct.id.length > 0) {
+        this.seen.add(`${direct.kind}:${direct.id}`);
+        fresh.push(direct);
+      }
       for (const item of items) {
         if (item.id.length === 0) {
           continue;
@@ -630,6 +646,15 @@ export struct SearchPage {
         this.loadingMore = false;
       }
     }
+  }
+
+  /** 书旗 ID 直查：纯数字 bookId 走详情端点转搜索卡片；格式无效或不命中返回 null，网络错误照抛。 */
+  private async lookupShuqiById(id: string): Promise<FqMediaItem | null> {
+    if (!/^[0-9]+$/.test(id) || !/[1-9]/.test(id)) {
+      return null;
+    }
+    const book: FqShuqiBook = await FqBackend.get().shuqiBook(id);
+    return book.bookId.length > 0 ? book.toMediaItem() : null;
   }
 
   private loadMore(): void {

@@ -84,6 +84,8 @@ export class AuthorNavParams {
   static fallbackName: string = '';
   /** 详情页作者头像（加载完成前的占位显示）。 */
   static avatar: string = '';
+  /** 书旗来源（无作者端点）：作者页走 shuqiSearch(作者名) 聚合，仅笔名 + 作品列表。 */
+  static shuqi: boolean = false;
 }
 
 /** 听书页跳转参数。 */

@@ -165,10 +165,8 @@ export struct DetailPage {
                 this.TagChips()
               }
             }
-            if (!this.shuqiMode) {
-              ListItem(){
-                this.IdRow()
-              }
+            ListItem(){
+              this.IdRow()
             }
             ListItem(){
               this.DirectoryRow()
@@ -309,7 +307,7 @@ export struct DetailPage {
           .fontColor($r('sys.color.font_tertiary'))
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .visibility(this.detail.authorId.length > 0 ? Visibility.Visible : Visibility.None)
+          .visibility(this.shuqiMode || this.detail.authorId.length > 0 ? Visibility.Visible : Visibility.None)
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
@@ -322,14 +320,26 @@ export struct DetailPage {
     .onClick(() => this.openAuthor())
   }
 
-  /** 打开作者主页；无作者 ID（漫画/漫剧 1_ 前缀等）时不响应。 */
+  /** 打开作者主页；书旗来源走作者名搜索聚合主页；无作者 ID（漫画/漫剧 1_ 前缀等）时不响应。 */
   private openAuthor(): void {
+    if (this.shuqiMode) {
+      if (this.detail.author.length === 0) {
+        return;
+      }
+      AuthorNavParams.authorId = '';
+      AuthorNavParams.fallbackName = this.detail.author;
+      AuthorNavParams.avatar = '';
+      AuthorNavParams.shuqi = true;
+      NavPathUtils.push(ROUTE_AUTHOR);
+      return;
+    }
     if (this.detail.authorId.length === 0) {
       return;
     }
     AuthorNavParams.authorId = this.detail.authorId;
     AuthorNavParams.fallbackName = this.detail.author;
     AuthorNavParams.avatar = this.detail.authorAvatar;
+    AuthorNavParams.shuqi = false;
     NavPathUtils.push(ROUTE_AUTHOR);
   }
 

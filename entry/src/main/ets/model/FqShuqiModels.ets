@@ -15,6 +15,21 @@ export function fqIsShuqiItem(item: FqMediaItem): boolean {
   return item.source === FQ_SHUQI_SOURCE_ID;
 }
 
+/**
+ * 书旗搜索词 ID 识别：仅 `id:`/`id：` 前缀显式指定走 ID 直查。
+ * 书旗 bookId 无长度特征（纯数字、短至 1 位），纯数字查询不做 ID 判定，
+ * 由搜索页做「ID 直查命中置顶 + 关键词结果」合并，避免误伤数字书名。
+ */
+export function fqShuqiIdFromSearch(query: string): string | null {
+  const value: string = query.trim();
+  const stripped: string = value.replace(/^id\s*[:：]\s*/i, '');
+  if (stripped !== value) {
+    const id: string = stripped.trim();
+    return id.length > 0 ? id : null;
+  }
+  return null;
+}
+
 /** 书籍详情（/api/v1/shuqi/book 的 data）。 */
 export class FqShuqiBook {
   readonly bookId: string;
@@ -94,21 +109,36 @@ function fqShuqiWordNumber(wordCount: string): number {
   return Math.round(value * scale);
 }
 
-/** 书旗详情 → 番茄详情模型（复用 DetailPage 展示；无评分/标签/作者头像，评论区隐藏）。 */
+/** 「分类,标签…,状态,评分」逗号串拆分（fqapp _splitKinds：trim + 去空段）。 */
+function fqSplitShuqiKinds(raw: string): string[] {
+  const kinds: string[] = [];
+  const parts: string[] = raw.split(',');
+  for (const part of parts) {
+    const kind: string = part.trim();
+    if (kind.length > 0) {
+      kinds.push(kind);
+    }
+  }
+  return kinds;
+}
+
+/** 书旗详情 → 番茄详情模型（复用 DetailPage 展示；无评分/作者头像，评论区隐藏）。
+ *  kind 逗号串：首段（分类）进书名下元信息行，其余段进简介标签区。 */
 export function fqShuqiBookToDetail(book: FqShuqiBook): FqBookDetail {
+  const kinds: string[] = fqSplitShuqiKinds(book.kind);
   return new FqBookDetail(
     book.bookId,
     book.name,
     book.author,
     book.intro,
     book.coverUrl,
-    book.kind,
+    kinds.length > 0 ? kinds[0] : '',
     fqShuqiCreationStatus(book.status),
     fqShuqiWordNumber(book.wordCount),
     book.chapterTotalNum,
     '',
     '',
-    [],
+    kinds.slice(1),
     false,
     '',
     '',

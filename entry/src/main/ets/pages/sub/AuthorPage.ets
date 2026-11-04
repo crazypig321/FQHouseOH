@@ -10,9 +10,10 @@
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { FqAuthorProfile, FqAuthorWork, FqMediaItem } from '../../model/FqModels';
 import { FqMediaCard } from '../../view/FqMediaCard';
-import { AuthorNavParams, fqPushBookOrDetail, FqTitleBarOptions } from '../../model/FqNavModels';
+import { AuthorNavParams, DetailNavParams, fqPushBookOrDetail, FqTitleBarOptions, ROUTE_DETAIL } from '../../model/FqNavModels';
 import { CommonNav } from '../../view/CommonNav';
 import { CommonLoading } from '../../view/CommonCom';
+import { NavPathUtils } from '../../utils/NavPathUtils';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { appState } from '../../entryability/AppState';
 
@@ -28,6 +29,8 @@ export struct AuthorPage {
   @Local errorMsg: string = '';
   @Local profile: FqAuthorProfile = new FqAuthorProfile('', '', '', '', '', 0, 0, []);
   @Local headerTitle: string = '作者';
+  /** 书旗来源：无作者端点，shuqiSearch(作者名) 聚合作品，复用本页 UI。 */
+  private shuqiMode: boolean = false;
   private authorId: string = '';
   private fallbackName: string = '';
   private avatarUrl: string = '';
@@ -37,6 +40,8 @@ export struct AuthorPage {
   private stableTopInset: number = 0;
 
   aboutToAppear(): void {
+    this.shuqiMode = AuthorNavParams.shuqi;
+    AuthorNavParams.shuqi = false;
     this.authorId = AuthorNavParams.authorId;
     this.fallbackName = AuthorNavParams.fallbackName;
     this.avatarUrl = AuthorNavParams.avatar;
@@ -210,6 +215,10 @@ export struct AuthorPage {
   }
 
   private load(): void {
+    if (this.shuqiMode) {
+      this.loadShuqiAuthor();
+      return;
+    }
     if (this.authorId.length === 0) {
       this.loadingState = false;
       this.errorMsg = '作者信息不可用';
@@ -233,6 +242,43 @@ export struct AuthorPage {
       if (profile.avatar.length > 0) {
         this.avatarUrl = profile.avatar;
       }
+    }).catch((error: BusinessError): void => {
+      if (token !== this.loadToken) {
+        return;
+      }
+      this.loadingState = false;
+      this.errorMsg = fqErrorMessage(error);
+    });
+  }
+
+  /**
+   * 书旗作者主页：书旗无作者端点，shuqiSearch(作者名) 结果按作者精确过滤聚合
+   * （无头像/等级/粉丝数据，仅笔名 + N 部作品 + 3 列封面网格，UI 与番茄作者主页一致）。
+   */
+  private loadShuqiAuthor(): void {
+    const author: string = this.fallbackName.trim();
+    if (author.length === 0) {
+      this.loadingState = false;
+      this.errorMsg = '作者信息不可用';
+      return;
+    }
+    this.loadToken += 1;
+    const token: number = this.loadToken;
+    this.loadingState = true;
+    this.errorMsg = '';
+    FqBackend.get().shuqiSearch(author).then((items: FqMediaItem[]): void => {
+      if (token !== this.loadToken) {
+        return;
+      }
+      const works: FqAuthorWork[] = [];
+      for (const item of items) {
+        if (item.id.length === 0 || item.author.trim() !== author) {
+          continue;
+        }
+        works.push(new FqAuthorWork(item.id, item.title, item.cover, item.intro, '', -1, 0, ''));
+      }
+      this.profile = new FqAuthorProfile('', author, '', '', '', 0, works.length, works);
+      this.loadingState = false;
     }).catch((error: BusinessError): void => {
       if (token !== this.loadToken) {
         return;
@@ -293,6 +339,15 @@ export struct AuthorPage {
 
   private openWork(item: FqMediaItem): void {
     if (item.id.length === 0) {
+      return;
+    }
+    if (this.shuqiMode) {
+      DetailNavParams.id = item.id;
+      DetailNavParams.kind = 'book';
+      DetailNavParams.title = item.title;
+      DetailNavParams.cover = item.cover;
+      DetailNavParams.shuqi = true;
+      NavPathUtils.push(ROUTE_DETAIL);
       return;
     }
     fqPushBookOrDetail(item.id, 'book', item.title, item.cover);
