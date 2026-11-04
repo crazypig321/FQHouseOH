@@ -298,8 +298,8 @@ export function FqTitleBarOptions(mainTitle: ResourceStr, showSearch: boolean,
       content: {
         // 分类浏览中用主题色高亮（SymbolGlyphModifier 携带 fontColor）
         icon: categoryActive === true
-          ? new SymbolGlyphModifier($r('sys.symbol.square_grid_2x2')).fontColor([appState.accentColor])
-          : $r('sys.symbol.square_grid_2x2'),
+          ? new SymbolGlyphModifier($r('sys.symbol.rectangle_stack')).fontColor([appState.accentColor])
+          : $r('sys.symbol.rectangle_stack'),
         label: '分类',
         action: onCategory,
       },

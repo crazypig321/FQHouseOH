@@ -448,12 +448,12 @@ export struct HomePage {
     return FQ_CAPTIONS[this.channelIndex];
   }
 
-  /** 分区头副标题：分类态带上当前分类词。 */
+  /** 分区头副标题：分类态显示当前分类词。 */
   private sectionSubtitle(): string {
     const channel: FqChannelDef = FQ_CHANNELS[this.channelIndex];
     const word: string = this.currentCategoryWord();
     if (word.length > 0) {
-      return `值得一看的${word}内容`;
+      return `当前分类：${word}`;
     }
     return `值得一看的${channel.label}`;
   }
