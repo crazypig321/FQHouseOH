@@ -1872,7 +1872,18 @@ pub(crate) async fn serve_src_file(
     use crate::dispatch::{Response, ResponseBody};
     let root = Path::new(src_dir);
     let path = crate::static_files::resolve_confined(root, rest).await?;
-    if path.extension().and_then(|e| e.to_str()) != Some("mp4") {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    // CENC-encrypted cache entries are ISO-BMFF files: video episodes land
+    // here as `.mp4` and online-TTS audio chapters as `.m4a` (see
+    // `DownloadKind::Audio`). Both carry `enca`/`encv` sample entries and
+    // share the same range-decrypt path, so either extension qualifies;
+    // everything else (manga images, `.ts`, ...) falls through to plain
+    // static serving.
+    if ext != "mp4" && ext != "m4a" {
         return None;
     }
     if cache_cenc_state(&path) != CacheCencState::Encrypted {
