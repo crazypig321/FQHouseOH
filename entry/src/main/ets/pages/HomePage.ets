@@ -454,13 +454,13 @@ export struct HomePage {
     return `值得一看的${channel.label}`;
   }
 
-  /** 标题栏副标题：分类态显示当前分类词。 */
+  /** 标题栏副标题：分类态显示「当前分类：一级名/词」。 */
   private titleSubTitle(): ResourceStr | undefined {
     if (this.categoryIndex <= 0) {
       return undefined;
     }
     const word: string = this.currentCategoryWord();
-    return word.length > 0 ? `当前分类：${word}` : undefined;
+    return word.length > 0 ? `当前分类：${this.novelLevel1().label} － ${word}` : undefined;
   }
 
   /** 失败/空态重试：按当前模式分派首屏加载。 */
