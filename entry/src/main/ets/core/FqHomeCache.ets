@@ -15,6 +15,7 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { FqMediaItem } from '../model/FqModels';
 import { fqAsArray, fqAsRecord, fqNum, fqParseObject, fqStr } from './FqJson';
+import { fqParseMediaTag } from './FqParser';
 
 const FQ_CACHE_STORE_NAME: string = 'fq_home_cache';
 const FQ_CACHE_KEY_CHANNEL_INDEX: string = 'channel_index';
@@ -114,6 +115,15 @@ export class FqHomeCache {
         'episodeId': item.episodeId,
         'followerCount': item.followerCount,
       };
+      if (item.tag !== null) {
+        // 促销角标一并落盘（fqapp toJson 保留 tag），冷启动缓存同样带角标
+        const tagRec: Record<string, Object> = {
+          'text': item.tag.text,
+          'bg_color': item.tag.lightColors,
+          'dark_bg_color': item.tag.darkColors,
+        };
+        rec['tag'] = tagRec;
+      }
       recs.push(rec);
     }
     const payload: Record<string, Object> = {
@@ -184,7 +194,8 @@ export class FqHomeCache {
         fqStr(rec, 'intro'),
         fqStr(rec, 'seriesId'),
         fqStr(rec, 'episodeId'),
-        fqNum(rec, 'followerCount')));
+        fqNum(rec, 'followerCount'),
+        fqParseMediaTag(fqAsRecord(rec['tag']))));
     }
     return items;
   }

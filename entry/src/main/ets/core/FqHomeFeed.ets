@@ -439,6 +439,7 @@ export class FqHomeFeed {
         item.seriesId,
         item.episodeId,
         item.followerCount,
+        item.tag,
       ));
     }
     return out;

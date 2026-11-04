@@ -4,7 +4,7 @@
  */
 
 import { FqBackend } from '../core/FqBackend';
-import { FqMediaItem, fqEmptyMediaItem, fqKindLabel } from '../model/FqModels';
+import { FqMediaItem, FqMediaTag, fqEmptyMediaItem, fqKindLabel } from '../model/FqModels';
 import { appState } from '../entryability/AppState';
 import { FqColorUtils } from '../utils/FqColorUtils';
 
@@ -103,6 +103,7 @@ export struct FqMediaCard {
           .transition(TransitionEffect.OPACITY)
         }
         if (!this.batchMode && this.item.ep.length > 0) {
+          // 集数/章节文案：移到封面右下角（fqapp HomeMediaCard ep 位置）
           Column() {
             Text(this.item.ep)
               .fontSize(9)
@@ -114,7 +115,25 @@ export struct FqMediaCard {
               .backgroundColor('#B81C1B1A')
           }
           .width('100%')
+          .height('100%')
           .justifyContent(FlexAlign.End)
+          .alignItems(HorizontalAlign.End)
+          .padding(MARGIN_LABEL)
+          .transition(TransitionEffect.OPACITY)
+        }
+        if (!this.batchMode && this.item.tag !== null && this.item.tag.hasColors()) {
+          // 促销角标（tag_info：上新/爆款）：封面右上角，上游渐变配色
+          Column() {
+            Text(this.item.tag.text)
+              .fontSize(9)
+              .fontColor(Color.White)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+              .borderRadius(5)
+              .linearGradient({ angle: 90, colors: this.tagGradientStops() })
+          }
+          .width('100%')
           .alignItems(HorizontalAlign.End)
           .padding(MARGIN_LABEL)
           .transition(TransitionEffect.OPACITY)
@@ -175,5 +194,31 @@ export struct FqMediaCard {
       return this.item.badge;
     }
     return fqKindLabel(this.item.kind);
+  }
+
+  /**
+   * 促销角标渐变 stops（fqapp CoverTagChip）：水平（angle 90）铺 tag 配色；
+   * 单色重复为首尾两站呈实心；无色时退中性深底不进渐变。
+   */
+  private tagGradientStops(): [ResourceColor, number][] {
+    const stops: [ResourceColor, number][] = [];
+    const tag: FqMediaTag | null = this.item.tag;
+    if (tag === null) {
+      return stops;
+    }
+    const colors: string[] = tag.colorsFor(appState.isDark);
+    if (colors.length === 0) {
+      return stops;
+    }
+    if (colors.length === 1) {
+      stops.push([colors[0], 0.0]);
+      stops.push([colors[0], 1.0]);
+      return stops;
+    }
+    const step: number = 1 / (colors.length - 1);
+    for (let i = 0; i < colors.length; i++) {
+      stops.push([colors[i], i * step]);
+    }
+    return stops;
   }
 }

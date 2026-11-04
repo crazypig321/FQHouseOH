@@ -4,6 +4,37 @@
  * 与 lib/models/book_detail.dart 的 BookDetail。
  */
 
+/**
+ * 封面角标（tag_info，fqapp MediaTag）：上游挂在卡片上的促销标签
+ * （`上新` 绿渐变 / `爆款` 红渐变），文案与明暗两套渐变色都来自载荷，
+ * 不能写死。仅带配色的才是促销角标；搜索结果里同字段的无色分类文字
+ * （`漫剧`/`小说改编`）不作角标渲染。
+ */
+export class FqMediaTag {
+  readonly text: string;
+  readonly lightColors: string[];
+  readonly darkColors: string[];
+
+  constructor(text: string, lightColors: string[], darkColors: string[]) {
+    this.text = text;
+    this.lightColors = lightColors;
+    this.darkColors = darkColors;
+  }
+
+  /** 是否带渐变配色（促销角标与普通文字标签的判据，fqapp hasColors）。 */
+  hasColors(): boolean {
+    return this.lightColors.length > 0 || this.darkColors.length > 0;
+  }
+
+  /** 按明暗取渐变色组（缺侧回退另一侧，fqapp colorsFor）。 */
+  colorsFor(dark: boolean): string[] {
+    if (dark) {
+      return this.darkColors.length > 0 ? this.darkColors : this.lightColors;
+    }
+    return this.lightColors.length > 0 ? this.lightColors : this.darkColors;
+  }
+}
+
 /** 内容卡片。kind: 'book' | 'video' | 'manju' | 'manga' | 'audio'。 */
 export class FqMediaItem {
   /** 内容唯一标识。 */
@@ -30,6 +61,8 @@ export class FqMediaItem {
   readonly episodeId: string;
   /** 关注人数。 */
   readonly followerCount: number;
+  /** 封面角标（tag_info：上新/爆款等带渐变的促销标签）；null 无。 */
+  readonly tag: FqMediaTag | null;
 
   constructor(
     id: string,
@@ -44,6 +77,7 @@ export class FqMediaItem {
     seriesId: string,
     episodeId: string,
     followerCount: number,
+    tag: FqMediaTag | null = null,
   ) {
     this.id = id;
     this.title = title;
@@ -57,6 +91,7 @@ export class FqMediaItem {
     this.seriesId = seriesId;
     this.episodeId = episodeId;
     this.followerCount = followerCount;
+    this.tag = tag;
   }
 }
 

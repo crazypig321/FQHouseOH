@@ -43,6 +43,7 @@ import {
   FqSearchTab,
   FqSeriesRelateBook,
   FqRelatedSeries,
+  FqMediaTag,
   fqEmptyRankCatalog,
   fqFormatCounter,
   FqChapterIdeaMeta,
@@ -353,9 +354,48 @@ export function fqItemFromRaw(rec: Record<string, Object>, forcedKind: string): 
     fqAsInt(bd['followed_cnt'], 0),
   );
 
+  // 封面角标：骑在卡片对象本体上（与 title/cover 平级），也可能在 book_data
+  const tagInfo: Record<string, Object> | null = fqMapFrom(rec['tag_info']) ??
+    fqMapFrom(bd['tag_info']);
+  const tag: FqMediaTag | null = fqParseMediaTag(tagInfo);
+
   return new FqMediaItem(
-    id, title, cover, author, badge, ep, kind, score, intro, seriesId, episodeId, followerCount,
+    id, title, cover, author, badge, ep, kind, score, intro, seriesId, episodeId, followerCount, tag,
   );
+}
+
+// ---------------------------------------------------------------------------
+// 封面角标（fqapp lib/models/media_item.dart MediaTag.fromRaw）
+// ---------------------------------------------------------------------------
+
+/**
+ * 解析封面角标（tag_info：`text` + `bg_color`/`dark_bg_color` 渐变组）。
+ * 文案为空返回 null；色组只保留合规 `#RRGGBB`（畸形色值不进渲染）。
+ */
+export function fqParseMediaTag(rec: Record<string, Object> | null): FqMediaTag | null {
+  if (rec === null) {
+    return null;
+  }
+  const text: string = fqStr(rec, 'text').trim();
+  if (text.length === 0) {
+    return null;
+  }
+  return new FqMediaTag(text, fqHexColorListOf(rec['bg_color']), fqHexColorListOf(rec['dark_bg_color']));
+}
+
+/** 提取合规 `#RRGGBB` 色值列表（非该形状的条目丢弃）。 */
+function fqHexColorListOf(value: Object | undefined): string[] {
+  const out: string[] = [];
+  const arr: Object[] | null = fqAsArray(value);
+  if (arr === null) {
+    return out;
+  }
+  for (const entry of arr) {
+    if (typeof entry === 'string' && /^#[0-9a-fA-F]{6}$/.test(entry.trim())) {
+      out.push(entry.trim());
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
