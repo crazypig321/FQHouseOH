@@ -62,6 +62,7 @@ const FQ_LIBRARIES: FqLibraryEntry[] = [
   new FqLibraryEntry('mpv-arkts', 'GPL-2.0+', 'HarmonyOS libmpv 绑定，视频与听书播放内核'),
   new FqLibraryEntry('libmpv / FFmpeg', 'GPL 兼容', '媒体解码与渲染，随 mpv-arkts 引入'),
   new FqLibraryEntry('fqapi', 'GPL-3.0', '本项目自带的 Rust 后端核心'),
+  new FqLibraryEntry('@keke/color-picker', 'MIT', 'HSB 颜色选择器组件，主题色与阅读主题自定义取色'),
 ];
 
 /** 关于页通用行：彩色图标块 + 标题/副标题 + 右侧文案与箭头，onTap 可空（纯展示行）。 */

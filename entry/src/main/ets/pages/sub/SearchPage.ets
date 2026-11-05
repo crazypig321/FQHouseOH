@@ -6,6 +6,7 @@
  */
 
 import { preferences } from '@kit.ArkData';
+import { LengthMetrics } from '@kit.ArkUI';
 import { HdsNavigationMenuItemOptions, TitleBarContentOptions } from '@kit.UIDesignKit';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { FqHotSearchEntry, FqMediaItem, FqSearchTab } from '../../model/FqModels';
@@ -47,15 +48,12 @@ const FQ_SCORE_FILTER_LABELS: string[] = ['默认', '高分排序', '8分以上'
 const HISTORY_STORE_NAME: string = 'fq_search_history';
 const HISTORY_KEY: string = 'history';
 const HISTORY_MAX: number = 10;
-/** 筛选/高分选项持久化 key（fqapp 'search_minimum_score' 模式）。 */
-const STATUS_FILTER_KEY: string = 'status_filter';
-const SCORE_FILTER_KEY: string = 'score_filter';
 
-/** 标题栏 bottomBuilder 插槽高：搜索框 40 + 间距 10 + 筛选行 36 + 间距 10 + 分类条 33 + 上下 padding */
-const FQ_SEARCH_BOTTOM_BUILDER_HEIGHT: number = 156;
+/** 标题栏 bottomBuilder 插槽高：搜索框 40 + 间距 10 + 筛选/类目行 36 + 上下 padding */
+const FQ_SEARCH_BOTTOM_BUILDER_HEIGHT: number = 110;
 
 /** 列表内容起始偏移：标题栏 56 + bottomBuilder 100 */
-const FQ_SEARCH_TOP_INSET: number = 206;
+const FQ_SEARCH_TOP_INSET: number = 160;
 
 /** 「来源」菜单锚点 id（对齐书架页更多菜单模式）。 */
 const FQ_SEARCH_SOURCE_ANCHOR_ID: string = 'search_source_anchor';
@@ -300,30 +298,16 @@ export struct SearchPage {
         click: (): void => {
         },
       })
-      this.FilterRow()
       this.CategoryStrip()
     }
     .padding({ left: 16, right: 16, top: 2, bottom: 10 })
   }
 
-  /** 筛选行：完结状态 Select（番茄/书旗均可用）+ 高分 Select（书旗无评分，隐藏；fqapp「不提供评分」）。 */
-  @Builder
-  private FilterRow() {
-    Row({ space: 12 }) {
-      this.StatusFilterSelect()
-      if (!this.shuqiSource) {
-        this.ScoreFilterSelect()
-      }
-    }
-    .width('100%')
-    .alignItems(VerticalAlign.Center)
-  }
-
-  /** 完结状态筛选 Select（样式对齐分类弹窗类目 Select；ID 直查模式禁用）。 */
+  /** 完结状态筛选 Select（样式对齐分类弹窗类目 Select；ID 直查模式禁用；未选择显示「状态」）。 */
   @Builder
   private StatusFilterSelect() {
     Select(this.statusFilterOptions())
-      .value(FQ_STATUS_FILTER_LABELS[this.statusFilterIndex])
+      .value(this.statusFilterIndex === 0 ? '状态' : FQ_STATUS_FILTER_LABELS[this.statusFilterIndex])
       .selected(this.statusFilterIndex)
       .font({ size: 15, weight: FontWeight.Medium })
       .fontColor($r('sys.color.font_primary'))
@@ -342,11 +326,11 @@ export struct SearchPage {
       .opacity(this.idQuery.length > 0 ? 0.4 : 1)
   }
 
-  /** 高分选项 Select（高分排序 + 8/9 分阈值；ID 直查模式禁用）。 */
+  /** 高分选项 Select（高分排序 + 8/9 分阈值；ID 直查模式禁用；未选择显示「评分」）。 */
   @Builder
   private ScoreFilterSelect() {
     Select(this.scoreFilterOptions())
-      .value(FQ_SCORE_FILTER_LABELS[this.scoreFilterIndex])
+      .value(this.scoreFilterIndex === 0 ? '评分' : FQ_SCORE_FILTER_LABELS[this.scoreFilterIndex])
       .selected(this.scoreFilterIndex)
       .font({ size: 15, weight: FontWeight.Medium })
       .fontColor($r('sys.color.font_primary'))
@@ -385,25 +369,39 @@ export struct SearchPage {
     return options;
   }
 
+  /** 筛选/类目行：状态 + 评分两个 Select 在前，类目 List 其后（放不下时横向滚动）。
+   *  高分 Select 书旗源隐藏（书旗无评分，fqapp「不提供评分」）；书旗下类目置灰不可点。 */
   @Builder
   private CategoryStrip() {
-    Scroll() {
-      Row({ space: 2 }) {
+    Row({ space: 6 }) {
+      this.StatusFilterSelect()
+      if (!this.shuqiSource) {
+        this.ScoreFilterSelect()
+      }
+      List({ space: 22 }) {
         ForEach(FQ_SEARCH_CATEGORIES, (category: FqSearchCategoryDef, index: number) => {
-          Text(category.title)
-            .fontSize(15)
-            .fontWeight(this.categoryWeight(index))
-            .fontColor(this.categoryColor(index))
-            .padding({ left: 10, right: 10, top: 6, bottom: 6 })
-            .onClick(() => this.selectCategory(index))
+          ListItem() {
+            Text(category.title)
+              .fontSize(15)
+              .fontWeight(this.categoryWeight(index))
+              .fontColor(this.categoryColor(index))
+              .padding({ top: 6, bottom: 6 })
+              .onClick(() => this.selectCategory(index))
+          }
         }, (category: FqSearchCategoryDef): string => category.title)
       }
+      .listDirection(Axis.Horizontal)
+      .scrollBar(BarState.Off)
+      .edgeEffect(EdgeEffect.None)
+      .layoutWeight(1)
+      .height(36)
+      .alignListItem(ListItemAlign.Center)
       .padding({ left: 8, right: 8 })
+      .opacity(this.shuqiSource ? 0.4 : 1)
+      .fadingEdge(true, { fadingEdgeLength: LengthMetrics.vp(30) })
     }
-    .scrollable(ScrollDirection.Horizontal)
-    .scrollBar(BarState.Off)
     .width('100%')
-    .opacity(this.shuqiSource ? 0.4 : 1)
+    .alignItems(VerticalAlign.Center)
   }
 
   /** 标题栏「来源」菜单按钮（对齐书架页更多按钮模式）。 */
@@ -587,11 +585,8 @@ export struct SearchPage {
     }
     if (shuqi) {
       this.fanqieCategoryIndex = this.categoryIndex;
-      // 书旗源无评分：高分 Select 隐藏，选项同步回「默认」，避免隐形过滤清空结果
-      if (this.scoreFilterIndex !== 0) {
-        this.scoreFilterIndex = 0;
-        this.persistFilterIndices();
-      }
+      // 书旗源无评分：高分 Select 隐藏，选项同步回「评分」，避免隐形过滤清空结果
+      this.scoreFilterIndex = 0;
     }
     this.shuqiSource = shuqi;
     this.categoryIndex = shuqi ? 0 : this.fanqieCategoryIndex;
@@ -681,7 +676,6 @@ export struct SearchPage {
       return;
     }
     this.statusFilterIndex = index;
-    this.persistFilterIndices();
     this.applyFilters();
   }
 
@@ -690,7 +684,6 @@ export struct SearchPage {
       return;
     }
     this.scoreFilterIndex = index;
-    this.persistFilterIndices();
     this.applyFilters();
   }
 
@@ -698,17 +691,7 @@ export struct SearchPage {
   private clearFilters(): void {
     this.statusFilterIndex = 0;
     this.scoreFilterIndex = 0;
-    this.persistFilterIndices();
     this.applyFilters();
-  }
-
-  private persistFilterIndices(): void {
-    const store: preferences.Preferences | null = this.historyStore;
-    if (store !== null) {
-      store.put(STATUS_FILTER_KEY, this.statusFilterIndex);
-      store.put(SCORE_FILTER_KEY, this.scoreFilterIndex);
-      store.flush();
-    }
   }
 
   private submit(): void {
@@ -967,7 +950,6 @@ export struct SearchPage {
   private async initHistory(): Promise<void> {
     try {
       this.historyStore = await preferences.getPreferences(getContext(this), HISTORY_STORE_NAME);
-      await this.loadFilterIndices();
       const raw: preferences.ValueType = await this.historyStore.get(HISTORY_KEY, '');
       if (typeof raw === 'string' && raw.length > 0) {
         const parsed: Object = JSON.parse(raw);
@@ -983,22 +965,6 @@ export struct SearchPage {
       }
     } catch (error) {
       this.historyChips = [];
-    }
-  }
-
-  /** 载入持久化的筛选/高分选项（越界回退「默认」）。 */
-  private async loadFilterIndices(): Promise<void> {
-    const store: preferences.Preferences | null = this.historyStore;
-    if (store === null) {
-      return;
-    }
-    const statusRaw: preferences.ValueType = await store.get(STATUS_FILTER_KEY, 0);
-    if (typeof statusRaw === 'number' && statusRaw >= 0 && statusRaw < FQ_STATUS_FILTER_LABELS.length) {
-      this.statusFilterIndex = statusRaw;
-    }
-    const scoreRaw: preferences.ValueType = await store.get(SCORE_FILTER_KEY, 0);
-    if (typeof scoreRaw === 'number' && scoreRaw >= 0 && scoreRaw < FQ_SCORE_FILTER_LABELS.length) {
-      this.scoreFilterIndex = scoreRaw;
     }
   }
 

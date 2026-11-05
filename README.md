@@ -64,6 +64,7 @@
 | **Rust 核心**（vendored `fqapi_core`） | 进程内本地 HTTP 服务（`127.0.0.1:8080`）|
 | **Node-API 绑定**（`crates/fqapi_napi`） | 手写 `libfqapi_napi.so` 适配层，ArkTS 经其驱动 Rust 核心 |
 | **mpv-arkts**（`@mpv-ohos/mpv-arkts`） | HarmonyOS libmpv 绑定，视频 / 听书播放内核 |
+| **@keke/color-picker** | HSB 颜色选择器组件，主题色 / 阅读主题自定义取色 |
 | **Asset Store Kit**（`@kit.AssetStoreKit`） | 设备池密钥安全存储，不可用时降级明文池 |
 
 ---
@@ -108,6 +109,7 @@ hvigorw assembleHap
 
 - [fqapp](https://github.com/ch6vip/fqapp) 及其作者 **ch6vip** —— 本项目移植自该项目
 - [mpv-arkts](https://gitcode.com/openharmony-tpc/mpv-arkts) —— HarmonyOS libmpv 绑定
+- [@keke/color-picker](https://gitee.com/oh_keke/keke/blob/main/packages/ColorPicker/README.md) —— HSB 颜色选择器组件
 - [musicfreeOH](https://github.com/crazypig321/MusicFreeOH) —— UI 大框架与组件设计参考
 
 ---
