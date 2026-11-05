@@ -18,6 +18,7 @@ import { NavPathUtils } from '../../utils/NavPathUtils';
 import { CommonSearch, CommonLoading } from '../../view/CommonCom';
 import { CommonNav, titleBarOf } from '../../view/CommonNav';
 import { FqMenu, FqMenuItem } from '../../view/CommonMenu';
+import { selectImmersiveModifier } from '../../utils/ModifierUtils';
 import { appState } from '../../entryability/AppState';
 import { FqLog } from '../../core/FqLogStore';
 
@@ -37,15 +38,24 @@ const FQ_SEARCH_CATEGORIES: FqSearchCategoryDef[] = [
   { title: '听书', sourceTitle: '听书', tabType: 2, kind: 'audio' },
 ];
 
+/** 完结状态筛选选项（0 默认 / 1 未完结 / 2 已完结）。 */
+const FQ_STATUS_FILTER_LABELS: string[] = ['默认', '未完结', '已完结'];
+
+/** 高分选项（0 默认 / 1 高分排序 / 2 8分以上 / 3 9分以上）。 */
+const FQ_SCORE_FILTER_LABELS: string[] = ['默认', '高分排序', '8分以上', '9分以上'];
+
 const HISTORY_STORE_NAME: string = 'fq_search_history';
 const HISTORY_KEY: string = 'history';
 const HISTORY_MAX: number = 10;
+/** 筛选/高分选项持久化 key（fqapp 'search_minimum_score' 模式）。 */
+const STATUS_FILTER_KEY: string = 'status_filter';
+const SCORE_FILTER_KEY: string = 'score_filter';
 
-/** 标题栏 bottomBuilder 插槽高：搜索框 40 + 间距 10 + 分类条 33 + 上下 padding 12 */
-const FQ_SEARCH_BOTTOM_BUILDER_HEIGHT: number = 110;
+/** 标题栏 bottomBuilder 插槽高：搜索框 40 + 间距 10 + 筛选行 36 + 间距 10 + 分类条 33 + 上下 padding */
+const FQ_SEARCH_BOTTOM_BUILDER_HEIGHT: number = 156;
 
-/** 列表内容起始偏移：标题栏 56 + bottomBuilder 96 */
-const FQ_SEARCH_TOP_INSET: number = 160;
+/** 列表内容起始偏移：标题栏 56 + bottomBuilder 100 */
+const FQ_SEARCH_TOP_INSET: number = 206;
 
 /** 「来源」菜单锚点 id（对齐书架页更多菜单模式）。 */
 const FQ_SEARCH_SOURCE_ANCHOR_ID: string = 'search_source_anchor';
@@ -66,9 +76,15 @@ export struct SearchPage {
   @Local idQuery: string = '';
   /** 搜索来源：false 番茄 / true 书旗（fqapp _shuqiSource；只读第三方源）。 */
   @Local shuqiSource: boolean = false;
+  /** 完结状态筛选下标（FQ_STATUS_FILTER_LABELS；fqapp 评分筛选的新增姊妹筛选项）。 */
+  @Local statusFilterIndex: number = 0;
+  /** 高分选项下标（FQ_SCORE_FILTER_LABELS；fqapp SearchScoreFilter 阈值 0/8/9 + 高分排序）。 */
+  @Local scoreFilterIndex: number = 0;
   /** 切入书旗前记住的番茄分类，切回「番茄」时恢复（fqapp _fanqieTab）。 */
   private fanqieCategoryIndex: number = 0;
   private dataSource: FqMediaDataSource = new FqMediaDataSource();
+  /** 已加载的原始结果（去重后原顺序），筛选/排序在视图层重投影（fqapp 筛选只作用于已加载结果）。 */
+  private allItems: FqMediaItem[] = [];
   /** ID 模式查得的单条结果（切分类时本地过滤，不重新请求）。 */
   private idItem: FqMediaItem | null = null;
   private hasMore: boolean = false;
@@ -151,10 +167,30 @@ export struct SearchPage {
           }
         } else if (this.itemCount === 0 && !this.loadingState) {
           ListItem() {
-            Column() {
-              Text(this.idQuery.length > 0 ? '未找到该 ID 对应的作品' : '没有找到相关内容')
+            Column({ space: 12 }) {
+              Text(this.idQuery.length > 0 ? '未找到该 ID 对应的作品'
+                : this.filtersActive() && this.allItems.length > 0 ? '已加载结果中暂无符合筛选的作品'
+                : '没有找到相关内容')
                 .fontSize(14)
                 .fontColor($r('sys.color.font_secondary'))
+                .textAlign(TextAlign.Center)
+                .padding({ left: 32, right: 32 })
+              if (this.filtersActive() && this.allItems.length > 0) {
+                Row({ space: 10 }) {
+                  if (this.hasMore) {
+                    Button('加载更多')
+                      .fontSize(13)
+                      .backgroundColor($r('sys.color.comp_background_tertiary'))
+                      .fontColor($r('sys.color.font_primary'))
+                      .onClick(() => this.loadMore())
+                  }
+                  Button('清除筛选')
+                    .fontSize(13)
+                    .backgroundColor(appState.accentColor)
+                    .onClick(() => this.clearFilters())
+                }
+                .alignItems(VerticalAlign.Center)
+              }
             }
             .width('100%')
             .padding({ top: 48 })
@@ -264,9 +300,89 @@ export struct SearchPage {
         click: (): void => {
         },
       })
+      this.FilterRow()
       this.CategoryStrip()
     }
     .padding({ left: 16, right: 16, top: 2, bottom: 10 })
+  }
+
+  /** 筛选行：完结状态 Select（番茄/书旗均可用）+ 高分 Select（书旗无评分，隐藏；fqapp「不提供评分」）。 */
+  @Builder
+  private FilterRow() {
+    Row({ space: 12 }) {
+      this.StatusFilterSelect()
+      if (!this.shuqiSource) {
+        this.ScoreFilterSelect()
+      }
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Center)
+  }
+
+  /** 完结状态筛选 Select（样式对齐分类弹窗类目 Select；ID 直查模式禁用）。 */
+  @Builder
+  private StatusFilterSelect() {
+    Select(this.statusFilterOptions())
+      .value(FQ_STATUS_FILTER_LABELS[this.statusFilterIndex])
+      .selected(this.statusFilterIndex)
+      .font({ size: 15, weight: FontWeight.Medium })
+      .fontColor($r('sys.color.font_primary'))
+      .selectedOptionFont({ size: 15, weight: FontWeight.Medium })
+      .selectedOptionFontColor(appState.accentColor)
+      .optionFont({ size: 15 })
+      .optionFontColor($r('sys.color.font_primary'))
+      .backgroundColor(Color.Transparent)
+      .height(36)
+      .padding({ left: 0, right: 0 })
+      .onSelect((index: number, text: string) => {
+        this.selectStatusFilter(index);
+      })
+      .attributeModifier(selectImmersiveModifier)
+      .enabled(this.idQuery.length === 0)
+      .opacity(this.idQuery.length > 0 ? 0.4 : 1)
+  }
+
+  /** 高分选项 Select（高分排序 + 8/9 分阈值；ID 直查模式禁用）。 */
+  @Builder
+  private ScoreFilterSelect() {
+    Select(this.scoreFilterOptions())
+      .value(FQ_SCORE_FILTER_LABELS[this.scoreFilterIndex])
+      .selected(this.scoreFilterIndex)
+      .font({ size: 15, weight: FontWeight.Medium })
+      .fontColor($r('sys.color.font_primary'))
+      .selectedOptionFont({ size: 15, weight: FontWeight.Medium })
+      .selectedOptionFontColor(appState.accentColor)
+      .optionFont({ size: 15 })
+      .optionFontColor($r('sys.color.font_primary'))
+      .backgroundColor(Color.Transparent)
+      .height(36)
+      .padding({ left: 0, right: 0 })
+      .onSelect((index: number, text: string) => {
+        this.selectScoreFilter(index);
+      })
+      .attributeModifier(selectImmersiveModifier)
+      .enabled(this.idQuery.length === 0)
+      .opacity(this.idQuery.length > 0 ? 0.4 : 1)
+  }
+
+  /** 完结状态筛选选项。 */
+  private statusFilterOptions(): SelectOption[] {
+    const options: SelectOption[] = [];
+    for (const label of FQ_STATUS_FILTER_LABELS) {
+      const option: SelectOption = { value: label };
+      options.push(option);
+    }
+    return options;
+  }
+
+  /** 高分选项。 */
+  private scoreFilterOptions(): SelectOption[] {
+    const options: SelectOption[] = [];
+    for (const label of FQ_SCORE_FILTER_LABELS) {
+      const option: SelectOption = { value: label };
+      options.push(option);
+    }
+    return options;
   }
 
   @Builder
@@ -471,6 +587,11 @@ export struct SearchPage {
     }
     if (shuqi) {
       this.fanqieCategoryIndex = this.categoryIndex;
+      // 书旗源无评分：高分 Select 隐藏，选项同步回「默认」，避免隐形过滤清空结果
+      if (this.scoreFilterIndex !== 0) {
+        this.scoreFilterIndex = 0;
+        this.persistFilterIndices();
+      }
     }
     this.shuqiSource = shuqi;
     this.categoryIndex = shuqi ? 0 : this.fanqieCategoryIndex;
@@ -490,12 +611,104 @@ export struct SearchPage {
 
   private resetFeed(): void {
     this.dataSource.reset();
+    this.allItems = [];
     this.itemCount = 0;
     this.errorMsg = '';
     this.seen.clear();
     this.nextOffset = 0;
     this.hasMore = false;
     this.loadToken += 1;
+  }
+
+  // ----- 筛选/排序（视图层重投影，fqapp 筛选只作用于已加载结果） -----
+
+  /** 完结状态筛选是否生效。 */
+  private filtersActive(): boolean {
+    return this.statusFilterIndex > 0 || (this.scoreFilterIndex > 0 && !this.shuqiSource);
+  }
+
+  /** 完结状态筛选：未完结/已完结均要求已知状态，未知（-1）不计入。 */
+  private matchesStatusFilter(item: FqMediaItem): boolean {
+    if (this.statusFilterIndex === 1) {
+      return item.creationStatus === 1;
+    }
+    if (this.statusFilterIndex === 2) {
+      return item.creationStatus === 0;
+    }
+    return true;
+  }
+
+  /** 高分筛选：8/9 分阈值不计未评分（score 0；fqapp「未评分作品不计入」）。 */
+  private matchesScoreFilter(item: FqMediaItem): boolean {
+    if (this.scoreFilterIndex === 2) {
+      return item.score >= 8;
+    }
+    if (this.scoreFilterIndex === 3) {
+      return item.score >= 9;
+    }
+    return true;
+  }
+
+  /** allItems 按当前筛选/排序重投影进 dataSource；ID 直查模式不过滤（fqapp 评分筛选 ID 模式禁用）。 */
+  private applyFilters(): void {
+    const view: FqMediaItem[] = [];
+    if (this.idQuery.length > 0) {
+      for (const item of this.allItems) {
+        view.push(item);
+      }
+    } else {
+      for (const item of this.allItems) {
+        if (!this.matchesStatusFilter(item)) {
+          continue;
+        }
+        if (!this.matchesScoreFilter(item)) {
+          continue;
+        }
+        view.push(item);
+      }
+      if (this.scoreFilterIndex === 1 && !this.shuqiSource) {
+        // 高分排序：分数降序，同分保持原顺序（稳定排序）
+        view.sort((left: FqMediaItem, right: FqMediaItem): number => right.score - left.score);
+      }
+    }
+    this.dataSource.reset();
+    this.dataSource.append(view);
+    this.itemCount = this.dataSource.totalCount();
+  }
+
+  private selectStatusFilter(index: number): void {
+    if (this.statusFilterIndex === index) {
+      return;
+    }
+    this.statusFilterIndex = index;
+    this.persistFilterIndices();
+    this.applyFilters();
+  }
+
+  private selectScoreFilter(index: number): void {
+    if (this.scoreFilterIndex === index) {
+      return;
+    }
+    this.scoreFilterIndex = index;
+    this.persistFilterIndices();
+    this.applyFilters();
+  }
+
+  /** 清空筛选（空态「清除筛选」按钮）。 */
+  private clearFilters(): void {
+    this.statusFilterIndex = 0;
+    this.scoreFilterIndex = 0;
+    this.persistFilterIndices();
+    this.applyFilters();
+  }
+
+  private persistFilterIndices(): void {
+    const store: preferences.Preferences | null = this.historyStore;
+    if (store !== null) {
+      store.put(STATUS_FILTER_KEY, this.statusFilterIndex);
+      store.put(SCORE_FILTER_KEY, this.scoreFilterIndex);
+      store.flush();
+    }
   }
 
   private submit(): void {
@@ -565,8 +778,8 @@ export struct SearchPage {
         && (category.kind.length === 0 || item.kind === category.kind)) {
         fresh.push(item);
       }
-      this.dataSource.append(fresh);
-      this.itemCount = this.dataSource.totalCount();
+      this.allItems = this.allItems.concat(fresh);
+      this.applyFilters();
       this.hasMore = false;
     } catch (error) {
       if (token !== this.loadToken) {
@@ -589,8 +802,8 @@ export struct SearchPage {
     if (item !== null && (category.kind.length === 0 || item.kind === category.kind)) {
       fresh.push(item);
     }
-    this.dataSource.append(fresh);
-    this.itemCount = this.dataSource.totalCount();
+    this.allItems = fresh;
+    this.applyFilters();
   }
 
   /** 书旗搜索（fqapp _searchShuqi）：单次返回全量、无分页，结果全量落当前 feed。
@@ -631,8 +844,8 @@ export struct SearchPage {
         this.seen.add(key);
         fresh.push(item);
       }
-      this.dataSource.append(fresh);
-      this.itemCount = this.dataSource.totalCount();
+      this.allItems = this.allItems.concat(fresh);
+      this.applyFilters();
       this.hasMore = false;
     } catch (error) {
       if (token !== this.loadToken) {
@@ -714,8 +927,8 @@ export struct SearchPage {
         this.seen.add(key);
         fresh.push(item);
       }
-      this.dataSource.append(fresh);
-      this.itemCount = this.dataSource.totalCount();
+      this.allItems = this.allItems.concat(fresh);
+      this.applyFilters();
       const next: number = page.nextOffset;
       this.hasMore = page.hasMore && next > offset;
       if (this.hasMore) {
@@ -754,6 +967,7 @@ export struct SearchPage {
   private async initHistory(): Promise<void> {
     try {
       this.historyStore = await preferences.getPreferences(getContext(this), HISTORY_STORE_NAME);
+      await this.loadFilterIndices();
       const raw: preferences.ValueType = await this.historyStore.get(HISTORY_KEY, '');
       if (typeof raw === 'string' && raw.length > 0) {
         const parsed: Object = JSON.parse(raw);
@@ -769,6 +983,22 @@ export struct SearchPage {
       }
     } catch (error) {
       this.historyChips = [];
+    }
+  }
+
+  /** 载入持久化的筛选/高分选项（越界回退「默认」）。 */
+  private async loadFilterIndices(): Promise<void> {
+    const store: preferences.Preferences | null = this.historyStore;
+    if (store === null) {
+      return;
+    }
+    const statusRaw: preferences.ValueType = await store.get(STATUS_FILTER_KEY, 0);
+    if (typeof statusRaw === 'number' && statusRaw >= 0 && statusRaw < FQ_STATUS_FILTER_LABELS.length) {
+      this.statusFilterIndex = statusRaw;
+    }
+    const scoreRaw: preferences.ValueType = await store.get(SCORE_FILTER_KEY, 0);
+    if (typeof scoreRaw === 'number' && scoreRaw >= 0 && scoreRaw < FQ_SCORE_FILTER_LABELS.length) {
+      this.scoreFilterIndex = scoreRaw;
     }
   }
 

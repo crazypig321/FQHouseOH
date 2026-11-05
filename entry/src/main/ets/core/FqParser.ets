@@ -360,8 +360,13 @@ export function fqItemFromRaw(rec: Record<string, Object>, forcedKind: string): 
     fqMapFrom(bd['tag_info']);
   const tag: FqMediaTag | null = fqParseMediaTag(tagInfo);
 
+  // 连载状态（fqapp MediaItem.creationStatus：bd 优先、卡片兜底，非 0/1 视为未知）
+  const rawCreationStatus: number = fqAsInt(bd['creation_status'], fqAsInt(rec['creation_status'], -1));
+  const creationStatus: number = rawCreationStatus === 0 || rawCreationStatus === 1 ? rawCreationStatus : -1;
+
   return new FqMediaItem(
     id, title, cover, author, badge, ep, kind, score, intro, seriesId, episodeId, followerCount, tag,
+    'fanqie', creationStatus,
   );
 }
 

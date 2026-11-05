@@ -214,7 +214,8 @@ export function fqParseShuqiSearch(payload: Record<string, Object>): FqMediaItem
   return items;
 }
 
-/** 搜索条目 → FqMediaItem（fqapp shuqiMediaItemFromSearch：badge/ep 置空、kind 固定 book、无评分）。 */
+/** 搜索条目 → FqMediaItem（fqapp shuqiMediaItemFromSearch：badge/ep 置空、kind 固定 book、无评分；
+ *  status 映射 creationStatus 供搜索页完结状态筛选）。 */
 function fqShuqiItemFromSearch(rec: Record<string, Object>): FqMediaItem {
   return new FqMediaItem(
     fqStr(rec, 'bookId'),
@@ -231,6 +232,7 @@ function fqShuqiItemFromSearch(rec: Record<string, Object>): FqMediaItem {
     0,
     null,
     FQ_SHUQI_SOURCE_ID,
+    fqShuqiCreationStatus(fqStr(rec, 'status')),
   );
 }
 

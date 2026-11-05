@@ -65,6 +65,8 @@ export class FqMediaItem {
   readonly tag: FqMediaTag | null;
   /** 数据来源：'fanqie' 番茄（默认）| 'shuqi' 书旗（只读第三方源，fqapp MediaItem.source）。 */
   readonly source: string;
+  /** 连载状态：0 完结 / 1 连载 / -1 未知（fqapp MediaItem.creationStatus，搜索筛选用）。 */
+  readonly creationStatus: number;
 
   constructor(
     id: string,
@@ -81,6 +83,7 @@ export class FqMediaItem {
     followerCount: number,
     tag: FqMediaTag | null = null,
     source: string = 'fanqie',
+    creationStatus: number = -1,
   ) {
     this.id = id;
     this.title = title;
@@ -96,6 +99,7 @@ export class FqMediaItem {
     this.followerCount = followerCount;
     this.tag = tag;
     this.source = source;
+    this.creationStatus = creationStatus;
   }
 }
 
