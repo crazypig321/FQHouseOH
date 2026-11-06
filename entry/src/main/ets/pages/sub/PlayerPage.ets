@@ -2057,6 +2057,7 @@ export struct PlayerPage {
     .layoutWeight(1)
     .scrollBar(BarState.Off)
     .padding({ right: 20, left: 20 })
+    .contentEndOffset(appState.bottomRect === 0 ? 16 : appState.bottomRect)
   }
 
   /** 设置行点击：听视频进听剧模式页；离线缓存呼出缓存选集半模态；
@@ -2982,10 +2983,11 @@ export struct PlayerPage {
       }
       .width('100%')
       .justifyContent(FlexAlign.Center)
-      .padding({ top: 12, bottom: 12, left: 20, right: 20 })
+      .padding({ top: 16, bottom: 16, left: 20, right: 20 })
     }
     .width('100%')
     .height('100%')
+    .padding({ bottom: appState.bottomRect === 0 ? 16 : appState.bottomRect })
   }
 
   /**
