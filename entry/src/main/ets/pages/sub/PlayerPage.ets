@@ -55,6 +55,15 @@
  * - 弹幕（全屏展示）：/api/v1/videos/{vid}/danmaku 按 cursor 续拉，
  *   切集整池作废、seek 按目标时间重取；FqDanmakuView 车道避让右→左飞行，
  *   全屏控制条「弹幕」开关（官方 Toast 文案）。
+ * - 弹幕样式可调（fqapp danmaku_config / playlet_danmaku_settings）：播放设置
+ *   「弹幕设置」二级页（sheet 与横屏侧边栏深色变体共用）——不透明度 20-100%、
+ *   速度 5 档、显示区域（竖屏 1-4 行 / 横屏 单行·1/4·1/2·3/4 屏）、字号 5 档、
+ *   弹幕背景透明开关 + 恢复默认（Toast「设置成功」），FqAppSettingsStore 持久化。
+ * - PC 大窗口右侧详情侧边栏（fqapp 桌面停靠目录 desktop_video_chrome）：窗口
+ *   ≥1000vp 的 PC 布局常驻（横竖屏片源、全屏与否均展示，可收起成窄轨）；
+ *   剧名/共N集·第N集/简介/原著横幅/入口药丸（作品详情·评论·缓存·听剧·同系列）/
+ *   选集头 + >30 集分页条 + 5 列选集网格；播放区缩窄让位，几何一律走
+ *   pageW()/pageH()（根 Stack 实测），不出侧边栏的设备回退屏宽屏高。
  */
 
 import { display, window, PiPWindow } from '@kit.ArkUI';
@@ -68,7 +77,7 @@ import { FqCacheSheet } from '../../view/sheet/FqCacheSheet';
 import { FqRelatedSheet, FqRelatedList } from '../../view/sheet/FqRelatedSheet';
 import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/sheet/FqCommentSheet';
 import { FqMenu, FqMenuItem } from '../../view/CommonMenu';
-import { FqDanmakuView } from '../../view/FqDanmakuView';
+import { FqDanmakuView, FqDanmakuViewConfig } from '../../view/FqDanmakuView';
 import { FqSettingRow } from '../../view/FqSettingRow';
 import { FqStoryPanel } from '../../view/FqStoryPanel';
 import { fqPushBookOrDetail, PlayerNavParams, ListenVideoNavParams, ROUTE_LISTEN_VIDEO, ROUTE_CACHED_DRAMAS, DetailNavParams, ROUTE_DETAIL } from '../../model/FqNavModels';
@@ -76,7 +85,17 @@ import { FqBookCommentPage, FqChapter, FqDanmaku, FqDanmakuPage, FqEpisodeCommen
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { fqAudioSession } from '../../core/FqAudioSession';
 import { FqVideoMedia } from '../../core/FqVideoMedia';
-import { FqAppSettingsStore } from '../../core/FqAppSettingsStore';
+import {
+  FqAppSettingsStore,
+  FQ_DANMAKU_ALPHA_MIN_PERCENT,
+  FQ_DANMAKU_ALPHA_MAX_PERCENT,
+  FQ_DANMAKU_SPEED_MULTIPLIERS,
+  FQ_DANMAKU_SPEED_LABELS,
+  FQ_DANMAKU_TEXT_SIZES,
+  FQ_DANMAKU_SIZE_LABELS,
+  FQ_DANMAKU_LINE_SPACE_FACTORS,
+  FQ_DANMAKU_LINE_SPACE_LABELS,
+} from '../../core/FqAppSettingsStore';
 import { FqWatchedStore, FqWatchedProgress } from '../../core/FqWatchedStore';
 import { FqDramaCacheStore } from '../../core/FqDramaCacheStore';
 import { fqDramaDownloader, FqDramaDownloader, FqDramaDownloadTask, DramaDownloadStatus } from '../../core/FqDramaDownloader';
@@ -148,6 +167,18 @@ const FQ_DARK_TERTIARY_TEXT: string = '#99FFFFFF';
 const FQ_CACHE_PAGE_SIZE: number = 30;
 /** 预热下一集提前量（秒；fqapp player_page_preload _warmLead = 30s）。 */
 const FQ_WARM_LEAD_SEC: number = 30;
+/** PC 右侧详情侧边栏宽（对齐 fqapp 桌面停靠目录 304 一档，取本项目圆整）。 */
+const FQ_PC_DETAIL_SIDEBAR_W: number = 320;
+/** PC 右侧详情侧边栏最小窗口宽（对齐 fqapp 桌面 width >= 1000 才停靠）。 */
+const FQ_PC_DETAIL_SIDEBAR_MIN_W: number = 1000;
+/** PC 详情侧边栏背景（fqapp 桌面停靠面板 0xff1c1c1f）。 */
+const FQ_PC_DETAIL_SIDEBAR_BG: string = '#FF1C1C1F';
+/** PC 详情侧边栏左缘关闭长条宽（点击整条收起侧边栏）。 */
+const FQ_PC_SIDEBAR_CLOSE_STRIP_W: number = 18;
+/** PC 详情侧边栏关闭长条背景（略亮于面板底色以示可点）。 */
+const FQ_PC_SIDEBAR_CLOSE_STRIP_BG: string = '#FF26262B';
+/** PC 布局非全屏底部组件（选集行/进度等）整体抬高距离（窗口无底部手势区，留出下边距）。 */
+const FQ_PC_BOTTOM_LIFT_VP: number = 12;
 
 /** 播放设置行描述（key 决定右侧控件：speed 滑杆 / cache、listen 箭头 / danmaku 开关）。 */
 class FqSettingItem {
@@ -214,6 +245,20 @@ export struct PlayerPage {
   private pcFullscreenWasMaximized: boolean = false;
   /** 进入 PC 沉浸全屏前窗口已是沉浸全屏（用户双击标题栏等进入）：退出保持全屏形态不缩窗。 */
   private pcFullscreenWasFullscreen: boolean = false;
+  /** PC 窗口形态变化回调：全屏播放中被系统窗口化（ESC 系统窗口化快捷键/标题栏操作）→
+   *  窗口形态已由系统接管，同步退出应用内全屏播放态（不再 maximize/recover 还原）。 */
+  private onWindowStatusChange: (status: window.WindowStatusType) => void =
+    (status: window.WindowStatusType): void => {
+      if (!this.fullScreen || status === window.WindowStatusType.FULL_SCREEN) {
+        return;
+      }
+      const pcLayout: boolean =
+        useSidebarLayout(appState.WidthBp, appState.windowWidthVp, appState.displayWidthVp);
+      if (!pcLayout) {
+        return;
+      }
+      this.exitFullscreen(true);
+    };
   /** 全屏控件显隐（横片源 3s 自动隐藏，单击画面切换）。 */
   @Local fsControlsVisible: boolean = true;
   /** 中央播放按钮显隐（点击才出现；暂停时常驻，播放 3s 后自动隐藏）。 */
@@ -228,6 +273,22 @@ export struct PlayerPage {
   @Local danmakuItems: FqDanmaku[] = [];
   /** 弹幕层重置令牌（seek/切集 +1，清已飞/在飞状态）。 */
   @Local danmakuResetToken: number = 0;
+  /** 弹幕样式配置（对齐 fqapp danmaku_config：字号/不透明度/速度倍率/背景透明；设置实时生效）。 */
+  @Local danmakuCfg: FqDanmakuViewConfig = new FqDanmakuViewConfig();
+  /** 弹幕不透明度（%，20-100，fqapp 默认 100）。 */
+  @Local danmakuAlphaPercent: number = 100;
+  /** 弹幕速度档（1-5：0.5/0.7/1.0/1.25/1.5 倍，fqapp 默认 3）。 */
+  @Local danmakuSpeedTier: number = 3;
+  /** 竖屏弹幕行数（1-4 行，fqapp 默认 4）。 */
+  @Local danmakuLineCount: number = 4;
+  /** 横屏弹幕显示区域档（1-4：单行/1/4屏/1/2屏/3/4屏，fqapp 默认 2）。 */
+  @Local danmakuLineSpaceTier: number = 2;
+  /** 弹幕字号档（1-5：12/14/16/18/20sp，fqapp 默认 3=16sp）。 */
+  @Local danmakuSizeTier: number = 3;
+  /** 弹幕背景透明（不画官方 40% 黑底气泡，本地开关）。 */
+  @Local danmakuBgTransparent: boolean = false;
+  /** 播放设置二级页（'' 主设置 / 'danmaku' 弹幕设置；sheet 与横屏侧边栏共用）。 */
+  @Local settingsPage: string = '';
   /** 关联原著（剧有原著才显示横幅；装饰性数据，失败静默）。 */
   @Local originalBook: FqSeriesRelateBook | null = null;
   /** 已看集 itemId 集合（FqWatchedStore；标记后重赋值驱动选集面板刷新）。 */
@@ -360,6 +421,18 @@ export struct PlayerPage {
   /** 屏幕尺寸（vp，布局定位用）。 */
   private screenW: number = 0;
   private screenH: number = 0;
+  /** 播放区实测宽（vp；PC 出右侧详情侧边栏后回填缩窄值，0 = 未实测回退屏宽）。 */
+  @Local layoutW: number = 0;
+  /** 播放区实测高（vp；0 = 未实测回退屏高）。 */
+  @Local layoutH: number = 0;
+  /** PC 详情侧边栏选集滚动器。 */
+  private pcScroller: Scroller = new Scroller();
+  /** PC 详情侧边栏选集分页条当前段。 */
+  @Local pcEpisodePage: number = 0;
+  /** PC 详情侧边栏内容页（'' 目录 / 'related' 同系列；选集头「同系列」按钮切换）。 */
+  @Local pcPanel: string = '';
+  /** PC 详情侧边栏收起（窄轨只留展开钮，fqapp 桌面目录收起语义）。 */
+  @Local pcSidebarCollapsed: boolean = false;
   /** AVSession/后台播放助手（通知栏播控中心/胶囊 + 后台 audioPlayback 长时任务）。 */
   private media: FqVideoMedia = new FqVideoMedia('FqVideo');
   /** AVSession 元数据已同步时长（切集重置 -1；时长事件到达后补发元数据）。 */
@@ -390,6 +463,8 @@ export struct PlayerPage {
     this.tab = fqKindToTab(PlayerNavParams.kind);
     this.creationStatus = PlayerNavParams.creationStatus;
     this.episodes = PlayerNavParams.chapters;
+    // PC 布局隐藏左侧主导航栏（onHidden 被上层页面覆盖/离页复位）
+    appState.hidePcSideNav = true;
     if (PlayerNavParams.startIndex >= 0) {
       this.explicitStartIndex = PlayerNavParams.startIndex;
     }
@@ -411,6 +486,14 @@ export struct PlayerPage {
     FqWatchedStore.init(getContext(this));
     this.progress = FqWatchedStore.progress(PlayerNavParams.contentId);
     this.watchedIds = this.copyWatchedIds();
+    // 弹幕样式：载入持久化设置（fqapp danmaku_config 五项 + 背景透明）
+    this.danmakuAlphaPercent = FqAppSettingsStore.getDanmakuAlphaPercent();
+    this.danmakuSpeedTier = FqAppSettingsStore.getDanmakuSpeedTier();
+    this.danmakuLineCount = FqAppSettingsStore.getDanmakuLineCount();
+    this.danmakuLineSpaceTier = FqAppSettingsStore.getDanmakuLineSpaceTier();
+    this.danmakuSizeTier = FqAppSettingsStore.getDanmakuSizeTier();
+    this.danmakuBgTransparent = FqAppSettingsStore.isDanmakuBgTransparent();
+    this.applyDanmakuCfg();
     // 实际播放 guard：position 走表（非加载期）才视为看过（对齐 fqapp 首帧不标）
     this.player.stream.position.listen((pos: number): void => {
       if (pos > 0 && !this.loading) {
@@ -484,9 +567,11 @@ export struct PlayerPage {
       this.syncMediaState(false);
     };
     appState.backgroundPauseHandlers.push(this.backgroundPause);
-    // 播放页常亮：进入开 keepScreenOn（播放视频不熄屏），离页恢复
+    // 播放页常亮：进入开 keepScreenOn（播放视频不熄屏），离页恢复；
+    // 同时监听 PC 窗口形态变化（全屏播放中按 ESC 系统窗口化时同步退出全屏）
     window.getLastWindow(getContext(this)).then((win: window.Window): void => {
       win.setWindowKeepScreenOn(true);
+      win.on('windowStatusChange', this.onWindowStatusChange);
     }).catch((): void => {
       // 常亮设置失败不影响播放
     });
@@ -507,6 +592,8 @@ export struct PlayerPage {
   }
 
   aboutToDisappear(): void {
+    // 复位 PC 左侧主导航显隐（离页交还主导航）
+    appState.hidePcSideNav = false;
     const bgHandlerIdx: number = appState.backgroundPauseHandlers.indexOf(this.backgroundPause);
     if (bgHandlerIdx >= 0) {
       appState.backgroundPauseHandlers.splice(bgHandlerIdx, 1);
@@ -542,9 +629,11 @@ export struct PlayerPage {
         // 恢复失败交由系统窗口销毁兜底
       });
     }
-    // 播放页常亮恢复 + 画中画控制器销毁（停自动拉起/事件订阅/小窗）
+    // 播放页常亮恢复 + 画中画控制器销毁（停自动拉起/事件订阅/小窗）；
+    // 同时注销 PC 窗口形态变化监听
     window.getLastWindow(getContext(this)).then((win: window.Window): void => {
       win.setWindowKeepScreenOn(false);
+      win.off('windowStatusChange');
     }).catch((): void => {
       // 恢复失败交由系统窗口销毁兜底
     });
@@ -560,9 +649,11 @@ export struct PlayerPage {
       pageBackgroundColor: Color.Black,
       showPlaybackBall: false,
       onShown: (): void => {
+        appState.hidePcSideNav = true;
         this.onNavPipShown();
       },
       onHidden: (): void => {
+        appState.hidePcSideNav = false;
         this.onNavPipHidden();
       },
       backPressed: (): boolean => {
@@ -579,7 +670,8 @@ export struct PlayerPage {
         return false;
       },
     }) {
-      Stack() {
+      Row() {
+        Stack() {
         // 视频区（contain；mpv 内部保持比例留黑边；全屏时撑满，面板展开时几何不变）
         Stack() {
           // 非全屏：surface 只取画面 contain 矩形（区域内居中），mpv 填满 surface 即画面居中；
@@ -700,11 +792,12 @@ export struct PlayerPage {
               })
           )
         )
-        // 右上角菜单呼出的播放设置半模态（公共框架，不触发前景模糊）
+        // 右上角菜单呼出的播放设置半模态（公共框架，不触发前景模糊）；
+        // 二级「弹幕设置」页行数多，sheet 高度随之抬高
         .bindSheet(this.settingsVisible, this.SettingsSheetBuilder(),
           FqSheetOptions((): void => {
             this.closeSettings();
-          }, 320, false))
+          }, this.settingsPage === 'danmaku' ? 430 : 320, false))
 
         // 中央播放/暂停按钮（非全屏渲染：点击才出现：暂停时常驻、播放 3s 后隐藏）
         if (this.errorMsg.length === 0 && !this.loading && !this.sheetVisible && !this.fullScreen &&
@@ -712,7 +805,7 @@ export struct PlayerPage {
           this.CenterPlayButton()
         }
 
-        // 弹幕层：只占屏上 20% 高度、锚定顶部（尽量少遮挡画面）；
+        // 弹幕层：竖屏片源占屏上 20%、横屏片源按「显示区域」档（fqapp danmaku_config）；
         // 竖屏片源全屏沉浸后 topRect 归零，用 maxTopRect 保底下移避开摄像头孔条（同 FsTopBar 语义）；
         // 且整棵子树不参与触摸测试，绝不影响底部控制条交互
         if (this.fullScreen && this.danmakuOn && this.errorMsg.length === 0 && this.danmakuItems.length > 0) {
@@ -721,9 +814,11 @@ export struct PlayerPage {
             positionMs: Math.floor(this.player.state.position * 1000),
             resetToken: this.danmakuResetToken,
             playing: this.player.state.playing,
+            config: this.danmakuCfg,
+            maxLanes: this.danmakuMaxLanes(),
           })
             .width('100%')
-            .height('20%')
+            .height(this.danmakuLayerHeight())
             .position({ x: 0, y: this.isLandscapeVideo() ? appState.topRect : appState.maxTopRect })
             .hitTestBehavior(HitTestMode.None)
         }
@@ -798,13 +893,29 @@ export struct PlayerPage {
             .animation({ duration: 200, curve: Curve.Friction }))
         }
       }
-      .width('100%')
+      .layoutWeight(1)
       .height('100%')
       .backgroundColor(Color.Black)
       .bindSheet(this.sheetVisible, this.EpisodeSheetBuilder(),
         FqSheetOptions((): void => {
           this.closeSheet();
         }, fqPlayerSheetHeightVp(), false))
+        .onAreaChange((_oldArea: Area, newArea: Area): void => {
+          this.layoutW = Number(newArea.width);
+          this.layoutH = Number(newArea.height);
+        })
+
+        // PC 大窗口右侧详情侧边栏（对齐 fqapp 桌面停靠目录）：非全屏常驻；
+        // 全屏随控件层显隐同步消失/出现（含收起窄轨：3s 自隐、单击唤出、sheet/横屏侧栏打开让位），
+        // 播放区缩窄让位（几何走 pageW()/pageH()），面板本身不遮挡画面
+        if (this.pcSidebarOn() && (!this.fullScreen ||
+          (!this.sheetVisible && this.sidePanel.length === 0 && this.fsControlsVisible))) {
+          this.PcDetailSidebar()
+        }
+      }
+      .width('100%')
+      .height('100%')
+      .backgroundColor(Color.Black)
     }
   }
 
@@ -838,17 +949,20 @@ export struct PlayerPage {
           .layoutWeight(1)
           .padding({ left: 4 })
 
-        Row() {
-          SymbolGlyph($r('sys.symbol.dot_grid_2x2'))
-            .fontSize(22)
-            .fontColor([Color.White])
+        // PC 侧边栏在场时设置按钮移入侧边栏标题右侧，顶栏不再显示
+        if (!this.pcSidebarOn()) {
+          Row() {
+            SymbolGlyph($r('sys.symbol.dot_grid_2x2'))
+              .fontSize(22)
+              .fontColor([Color.White])
+          }
+          .width(40)
+          .height(44)
+          .justifyContent(FlexAlign.Center)
+          .onClick((): void => {
+            this.openSettings();
+          })
         }
-        .width(40)
-        .height(44)
-        .justifyContent(FlexAlign.Center)
-        .onClick((): void => {
-          this.openSettings();
-        })
       }
       .height(44)
       .width('100%')
@@ -974,7 +1088,7 @@ export struct PlayerPage {
     .backgroundColor('rgba(0,0,0,0.28)')
     .opacity(this.player.state.playing ? 0.45 : 1)
     .position({
-      x: this.screenW / 2,
+      x: this.pageW() / 2,
       y: this.videoTopAbs() + this.videoRegionHeight() / 2,
     })
     .markAnchor({ x: '50%', y: '50%' })
@@ -1036,8 +1150,9 @@ export struct PlayerPage {
   @Builder
   private CatalogBar() {
     Column({ space: 12 }){
-      // 「全屏观看」药丸：视频实际画面出现（尺寸就绪）才显示，加载占位期不出现
-      if (this.player.state.videoParams.dw > 0) {
+      // 「全屏观看」药丸：视频实际画面出现（尺寸就绪）才显示，加载占位期不出现；
+      // PC 布局不出药丸，全屏入口移到选集行缓存按钮右侧
+      if (this.player.state.videoParams.dw > 0 && !this.pcSidebarOn()) {
         this.FullscreenPill()
       }
 
@@ -1124,11 +1239,36 @@ export struct PlayerPage {
         .onClick((): void => {
           this.openCacheSheet();
         })
+
+        // 全屏入口（PC 布局）：缓存按钮右侧按钮，替代「全屏观看」药丸
+        if (this.pcSidebarOn()) {
+          Column({ space: 1 }) {
+            SymbolGlyph($r('sys.symbol.arrow_up_left_and_arrow_down_right'))
+              .fontSize(22)
+              .fontColor([Color.White])
+              .opacity(0.9)
+            Text('全屏')
+              .fontSize(11)
+              .fontWeight(FontWeight.Bold)
+              .fontColor('rgba(255,255,255,0.9)')
+          }
+          .width(44)
+          .height(40)
+          .margin({ left: 8 })
+          .borderRadius(8)
+          .backgroundColor('#E6222222')
+          .alignItems(HorizontalAlign.Center)
+          .justifyContent(FlexAlign.Center)
+          .onClick((): void => {
+            this.enterFullscreen();
+          })
+        }
       }
       .width('100%')
       .padding({ left: 16, right: 16 })
     }.layoutGravity(LocalizedAlignment.BOTTOM_END)// stack组件中子组件对齐位置
-    .offset({ bottom: appState.bottomRect })
+    // PC 窗口无底部手势区（bottomRect 为 0），底部组件整体抬高留出下边距
+    .offset({ bottom: appState.bottomRect + (this.pcSidebarOn() ? FQ_PC_BOTTOM_LIFT_VP : 0) })
   }
 
   // ---------------------------------------------------------------------------
@@ -1169,17 +1309,20 @@ export struct PlayerPage {
         .layoutWeight(1)
         .alignItems(VerticalAlign.Center)
 
-        Row() {
-          SymbolGlyph($r('sys.symbol.dot_grid_2x2'))
-            .fontSize(22)
-            .fontColor([Color.White])
+        // PC 侧边栏在场时设置按钮移入侧边栏标题右侧，全屏顶栏不再显示
+        if (!this.pcSidebarOn()) {
+          Row() {
+            SymbolGlyph($r('sys.symbol.dot_grid_2x2'))
+              .fontSize(22)
+              .fontColor([Color.White])
+          }
+          .width(40)
+          .height(44)
+          .justifyContent(FlexAlign.Center)
+          .onClick((): void => {
+            this.openSettings();
+          })
         }
-        .width(40)
-        .height(44)
-        .justifyContent(FlexAlign.Center)
-        .onClick((): void => {
-          this.openSettings();
-        })
       }
       .height(44)
       .width('100%')
@@ -1774,25 +1917,47 @@ export struct PlayerPage {
     return this.cacheDownloadedIds.has(episode.itemId) || this.cacheCellSelected(episode);
   }
 
-  /** 播放设置半模态（右上角菜单）：公共 FqSettingRow 设置行 List（与横屏侧边栏共用）——
-   * 倍速（Slider 滑杆 0.5-2.0 步进 0.25，拖动实时预览、松手生效）、
-   * 离线缓存/听视频（跳转箭头）、弹幕开关（Switch 开关）。 */
+  /** 播放设置半模态（右上角菜单）：主设置页（公共 FqSettingRow 设置行 List）与
+   * 二级「弹幕设置」页（fqapp 弹幕设置四滑杆 + 背景透明开关 + 恢复默认）按 settingsPage 切换。 */
   @Builder
   private SettingsSheetBuilder() {
     Column() {
       Column().height(12)
 
-      Row() {
-        Text('播放设置')
-          .fontSize(16)
-          .fontWeight(FontWeight.Bold)
-      }
-      .width('100%')
-      .height(48)
-      .padding({ left: 20, right: 16 })
-      .alignItems(VerticalAlign.Center)
+      if (this.settingsPage === 'danmaku') {
+        // 二级页：返回箭头回主设置
+        Row() {
+          SymbolGlyph($r('sys.symbol.chevron_left'))
+            .fontSize(22)
+            .fontColor([$r('sys.color.font')])
+            .onClick((): void => {
+              this.settingsPage = '';
+            })
 
-      this.SettingRows(false)
+          Text('弹幕设置')
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .padding({ left: 8 })
+        }
+        .width('100%')
+        .height(48)
+        .padding({ left: 12, right: 16 })
+        .alignItems(VerticalAlign.Center)
+
+        this.DanmakuSettingsBody(false)
+      } else {
+        Row() {
+          Text('播放设置')
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+        }
+        .width('100%')
+        .height(48)
+        .padding({ left: 20, right: 16 })
+        .alignItems(VerticalAlign.Center)
+
+        this.SettingRows(false)
+      }
     }
     .width('100%')
     .height('100%')
@@ -1887,12 +2052,15 @@ export struct PlayerPage {
     .padding({ right: 20, left: 20 })
   }
 
-  /** 设置行点击：听视频进听剧模式页；离线缓存呼出缓存选集半模态（倍速/弹幕行右侧控件自理）。 */
+  /** 设置行点击：听视频进听剧模式页；离线缓存呼出缓存选集半模态；
+   * 弹幕设置进二级设置页（倍速/弹幕行右侧控件自理）。 */
   private onSettingRowClick(key: string): void {
     if (key === 'cache') {
       this.openCacheSheet();
     } else if (key === 'listen') {
       this.openListenMode();
+    } else if (key === 'danmakuSettings') {
+      this.settingsPage = 'danmaku';
     }
   }
 
@@ -2224,13 +2392,14 @@ export struct PlayerPage {
     }
   }
 
-  /** 播放设置行描述（key 决定右侧控件：speed 滑杆 / cache、listen 箭头 / danmaku 开关）。 */
+  /** 播放设置行描述（key 决定右侧控件：speed 滑杆 / cache、listen、danmakuSettings 箭头 / danmaku 开关）。 */
   private settingItems(): FqSettingItem[] {
     const items: FqSettingItem[] = [
       new FqSettingItem('speed', '倍速', $r('sys.symbol.speed_multiple')),
       new FqSettingItem('cache', '离线缓存', $r('sys.symbol.download')),
       new FqSettingItem('listen', '听视频', $r('sys.symbol.waveform_tv')),
-      new FqSettingItem('danmaku', '弹幕开关', $r('sys.symbol.ellipsis_bubble'))
+      new FqSettingItem('danmaku', '弹幕开关', $r('sys.symbol.ellipsis_bubble')),
+      new FqSettingItem('danmakuSettings', '弹幕设置', $r('sys.symbol.textformat'))
     ];
     return items;
   }
@@ -2369,16 +2538,508 @@ export struct PlayerPage {
     .scrollBar(BarState.Off)
   }
 
-  /** 侧边栏·播放设置：公共设置行 List（同半模态结构，深色配色）。 */
+  // ---------------------------------------------------------------------------
+  // PC 右侧详情侧边栏（fqapp 桌面停靠目录 desktop_video_chrome）
+  // ---------------------------------------------------------------------------
+
+  /** PC 详情侧边栏入口药丸（作品详情/评论/缓存/听剧/同系列，深色圆角芯片；芯片间留间隔）。 */
+  @Builder
+  private PcSidebarPill(label: string, onClick: () => void) {
+    Text(label)
+      .fontSize(13)
+      .fontColor(Color.White)
+      .padding({ left: 14, right: 14, top: 6, bottom: 6 })
+      .borderRadius(15)
+      .backgroundColor('#33FFFFFF')
+      .margin({ right: 8, bottom: 8 })
+      .onClick((): void => {
+        onClick();
+      })
+  }
+
+  /** PC 详情侧边栏选集 >30 集分页条（横向滚动直达 + 滚动联动）。 */
+  @Builder
+  private PcEpisodePagingStrip() {
+    Scroll() {
+      Row({ space: 16 }) {
+        ForEach(this.cachePageLabels(), (label: string, page: number) => {
+          Text(label)
+            .fontSize(12)
+            .fontWeight(page === this.pcEpisodePage ? FontWeight.Bold : FontWeight.Normal)
+            .fontColor(page === this.pcEpisodePage ? Color.White : FQ_DARK_TERTIARY_TEXT)
+            .onClick((): void => {
+              this.pcEpisodePage = page;
+              this.pcScroller.scrollToIndex(page * FQ_CACHE_PAGE_SIZE, false, ScrollAlign.START);
+            })
+        }, (label: string) => label)
+      }
+      .padding({ left: 2, right: 2 })
+    }
+    .width('100%')
+    .height(24)
+    .scrollable(ScrollDirection.Horizontal)
+    .scrollBar(BarState.Off)
+  }
+
+  /**
+   * PC 右侧详情侧边栏（fqapp 桌面停靠目录）：左缘关闭长条 + 剧名 + 设置按钮（顶栏原设置按钮移入）/
+   * 共N集·第N集 / 简介 3 行 / 原著横幅 / 入口药丸（作品详情/评论/缓存/听剧/同系列）/ 选集头 /
+   * 分页条 / 5 列选集网格（集数区独立滚动，滚动不动上方固定区，分段按钮直达）；
+   * 同系列页顶部标题栏不显示；横竖屏片源、全屏与否均常驻，播放区缩窄让位。
+   */
+  @Builder
+  private PcDetailSidebar() {
+    if (this.pcSidebarCollapsed) {
+      // 收起窄轨：只留展开钮（向左，展开拉回侧边栏）
+      Column() {
+        SymbolGlyph($r('sys.symbol.chevron_left'))
+          .fontSize(20)
+          .fontColor([Color.White])
+      }
+      .width(FQ_PC_SIDEBAR_CLOSE_STRIP_W)
+      .height('100%')
+      .backgroundColor(FQ_PC_DETAIL_SIDEBAR_BG)
+      .justifyContent(FlexAlign.Center)
+      .onClick((): void => {
+        this.pcSidebarCollapsed = false;
+      })
+    } else {
+      Row() {
+        // 关闭长条：整个侧边栏左缘竖条，点击收起整个侧边栏
+        Column() {
+          SymbolGlyph($r('sys.symbol.chevron_right'))
+            .fontSize(20)
+            .fontColor(['#99FFFFFF'])
+        }
+        .width(FQ_PC_SIDEBAR_CLOSE_STRIP_W)
+        .height('100%')
+        .backgroundColor(FQ_PC_SIDEBAR_CLOSE_STRIP_BG)
+        .justifyContent(FlexAlign.Center)
+        .onClick((): void => {
+          this.pcSidebarCollapsed = true;
+        })
+
+        Column() {
+          // 头部：剧名（2 行）+ 设置按钮（PC 把顶栏原设置按钮移到标题右侧；同系列页不显示标题栏）
+          if (this.pcPanel !== 'related') {
+            Row({space: 10}) {
+              Text(this.title)
+                .fontSize(17)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(Color.White)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .layoutWeight(1)
+
+              SymbolGlyph($r('sys.symbol.dot_grid_2x2'))
+                .fontSize(20)
+                .fontColor([Color.White])
+                .padding(6)
+                .borderRadius(100)
+                .backgroundColor('#26FFFFFF')
+                .onClick((): void => {
+                  this.openSettings();
+                })
+            }
+            .width('100%')
+            .padding({ left: 16, right: 8, top: appState.topRect + 8, bottom: 8 })
+            .alignItems(VerticalAlign.Center)
+          }
+
+          if (this.pcPanel === 'related') {
+            // 同系列页（选集头「同系列」/药丸进入）：顶部标题栏不显示，返回头 + 深色双列卡片网格
+            Row({space: 3}) {
+              Row(){
+                SymbolGlyph($r('sys.symbol.chevron_left'))
+                  .fontSize(22)
+                  .fontColor([Color.White])
+              }
+              .padding(12)
+              .aspectRatio(1)
+              .borderRadius(100)
+              .backgroundColor('#26FFFFFF')
+              .onClick((): void => {
+                this.pcPanel = '';
+              })
+
+
+              Text('同系列剧')
+                .fontSize(16)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(Color.White)
+                .layoutWeight(1)
+                .padding({ left: 8 })
+            }
+            .width('100%')
+            .height(48)
+            .padding({ left: 12, right: 16 })
+            .alignItems(VerticalAlign.Center)
+
+            FqRelatedList({
+              items: this.relatedList,
+              loading: this.relatedLoading,
+              errorMsg: this.relatedErrorMsg,
+              dark: true,
+              retryClick: (): void => {
+                this.loadRelatedSeries();
+              },
+              itemClick: (entry: FqRelatedSeries): void => {
+                this.switchRelatedSeries(entry);
+              },
+            })
+              .width('100%')
+              .layoutWeight(1)
+          } else {
+            // 固定区（不随集数滚动）：集数/状态、简介、原著横幅、入口药丸、选集头、分段条
+            Column({ space: 10 }) {
+              // 集数/状态 + 当前集
+              Text(`共${this.episodes.length}集 · 第${this.episodes.length > 0 ? this.index + 1 : 1}集 · ${this.episodeLabel()}`)
+                .fontSize(12)
+                .fontColor('#99FFFFFF')
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+              // 简介（3 行，fqapp 桌面 synopsis）
+              if (PlayerNavParams.intro.length > 0) {
+                Text(PlayerNavParams.intro)
+                  .fontSize(12)
+                  .fontColor('#99FFFFFF')
+                  .maxLines(3)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .lineHeight(18)
+              }
+
+              // 原著横幅（有原著才显示）
+              if (this.originalBook !== null) {
+                this.OriginalBookBanner()
+              }
+
+              // 入口药丸（fqapp 桌面 Wrap 按钮组）
+              Flex({ wrap: FlexWrap.Wrap }) {
+                this.PcSidebarPill('作品详情', (): void => {
+                  this.openDramaDetail();
+                })
+                this.PcSidebarPill('评论', (): void => {
+                  this.openComments();
+                })
+                this.PcSidebarPill('缓存', (): void => {
+                  this.openCacheSheet();
+                })
+                this.PcSidebarPill('听剧', (): void => {
+                  this.openListenMode();
+                })
+                this.PcSidebarPill('同系列', (): void => {
+                  this.openRelatedSeries();
+                })
+              }
+              .width('100%')
+
+              // 选集头（右侧「同系列」入口：点击侧边栏内容切换为同系列组件，目录让位）
+              Row({ space: 8 }) {
+                Text('选集')
+                  .fontSize(15)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor(Color.White)
+
+                Text(this.episodeLabel())
+                  .fontSize(12)
+                  .fontColor('#99FFFFFF')
+                  .layoutWeight(1)
+
+                Text('同系列')
+                  .fontSize(13)
+                  .fontColor(Color.White)
+                  .padding({ left: 12, right: 12, top: 5, bottom: 5 })
+                  .borderRadius(13)
+                  .backgroundColor('#33FFFFFF')
+                  .onClick((): void => {
+                    this.openRelatedSeries();
+                  })
+              }
+              .width('100%')
+              .alignItems(VerticalAlign.Center)
+
+              if (this.episodes.length > FQ_CACHE_PAGE_SIZE) {
+                this.PcEpisodePagingStrip()
+              }
+
+              if (this.episodes.length === 0) {
+                Text('暂无剧集')
+                  .fontSize(13)
+                  .fontColor('#99FFFFFF')
+                  .padding({ top: 24, bottom: 24 })
+              }
+            }
+            .width('100%')
+            .padding({ left: 16, right: 16, top: 2 })
+            .alignItems(HorizontalAlign.Start)
+
+            if (this.episodes.length > 0) {
+              // 集数网格独立滚动（占满余高）：分段按钮 scrollToIndex 直达当前段，
+              // 滚动只动集数，不动上方固定区
+              Grid(this.pcScroller) {
+                ForEach(this.episodes, (episode: FqChapter, index: number) => {
+                  GridItem() {
+                    Row() {
+                      Text(`${index + 1}`)
+                        .fontSize(14)
+                        .fontWeight(index === this.index ? FontWeight.Bold : FontWeight.Normal)
+                        .fontColor(this.sideEpisodeColor(index))
+                    }
+                    .width('100%')
+                    .aspectRatio(1)
+                    .justifyContent(FlexAlign.Center)
+                    .alignItems(VerticalAlign.Center)
+                    .borderRadius(8)
+                    .backgroundColor(index === this.index ? '#1AFA6725' : '#26FFFFFF')
+                    .onClick((): void => {
+                      this.loadEpisode(index);
+                    })
+                  }
+                }, (episode: FqChapter, index: number) => `${episode.itemId}-${index}`)
+              }
+              .columnsTemplate('1fr 1fr 1fr 1fr 1fr')
+              .columnsGap(8)
+              .rowsGap(8)
+              .scrollBar(BarState.Off)
+              .edgeEffect(EdgeEffect.Spring)
+              .width('100%')
+              .layoutWeight(1)
+              .padding({ left: 16, right: 16, top: 8, bottom: 16 })
+              .onScrollIndex((first: number, last: number): void => {
+                const page: number = Math.floor(first / FQ_CACHE_PAGE_SIZE);
+                if (page !== this.pcEpisodePage && page >= 0 && page <= this.cacheLastPage()) {
+                  this.pcEpisodePage = page;
+                }
+              })
+            }
+          }
+        }
+        .width(FQ_PC_DETAIL_SIDEBAR_W - FQ_PC_SIDEBAR_CLOSE_STRIP_W)
+        .height('100%')
+        .backgroundColor(FQ_PC_DETAIL_SIDEBAR_BG)
+      }
+      .width(FQ_PC_DETAIL_SIDEBAR_W)
+      .height('100%')
+    }
+  }
+
+  /** 作品详情入口（fqapp 桌面「作品详情」）：暂停存进度后进本剧详情页。 */
+  private openDramaDetail(): void {
+    this.player.pause();
+    this.saveCurrentProgress();
+    fqPushBookOrDetail(PlayerNavParams.contentId, PlayerNavParams.kind, this.title, PlayerNavParams.cover);
+  }
+
+  /** 侧边栏·播放设置：主设置页（公共设置行 List，深色配色）与二级「弹幕设置」页切换。 */
   @Builder
   private SideSettings() {
     Column() {
-      this.SidePanelHeader('播放设置', false)
+      if (this.settingsPage === 'danmaku') {
+        // 二级页头：返回回播放设置 + 右上关闭侧边栏
+        Row() {
+          SymbolGlyph($r('sys.symbol.chevron_left'))
+            .fontSize(22)
+            .fontColor([Color.White])
+            .onClick((): void => {
+              this.settingsPage = '';
+            })
 
-      this.SettingRows(true)
+          Text('弹幕设置')
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(Color.White)
+            .layoutWeight(1)
+            .padding({ left: 8 })
+
+          Row() {
+            SymbolGlyph($r('sys.symbol.xmark'))
+              .fontSize(16)
+              .fontColor([Color.White])
+          }
+          .width(32)
+          .height(32)
+          .justifyContent(FlexAlign.Center)
+          .onClick((): void => {
+            this.closeSidePanel();
+          })
+        }
+        .width('100%')
+        .height(48)
+        .padding({ left: 12, right: 8 })
+        .alignItems(VerticalAlign.Center)
+
+        this.DanmakuSettingsBody(true)
+      } else {
+        this.SidePanelHeader('播放设置', false)
+
+        this.SettingRows(true)
+      }
     }
     .width('100%')
     .height('100%')
+  }
+
+  /**
+   * 弹幕设置主体（对齐 fqapp playlet_danmaku_settings：不透明度/速度/显示区域/字号
+   * 四滑杆 + 弹幕背景透明开关 + 恢复默认；半模态浅色与横屏侧边栏深色共用，dark 控配色）。
+   */
+  @Builder
+  private DanmakuSettingsBody(dark: boolean) {
+    Column() {
+      List() {
+        ListItemGroup() {
+          // 不透明度（20-100% 连续滑杆，实时生效）
+          this.DanmakuSliderRow(dark, '不透明度', this.danmakuAlphaPercent,
+            FQ_DANMAKU_ALPHA_MIN_PERCENT, FQ_DANMAKU_ALPHA_MAX_PERCENT, 1, false,
+            `${this.danmakuAlphaPercent}%`, [], (value: number): void => {
+              this.setDanmakuAlpha(value);
+            })
+
+          // 弹幕速度（5 档：慢/较慢/适中/较快/快）
+          this.DanmakuSliderRow(dark, '弹幕速度', this.danmakuSpeedTier - 1, 0, 4, 1, true,
+            FQ_DANMAKU_SPEED_LABELS[this.danmakuSpeedTier - 1], FQ_DANMAKU_SPEED_LABELS,
+            (value: number): void => {
+              this.setDanmakuSpeedTier(value + 1);
+            })
+
+          if (this.isLandscapeDanmaku()) {
+            // 显示区域（横屏片源全屏：单行/1/4屏/1/2屏/3/4屏）
+            this.DanmakuSliderRow(dark, '显示区域', this.danmakuLineSpaceTier - 1, 0, 3, 1, true,
+              FQ_DANMAKU_LINE_SPACE_LABELS[this.danmakuLineSpaceTier - 1], FQ_DANMAKU_LINE_SPACE_LABELS,
+              (value: number): void => {
+                this.setDanmakuLineSpaceTier(value + 1);
+              })
+          } else {
+            // 显示区域（竖屏片源全屏：1-4 行）
+            this.DanmakuSliderRow(dark, '显示区域', this.danmakuLineCount - 1, 0, 3, 1, true,
+              `${this.danmakuLineCount}行`, ['1行', '2行', '3行', '4行'],
+              (value: number): void => {
+                this.setDanmakuLineCount(value + 1);
+              })
+          }
+
+          // 字号（5 档：小/较小/适中/较大/大）
+          this.DanmakuSliderRow(dark, '字号', this.danmakuSizeTier - 1, 0, 4, 1, true,
+            FQ_DANMAKU_SIZE_LABELS[this.danmakuSizeTier - 1], FQ_DANMAKU_SIZE_LABELS,
+            (value: number): void => {
+              this.setDanmakuSizeTier(value + 1);
+            })
+
+          // 弹幕背景透明（本地开关：不画官方 40% 黑底气泡）
+          ListItem() {
+            Row() {
+              Text('弹幕背景透明')
+                .fontSize(15)
+                .fontColor(dark ? Color.White : $r('sys.color.font'))
+                .layoutWeight(1)
+
+              Toggle({ type: ToggleType.Switch, isOn: this.danmakuBgTransparent })
+                .selectedColor(FQ_STORY_ORANGE)
+                .onChange((isOn: boolean): void => {
+                  this.setDanmakuBgTransparent(isOn);
+                })
+            }
+            .width('100%')
+            .height(48)
+            .padding({ left: 16, right: 16 })
+            .alignItems(VerticalAlign.Center)
+          }
+        }
+        .borderRadius(14)
+        .backgroundColor(dark ? FQ_DARK_CARD_BG : $r('sys.color.comp_background_list_card'))
+        .divider({
+          strokeWidth: 0.5,
+          color: dark ? FQ_DARK_DIVIDER : $r('sys.color.comp_divider'),
+          startMargin: 16,
+          endMargin: 16
+        })
+      }
+      .width('100%')
+      .layoutWeight(1)
+      .scrollBar(BarState.Off)
+      .padding({ left: 20, right: 20 })
+
+      // 恢复默认（fqapp 语义：落默认值 + Toast「设置成功」）
+      Row() {
+        Text('恢复默认')
+          .fontSize(15)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(FQ_STORY_ORANGE)
+          .padding({ left: 24, right: 24, top: 12, bottom: 12 })
+          .borderRadius(14)
+          .backgroundColor(dark ? FQ_DARK_CARD_BG : $r('sys.color.comp_background_list_card'))
+          .onClick((): void => {
+            this.resetDanmakuSettings();
+          })
+      }
+      .width('100%')
+      .justifyContent(FlexAlign.Center)
+      .padding({ top: 12, bottom: 12, left: 20, right: 20 })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  /**
+   * 弹幕设置滑杆行：标题 + 当前值（左标题右值）+ 步进滑杆 +（可选）档位刻度文本行。
+   * 松手/点按提交 onChange（对齐 fqapp 拖动结束生效语义）。
+   */
+  @Builder
+  private DanmakuSliderRow(dark: boolean, label: string, value: number, min: number, max: number,
+    step: number, showTicks: boolean, valueLabel: string, tickLabels: string[],
+    onChange: (value: number) => void) {
+    ListItem() {
+      Column({ space: 2 }) {
+        Row() {
+          Text(label)
+            .fontSize(15)
+            .fontColor(dark ? Color.White : $r('sys.color.font'))
+
+          Text(valueLabel)
+            .fontSize(15)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(FQ_STORY_ORANGE)
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+
+        Slider({
+          value: value,
+          min: min,
+          max: max,
+          step: step,
+          style: SliderStyle.InSet
+        })
+          .width('100%')
+          .height(30)
+          .showSteps(showTicks)
+          .stepColor(dark ? FQ_DARK_TRACK : $r('sys.color.comp_background_tertiary'))
+          .blockColor(FQ_STORY_ORANGE)
+          .selectedColor('#33FA6725')
+          .trackColor(dark ? FQ_DARK_TRACK : $r('sys.color.comp_background_tertiary'))
+          .onChange((sliderValue: number, mode: SliderChangeMode): void => {
+            if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) {
+              onChange(sliderValue);
+            }
+          })
+
+        if (tickLabels.length > 0) {
+          Row() {
+            ForEach(tickLabels, (tick: string) => {
+              Text(tick)
+                .fontSize(7)
+                .fontColor(dark ? FQ_DARK_TERTIARY_TEXT : $r('sys.color.font_tertiary'))
+            }, (tick: string) => tick)
+          }
+          .justifyContent(FlexAlign.SpaceBetween)
+          .width('100%')
+          .hitTestBehavior(HitTestMode.None)
+        }
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 10, bottom: 8 })
+    }
   }
 
   /** 侧边栏·同系列（横屏全屏形态）：深色双列卡片网格，选中新剧进详情页。 */
@@ -2552,6 +3213,25 @@ export struct PlayerPage {
   // 布局几何（官方 PlayerVideoLayout 竖屏语义）
   // ---------------------------------------------------------------------------
 
+  /**
+   * 播放区宽（vp）：根 Stack 实测宽（PC 侧边栏挤占后回填；未实测回退屏宽）。
+   * 几何一律走这里而不是屏宽，PC 大窗口出右侧详情侧边栏时画面区按缩窄后布局。
+   */
+  private pageW(): number {
+    return this.layoutW > 0 ? this.layoutW : this.screenW;
+  }
+
+  /** 播放区高（vp）：根 Stack 实测高（未实测回退屏高）。 */
+  private pageH(): number {
+    return this.layoutH > 0 ? this.layoutH : this.screenH;
+  }
+
+  /** PC 右侧详情侧边栏显隐：PC 布局且窗口够宽（对齐 fqapp 桌面停靠目录阈值）时常驻。 */
+  private pcSidebarOn(): boolean {
+    return useSidebarLayout(appState.WidthBp, appState.windowWidthVp, appState.displayWidthVp) &&
+      appState.windowWidthVp >= FQ_PC_DETAIL_SIDEBAR_MIN_W;
+  }
+
   /** 视频区顶：全屏贴顶；常驻态顶栏 44 + 状态栏（与面板展开无关，面板只是覆盖）。 */
   private videoTopAbs(): number {
     if (this.fullScreen) {
@@ -2563,10 +3243,10 @@ export struct PlayerPage {
   /** 视频区高：全屏撑满；常驻态 = 屏高 − 顶栏 − 底部 163 信息区（与面板展开无关）。 */
   private videoRegionHeight(): number {
     if (this.fullScreen) {
-      return this.screenH;
+      return this.pageH();
     }
     return Math.max(0,
-      this.screenH - (appState.topRect + 44) - appState.bottomRect - FQ_STORY_BOTTOM_INSET);
+      this.pageH() - (appState.topRect + 44) - appState.bottomRect - FQ_STORY_BOTTOM_INSET);
   }
 
   /**
@@ -2574,7 +3254,7 @@ export struct PlayerPage {
    * 恒在细进度线与选集胶囊上方（自上而下：剧名行 → 进度线 → 选集胶囊）。
    */
   private infoTop(): number {
-    return this.screenH - appState.bottomRect - FQ_STORY_BOTTOM_INSET;
+    return this.pageH() - appState.bottomRect - FQ_STORY_BOTTOM_INSET;
   }
 
   /**
@@ -2587,9 +3267,9 @@ export struct PlayerPage {
     const dh: number = this.player.state.videoParams.dh;
     let videoH: number = 0;
     if (dw > 0 && dh > 0) {
-      videoH = Math.min(regionH, this.screenW / dw * dh);
+      videoH = Math.min(regionH, this.pageW() / dw * dh);
     } else {
-      videoH = Math.min(regionH, this.screenW * 16 / 9);
+      videoH = Math.min(regionH, this.pageW() * 16 / 9);
     }
     return this.videoTopAbs() + (regionH + videoH) / 2;
   }
@@ -2602,7 +3282,7 @@ export struct PlayerPage {
     const ratioW: number = dw > 0 && dh > 0 ? dw : 9;
     const ratioH: number = dw > 0 && dh > 0 ? dh : 16;
     const byHeight: number = regionH / ratioH * ratioW;
-    return Math.max(1, Math.min(this.screenW, byHeight));
+    return Math.max(1, Math.min(this.pageW(), byHeight));
   }
 
   /** 非全屏画面（contain 矩形）高：与 videoRectWidth 同一 contain 约束的另一边。 */
@@ -2612,7 +3292,7 @@ export struct PlayerPage {
     const dh: number = this.player.state.videoParams.dh;
     const ratioW: number = dw > 0 && dh > 0 ? dw : 9;
     const ratioH: number = dw > 0 && dh > 0 ? dh : 16;
-    const byWidth: number = this.screenW / ratioW * ratioH;
+    const byWidth: number = this.pageW() / ratioW * ratioH;
     return Math.max(1, Math.min(regionH, byWidth));
   }
 
@@ -2624,7 +3304,7 @@ export struct PlayerPage {
 
   /** 底部信息列顶（列自底向上生长，官方 informationTop；药丸让位钳制用）。 */
   private bandTopAbs(): number {
-    return this.screenH - appState.bottomRect - this.bandContentHeight();
+    return this.pageH() - appState.bottomRect - this.bandContentHeight();
   }
 
   // ---------------------------------------------------------------------------
@@ -2680,6 +3360,7 @@ export struct PlayerPage {
   /** 打开播放设置（横屏全屏走右侧边栏，其余右上角菜单半模态）。 */
   private openSettings(): void {
     this.speedPreview = -1;
+    this.settingsPage = '';
     if (this.fullScreen && this.isLandscapeVideo()) {
       this.openSidePanel('settings');
       return;
@@ -2723,9 +3404,13 @@ export struct PlayerPage {
   // 同系列（fqapp RelatedSeriesSheet / _switchRelatedSeries）
   // ---------------------------------------------------------------------------
 
-  /** 打开同系列列表（横屏全屏走右侧边栏深色面板，其余底部半模态）。 */
+  /** 打开同系列列表（PC 详情侧边栏在场则内容页切换；横屏全屏走右侧边栏深色面板，其余底部半模态）。 */
   private openRelatedSeries(): void {
     this.loadRelatedSeries();
+    if (this.pcSidebarOn()) {
+      this.pcPanel = 'related';
+      return;
+    }
     if (this.fullScreen && this.isLandscapeVideo()) {
       this.openSidePanel('related');
       return;
@@ -2782,6 +3467,7 @@ export struct PlayerPage {
     }
     this.closeRelatedSheet();
     this.closeSidePanel();
+    this.pcPanel = '';
     this.player.pause();
     this.saveCurrentProgress();
     DetailNavParams.id = entry.id;
@@ -2964,6 +3650,7 @@ export struct PlayerPage {
   /** 关闭播放设置半模态：延迟一拍置 isShow（面板事件内同步改 isShow 会被框架丢弃）。 */
   private closeSettings(): void {
     this.speedPreview = -1;
+    this.settingsPage = '';
     const token: number = ++this.settingsCloseToken;
     setTimeout((): void => {
       if (token === this.settingsCloseToken) {
@@ -3080,22 +3767,25 @@ export struct PlayerPage {
     this.applyImmersive(true);
   }
 
-  /** 退出全屏沉浸：恢复方向与系统栏；离开横屏解除防误触锁（官方 _releaseLock）。 */
-  private exitFullscreen(): void {
+  /** 退出全屏沉浸：恢复方向与系统栏；离开横屏解除防误触锁（官方 _releaseLock）。
+   *  windowFormSettled：窗口形态已被系统接管（PC 全屏中按 ESC 系统窗口化等），
+   *  跳过 maximize/recover 还原，仅恢复应用内状态与系统栏。 */
+  private exitFullscreen(windowFormSettled: boolean = false): void {
     this.fullScreen = false;
     this.fsLocked = false;
     this.lockVisible = false;
     this.cancelFsHide();
     this.cancelLockHide();
     this.fsControlsVisible = true;
-    this.applyImmersive(false);
+    this.applyImmersive(false, windowFormSettled);
   }
 
   /** 沉浸全屏：进入隐藏系统栏（横屏片源同时锁 AUTO_ROTATION_LANDSCAPE），退出恢复。
    *  PC 侧边栏布局额外接管窗口：进入 maximize(ENTER_IMMERSIVE) 沉浸全屏（隐藏系统标题栏/Dock，
-   *  PcMainLayout 同步隐藏应用标题栏与侧边栏）；退出按进入前窗口状态还原
-   *  （最大化 → maximize(EXIT_IMMERSIVE)，自由窗口 → recover() 恢复原尺寸位置）。 */
-  private applyImmersive(enter: boolean): void {
+   *  PcMainLayout 同步隐藏应用内标题栏与侧边栏）；退出按进入前窗口状态还原
+   *  （最大化 → maximize(EXIT_IMMERSIVE)，自由窗口 → recover() 恢复原尺寸位置）；
+   *  windowFormSettled 为 true 时窗口形态已被系统接管（ESC 系统窗口化），跳过还原。 */
+  private applyImmersive(enter: boolean, windowFormSettled: boolean = false): void {
     window.getLastWindow(getContext(this)).then((win: window.Window): void => {
       const pcLayout: boolean = useSidebarLayout(appState.WidthBp, appState.windowWidthVp, appState.displayWidthVp);
       if (enter) {
@@ -3115,7 +3805,9 @@ export struct PlayerPage {
       } else {
         if (pcLayout) {
           appState.pcImmersiveFullscreen = false;
-          if (this.pcFullscreenWasFullscreen) {
+          if (windowFormSettled) {
+            // 窗口形态已被系统接管（ESC 系统窗口化等）：保持用户所选形态，不 maximize/recover
+          } else if (this.pcFullscreenWasFullscreen) {
             // 进入前已是沉浸全屏：保持全屏形态，仅恢复应用内标题栏/侧边栏
           } else if (this.pcFullscreenWasMaximized) {
             win.maximize(window.MaximizePresentation.EXIT_IMMERSIVE).catch((): void => {
@@ -3919,6 +4611,97 @@ export struct PlayerPage {
     this.scheduleFsHide();
   }
 
+  /** 重建弹幕样式配置（设置实时生效，无需清在飞弹幕）。 */
+  private applyDanmakuCfg(): void {
+    this.danmakuCfg = new FqDanmakuViewConfig(this.danmakuFontSize(), this.danmakuAlphaPercent,
+      FQ_DANMAKU_SPEED_MULTIPLIERS[this.danmakuSpeedTier - 1], this.danmakuBgTransparent);
+  }
+
+  /** 弹幕「显示区域」语义上下文：横屏片源全屏=单行/1/4屏/1/2屏/3/4屏；竖屏=1-4 行。 */
+  private isLandscapeDanmaku(): boolean {
+    return this.fullScreen && this.isLandscapeVideo();
+  }
+
+  /** 弹幕字号（fqapp 5 档 12-20sp，默认 16）。 */
+  private danmakuFontSize(): number {
+    const tier: number = Math.min(5, Math.max(1, this.danmakuSizeTier));
+    return FQ_DANMAKU_TEXT_SIZES[tier - 1];
+  }
+
+  private setDanmakuAlpha(percent: number): void {
+    this.danmakuAlphaPercent = Math.round(percent);
+    FqAppSettingsStore.setDanmakuAlphaPercent(this.danmakuAlphaPercent);
+    this.applyDanmakuCfg();
+  }
+
+  private setDanmakuSpeedTier(tier: number): void {
+    this.danmakuSpeedTier = Math.min(5, Math.max(1, tier));
+    FqAppSettingsStore.setDanmakuSpeedTier(this.danmakuSpeedTier);
+    this.applyDanmakuCfg();
+  }
+
+  private setDanmakuLineCount(count: number): void {
+    this.danmakuLineCount = Math.min(4, Math.max(1, count));
+    FqAppSettingsStore.setDanmakuLineCount(this.danmakuLineCount);
+  }
+
+  private setDanmakuLineSpaceTier(tier: number): void {
+    this.danmakuLineSpaceTier = Math.min(4, Math.max(1, tier));
+    FqAppSettingsStore.setDanmakuLineSpaceTier(this.danmakuLineSpaceTier);
+  }
+
+  private setDanmakuSizeTier(tier: number): void {
+    this.danmakuSizeTier = Math.min(5, Math.max(1, tier));
+    FqAppSettingsStore.setDanmakuSizeTier(this.danmakuSizeTier);
+    this.applyDanmakuCfg();
+  }
+
+  private setDanmakuBgTransparent(on: boolean): void {
+    this.danmakuBgTransparent = on;
+    FqAppSettingsStore.setDanmakuBgTransparent(on);
+    this.applyDanmakuCfg();
+  }
+
+  /** 恢复默认弹幕设置（对齐 fqapp：落默认值 + Toast「设置成功」）。 */
+  private resetDanmakuSettings(): void {
+    FqAppSettingsStore.resetDanmakuSettings();
+    this.danmakuAlphaPercent = FqAppSettingsStore.getDanmakuAlphaPercent();
+    this.danmakuSpeedTier = FqAppSettingsStore.getDanmakuSpeedTier();
+    this.danmakuLineCount = FqAppSettingsStore.getDanmakuLineCount();
+    this.danmakuLineSpaceTier = FqAppSettingsStore.getDanmakuLineSpaceTier();
+    this.danmakuSizeTier = FqAppSettingsStore.getDanmakuSizeTier();
+    this.danmakuBgTransparent = FqAppSettingsStore.isDanmakuBgTransparent();
+    this.applyDanmakuCfg();
+    this.getUIContext().getPromptAction().showToast({ message: '设置成功', duration: 1200 });
+  }
+
+  /**
+   * 弹幕层高（对齐 fqapp 显示区域档）：
+   * 横屏全屏 = 档位屏高占比（单行=一条行高）；竖屏全屏 = 屏上 20%。
+   */
+  private danmakuLayerHeight(): Length {
+    if (this.fullScreen && this.isLandscapeVideo()) {
+      const laneH: number = this.danmakuFontSize() + 12;
+      const tier: number = Math.min(4, Math.max(1, this.danmakuLineSpaceTier));
+      if (tier === 1) {
+        return laneH + 4;
+      }
+      const factor: number = FQ_DANMAKU_LINE_SPACE_FACTORS[tier - 1];
+      return Math.max(laneH + 4, Math.round(this.pageH() * factor));
+    }
+    return '20%';
+  }
+
+  /** 弹幕最大车道（竖屏=设置行数 1-4；横屏=区域高度按行高折算，封顶 12）。 */
+  private danmakuMaxLanes(): number {
+    if (this.fullScreen && this.isLandscapeVideo()) {
+      const laneH: number = this.danmakuFontSize() + 12;
+      const heightVp: number = Number(this.danmakuLayerHeight());
+      return Math.max(1, Math.min(12, Math.floor(heightVp / laneH)));
+    }
+    return this.danmakuLineCount;
+  }
+
   /** 下一集（横屏控制条/自动连播共用）。 */
   private nextEpisode(): void {
     if (this.index + 1 < this.episodes.length) {
@@ -3959,6 +4742,16 @@ export struct PlayerPage {
     if (this.episodes.length === 0) {
       return;
     }
+    // PC 布局：选集点击呼出右侧详情侧边栏（收起则展开），定位到当前集，不开底部半模态
+    if (this.pcSidebarOn()) {
+      this.pcSidebarCollapsed = false;
+      this.pcPanel = '';
+      this.pcEpisodePage = Math.floor(this.index / FQ_CACHE_PAGE_SIZE);
+      setTimeout((): void => {
+        this.pcScroller.scrollToIndex(this.index, false, ScrollAlign.CENTER);
+      }, 120);
+      return;
+    }
     // 横屏全屏走右侧边栏（少遮挡画面），其余走官方底部半模态
     if (this.fullScreen && this.isLandscapeVideo()) {
       this.openSidePanel('episodes');
@@ -3977,6 +4770,7 @@ export struct PlayerPage {
   /** 横屏全屏右侧边栏打开：收控件、面板贴右滑入；选集滚到当前集竖直居中。 */
   private openSidePanel(kind: string): void {
     this.cancelFsHide();
+    this.settingsPage = '';
     this.fsControlsVisible = false;
     this.getUIContext().animateTo({ duration: 200 }, (): void => {
       this.sidePanel = kind;
@@ -3994,6 +4788,7 @@ export struct PlayerPage {
   /** 关闭横屏全屏右侧边栏：面板滑出，亮出全屏控件并重新计自动隐藏。 */
   private closeSidePanel(): void {
     this.cancelSideLocate();
+    this.settingsPage = '';
     this.getUIContext().animateTo({ duration: 200 }, (): void => {
       this.sidePanel = '';
     });

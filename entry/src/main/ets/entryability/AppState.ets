@@ -98,6 +98,10 @@ export class AppState {
    *  PcMainLayout 据此隐藏顶部标题栏与左侧导航栏，内容区铺满全屏。 */
   @Trace pcImmersiveFullscreen: boolean = false;
 
+  /** 隐藏 PC 左侧主导航栏（播放页等沉浸内容页 onShown 置位、onHidden/离页复位；
+   *  仅 PcMainLayout 消费，手机布局不受影响）。 */
+  @Trace hidePcSideNav: boolean = false;
+
   /** 主 Ability 上下文（EntryAbility 注入：退出应用 terminateSelf 用）。 */
   public abilityContext: common.UIAbilityContext | null = null;
 

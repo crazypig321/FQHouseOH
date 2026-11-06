@@ -30,7 +30,8 @@ export struct PcMainLayout {
       }
 
       Row() {
-        if (!appState.pcImmersiveFullscreen) {
+        // 播放页等沉浸内容页（appState.hidePcSideNav）隐藏左侧主导航，内容区铺满
+        if (!appState.pcImmersiveFullscreen && !appState.hidePcSideNav) {
           PcSideBar({
             expanded: appState.sidebarExpanded,
             onSelect: (index: number): void => {

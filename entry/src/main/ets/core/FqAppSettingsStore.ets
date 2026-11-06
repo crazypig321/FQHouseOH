@@ -49,6 +49,12 @@ const FQ_SETTINGS_KEY_CHAPTER_CACHE_LIMIT: string = 'chapterCacheLimitMb';
 const FQ_SETTINGS_KEY_DRAMA_AUTO_AHEAD: string = 'dramaAutoCacheAhead';
 const FQ_SETTINGS_KEY_DRAMA_AUTO_WIFI: string = 'dramaAutoCacheWifiOnly';
 const FQ_SETTINGS_KEY_LAN_SHARE: string = 'apiLanShare';
+const FQ_SETTINGS_KEY_DANMAKU_ALPHA: string = 'danmakuAlphaPercent';
+const FQ_SETTINGS_KEY_DANMAKU_SPEED: string = 'danmakuSpeedTier';
+const FQ_SETTINGS_KEY_DANMAKU_LINE_COUNT: string = 'danmakuLineCount';
+const FQ_SETTINGS_KEY_DANMAKU_LINE_SPACE: string = 'danmakuLineSpaceTier';
+const FQ_SETTINGS_KEY_DANMAKU_SIZE: string = 'danmakuSizeTier';
+const FQ_SETTINGS_KEY_DANMAKU_BG_TRANSPARENT: string = 'danmakuBgTransparent';
 
 /** 章节自动缓存大小上限默认值（MB）。 */
 export const FQ_CHAPTER_CACHE_LIMIT_DEFAULT_MB: number = 80;
@@ -62,6 +68,22 @@ export const FQ_DRAMA_AUTO_CACHE_AHEAD_DEFAULT: number = 5;
 export const FQ_DRAMA_AUTO_CACHE_AHEAD_MAX: number = 50;
 /** 边看边往后缓存可选档位（fqapp presetAheads 除 0 = 关）。 */
 export const FQ_DRAMA_AUTO_CACHE_AHEAD_PRESETS: number[] = [3, 5, 10];
+/** 弹幕速度档位倍率（fqapp DanmakuSettings.speedMultipliers：慢..快 5 档，默认 3 = 适中 1.0）。 */
+export const FQ_DANMAKU_SPEED_MULTIPLIERS: number[] = [0.5, 0.7, 1.0, 1.25, 1.5];
+/** 弹幕速度档位文案。 */
+export const FQ_DANMAKU_SPEED_LABELS: string[] = ['慢', '较慢', '适中', '较快', '快'];
+/** 弹幕字号档位（sp；fqapp DanmakuSettings.textSizes 5 档，默认 3 = 16sp）。 */
+export const FQ_DANMAKU_TEXT_SIZES: number[] = [12, 14, 16, 18, 20];
+/** 弹幕字号档位文案。 */
+export const FQ_DANMAKU_SIZE_LABELS: string[] = ['小', '较小', '适中', '较大', '大'];
+/** 横屏弹幕显示区域档位屏高占比（fqapp DanmakuSettings.lineSpaceFactors：单行/1/4屏/1/2屏/3/4屏，默认 2 = 1/4屏）。 */
+export const FQ_DANMAKU_LINE_SPACE_FACTORS: number[] = [1.0, 0.25, 0.5, 0.75];
+/** 横屏弹幕显示区域档位文案。 */
+export const FQ_DANMAKU_LINE_SPACE_LABELS: string[] = ['单行', '1/4屏', '1/2屏', '3/4屏'];
+/** 弹幕不透明度下限（%；fqapp 面板 20%..100%）。 */
+export const FQ_DANMAKU_ALPHA_MIN_PERCENT: number = 20;
+/** 弹幕不透明度上限（%）。 */
+export const FQ_DANMAKU_ALPHA_MAX_PERCENT: number = 100;
 
 /** 深色模式档位：跟随系统。 */
 export const FQ_THEME_FOLLOW: number = 0;
@@ -97,6 +119,18 @@ export class FqAppSettingsStore {
   private static dramaAutoCacheAhead: number = FQ_DRAMA_AUTO_CACHE_AHEAD_DEFAULT;
   /** 剧集自动缓存仅 Wi-Fi（计量网络不自动缓存；手动下载不受影响）。 */
   private static dramaAutoCacheWifiOnly: boolean = true;
+  /** 弹幕不透明度（%，20-100；fqapp key_alpha 默认 255 即 100%）。 */
+  private static danmakuAlphaPercent: number = FQ_DANMAKU_ALPHA_MAX_PERCENT;
+  /** 弹幕速度档位（1-5，默认 3 适中）。 */
+  private static danmakuSpeedTier: number = 3;
+  /** 竖屏弹幕行数（1-4，fqapp key_line_count 默认 4）。 */
+  private static danmakuLineCount: number = 4;
+  /** 横屏弹幕显示区域档位（1-4，fqapp key_line_space 默认 2 = 1/4屏）。 */
+  private static danmakuLineSpaceTier: number = 2;
+  /** 弹幕字号档位（1-5，fqapp key_text_size 默认 3 = 16sp）。 */
+  private static danmakuSizeTier: number = 3;
+  /** 弹幕背景透明（不画 40% 黑底气泡，只留文字与阴影；官方气泡底色写死，此为本地开关）。 */
+  private static danmakuBgTransparent: boolean = false;
 
   public static init(context: common.Context): void {
     if (FqAppSettingsStore.pref !== null) {
@@ -176,6 +210,32 @@ export class FqAppSettingsStore {
       const rawDramaWifi: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_DRAMA_AUTO_WIFI, true);
       if (typeof rawDramaWifi === 'boolean') {
         FqAppSettingsStore.dramaAutoCacheWifiOnly = rawDramaWifi;
+      }
+      const rawDmAlpha: preferences.ValueType =
+        pref.getSync(FQ_SETTINGS_KEY_DANMAKU_ALPHA, FQ_DANMAKU_ALPHA_MAX_PERCENT);
+      if (typeof rawDmAlpha === 'number' && rawDmAlpha >= FQ_DANMAKU_ALPHA_MIN_PERCENT
+        && rawDmAlpha <= FQ_DANMAKU_ALPHA_MAX_PERCENT) {
+        FqAppSettingsStore.danmakuAlphaPercent = Math.round(rawDmAlpha);
+      }
+      const rawDmSpeed: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_DANMAKU_SPEED, 3);
+      if (typeof rawDmSpeed === 'number' && rawDmSpeed >= 1 && rawDmSpeed <= 5) {
+        FqAppSettingsStore.danmakuSpeedTier = Math.round(rawDmSpeed);
+      }
+      const rawDmLines: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_DANMAKU_LINE_COUNT, 4);
+      if (typeof rawDmLines === 'number' && rawDmLines >= 1 && rawDmLines <= 4) {
+        FqAppSettingsStore.danmakuLineCount = Math.round(rawDmLines);
+      }
+      const rawDmSpace: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_DANMAKU_LINE_SPACE, 2);
+      if (typeof rawDmSpace === 'number' && rawDmSpace >= 1 && rawDmSpace <= 4) {
+        FqAppSettingsStore.danmakuLineSpaceTier = Math.round(rawDmSpace);
+      }
+      const rawDmSize: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_DANMAKU_SIZE, 3);
+      if (typeof rawDmSize === 'number' && rawDmSize >= 1 && rawDmSize <= 5) {
+        FqAppSettingsStore.danmakuSizeTier = Math.round(rawDmSize);
+      }
+      const rawDmBg: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_DANMAKU_BG_TRANSPARENT, false);
+      if (typeof rawDmBg === 'boolean') {
+        FqAppSettingsStore.danmakuBgTransparent = rawDmBg;
       }
     } catch (error) {
       // 损坏数据按默认值处理
@@ -505,6 +565,111 @@ export class FqAppSettingsStore {
     }
     try {
       pref.putSync(FQ_SETTINGS_KEY_DRAMA_AUTO_WIFI, wifiOnly);
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
+  }
+
+  /** 弹幕不透明度（%，20-100）。 */
+  public static getDanmakuAlphaPercent(): number {
+    return FqAppSettingsStore.danmakuAlphaPercent;
+  }
+
+  public static setDanmakuAlphaPercent(percent: number): void {
+    if (!Number.isFinite(percent)) {
+      return;
+    }
+    FqAppSettingsStore.danmakuAlphaPercent =
+      Math.round(Math.min(FQ_DANMAKU_ALPHA_MAX_PERCENT, Math.max(FQ_DANMAKU_ALPHA_MIN_PERCENT, percent)));
+    FqAppSettingsStore.putDanmaku(FQ_SETTINGS_KEY_DANMAKU_ALPHA, FqAppSettingsStore.danmakuAlphaPercent);
+  }
+
+  /** 弹幕速度档位（1-5；倍率见 FQ_DANMAKU_SPEED_MULTIPLIERS）。 */
+  public static getDanmakuSpeedTier(): number {
+    return FqAppSettingsStore.danmakuSpeedTier;
+  }
+
+  public static setDanmakuSpeedTier(tier: number): void {
+    FqAppSettingsStore.danmakuSpeedTier = FqAppSettingsStore.clampDanmakuTier(tier, 5, 3);
+    FqAppSettingsStore.putDanmaku(FQ_SETTINGS_KEY_DANMAKU_SPEED, FqAppSettingsStore.danmakuSpeedTier);
+  }
+
+  /** 竖屏弹幕行数（1-4）。 */
+  public static getDanmakuLineCount(): number {
+    return FqAppSettingsStore.danmakuLineCount;
+  }
+
+  public static setDanmakuLineCount(count: number): void {
+    FqAppSettingsStore.danmakuLineCount = FqAppSettingsStore.clampDanmakuTier(count, 4, 4);
+    FqAppSettingsStore.putDanmaku(FQ_SETTINGS_KEY_DANMAKU_LINE_COUNT, FqAppSettingsStore.danmakuLineCount);
+  }
+
+  /** 横屏弹幕显示区域档位（1-4；占比见 FQ_DANMAKU_LINE_SPACE_FACTORS）。 */
+  public static getDanmakuLineSpaceTier(): number {
+    return FqAppSettingsStore.danmakuLineSpaceTier;
+  }
+
+  public static setDanmakuLineSpaceTier(tier: number): void {
+    FqAppSettingsStore.danmakuLineSpaceTier = FqAppSettingsStore.clampDanmakuTier(tier, 4, 2);
+    FqAppSettingsStore.putDanmaku(FQ_SETTINGS_KEY_DANMAKU_LINE_SPACE, FqAppSettingsStore.danmakuLineSpaceTier);
+  }
+
+  /** 弹幕字号档位（1-5；字号见 FQ_DANMAKU_TEXT_SIZES）。 */
+  public static getDanmakuSizeTier(): number {
+    return FqAppSettingsStore.danmakuSizeTier;
+  }
+
+  public static setDanmakuSizeTier(tier: number): void {
+    FqAppSettingsStore.danmakuSizeTier = FqAppSettingsStore.clampDanmakuTier(tier, 5, 3);
+    FqAppSettingsStore.putDanmaku(FQ_SETTINGS_KEY_DANMAKU_SIZE, FqAppSettingsStore.danmakuSizeTier);
+  }
+
+  /** 弹幕背景透明（不画黑底气泡，只留文字与阴影）。 */
+  public static isDanmakuBgTransparent(): boolean {
+    return FqAppSettingsStore.danmakuBgTransparent;
+  }
+
+  public static setDanmakuBgTransparent(transparent: boolean): void {
+    FqAppSettingsStore.danmakuBgTransparent = transparent;
+    FqAppSettingsStore.putDanmaku(FQ_SETTINGS_KEY_DANMAKU_BG_TRANSPARENT, transparent);
+  }
+
+  /** 弹幕设置恢复默认（fqapp 官方五键回出厂值；本地另含背景透明开关）。 */
+  public static resetDanmakuSettings(): void {
+    FqAppSettingsStore.danmakuAlphaPercent = FQ_DANMAKU_ALPHA_MAX_PERCENT;
+    FqAppSettingsStore.danmakuSpeedTier = 3;
+    FqAppSettingsStore.danmakuLineCount = 4;
+    FqAppSettingsStore.danmakuLineSpaceTier = 2;
+    FqAppSettingsStore.danmakuSizeTier = 3;
+    FqAppSettingsStore.danmakuBgTransparent = false;
+    FqAppSettingsStore.putDanmaku(FQ_SETTINGS_KEY_DANMAKU_ALPHA, FqAppSettingsStore.danmakuAlphaPercent);
+    FqAppSettingsStore.putDanmaku(FQ_SETTINGS_KEY_DANMAKU_SPEED, FqAppSettingsStore.danmakuSpeedTier);
+    FqAppSettingsStore.putDanmaku(FQ_SETTINGS_KEY_DANMAKU_LINE_COUNT, FqAppSettingsStore.danmakuLineCount);
+    FqAppSettingsStore.putDanmaku(FQ_SETTINGS_KEY_DANMAKU_LINE_SPACE, FqAppSettingsStore.danmakuLineSpaceTier);
+    FqAppSettingsStore.putDanmaku(FQ_SETTINGS_KEY_DANMAKU_SIZE, FqAppSettingsStore.danmakuSizeTier);
+    FqAppSettingsStore.putDanmaku(FQ_SETTINGS_KEY_DANMAKU_BG_TRANSPARENT,
+      FqAppSettingsStore.danmakuBgTransparent);
+  }
+
+  /** 弹幕档位钳制（1..max，非法值回退 fallback）。 */
+  private static clampDanmakuTier(tier: number, max: number, fallback: number): number {
+    if (!Number.isFinite(tier)) {
+      return fallback;
+    }
+    return Math.round(Math.min(max, Math.max(1, tier)));
+  }
+
+  /** 弹幕设置键落盘（失败静默）。 */
+  private static putDanmaku(key: string, value: preferences.ValueType): void {
+    const pref: preferences.Preferences | null = FqAppSettingsStore.pref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.putSync(key, value);
       pref.flush().catch((_error: BusinessError): void => {
         // 落盘失败不阻断
       });

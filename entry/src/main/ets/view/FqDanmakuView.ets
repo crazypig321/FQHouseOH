@@ -2,25 +2,42 @@
  * 弹幕层（对齐 fqapp playlet_danmaku_layer 语义的轻量实现）：
  * - 右→左匀速飞行（animateTo 线性动画驱动 @Trace x）；
  * - 车道避让：每条车道记录下一次可复用的墙钟时刻，满道丢弃（官方同语义）；
- * - 车道数按层实际高度自适应（层只占屏上约 20%，少遮挡画面）；
+ * - 车道数 = maxLanes 与层实际高度按行高自适应的较小者；
  * - 播放位置喂入驱动出现时机，超过追补窗口的旧弹幕静默跳过；
  * - 暂停时全体冻结在当前像素位置，恢复播放后按剩余时长续飞；
  * - resetToken 变化（seek/切集）清空已飞/在飞状态；
+ * - 样式经 config 可调（fqapp danmaku_config：字号/不透明度/速度倍率/背景透明气泡）；
  * - 整棵子树不参与触摸测试，不影响任何交互。
  */
 
 import { FqDanmaku } from '../model/FqModels';
 
-/** 弹幕字号（官方 15sp 档）。 */
-const FQ_DANMAKU_FONT_SIZE: number = 15;
-/** 车道高（含行距）。 */
-const FQ_DANMAKU_LANE_HEIGHT: number = 30;
-/** 最大车道数（实际按层高度自适应向下收敛）。 */
-const FQ_DANMAKU_MAX_LANES: number = 9;
-/** 飞行速度（vp/s）。 */
+/** 基准飞行速度（vp/s；实际 = 基准 × 速度档倍率）。 */
 const FQ_DANMAKU_SPEED_VP: number = 90;
 /** 追补窗口：位置跳变后多久内的弹幕仍允许起飞（毫秒）。 */
 const FQ_DANMAKU_CATCHUP_MS: number = 1500;
+/** 弹幕气泡底色（官方 40% 黑底圆角气泡；transparentBg 时不画）。 */
+const FQ_DANMAKU_BUBBLE_BG: string = '#66000000';
+
+/** 弹幕样式配置（fqapp danmaku_config 五项 + 本地背景透明开关的视图投影）。 */
+export class FqDanmakuViewConfig {
+  /** 字号（fp；fqapp DanmakuTextSize 5 档 12/14/16/18/20，默认 16）。 */
+  readonly fontSize: number;
+  /** 不透明度（%，20-100）。 */
+  readonly alphaPercent: number;
+  /** 速度倍率（fqapp DanmakuSpeed 5 档 0.5-1.5，默认 1.0）。 */
+  readonly speedMultiplier: number;
+  /** 背景透明：不画黑底气泡，只留文字与阴影。 */
+  readonly transparentBg: boolean;
+
+  constructor(fontSize: number = 16, alphaPercent: number = 100,
+    speedMultiplier: number = 1.0, transparentBg: boolean = false) {
+    this.fontSize = fontSize;
+    this.alphaPercent = alphaPercent;
+    this.speedMultiplier = speedMultiplier;
+    this.transparentBg = transparentBg;
+  }
+}
 
 /** 飞行中的弹幕（@Trace x 驱动 translate 动画；墙钟起点支持暂停冻结）。 */
 @ObservedV2
@@ -64,6 +81,10 @@ export struct FqDanmakuView {
   @Param resetToken: number = 0;
   /** 是否正在播放：暂停冻结全体飞行，恢复后续飞。 */
   @Param playing: boolean = true;
+  /** 样式配置（字号/不透明度/速度倍率/背景透明；整实例替换生效）。 */
+  @Param config: FqDanmakuViewConfig = new FqDanmakuViewConfig();
+  /** 最大车道数（竖屏=设置行数 1-4；横屏=显示区域高度折算，宿主计算）。 */
+  @Param maxLanes: number = 4;
   @Local flying: FqFlyingDanmaku[] = [];
   private spawned: Set<string> = new Set<string>();
   private laneFreeAt: number[] = [];
@@ -90,6 +111,11 @@ export struct FqDanmakuView {
     } else {
       this.pauseAll();
     }
+  }
+
+  /** 行高（含行距）：随字号缩放（16sp → 28vp，对齐 fqapp trackPitch 28）。 */
+  private laneHeight(): number {
+    return this.config.fontSize + 12;
   }
 
   /** 位置推进：把 [0, pos] 内未起飞的弹幕依次起飞（追补窗口内的才真正飞行）。 */
@@ -131,7 +157,8 @@ export struct FqDanmakuView {
     }
     const textWidth: number = this.estimateTextWidth(item.text);
     const width: number = this.viewWidth > 0 ? this.viewWidth : 360;
-    const durationMs: number = Math.round((width + textWidth) / FQ_DANMAKU_SPEED_VP * 1000);
+    const speed: number = FQ_DANMAKU_SPEED_VP * this.config.speedMultiplier;
+    const durationMs: number = Math.round((width + textWidth) / speed * 1000);
     this.laneFreeAt[lane] = now + durationMs;
     const flyer: FqFlyingDanmaku = new FqFlyingDanmaku(
       item.id, item.text, lane, width, -textWidth, now, durationMs);
@@ -218,13 +245,13 @@ export struct FqDanmakuView {
     this.flying = this.flying.filter((item: FqFlyingDanmaku): boolean => item !== flyer);
   }
 
-  /** 车道数按层高度自适应（层只占屏上约 20%）。 */
+  /** 车道数：maxLanes 与层高度自适应（行高随字号）取较小者，至少 1 条。 */
   private rebuildLanes(): void {
-    let count: number = FQ_DANMAKU_MAX_LANES;
+    let count: number = this.maxLanes >= 1 ? Math.floor(this.maxLanes) : 1;
     if (this.viewHeight > 0) {
-      count = Math.floor(this.viewHeight / FQ_DANMAKU_LANE_HEIGHT);
+      count = Math.min(count, Math.floor(this.viewHeight / this.laneHeight()));
     }
-    count = Math.max(1, Math.min(FQ_DANMAKU_MAX_LANES, count));
+    count = Math.max(1, count);
     if (count !== this.laneFreeAt.length) {
       const lanes: number[] = [];
       for (let i: number = 0; i < count; i++) {
@@ -246,20 +273,34 @@ export struct FqDanmakuView {
     for (let i: number = 0; i < text.length; i++) {
       units += text.charCodeAt(i) > 0x2E7F ? 1 : 0.55;
     }
-    return Math.max(FQ_DANMAKU_FONT_SIZE, Math.ceil(units * FQ_DANMAKU_FONT_SIZE));
+    return Math.max(this.config.fontSize, Math.ceil(units * this.config.fontSize));
+  }
+
+  /** 弹幕文字色（白色 + 不透明度档；气泡底色恒定不受透明度影响）。 */
+  private textColor(): string {
+    const alpha: number = Math.round(this.config.alphaPercent) / 100;
+    return `rgba(255,255,255,${alpha})`;
   }
 
   build() {
     Stack() {
       ForEach(this.flying, (flyer: FqFlyingDanmaku) => {
         Text(flyer.text)
-          .fontSize(FQ_DANMAKU_FONT_SIZE)
+          .fontSize(this.config.fontSize)
           .fontWeight(FontWeight.Medium)
-          .fontColor(Color.White)
+          .fontColor(this.textColor())
           .textShadow({ radius: 2, color: '#CC000000', offsetX: 0, offsetY: 0 })
           .maxLines(1)
-          .position({ x: 0, y: flyer.lane * FQ_DANMAKU_LANE_HEIGHT })
+          .position({ x: 0, y: flyer.lane * this.laneHeight() })
           .translate({ x: flyer.x })
+          .padding({
+            left: this.config.transparentBg ? 0 : 6,
+            right: this.config.transparentBg ? 0 : 6,
+            top: this.config.transparentBg ? 0 : 2,
+            bottom: this.config.transparentBg ? 0 : 2,
+          })
+          .borderRadius(this.config.transparentBg ? 0 : 4)
+          .backgroundColor(this.config.transparentBg ? Color.Transparent : FQ_DANMAKU_BUBBLE_BG)
       }, (flyer: FqFlyingDanmaku) => flyer.key)
     }
     .width('100%')
