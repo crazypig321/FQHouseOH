@@ -70,6 +70,10 @@ export struct CommonSheet {
   @Param showClose: boolean = false;
   /** 标题栏右侧是否显示管理按钮（关闭钮之前）。 */
   @Param showManage: boolean = false;
+  /** 标题栏左侧是否显示 HDS 返回按钮（二级页返回上一级）。 */
+  @Param showBack: boolean = false;
+  /** 标题栏右侧是否显示「恢复默认」按钮（关闭钮之前）。 */
+  @Param showReset: boolean = false;
   /** 隐藏 HDS 标题栏（内容区自绘头部：返回/关闭等 HDS 标题栏放不下的控件）。 */
   @Param hideTitleBar: boolean = false;
   @Event searchToggle: () => void = (): void => {};
@@ -79,6 +83,8 @@ export struct CommonSheet {
   @Event sortClick: () => void = (): void => {};
   @Event closeClick: () => void = (): void => {};
   @Event manageClick: () => void = (): void => {};
+  @Event backClick: () => void = (): void => {};
+  @Event resetClick: () => void = (): void => {};
   @BuilderParam content: () => void;
 
   build() {
@@ -118,7 +124,7 @@ export struct CommonSheet {
       avoidLayoutSafeArea: false,
     })
     .hideTitleBar(this.hideTitleBar, true)
-    .hideBackButton(true)
+    .hideBackButton(!this.showBack)
     .titleMode(HdsNavDestinationTitleMode.MODAL)
     // 内容层透明：sheet 材质（blurStyle/systemMaterial）即唯一可见层，
     // 否则 HdsNavDestination 默认不透明底色盖住材质层，视觉成「两层」
@@ -129,6 +135,13 @@ export struct CommonSheet {
     const content: TitleBarContentOptions = {
       title: { mainTitle: this.sheetTitle },
     };
+    if (this.showBack) {
+      content.backIcon = {
+        action: (): void => {
+          this.backClick();
+        },
+      };
+    }
     const menus: HdsNavigationMenuItemOptions[] = [];
     if (this.showSearch) {
       menus.push({
@@ -170,6 +183,17 @@ export struct CommonSheet {
           label: 'manage',
           action: (): void => {
             this.manageClick();
+          },
+        },
+      });
+    }
+    if (this.showReset) {
+      menus.push({
+        content: {
+          icon: $r('sys.symbol.arrow_counterclockwise'),
+          label: 'reset',
+          action: (): void => {
+            this.resetClick();
           },
         },
       });
