@@ -37,6 +37,19 @@ export struct FqPlayerSidebar {
   @BuilderParam content: () => void;
 
   build() {
+    // 同 FqPlayerSettingsSheet：HDS 标题栏挂载后动态变化的按钮（返回/恢复默认/标题）
+    // action 不被重新绑定；showBack 翻转（主设置页↔弹幕设置页）经 if/else 分支互换
+    // 整树重建 CommonNav，使标题栏配置始终为挂载期静态配置
+    if (this.showBack) {
+      this.SidebarHost()
+    } else {
+      this.SidebarHost()
+    }
+  }
+
+  /** CommonNav 宿主（两分支同构：靠 if/else 分支互换强制整树重建）。 */
+  @Builder
+  private SidebarHost() {
     CommonNav({
       titleBarOp: this.sidebarTitleBar(),
       isHideBackButton: !this.showBack,
@@ -46,6 +59,14 @@ export struct FqPlayerSidebar {
       showBrandGradient: false,
       showPlaybackBall: false,
       doubleTapToTop: false,
+      // 兜底：backIcon.action 未触发时，默认返回钮走 CommonNav onBackPressed
+      backPressed: (): boolean => {
+        if (this.showBack) {
+          this.backClick();
+          return true;
+        }
+        return false;
+      },
       content: (): void => {
         this.content();
       },

@@ -125,6 +125,15 @@ export struct CommonSheet {
     })
     .hideTitleBar(this.hideTitleBar, true)
     .hideBackButton(!this.showBack)
+    // 兜底：backIcon.action 未触发时（HDS 标题栏挂载后动态换装的按钮 action 不绑定），
+    // 默认返回钮/系统返回走此回调；showBack 时消费返回事件并回调 backClick
+    .onBackPressed((): boolean => {
+      if (this.showBack) {
+        this.backClick();
+        return true;
+      }
+      return false;
+    })
     .titleMode(HdsNavDestinationTitleMode.MODAL)
     // 内容层透明：sheet 材质（blurStyle/systemMaterial）即唯一可见层，
     // 否则 HdsNavDestination 默认不透明底色盖住材质层，视觉成「两层」

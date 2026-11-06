@@ -56,6 +56,20 @@ export struct FqPlayerSettingsSheet {
   @Event closeClick: () => void = (): void => {};
 
   build() {
+    // HDS 标题栏选项在挂载后动态增删（返回/恢复默认/标题）时，新增按钮的 action
+    // 不会被重新绑定（设备实测点击无效）；全 app 已验证可用的是挂载期静态配置。
+    // 两级页切换经 if/else 分支互换整树重建 CommonSheet，使标题栏配置始终为
+    // 挂载期静态配置。
+    if (this.page === 'danmaku') {
+      this.SheetHost()
+    } else {
+      this.SheetHost()
+    }
+  }
+
+  /** CommonSheet 宿主（两分支同构：靠 if/else 分支互换强制整树重建）。 */
+  @Builder
+  private SheetHost() {
     CommonSheet({
       sheetTitle: this.page === 'danmaku' ? '弹幕设置' : '播放设置',
       showBack: this.page === 'danmaku',
