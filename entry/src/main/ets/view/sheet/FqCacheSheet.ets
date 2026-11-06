@@ -181,7 +181,7 @@ export struct FqCacheSheet {
           })
       }
       .width('100%')
-      .padding({ left: 16, right: 16, bottom: appState.bottomRect, top: 12 })
+      .padding({ left: 16, right: 16, bottom: appState.bottomRect != 0 ? appState.bottomRect : 16, top: 12 })
       .alignItems(VerticalAlign.Center)
     }
     .width('100%')
