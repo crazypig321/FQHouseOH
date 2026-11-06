@@ -51,6 +51,9 @@ const FQ_DETAIL_TOP_INSET: number = 56;
 /** 滚动内容末尾偏移：悬浮阅读栏 72 + 底部间距 24 */
 const FQ_DETAIL_BOTTOM_INSET: number = 96;
 
+/** 书旗详情缓存虚拟 kind：与番茄 book 缓存隔离（书旗 bookId 纯数字，可能与番茄撞号）。 */
+const FQ_SHUQI_CACHE_KIND: string = 'shuqi_book';
+
 @ComponentV2
 export struct DetailPage {
   @Local loadingState: boolean = true;
@@ -71,7 +74,8 @@ export struct DetailPage {
   private itemId: string = '';
   private itemKind: string = 'book';
   private itemCover: string = '';
-  /** 书旗来源（只读第三方源）：详情/目录/正文走书旗端点，旁路详情缓存/书评；
+  /** 书旗来源（只读第三方源）：详情/目录/正文走书旗端点，旁路书评；
+   *  详情缓存以虚拟 kind shuqi_book 持久化（防纯数字 bookId 与番茄撞号），
    *  书架/浏览历史用 shuqi: 前缀 id 照常写入。 */
   private shuqiMode: boolean = false;
   private loadToken: number = 0;
@@ -89,9 +93,11 @@ export struct DetailPage {
     this.headerTitle = this.shuqiMode ? '书旗小说详情' : `${fqKindLabel(this.itemKind)}详情`;
     this.stableTopInset = appState.topRect;
     if (this.shuqiMode) {
-      // 书旗只读链路：不初始化详情缓存；书架/浏览历史照常（shuqi: 前缀 id 隔离命名空间）
+      // 书旗只读链路：书架/浏览历史照常（shuqi: 前缀 id 隔离命名空间）；
+      // 详情缓存用虚拟 kind shuqi_book 持久化（防与番茄纯数字 bookId 撞号）
       FqShelfStore.init(getContext(this));
       FqBrowseStore.init(getContext(this));
+      fqDetailCacheInit(getContext(this));
       this.refreshShelfState();
       this.load();
       return;
@@ -981,16 +987,20 @@ export struct DetailPage {
   }
 
   /** 书旗详情加载（只读来源）：详情 + 目录顺序拉取，目录失败不阻断详情（章节区为空，
-   *  可点标题栏刷新重试）；无书评/试读预览/详情缓存；浏览历史照常记录（shuqi: 前缀 id）。 */
-  private async loadShuqi(): Promise<void> {
+   *  可点标题栏刷新重试）；无书评/试读预览；成功回写详情缓存（shuqi_book 虚拟 kind），
+   *  浏览历史照常记录（shuqi: 前缀 id）；silent：静默刷新，不展示 loading/错误，
+   *  失败保持缓存画面。 */
+  private async loadShuqi(silent: boolean): Promise<void> {
     if (this.itemId.length === 0) {
       this.errorMsg = '无效的作品';
       this.loadingState = false;
       return;
     }
     const token: number = ++this.loadToken;
-    this.loadingState = true;
-    this.errorMsg = '';
+    if (!silent) {
+      this.loadingState = true;
+      this.errorMsg = '';
+    }
     try {
       await FqBackend.get().start(getContext(this));
       const book: FqShuqiBook = await FqBackend.get().shuqiBook(this.itemId);
@@ -998,7 +1008,9 @@ export struct DetailPage {
         return;
       }
       if (book.name.length === 0) {
-        this.errorMsg = '没有取到书籍详情';
+        if (!silent) {
+          this.errorMsg = '没有取到书籍详情';
+        }
         return;
       }
       this.detail = fqShuqiBookToDetail(book);
@@ -1020,23 +1032,47 @@ export struct DetailPage {
       this.previews = new Map<string, string>();
       this.previewComments = [];
       this.commentTotal = 0;
+      // 回写详情缓存：下次复进秒开
+      fqDetailCachePut(FQ_SHUQI_CACHE_KIND, this.itemId, new FqDetailCacheEntry(
+        this.detail, this.chapters, this.previews, [], 0));
     } catch (error) {
       if (token !== this.loadToken) {
         return;
       }
-      this.errorMsg = fqErrorMessage(error);
+      if (!silent) {
+        this.errorMsg = fqErrorMessage(error);
+      }
     } finally {
-      if (token === this.loadToken) {
+      if (token === this.loadToken && !silent) {
         this.loadingState = false;
       }
     }
   }
 
   /** force：绕过缓存重新拉取；silent：静默刷新（秒显缓存后后台拉新，
-   * 不展示 loading/错误，失败保持缓存画面）。书旗来源无缓存，force 仅触发重拉。 */
+   * 不展示 loading/错误，失败保持缓存画面）。书旗来源同款缓存秒开 + 静默刷新。 */
   private async load(force: boolean = false, silent: boolean = false): Promise<void> {
     if (this.shuqiMode) {
-      await this.loadShuqi();
+      // 书旗详情缓存命中：五块状态回填秒开 + 后台静默刷新
+      // （shuqi_book 虚拟 kind 隔离，防纯数字 bookId 与番茄撞号）
+      if (!force && !silent) {
+        const cached: FqDetailCacheEntry | null = fqDetailCacheGet(FQ_SHUQI_CACHE_KIND, this.itemId);
+        if (cached !== null) {
+          this.detail = cached.detail;
+          this.chapters = cached.chapters;
+          this.previews = cached.previews;
+          this.previewComments = cached.previewComments;
+          this.commentTotal = cached.commentTotal;
+          this.errorMsg = '';
+          this.loadingState = false;
+          this.refreshShelfState();
+          FqBrowseStore.record(new FqBrowseItem(this.shelfId(), this.itemKind,
+            cached.detail.title, cached.detail.cover, Date.now()));
+          this.load(true, true);
+          return;
+        }
+      }
+      await this.loadShuqi(silent);
       return;
     }
     if (this.itemId.length === 0) {
