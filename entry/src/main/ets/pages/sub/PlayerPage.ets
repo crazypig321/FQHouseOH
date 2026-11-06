@@ -220,8 +220,15 @@ function fqPlayerSheetHeightVp(): number {
 
 @ComponentV2
 export struct PlayerPage {
-  /** mpv 播放器（@ObservedV2；state 经 @Trace 驱动本页渲染）。 */
-  private player: Player = new Player(new PlayerConfig());
+  /** mpv 播放器（@ObservedV2；state 经 @Trace 驱动本页渲染）。
+   * onReady = XComponent surface 挂载回调：离线缓存秒开时 open 可能先于
+   * surface 创建执行（aboutToAppear 同步链路零 await），mpv 无 wid 起播
+   * 后补挂 surface 概率性黑屏有声音——未就绪时暂存 Media，此回调补播。 */
+  private player: Player = new Player(new PlayerConfig({ onReady: (): void => this.onPlayerSurfaceReady() }));
+  /** XComponent surface 是否已挂载（PlayerSurface 首帧构建后为 true）。 */
+  private surfaceReady: boolean = false;
+  /** surface 未就绪时暂存的起播媒体（onReady 回调补 open）。 */
+  private pendingOpenMedia: Media | null = null;
   /** 剧集目录（详情页预载；为空则本页拉目录）。 */
   @Local episodes: FqChapter[] = [];
   /** 当前集下标。 */
@@ -3986,6 +3993,17 @@ export struct PlayerPage {
     }
   }
 
+  /** surface 挂载回调（PlayerConfig.onReady）：标记就绪并补播暂存的起播媒体。 */
+  private onPlayerSurfaceReady(): void {
+    this.surfaceReady = true;
+    const pending: Media | null = this.pendingOpenMedia;
+    if (pending !== null) {
+      this.pendingOpenMedia = null;
+      this.player.open(pending);
+      this.loading = false;
+    }
+  }
+
   /**
    * 起播公共尾段（在线取流 / 离线缓存命中 / 取流失败回退缓存共用）：
    * 关听书、mpv open（含续播 start 偏移）、AVSession/后台任务、
@@ -3993,15 +4011,23 @@ export struct PlayerPage {
    */
   private startEpisodePlayback(episode: FqChapter, url: string, startSec: number,
     wasDisplayed: boolean, switched: boolean, keepListenProgress: boolean): void {
-    this.loading = false;
+    // surface 未就绪：暂存 Media 延到 onReady 回调补播（loading 保持 true 盖住空窗）；
+    // 就绪则立即起播并关 loading
+    if (this.surfaceReady) {
+      this.loading = false;
+      this.player.open(startSec > 0
+        ? new Media(url, { start: startSec })
+        : new Media(url));
+    } else {
+      this.pendingOpenMedia = startSec > 0
+        ? new Media(url, { start: startSec })
+        : new Media(url);
+    }
     // 播放视频即停止听书（fqAudioSession 完整关闭链路：进度持久化、
     // 引擎释放、后台任务停止、AVSession 销毁、播控球消失）
     if (fqAudioSession.hasSession) {
       fqAudioSession.close();
     }
-    this.player.open(startSec > 0
-      ? new Media(url, { start: startSec })
-      : new Media(url));
     // 新集起播：重置「实际播放」guard（旧集残余走表不再计入）
     this.hasDisplayed = false;
     // AVSession/后台长时任务：会话确保 + 元数据（时长随 1s tick 补发）
