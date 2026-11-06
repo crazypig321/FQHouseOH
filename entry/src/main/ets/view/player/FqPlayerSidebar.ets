@@ -27,13 +27,22 @@ export struct FqPlayerSidebar {
   @Param showSettings: boolean = false;
   /** 右上关闭按钮（收起侧边栏）。 */
   @Param showClose: boolean = false;
+  /** 右上定位按钮（scope，选集面板滚动到当前集居中）。 */
+  @Param showLocate: boolean = false;
   /** 面板背景色（与宿主容器底色一致，避免 CommonNav 默认页面底色透出）。 */
   @Param panelBgColor: ResourceColor = '#F0141414';
+  /** 绑定内容滚动器（驱动标题栏滚动模糊与双击标题栏回顶）。 */
+  @Param scroller: Scroller | undefined = undefined;
+  /** 双击标题栏区域时列表回滚到顶部。 */
+  @Param doubleTapToTop: boolean = false;
+  /** 双击回顶 y 轴偏移（内容顶部为 0；有固定起始偏移的列表传负偏移）。 */
+  @Param scrollToTopYOffset: number = 0;
   @Event backClick: () => void = (): void => {};
   @Event relatedClick: () => void = (): void => {};
   @Event resetClick: () => void = (): void => {};
   @Event settingsClick: () => void = (): void => {};
   @Event closeClick: () => void = (): void => {};
+  @Event locateClick: () => void = (): void => {};
   @BuilderParam content: () => void;
 
   build() {
@@ -58,7 +67,9 @@ export struct FqPlayerSidebar {
       pageBackgroundColor: this.panelBgColor,
       showBrandGradient: false,
       showPlaybackBall: false,
-      doubleTapToTop: false,
+      scroller: this.scroller,
+      doubleTapToTop: this.doubleTapToTop,
+      scrollToTopYOffset: this.scrollToTopYOffset,
       // 兜底：backIcon.action 未触发时，默认返回钮走 CommonNav onBackPressed
       backPressed: (): boolean => {
         if (this.showBack) {
@@ -86,6 +97,17 @@ export struct FqPlayerSidebar {
       };
     }
     const menus: HdsNavigationMenuItemOptions[] = [];
+    if (this.showLocate) {
+      menus.push({
+        content: {
+          icon: $r('sys.symbol.scope'),
+          label: '定位',
+          action: (): void => {
+            this.locateClick();
+          },
+        },
+      });
+    }
     if (this.showRelated) {
       menus.push({
         content: {

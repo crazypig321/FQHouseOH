@@ -54,41 +54,96 @@ export struct FqDanmakuSettingsPanel {
       List() {
         ListItemGroup() {
           // 不透明度（20-100% 连续滑杆，实时生效）
-          this.SliderRow('不透明度', this.alphaPercent,
-            FQ_DANMAKU_ALPHA_MIN_PERCENT, FQ_DANMAKU_ALPHA_MAX_PERCENT, 1, false,
-            `${this.alphaPercent}%`, [], (value: number): void => {
-              this.alphaChange(value);
+          ListItem() {
+            FqDanmakuSliderRow({
+              dark: this.dark,
+              label: '不透明度',
+              sliderValue: this.alphaPercent,
+              minValue: FQ_DANMAKU_ALPHA_MIN_PERCENT,
+              maxValue: FQ_DANMAKU_ALPHA_MAX_PERCENT,
+              stepValue: 1,
+              showTicks: false,
+              valueLabel: `${this.alphaPercent}%`,
+              tickLabels: [],
+              commit: (value: number): void => {
+                this.alphaChange(value);
+              },
             })
+          }
 
           // 弹幕速度（5 档：慢/较慢/适中/较快/快）
-          this.SliderRow('弹幕速度', this.speedTier - 1, 0, 4, 1, true,
-            FQ_DANMAKU_SPEED_LABELS[this.speedTier - 1], FQ_DANMAKU_SPEED_LABELS,
-            (value: number): void => {
-              this.speedTierChange(value + 1);
+          ListItem() {
+            FqDanmakuSliderRow({
+              dark: this.dark,
+              label: '弹幕速度',
+              sliderValue: this.speedTier - 1,
+              minValue: 0,
+              maxValue: 4,
+              stepValue: 1,
+              showTicks: true,
+              valueLabel: FQ_DANMAKU_SPEED_LABELS[this.speedTier - 1],
+              tickLabels: FQ_DANMAKU_SPEED_LABELS,
+              commit: (value: number): void => {
+                this.speedTierChange(value + 1);
+              },
             })
+          }
 
           if (this.isLandscape) {
             // 显示区域（横屏片源全屏：单行/1/4屏/1/2屏/3/4屏）
-            this.SliderRow('显示区域', this.lineSpaceTier - 1, 0, 3, 1, true,
-              FQ_DANMAKU_LINE_SPACE_LABELS[this.lineSpaceTier - 1], FQ_DANMAKU_LINE_SPACE_LABELS,
-              (value: number): void => {
-                this.lineSpaceTierChange(value + 1);
+            ListItem() {
+              FqDanmakuSliderRow({
+                dark: this.dark,
+                label: '显示区域',
+                sliderValue: this.lineSpaceTier - 1,
+                minValue: 0,
+                maxValue: 3,
+                stepValue: 1,
+                showTicks: true,
+                valueLabel: FQ_DANMAKU_LINE_SPACE_LABELS[this.lineSpaceTier - 1],
+                tickLabels: FQ_DANMAKU_LINE_SPACE_LABELS,
+                commit: (value: number): void => {
+                  this.lineSpaceTierChange(value + 1);
+                },
               })
+            }
           } else {
             // 显示区域（竖屏片源全屏：1-4 行）
-            this.SliderRow('显示区域', this.lineCount - 1, 0, 3, 1, true,
-              `${this.lineCount}行`, ['1行', '2行', '3行', '4行'],
-              (value: number): void => {
-                this.lineCountChange(value + 1);
+            ListItem() {
+              FqDanmakuSliderRow({
+                dark: this.dark,
+                label: '显示区域',
+                sliderValue: this.lineCount - 1,
+                minValue: 0,
+                maxValue: 3,
+                stepValue: 1,
+                showTicks: true,
+                valueLabel: `${this.lineCount}行`,
+                tickLabels: ['1行', '2行', '3行', '4行'],
+                commit: (value: number): void => {
+                  this.lineCountChange(value + 1);
+                },
               })
+            }
           }
 
           // 字号（5 档：小/较小/适中/较大/大）
-          this.SliderRow('字号', this.sizeTier - 1, 0, 4, 1, true,
-            FQ_DANMAKU_SIZE_LABELS[this.sizeTier - 1], FQ_DANMAKU_SIZE_LABELS,
-            (value: number): void => {
-              this.sizeTierChange(value + 1);
+          ListItem() {
+            FqDanmakuSliderRow({
+              dark: this.dark,
+              label: '字号',
+              sliderValue: this.sizeTier - 1,
+              minValue: 0,
+              maxValue: 4,
+              stepValue: 1,
+              showTicks: true,
+              valueLabel: FQ_DANMAKU_SIZE_LABELS[this.sizeTier - 1],
+              tickLabels: FQ_DANMAKU_SIZE_LABELS,
+              commit: (value: number): void => {
+                this.sizeTierChange(value + 1);
+              },
             })
+          }
 
           // 弹幕背景透明（本地开关：不画官方 40% 黑底气泡）
           ListItem() {
@@ -123,70 +178,93 @@ export struct FqDanmakuSettingsPanel {
       .layoutWeight(1)
       .scrollBar(BarState.Off)
       .padding({ left: 20, right: 20 })
+      // 深色侧边栏：内容避让状态栏 + 标题栏（浅色 sheet 由 CommonSheet 已 padding 66）
+      .contentStartOffset(this.dark ? appState.topRect + 56 : 0)
+      .contentEndOffset(appState.bottomRect === 0 ? 16 : appState.bottomRect)
     }
     .width('100%')
     .height('100%')
-    .padding({ bottom: appState.bottomRect === 0 ? 16 : appState.bottomRect })
   }
+}
 
-  /**
-   * 弹幕设置滑杆行：标题 + 当前值（左标题右值）+ 步进滑杆 +（可选）档位刻度文本行。
-   * 松手/点按提交 onChange（对齐 fqapp 拖动结束生效语义）。
-   */
-  @Builder
-  private SliderRow(label: string, value: number, min: number, max: number,
-    step: number, showTicks: boolean, valueLabel: string, tickLabels: string[],
-    onChange: (value: number) => void) {
-    ListItem() {
-      Column({ space: 2 }) {
-        Row() {
-          Text(label)
-            .fontSize(15)
-            .fontColor(this.dark ? Color.White : $r('sys.color.font'))
+/**
+ * 弹幕设置滑杆行：标题 + 当前值（左标题右值）+ 步进滑杆 +（可选）档位刻度文本行。
+ * 松手/点按提交 commit（对齐 fqapp 拖动结束生效语义）。
+ * 独立 @ComponentV2（@Param 响应链）：@Builder 按值传参不随状态刷新
+ * （「恢复默认」落新值后滑杆/文案不更新），组件化后 @Param 变化即时重渲染。
+ */
+@ComponentV2
+struct FqDanmakuSliderRow {
+  /** 深色宿主配色开关。 */
+  @Param dark: boolean = false;
+  /** 行标题。 */
+  @Param label: string = '';
+  /** 滑杆当前值。 */
+  @Param sliderValue: number = 0;
+  /** 滑杆最小值。 */
+  @Param minValue: number = 0;
+  /** 滑杆最大值。 */
+  @Param maxValue: number = 100;
+  /** 步进。 */
+  @Param stepValue: number = 1;
+  /** 是否绘制步进刻度点。 */
+  @Param showTicks: boolean = false;
+  /** 当前值文案（标题行右侧）。 */
+  @Param valueLabel: string = '';
+  /** 档位刻度文本行（空数组不显示）。 */
+  @Param tickLabels: string[] = [];
+  /** 松手/点按提交。 */
+  @Event commit: (value: number) => void = (_value: number): void => {};
 
-          Text(valueLabel)
-            .fontSize(15)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(FQ_STORY_ORANGE)
-        }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
+  build() {
+    Column({ space: 2 }) {
+      Row() {
+        Text(this.label)
+          .fontSize(15)
+          .fontColor(this.dark ? Color.White : $r('sys.color.font'))
 
-        Slider({
-          value: value,
-          min: min,
-          max: max,
-          step: step,
-          style: SliderStyle.InSet
-        })
-          .width('100%')
-          .height(30)
-          .showSteps(showTicks)
-          .stepColor(this.dark ? FQ_DARK_TRACK : $r('sys.color.comp_background_tertiary'))
-          .blockColor(FQ_STORY_ORANGE)
-          .selectedColor('#33FA6725')
-          .trackColor(this.dark ? FQ_DARK_TRACK : $r('sys.color.comp_background_tertiary'))
-          .onChange((sliderValue: number, mode: SliderChangeMode): void => {
-            if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) {
-              onChange(sliderValue);
-            }
-          })
-
-        if (tickLabels.length > 0) {
-          Row() {
-            ForEach(tickLabels, (tick: string) => {
-              Text(tick)
-                .fontSize(7)
-                .fontColor(this.dark ? FQ_DARK_TERTIARY_TEXT : $r('sys.color.font_tertiary'))
-            }, (tick: string) => tick)
-          }
-          .justifyContent(FlexAlign.SpaceBetween)
-          .width('100%')
-          .hitTestBehavior(HitTestMode.None)
-        }
+        Text(this.valueLabel)
+          .fontSize(15)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(FQ_STORY_ORANGE)
       }
       .width('100%')
-      .padding({ left: 16, right: 16, top: 10, bottom: 8 })
+      .alignItems(VerticalAlign.Center)
+
+      Slider({
+        value: this.sliderValue,
+        min: this.minValue,
+        max: this.maxValue,
+        step: this.stepValue,
+        style: SliderStyle.InSet
+      })
+        .width('100%')
+        .height(30)
+        .showSteps(this.showTicks)
+        .stepColor(this.dark ? FQ_DARK_TRACK : $r('sys.color.comp_background_tertiary'))
+        .blockColor(FQ_STORY_ORANGE)
+        .selectedColor('#33FA6725')
+        .trackColor(this.dark ? FQ_DARK_TRACK : $r('sys.color.comp_background_tertiary'))
+        .onChange((sliderValue: number, mode: SliderChangeMode): void => {
+          if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) {
+            this.commit(sliderValue);
+          }
+        })
+
+      if (this.tickLabels.length > 0) {
+        Row() {
+          ForEach(this.tickLabels, (tick: string) => {
+            Text(tick)
+              .fontSize(7)
+              .fontColor(this.dark ? FQ_DARK_TERTIARY_TEXT : $r('sys.color.font_tertiary'))
+          }, (tick: string) => tick)
+        }
+        .justifyContent(FlexAlign.SpaceBetween)
+        .width('100%')
+        .hitTestBehavior(HitTestMode.None)
+      }
     }
+    .width('100%')
+    .padding({ left: 16, right: 16, top: 10, bottom: 8 })
   }
 }

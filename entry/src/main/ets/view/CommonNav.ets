@@ -119,15 +119,17 @@ export struct CommonNav {
       return;
     }
     const t: TouchObject = event.touches[0];
+    // 用组件相对坐标（t.x/t.y）而非窗口坐标：右侧锚定的侧边栏（FqPlayerSidebar）
+    // 组件原点不在窗口原点，windowX/windowY 会把触摸排除在标题栏带外
     // 仅响应标题栏带（状态栏下方 56vp 内）
-    if (t.windowY < appState.topRect || t.windowY > appState.topRect + 56) {
+    if (t.y < appState.topRect || t.y > appState.topRect + 56) {
       return;
     }
     // 避开左侧返回键与右侧菜单按钮
-    if (!this.isHideBackButton && t.windowX < 72) {
+    if (!this.isHideBackButton && t.x < 72) {
       return;
     }
-    if (this.pageWidthVp > 0 && t.windowX > this.pageWidthVp - 130) {
+    if (this.pageWidthVp > 0 && t.x > this.pageWidthVp - 130) {
       return;
     }
     const now: number = Date.now();

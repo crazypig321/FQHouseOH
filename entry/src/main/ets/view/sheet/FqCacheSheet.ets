@@ -44,6 +44,9 @@ export struct FqCacheSheet {
   @Param openToken: number = 0;
   /** 条目量词（集/章，默认文案「第 N 集」）。 */
   @Param itemLabel: string = '集';
+  /** 标题栏左侧返回按钮（从播放设置进入时显示，返回重开播放设置）。 */
+  @Param showBack: boolean = false;
+  @Event backClick: () => void = (): void => {};
   @Event manageClick: () => void = (): void => {};
   @Event closeClick: () => void = (): void => {};
   /** 下载勾选项（组件发出后清空勾选）。 */
@@ -100,10 +103,27 @@ export struct FqCacheSheet {
   }
 
   build() {
+    // 同 FqPlayerSettingsSheet：HDS 标题栏挂载后动态换装的按钮（返回）action 不被
+    // 重新绑定；showBack 翻转（设置 sheet 进入缓存 sheet）经 if/else 分支互换
+    // 整树重建 CommonSheet，使标题栏配置始终为挂载期静态配置
+    if (this.showBack) {
+      this.SheetHost()
+    } else {
+      this.SheetHost()
+    }
+  }
+
+  /** CommonSheet 宿主（两分支同构：靠 if/else 分支互换强制整树重建）。 */
+  @Builder
+  private SheetHost() {
     CommonSheet({
       sheetTitle: this.sheetTitle,
+      showBack: this.showBack,
       showManage: true,
       showClose: true,
+      backClick: (): void => {
+        this.backClick();
+      },
       manageClick: (): void => {
         this.manageClick();
       },
@@ -111,55 +131,61 @@ export struct FqCacheSheet {
         this.closeClick();
       },
     }) {
-      Column() {
-        if (this.items.length > FQ_CACHE_PAGE_SIZE) {
-          this.PagingStrip()
-        }
+      this.SheetBody()
+    }
+  }
 
-        Grid(this.scroller) {
-          ForEach(this.pageItems(), (item: FqChapter, index: number) => {
-            GridItem() {
-              this.Cell(item, this.page * FQ_CACHE_PAGE_SIZE + index)
-            }
-          }, (item: FqChapter) => item.itemId)
-        }
-        .columnsTemplate('1fr 1fr 1fr 1fr')
-        .columnsGap(8)
-        .rowsGap(8)
-        .width('100%')
-        .layoutWeight(1)
-        .scrollBar(BarState.Off)
-        .padding({ left: 16, right: 16, top: 4, bottom: 8 })
+  /** sheet 内容体（>30 项分页条 + 复选网格 + 全选下载行）。 */
+  @Builder
+  private SheetBody() {
+    Column() {
+      if (this.items.length > FQ_CACHE_PAGE_SIZE) {
+        this.PagingStrip()
+      }
 
-        Row() {
-          Text(this.allSelected() ? '取消全选' : '全选')
-            .fontSize(14)
-            .fontColor(this.pendingCount() === 0 ? $r('sys.color.font_tertiary') : FQ_CACHE_ORANGE)
-            .padding({ left: 4, right: 4, top: 10, bottom: 10 })
-            .onClick((): void => {
-              this.toggleSelectAll();
-            })
+      Grid(this.scroller) {
+        ForEach(this.pageItems(), (item: FqChapter, index: number) => {
+          GridItem() {
+            this.Cell(item, this.page * FQ_CACHE_PAGE_SIZE + index)
+          }
+        }, (item: FqChapter) => item.itemId)
+      }
+      .columnsTemplate('1fr 1fr 1fr 1fr')
+      .columnsGap(8)
+      .rowsGap(8)
+      .width('100%')
+      .layoutWeight(1)
+      .scrollBar(BarState.Off)
+      .padding({ left: 16, right: 16, top: 4, bottom: 8 })
 
-          Blank()
+      Row() {
+        Text(this.allSelected() ? '取消全选' : '全选')
+          .fontSize(14)
+          .fontColor(this.pendingCount() === 0 ? $r('sys.color.font_tertiary') : FQ_CACHE_ORANGE)
+          .padding({ left: 4, right: 4, top: 10, bottom: 10 })
+          .onClick((): void => {
+            this.toggleSelectAll();
+          })
 
-          Button(`下载 (${this.selectedIds.size})`)
-            .type(ButtonType.Capsule)
-            .height(36)
-            .fontSize(14)
-            .fontColor(Color.White)
-            .backgroundColor(this.selectedIds.size > 0 ? FQ_CACHE_ORANGE : '#33000000')
-            .enabled(this.selectedIds.size > 0)
-            .onClick((): void => {
-              this.confirmDownload();
-            })
-        }
-        .width('100%')
-        .padding({ left: 16, right: 16, bottom: appState.bottomRect, top: 12 })
-        .alignItems(VerticalAlign.Center)
+        Blank()
+
+        Button(`下载 (${this.selectedIds.size})`)
+          .type(ButtonType.Capsule)
+          .height(36)
+          .fontSize(14)
+          .fontColor(Color.White)
+          .backgroundColor(this.selectedIds.size > 0 ? FQ_CACHE_ORANGE : '#33000000')
+          .enabled(this.selectedIds.size > 0)
+          .onClick((): void => {
+            this.confirmDownload();
+          })
       }
       .width('100%')
-      .height('100%')
+      .padding({ left: 16, right: 16, bottom: appState.bottomRect, top: 12 })
+      .alignItems(VerticalAlign.Center)
     }
+    .width('100%')
+    .height('100%')
   }
 
   /** >30 项分页条（横向滚动「1-30/31-60/…」，点击直达，滚动联动）。 */

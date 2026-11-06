@@ -72,6 +72,15 @@ export struct FqStoryPanel {
           .padding({ left: 20 })
           .layoutWeight(1)
 
+        // 定位当前集（scope 图标，滚动当前集竖直居中；同系列入口之前）
+        SymbolGlyph($r('sys.symbol.scope'))
+          .fontSize(18)
+          .fontColor(['#FFFA6725'])
+          .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+          .onClick((): void => {
+            this.scroller.scrollToIndex(this.currentIndex, false, ScrollAlign.CENTER);
+          })
+
         // 官方同系列入口（story_player_panel.dart：tab 行右端 TextButton）
         if (this.onOpenRelatedSeries !== null) {
           Text('同系列')

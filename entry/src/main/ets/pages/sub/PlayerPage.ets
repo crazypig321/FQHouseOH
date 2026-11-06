@@ -295,6 +295,8 @@ export struct PlayerPage {
   @Local cacheDownloadedIds: Set<string> = new Set<string>();
   /** 缓存 sheet 打开令牌（每次打开 +1，FqCacheSheet 据此重置勾选并定位当前集）。 */
   @Local cacheOpenToken: number = 0;
+  /** 缓存 sheet 来源（true = 播放设置进入：标题栏显示返回钮，返回重开播放设置）。 */
+  @Local cacheFromSettings: boolean = false;
   /** 同系列半模态（选集面板「同系列」呼出；横屏全屏改走右侧边栏）。 */
   @Local relatedSheetVisible: boolean = false;
   /** 同系列条目（/api/v1/series/{id}/related，打开面板时加载）。 */
@@ -1605,6 +1607,12 @@ export struct PlayerPage {
       taskViewOf: (itemId: string): FqCacheTaskView | null => this.dl.taskOf(itemId),
       openToken: this.cacheOpenToken,
       itemLabel: '集',
+      showBack: this.cacheFromSettings,
+      backClick: (): void => {
+        // 播放设置进入：返回重开播放设置（主设置页）
+        this.closeCacheSheet();
+        this.openSettings();
+      },
       manageClick: (): void => {
         this.closeCacheSheet();
         NavPathUtils.push(ROUTE_CACHED_DRAMAS);
@@ -1622,13 +1630,15 @@ export struct PlayerPage {
   }
 
   /** 打开离线缓存选集半模态：刷新缓存/勾选状态（默认全选未缓存集）。
+   *  fromSettings：播放设置进入（标题栏带返回钮，返回重开播放设置）；
    *  横屏沉浸全屏：改走右侧边栏（与切集/播放设置同款 UI，不退全屏）；
    *  其余形态（竖屏全屏/非全屏）原样呼出底部 sheet（openToken 驱动组件重置定位）。 */
-  private openCacheSheet(): void {
+  private openCacheSheet(fromSettings: boolean = false): void {
     if (this.episodes.length === 0) {
       this.getUIContext().getPromptAction().showToast({ message: '剧集目录加载中', duration: 1500 });
       return;
     }
+    this.cacheFromSettings = fromSettings;
     this.closeSettings();
     if (this.fullScreen && this.isLandscapeVideo()) {
       this.refreshCacheSheetState();
@@ -1971,7 +1981,7 @@ export struct PlayerPage {
    * 弹幕设置进二级设置页（倍速/弹幕行右侧控件自理）。 */
   private onSettingRowClick(key: string): void {
     if (key === 'cache') {
-      this.openCacheSheet();
+      this.openCacheSheet(true);
     } else if (key === 'listen') {
       this.openListenMode();
     } else if (key === 'danmakuSettings') {
@@ -2333,11 +2343,19 @@ export struct PlayerPage {
       relatedClick: (): void => {
         this.openRelatedSeries();
       },
+      showLocate: true,
+      locateClick: (): void => {
+        // 定位当前集：分页条选中段跟随 + 滚动当前集竖直居中
+        this.sideEpisodePage = Math.floor(this.index / FQ_CACHE_PAGE_SIZE);
+        this.sideScroller.scrollToIndex(this.index, false, ScrollAlign.CENTER);
+      },
       showClose: true,
       closeClick: (): void => {
         this.closeSidePanel();
       },
       panelBgColor: FQ_FS_SIDE_BG,
+      scroller: this.sideScroller,
+      doubleTapToTop: true,
       content: (): void => {
         this.SideEpisodesBody();
       },
@@ -2400,6 +2418,8 @@ export struct PlayerPage {
     }
     .width('100%')
     .height('100%')
+    // 避让浮动标题栏（状态栏 + 56 标题栏高；Grid 无 contentStartOffset，用外层 padding）
+    .padding({ top: appState.topRect + 56 })
   }
 
   /** 侧边栏选集 >30 集分页条（深色，横向滚动直达 + 滚动联动；对齐非全屏选集面板分段条）。 */
@@ -2522,14 +2542,23 @@ export struct PlayerPage {
               },
             })
           } else {
-            // 目录页（公共 FqPlayerSidebar 壳）：标题=剧名 + 右上设置按钮（PC 把顶栏原设置按钮移到标题栏右侧）
+            // 目录页（公共 FqPlayerSidebar 壳）：标题=剧名 + 右上定位按钮（滚动到当前集）/
+            // 设置按钮（PC 把顶栏原设置按钮移到标题栏右侧）
             FqPlayerSidebar({
               title: this.title,
+              showLocate: true,
+              locateClick: (): void => {
+                // 定位当前集：分页条选中段跟随 + 滚动当前集竖直居中
+                this.pcEpisodePage = Math.floor(this.index / FQ_CACHE_PAGE_SIZE);
+                this.pcScroller.scrollToIndex(this.index, false, ScrollAlign.CENTER);
+              },
               showSettings: true,
               settingsClick: (): void => {
                 this.openSettings();
               },
               panelBgColor: FQ_PC_DETAIL_SIDEBAR_BG,
+              scroller: this.pcScroller,
+              doubleTapToTop: true,
               content: (): void => {
                 this.PcCatalogBody();
               },
@@ -2682,6 +2711,8 @@ export struct PlayerPage {
     }
     .width('100%')
     .height('100%')
+    // 避让浮动标题栏（状态栏 + 56 标题栏高；Grid 无 contentStartOffset，用外层 padding）
+    .padding({ top: appState.topRect + 56 })
   }
 
   /** PC 侧边栏·同系列内容体：深色双列卡片网格，选中新剧进详情页。 */
@@ -2705,6 +2736,8 @@ export struct PlayerPage {
     }
     .width('100%')
     .height('100%')
+    // 避让浮动标题栏（状态栏 + 56 标题栏高；Grid 无 contentStartOffset，用外层 padding）
+    .padding({ top: appState.topRect + 56 })
   }
 
   /** 侧边栏·播放设置（公共 FqPlayerSidebar 壳）：主设置页/二级「弹幕设置」页，
@@ -2823,6 +2856,8 @@ export struct PlayerPage {
     }
     .width('100%')
     .height('100%')
+    // 避让浮动标题栏（状态栏 + 56 标题栏高；Grid 无 contentStartOffset，用外层 padding）
+    .padding({ top: appState.topRect + 56 })
   }
 
   /** 侧边栏·离线缓存（横屏全屏形态，公共 FqPlayerSidebar 壳）：标题栏返回（回播放设置侧边栏）+
@@ -2919,6 +2954,8 @@ export struct PlayerPage {
     }
     .width('100%')
     .height('100%')
+    // 避让浮动标题栏（状态栏 + 56 标题栏高；Grid 无 contentStartOffset，用外层 padding）
+    .padding({ top: appState.topRect + 56 })
   }
 
   /** 侧边栏缓存 >30 集分页条（深色配色，横向滚动直达 + 滚动联动）。 */

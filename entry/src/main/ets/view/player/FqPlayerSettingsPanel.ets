@@ -151,6 +151,8 @@ export struct FqPlayerSettingsPanel {
     .layoutWeight(1)
     .scrollBar(BarState.Off)
     .padding({ right: 20, left: 20 })
+    // 深色侧边栏：内容避让状态栏 + 标题栏（浅色 sheet 由 CommonSheet 已 padding 66）
+    .contentStartOffset(this.dark ? appState.topRect + 56 : 0)
     .contentEndOffset(appState.bottomRect === 0 ? 16 : appState.bottomRect)
   }
 
