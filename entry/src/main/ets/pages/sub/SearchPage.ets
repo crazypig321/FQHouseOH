@@ -55,6 +55,9 @@ const FQ_SEARCH_BOTTOM_BUILDER_HEIGHT: number = 110;
 /** 列表内容起始偏移：标题栏 56 + bottomBuilder 100 */
 const FQ_SEARCH_TOP_INSET: number = 160;
 
+/** 高分排序自动拉取上限（防极端情况无限翻页；超限后只对已加载部分排序）。 */
+const FQ_SCORE_SORT_MAX_ITEMS: number = 300;
+
 /** 「来源」菜单锚点 id（对齐书架页更多菜单模式）。 */
 const FQ_SEARCH_SOURCE_ANCHOR_ID: string = 'search_source_anchor';
 
@@ -89,6 +92,8 @@ export struct SearchPage {
   private nextOffset: number = 0;
   private seen: Set<string> = new Set<string>();
   private loadToken: number = 0;
+  /** 高分排序链式拉取进行中（防重入；切筛选/分类/来源时每轮重校验自然中断）。 */
+  private scoreChainRunning: boolean = false;
   private historyStore: preferences.Preferences | null = null;
   private scroller: Scroller = new Scroller();
   /** 标题栏配置缓存：引用稳定避免每次渲染重建 HdsTitleBar 底部插槽（导致输入焦点丢失/分类条滚动复位） */
@@ -685,6 +690,10 @@ export struct SearchPage {
     }
     this.scoreFilterIndex = index;
     this.applyFilters();
+    // 高分排序要求全量结果：已加载的可能只是前几页，自动链式拉完剩余分页（加载中有指示）
+    if (index === 1 && this.hasMore && !this.loadingState && !this.scoreChainRunning) {
+      this.loadAllForScoreSort();
+    }
   }
 
   /** 清空筛选（空态「清除筛选」按钮）。 */
@@ -928,6 +937,34 @@ export struct SearchPage {
         this.loadingState = false;
         this.loadingMore = false;
       }
+    }
+    // 高分排序激活且还有下一页：自动链式拉完全部分页再全局排序（首搜/加载更多后兜底触发）
+    if (token === this.loadToken && this.scoreFilterIndex === 1 && !this.shuqiSource
+      && this.idQuery.length === 0 && this.hasMore && this.errorMsg.length === 0
+      && this.allItems.length < FQ_SCORE_SORT_MAX_ITEMS) {
+      this.loadAllForScoreSort();
+    }
+  }
+
+  /** 高分排序链式拉取：逐页 load() 直到拉完（或达上限/出错/被切换中断），每轮重校验状态；
+   *  复用 load() 的 loadingMore 指示与 loadToken 并发保护。 */
+  private async loadAllForScoreSort(): Promise<void> {
+    if (this.scoreChainRunning || this.idQuery.length > 0 || this.shuqiSource
+      || this.scoreFilterIndex !== 1) {
+      return;
+    }
+    this.scoreChainRunning = true;
+    try {
+      while (this.scoreFilterIndex === 1 && this.hasMore && this.errorMsg.length === 0
+        && this.allItems.length < FQ_SCORE_SORT_MAX_ITEMS) {
+        const before: number = this.allItems.length;
+        await this.load();
+        if (this.allItems.length === before) {
+          break;
+        }
+      }
+    } finally {
+      this.scoreChainRunning = false;
     }
   }
 

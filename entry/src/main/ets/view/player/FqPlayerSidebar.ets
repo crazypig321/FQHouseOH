@@ -1,6 +1,6 @@
 /**
  * 播放页公共右侧侧边栏壳（CommonNav/HdsNavDestination 包裹）：
- * 统一 HDS 标题栏（标题 + 可选返回按钮/「同系列」文本按钮/「恢复默认」/设置/关闭按钮）
+ * 统一 HDS 标题栏（标题 + 可选返回按钮/「同系列」文本按钮/「恢复默认」/设置/下载/关闭按钮）
  * 与按钮样式，内容经 content 插槽传入。横屏全屏侧边栏（选集/缓存/同系列/播放设置/
  * 弹幕设置）与 PC 详情侧边栏（目录/同系列）共用；深色面板 dark 固定白色前景。
  */
@@ -29,6 +29,8 @@ export struct FqPlayerSidebar {
   @Param showClose: boolean = false;
   /** 右上定位按钮（scope，选集面板滚动到当前集居中）。 */
   @Param showLocate: boolean = false;
+  /** 右上下载按钮（circle_and_arrow_down，离线缓存页下载所选集）。 */
+  @Param showDownload: boolean = false;
   /** 面板背景色（与宿主容器底色一致，避免 CommonNav 默认页面底色透出）。 */
   @Param panelBgColor: ResourceColor = '#F0141414';
   /** 绑定内容滚动器（驱动标题栏滚动模糊与双击标题栏回顶）。 */
@@ -43,6 +45,7 @@ export struct FqPlayerSidebar {
   @Event settingsClick: () => void = (): void => {};
   @Event closeClick: () => void = (): void => {};
   @Event locateClick: () => void = (): void => {};
+  @Event downloadClick: () => void = (): void => {};
   @BuilderParam content: () => void;
 
   build() {
@@ -137,6 +140,17 @@ export struct FqPlayerSidebar {
           label: '播放设置',
           action: (): void => {
             this.settingsClick();
+          },
+        },
+      });
+    }
+    if (this.showDownload) {
+      menus.push({
+        content: {
+          icon: $r('sys.symbol.circle_and_arrow_down'),
+          label: '下载',
+          action: (): void => {
+            this.downloadClick();
           },
         },
       });

@@ -2380,26 +2380,30 @@ export struct PlayerPage {
           this.SideEpisodePagingStrip()
         }
         Grid(this.sideScroller) {
-          ForEach(this.episodes, (episode: FqChapter, index: number) => {
-            GridItem() {
-              Row() {
-                Text(`${index + 1}`)
-                  .fontSize(15)
-                  .fontWeight(index === this.index ? FontWeight.Bold : FontWeight.Normal)
-                  .fontColor(this.sideEpisodeColor(index))
+          // Repeat 虚拟滚动：上千集仅构建可视区格子，避免全量 ForEach 冻结 UI
+          Repeat<FqChapter>(this.episodes)
+            .each((ri: RepeatItem<FqChapter>) => {
+              GridItem() {
+                Row() {
+                  Text(`${ri.index + 1}`)
+                    .fontSize(15)
+                    .fontWeight(ri.index === this.index ? FontWeight.Bold : FontWeight.Normal)
+                    .fontColor(this.sideEpisodeColor(ri.index))
+                }
+                .width('100%')
+                .aspectRatio(1)
+                .justifyContent(FlexAlign.Center)
+                .alignItems(VerticalAlign.Center)
+                .borderRadius(8)
+                .backgroundColor(ri.index === this.index ? '#1AFA6725' : '#26FFFFFF')
+                .onClick((): void => {
+                  this.closeSidePanel();
+                  this.loadEpisode(ri.index);
+                })
               }
-              .width('100%')
-              .aspectRatio(1)
-              .justifyContent(FlexAlign.Center)
-              .alignItems(VerticalAlign.Center)
-              .borderRadius(8)
-              .backgroundColor(index === this.index ? '#1AFA6725' : '#26FFFFFF')
-              .onClick((): void => {
-                this.closeSidePanel();
-                this.loadEpisode(index);
-              })
-            }
-          }, (episode: FqChapter, index: number) => `${episode.itemId}-${index}`)
+            })
+            .key((episode: FqChapter, index: number) => `${episode.itemId}-${index}`)
+            .virtualScroll()
         }
         .columnsTemplate('1fr 1fr 1fr 1fr')
         .columnsGap(8)
@@ -2673,25 +2677,29 @@ export struct PlayerPage {
         // 集数网格独立滚动（占满余高）：分段按钮 scrollToIndex 直达当前段，
         // 滚动只动集数，不动上方固定区
         Grid(this.pcScroller) {
-          ForEach(this.episodes, (episode: FqChapter, index: number) => {
-            GridItem() {
-              Row() {
-                Text(`${index + 1}`)
-                  .fontSize(14)
-                  .fontWeight(index === this.index ? FontWeight.Bold : FontWeight.Normal)
-                  .fontColor(this.sideEpisodeColor(index))
+          // Repeat 虚拟滚动：上千集仅构建可视区格子，避免全量 ForEach 冻结 UI
+          Repeat<FqChapter>(this.episodes)
+            .each((ri: RepeatItem<FqChapter>) => {
+              GridItem() {
+                Row() {
+                  Text(`${ri.index + 1}`)
+                    .fontSize(14)
+                    .fontWeight(ri.index === this.index ? FontWeight.Bold : FontWeight.Normal)
+                    .fontColor(this.sideEpisodeColor(ri.index))
+                }
+                .width('100%')
+                .aspectRatio(1)
+                .justifyContent(FlexAlign.Center)
+                .alignItems(VerticalAlign.Center)
+                .borderRadius(8)
+                .backgroundColor(ri.index === this.index ? '#1AFA6725' : '#26FFFFFF')
+                .onClick((): void => {
+                  this.loadEpisode(ri.index);
+                })
               }
-              .width('100%')
-              .aspectRatio(1)
-              .justifyContent(FlexAlign.Center)
-              .alignItems(VerticalAlign.Center)
-              .borderRadius(8)
-              .backgroundColor(index === this.index ? '#1AFA6725' : '#26FFFFFF')
-              .onClick((): void => {
-                this.loadEpisode(index);
-              })
-            }
-          }, (episode: FqChapter, index: number) => `${episode.itemId}-${index}`)
+            })
+            .key((episode: FqChapter, index: number) => `${episode.itemId}-${index}`)
+            .virtualScroll()
         }
         .columnsTemplate('1fr 1fr 1fr 1fr 1fr')
         .columnsGap(8)
@@ -2861,9 +2869,8 @@ export struct PlayerPage {
   }
 
   /** 侧边栏·离线缓存（横屏全屏形态，公共 FqPlayerSidebar 壳）：标题栏返回（回播放设置侧边栏）+
-   *  右上关闭；「管理」行在标题栏下方（进剧集缓存管理页）；
-   *  >30 集分页条横向滚动直达；集数网格 3 列复选（4 列勾选态文字超出单格宽度）/
-   *  全选/下载行与底部半模态同款逻辑。 */
+   *  右上下载（下载所选集）/关闭；>30 集分页条横向滚动直达；集数网格 3 列复选（4 列勾选态
+   *  文字超出单格宽度）/全选/下载行与底部半模态同款逻辑。 */
   @Builder
   private SideCache() {
     FqPlayerSidebar({
@@ -2871,6 +2878,14 @@ export struct PlayerPage {
       showBack: true,
       backClick: (): void => {
         this.openSidePanel('settings');
+      },
+      showDownload: true,
+      downloadClick: (): void => {
+        if (this.cacheSelectedIds.size === 0) {
+          this.getUIContext().getPromptAction().showToast({ message: '请选择要缓存的剧集', duration: 1500 });
+          return;
+        }
+        this.confirmCacheDownload(this.cacheSelectedIdList());
       },
       showClose: true,
       closeClick: (): void => {
@@ -2887,30 +2902,20 @@ export struct PlayerPage {
   @Builder
   private SideCacheBody() {
     Column() {
-      Row() {
-        Text('管理')
-          .fontSize(14)
-          .fontColor(FQ_STORY_ORANGE)
-          .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-          .onClick((): void => {
-            this.closeSidePanel();
-            NavPathUtils.push(ROUTE_CACHED_DRAMAS);
-          })
-      }
-      .width('100%')
-      .padding({ left: 8 })
-      .alignItems(VerticalAlign.Center)
-
       if (this.episodes.length > FQ_CACHE_PAGE_SIZE) {
         this.SideCachePagingStrip()
       }
 
       Grid(this.sideCacheScroller) {
-        ForEach(this.episodes, (episode: FqChapter, index: number) => {
-          GridItem() {
-            this.CacheEpisodeCell(episode, index, true)
-          }
-        }, (episode: FqChapter) => episode.itemId)
+        // Repeat 虚拟滚动：上千集仅构建可视区格子，避免全量 ForEach 冻结 UI
+        Repeat<FqChapter>(this.episodes)
+          .each((ri: RepeatItem<FqChapter>) => {
+            GridItem() {
+              this.CacheEpisodeCell(ri.item, ri.index, true)
+            }
+          })
+          .key((episode: FqChapter) => episode.itemId)
+          .virtualScroll()
       }
       .columnsTemplate('1fr 1fr 1fr')
       .columnsGap(8)

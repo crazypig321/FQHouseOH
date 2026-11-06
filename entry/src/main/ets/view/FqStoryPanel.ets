@@ -113,39 +113,43 @@ export struct FqStoryPanel {
         .justifyContent(FlexAlign.Center)
       } else {
         Grid(this.scroller) {
-          ForEach(this.episodes, (episode: FqChapter, index: number) => {
-            GridItem() {
-              Stack({ alignContent: Alignment.TopEnd }) {
-                // 序号居中（badge 独立 TopEnd 叠放）
-                Row({ space: 2 }) {
-                  Text(`${index + 1}`)
-                    .fontSize(14)
-                    .fontWeight(index === this.currentIndex ? FontWeight.Bold : FontWeight.Normal)
-                    .fontColor(this.tileTextColor(index))
+          // Repeat 虚拟滚动：上千集仅构建可视区格子，避免全量 ForEach 冻结 UI
+          Repeat<FqChapter>(this.episodes)
+            .each((ri: RepeatItem<FqChapter>) => {
+              GridItem() {
+                Stack({ alignContent: Alignment.TopEnd }) {
+                  // 序号居中（badge 独立 TopEnd 叠放）
+                  Row({ space: 2 }) {
+                    Text(`${ri.index + 1}`)
+                      .fontSize(14)
+                      .fontWeight(ri.index === this.currentIndex ? FontWeight.Bold : FontWeight.Normal)
+                      .fontColor(this.tileTextColor(ri.index))
 
-                  if (index === this.currentIndex) {
-                    // 当前集右上 12×12 播放角标（官方 video_playing_orange.json，
-                    // 本地以静态三角替代）
-                    SymbolGlyph($r('sys.symbol.play_fill'))
-                      .fontSize(11)
-                      .fontColor(['#FFFA6725'])
-                      .margin(4)
+                    if (ri.index === this.currentIndex) {
+                      // 当前集右上 12×12 播放角标（官方 video_playing_orange.json，
+                      // 本地以静态三角替代）
+                      SymbolGlyph($r('sys.symbol.play_fill'))
+                        .fontSize(11)
+                        .fontColor(['#FFFA6725'])
+                        .margin(4)
+                    }
                   }
+                  .width('100%')
+                  .height('100%')
+                  .justifyContent(FlexAlign.Center)
+                  .alignItems(VerticalAlign.Center)
                 }
                 .width('100%')
-                .height('100%')
-                .justifyContent(FlexAlign.Center)
-                .alignItems(VerticalAlign.Center)
+                .aspectRatio(53 / 52)
+                .borderRadius(8)
+                .backgroundColor(ri.index === this.currentIndex ? '#1AFA6725' : $r('sys.color.comp_background_list_card'))
+                .onClick((): void => {
+                  this.onSelectEpisode(ri.index);
+                })
               }
-              .width('100%')
-              .aspectRatio(53 / 52)
-              .borderRadius(8)
-              .backgroundColor(index === this.currentIndex ? '#1AFA6725' : $r('sys.color.comp_background_list_card'))
-              .onClick((): void => {
-                this.onSelectEpisode(index);
-              })
-            }
-          }, (episode: FqChapter, index: number) => `${episode.itemId}-${index}`)
+            })
+            .key((episode: FqChapter, index: number) => `${episode.itemId}-${index}`)
+            .virtualScroll()
         }
         .columnsTemplate('1fr 1fr 1fr 1fr 1fr 1fr')
         .columnsGap(8)
