@@ -426,8 +426,16 @@ export struct ShelfPage {
       }
       this.refreshData();
       this.showToast(added ? `已导入《${item.title}》` : `《${item.title}》已在书架，继续上次进度`);
-      // 导入后按书名网络匹配封面（命中回填书架条目，失败保持图标占位）
-      this.matchLocalBookCover(item.id, item.title);
+      if (item.cover.length > 0) {
+        // EPUB 内嵌封面：重复导入时补齐旧条目（旧版本导入的本地书无封面）
+        if (!added) {
+          FqShelfStore.updateCover(item.id, item.cover);
+          this.refreshData();
+        }
+      } else {
+        // 导入后按书名网络匹配封面（命中回填书架条目，失败保持图标占位）
+        this.matchLocalBookCover(item.id, item.title);
+      }
     } catch (error) {
       const err: BusinessError = error as BusinessError;
       this.showToast(`导入失败：${err.message.length > 0 ? err.message : '请重试'}`);

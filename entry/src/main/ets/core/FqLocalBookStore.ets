@@ -1,9 +1,10 @@
 /**
- * 本地书籍导入（对齐 fqapp ImportedBookStore 的 TXT 最小子集）。
+ * 本地书籍导入（对齐 fqapp ImportedBookStore 的 TXT / EPUB 子集）。
  *
- * - documentViewPicker 选择 .txt（免权限）；
- * - UTF-8 优先解码（fatal 探测），失败回退 GBK；
- * - 章节切分：行首「第X章/回/节/卷」标记；无标记时整本一章；
+ * - documentViewPicker 选择 .txt / .epub（免权限）；
+ * - TXT：UTF-8 优先解码（fatal 探测），失败回退 GBK；
+ *   章节切分：行首「第X章/回/节/卷」标记；无标记时整本一章；
+ * - EPUB：FqEpubParser 随机读取解析（≤1GB，图片 / 字体不加载，正文 ≤64MB）；
  * - 正文写入应用沙箱 files/local_books/<id>.txt，章节偏移持久化到 preferences；
  * - 书架条目 id 形如 local_h<内容哈希>（同文件重复导入复用同一本书，进度/已读命中），
  *   kind 'book'，cover 为空（书架卡片显示 kind 图标占位）。
@@ -12,10 +13,11 @@
 import preferences from '@ohos.data.preferences';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { fileIo, picker } from '@kit.CoreFileKit';
+import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { FqChapter } from '../model/FqModels';
 import { FqShelfItem } from './FqShelfStore';
+import { FqEpubBook, FqEpubCover, FqEpubParser } from './FqEpubParser';
 import { fqAsArray, fqAsRecord, fqStr, fqNum } from './FqJson';
 
 const FQ_LOCAL_BOOK_NAME: string = 'fq_local_books';
@@ -132,19 +134,26 @@ export class FqLocalBookStore {
   }
 
   /**
-   * 选择并导入一本本地 TXT；返回书架条目（取消返回 null）。
+   * 选择并导入一本本地 TXT / EPUB；返回书架条目（取消返回 null）。
    * 调用方负责写入书架与提示。
    */
   public static async pickAndImport(context: common.Context): Promise<FqShelfItem | null> {
     const docPicker: picker.DocumentViewPicker = new picker.DocumentViewPicker();
     const uris: string[] = await docPicker.select({
       maxSelectNumber: 1,
-      fileSuffixFilters: ['txt'],
+      fileSuffixFilters: ['txt', 'epub'],
     });
     if (uris.length === 0) {
       return null;
     }
     const uri: string = uris[0];
+    const suffix: string = FqLocalBookStore.suffixFromUri(uri);
+    if (suffix === 'epub') {
+      return FqLocalBookStore.importEpub(context, uri);
+    }
+    if (suffix !== 'txt') {
+      throw new Error('仅支持 TXT 和 EPUB 文件');
+    }
     const title: string = FqLocalBookStore.titleFromUri(uri);
     const text: string = FqLocalBookStore.readAndDecode(uri);
     if (text.trim().length === 0) {
@@ -167,6 +176,108 @@ export class FqLocalBookStore {
       h = (h * 33 + text.charCodeAt(i)) % 281474976710656;
     }
     return h.toString(16);
+  }
+
+  /** EPUB 导入：随机读取解析 → 拼整书正文并记录章节偏移（架构与 TXT 一致）。 */
+  private static async importEpub(context: common.Context, uri: string): Promise<FqShelfItem> {
+    const size: number = FqLocalBookStore.statFileSize(uri);
+    if (size > 1024 * 1024 * 1024) {
+      throw new Error('请选择小于 1 GB 的 EPUB 文件');
+    }
+    const fileTitle: string = FqLocalBookStore.titleFromUri(uri);
+    const book: FqEpubBook = await FqEpubParser.parse(uri, fileTitle);
+    // 章节拼接：parts 一次 join，避免 O(n²) 字符串拼接
+    const parts: string[] = [];
+    const chapters: FqLocalChapter[] = [];
+    let offset: number = 0;
+    for (const chapter of book.chapters) {
+      const text: string = chapter.text;
+      chapters.push(new FqLocalChapter(chapter.title, offset, text.length));
+      parts.push(text);
+      parts.push('\n\n');
+      offset += text.length + 2;
+    }
+    const full: string = parts.join('');
+    // 正文内容哈希稳定 id（与 TXT 同域）：相同正文的 EPUB / TXT 复用同一本书
+    const id: string = `${FQ_LOCAL_ID_PREFIX}h${FqLocalBookStore.textHash(full)}`;
+    const file: string = FqLocalBookStore.writeBookFile(context, id, full);
+    const meta: FqLocalBookMeta = new FqLocalBookMeta(id, book.title, file, chapters);
+    FqLocalBookStore.books.set(id, meta);
+    FqLocalBookStore.persist();
+    // 内嵌封面 best-effort：提取成功写沙箱并以 file URI 入架，失败回退网络匹配
+    const coverUri: string = book.cover !== null
+      ? FqLocalBookStore.writeCoverFile(context, id, book.cover) : '';
+    return new FqShelfItem(id, 'book', book.title, coverUri);
+  }
+
+  /** 封面写入沙箱并返回 file URI（Image 可直接加载；失败返回空串）。 */
+  private static writeCoverFile(context: common.Context, id: string,
+    cover: FqEpubCover): string {
+    const dir: string = `${context.filesDir}/${FQ_LOCAL_BOOK_DIR}`;
+    try {
+      fileIo.mkdirSync(dir);
+    } catch (error) {
+      // 目录已存在
+    }
+    const file: string = `${dir}/${id}_cover.${cover.extension}`;
+    let fd: number = -1;
+    try {
+      fd = fileIo.openSync(file,
+        fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC).fd;
+      fileIo.writeSync(fd, cover.bytes.buffer);
+    } catch (error) {
+      return '';
+    } finally {
+      if (fd >= 0) {
+        try {
+          fileIo.closeSync(fd);
+        } catch (error) {
+          // 关闭失败忽略
+        }
+      }
+    }
+    try {
+      return fileUri.getUriFromPath(file);
+    } catch (error) {
+      return '';
+    }
+  }
+
+  /** 文件大小（字节）；空文件 / 不可读抛中文错误。 */
+  private static statFileSize(uri: string): number {
+    let fd: number = -1;
+    try {
+      fd = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY).fd;
+      const stat = fileIo.statSync(fd);
+      const size: number = stat.size;
+      if (size <= 0) {
+        throw new Error('文件内容为空');
+      }
+      return size;
+    } finally {
+      if (fd >= 0) {
+        try {
+          fileIo.closeSync(fd);
+        } catch (error) {
+          // 关闭失败忽略
+        }
+      }
+    }
+  }
+
+  /** 文件 URI 后缀（小写，去 query / decode）。 */
+  private static suffixFromUri(uri: string): string {
+    const noQuery: string = uri.split('?')[0];
+    const segments: string[] = noQuery.split('/');
+    const name: string = segments.length > 0 ? segments[segments.length - 1] : '';
+    let decoded: string = name;
+    try {
+      decoded = decodeURIComponent(name);
+    } catch (error) {
+      // 保留原始名
+    }
+    const dot: number = decoded.lastIndexOf('.');
+    return (dot >= 0 ? decoded.substring(dot + 1) : '').toLowerCase();
   }
 
   private static titleFromUri(uri: string): string {

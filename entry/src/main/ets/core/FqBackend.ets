@@ -183,9 +183,13 @@ export class FqBackend {
   /**
    * 把后端相对资源（/src/...）锚定到带 capability 的 loopback 前缀。
    * 绝对 http(s) URL 原样返回（CDN 签名不可重编码）。
+   * file:// 沙箱 URI（本地书内嵌封面）原样返回，由 Image 直接加载。
    */
   public resourceUrl(rawPath: string): string {
     if (rawPath.startsWith('http://') || rawPath.startsWith('https://')) {
+      return rawPath;
+    }
+    if (rawPath.startsWith('file://')) {
       return rawPath;
     }
     let path: string = rawPath;
