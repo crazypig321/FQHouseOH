@@ -562,9 +562,20 @@ export struct ShelfPage {
   /** 清空确认（按当前 tab：书架 / 浏览历史；共用确认弹窗）。 */
   private confirmClearCurrentTab(): void {
     const isShelf: boolean = this.currentTab === 0;
+    let shelfHasLocal: boolean = false;
+    if (isShelf) {
+      for (const entry of FqShelfStore.all()) {
+        if (FqLocalBookStore.isLocalBookId(entry.id)) {
+          shelfHasLocal = true;
+          break;
+        }
+      }
+    }
     DialogManager.ShowConfirm(
       isShelf ? '清空书架' : '清空浏览历史',
-      isShelf ? '确定要清空书架全部作品吗？此操作不可恢复。'
+      isShelf
+        ? (shelfHasLocal ? '确定要清空书架全部作品吗？本地导入书的文件将一并删除，此操作不可恢复。'
+          : '确定要清空书架全部作品吗？此操作不可恢复。')
         : '确定要清空全部浏览历史吗？此操作不可恢复。',
       '清空',
       (): void => {
@@ -573,6 +584,7 @@ export struct ShelfPage {
           for (const entry of FqShelfStore.all()) {
             ids.push(entry.id);
           }
+          FqLocalBookStore.deleteBooks(ids);
           FqShelfStore.removeByIds(ids);
         } else {
           FqBrowseStore.clear();
@@ -704,12 +716,17 @@ export struct ShelfPage {
     const ids: string[] = this.batchSelected.slice();
     const count: number = ids.length;
     const isShelf: boolean = this.currentTab === 0;
+    const hasLocal: boolean = ids.some((id: string): boolean => FqLocalBookStore.isLocalBookId(id));
     DialogManager.ShowConfirm(
       isShelf ? '移出书架' : '删除记录',
-      isShelf ? `确定将选中的 ${count} 本作品移出书架吗？` : `确定删除选中的 ${count} 条浏览记录吗？`,
+      isShelf
+        ? (hasLocal ? `确定将选中的 ${count} 本作品移出书架吗？本地导入书的文件将一并删除。`
+          : `确定将选中的 ${count} 本作品移出书架吗？`)
+        : `确定删除选中的 ${count} 条浏览记录吗？`,
       isShelf ? '移出' : '删除',
       (): void => {
         if (isShelf) {
+          FqLocalBookStore.deleteBooks(ids);
           FqShelfStore.removeByIds(ids);
           this.showToast(`已移出 ${count} 本`);
         } else {

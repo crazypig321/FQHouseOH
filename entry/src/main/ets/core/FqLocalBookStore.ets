@@ -134,6 +134,46 @@ export class FqLocalBookStore {
   }
 
   /**
+   * 本地书移出书架：删除沙箱正文 / 封面文件与元数据，避免残留占空间。
+   * 非本地书 id 自动跳过；重复调用安全。
+   */
+  public static deleteBooks(ids: string[]): void {
+    let changed: boolean = false;
+    for (const id of ids) {
+      if (!FqLocalBookStore.isLocalBookId(id)) {
+        continue;
+      }
+      const meta: FqLocalBookMeta | undefined = FqLocalBookStore.books.get(id);
+      if (meta !== undefined) {
+        FqLocalBookStore.deleteFileQuietly(meta.file);
+        FqLocalBookStore.books.delete(id);
+        changed = true;
+      }
+      // 封面扩展名不在元数据里（png/jpg/svg 逐一尝试删除）
+      const dir: string = `${FqLocalBookStore.filesDir}/${FQ_LOCAL_BOOK_DIR}`;
+      const extensions: string[] = ['png', 'jpg', 'svg'];
+      for (const extension of extensions) {
+        FqLocalBookStore.deleteFileQuietly(`${dir}/${id}_cover.${extension}`);
+      }
+    }
+    if (changed) {
+      FqLocalBookStore.persist();
+    }
+  }
+
+  /** 删除单个沙箱文件：不存在 / 失败静默忽略。 */
+  private static deleteFileQuietly(path: string): void {
+    if (path.length === 0) {
+      return;
+    }
+    try {
+      fileIo.unlinkSync(path);
+    } catch (error) {
+      // 文件不存在 / 删除失败忽略
+    }
+  }
+
+  /**
    * 选择并导入一本本地 TXT / EPUB；返回书架条目（取消返回 null）。
    * 调用方负责写入书架与提示。
    */
