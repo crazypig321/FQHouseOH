@@ -2147,9 +2147,34 @@ export class FqAudioSession {
     // 离线朗读：秒级位置无意义，写 0 + mode='tts'（章节进度与在线共享）
     const positionSec: number = this.ttsMode ? 0 : this.positionSec;
     const durationSec: number = this.ttsMode ? 0 : this.durationSec;
+    const chapter: FqChapter | undefined = this.chapters[this.index];
     FqAudioHistory.put(new FqListenRecord(this.bookId, this.index, positionSec,
       durationSec, this.toneId, this.rate, this.completed, this.title, this.cover,
-      this.ttsMode ? 'tts' : 'online'));
+      this.ttsMode ? 'tts' : 'online', Date.now(), this.currentListenCueText(),
+      chapter !== undefined ? chapter.itemId : ''));
+  }
+
+  /** 听书→阅读同步锚点：当前播放/朗读位置附近的正文片段（≤40 字符）。 */
+  private currentListenCueText(): string {
+    if (this.ttsMode) {
+      // 离线朗读：ttsOffset 即当前朗读字符位（ttsText 为同源归一化正文）
+      const rest: string = this.ttsText.length > this.ttsOffset
+        ? this.ttsText.substring(this.ttsOffset) : '';
+      return FqAudioSession.clipCueText(rest);
+    }
+    if (this.positionSec <= 0 || this.subtitleTrack.isEmpty) {
+      return '';
+    }
+    const cueIndex: number = this.subtitleTrack.indexAt(this.positionSec * 1000);
+    if (cueIndex < 0) {
+      return '';
+    }
+    return FqAudioSession.clipCueText(this.subtitleTrack.cues[cueIndex].text);
+  }
+
+  private static clipCueText(text: string): string {
+    const trimmed: string = text.trim();
+    return trimmed.length > 40 ? trimmed.substring(0, 40) : trimmed;
   }
 
   /** 真人讲书目录对位：核心标题 → 序号 → 原下标。 */

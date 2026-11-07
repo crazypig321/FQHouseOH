@@ -28,11 +28,15 @@ export class FqReaderProgress {
   readonly domPos: string;
   /** 整书阅读百分比 0..100（书架封面角标用）；-1 = 未记录。 */
   readonly percent: number;
+  /** 最近一次写入时间戳（ms）；0 = 旧记录未记录（听书→阅读同步取较新者）。 */
+  readonly updatedAt: number;
 
-  constructor(chapterIndex: number, domPos: string, percent: number = -1) {
+  constructor(chapterIndex: number, domPos: string, percent: number = -1,
+    updatedAt: number = 0) {
     this.chapterIndex = chapterIndex;
     this.domPos = domPos;
     this.percent = percent;
+    this.updatedAt = updatedAt > 0 ? Math.trunc(updatedAt) : 0;
   }
 }
 
@@ -1119,13 +1123,20 @@ export class FqReaderStore {
       if (typeof percentRaw === 'number' && percentRaw >= 0 && percentRaw <= 100) {
         percent = Math.trunc(percentRaw);
       }
-      return new FqReaderProgress(Math.trunc(chapterIndex), domPos, percent);
+      const updatedAtRaw: Object | undefined = rec['updatedAt'];
+      let updatedAt: number = 0;
+      if (typeof updatedAtRaw === 'number' && updatedAtRaw > 0) {
+        updatedAt = Math.trunc(updatedAtRaw);
+      }
+      return new FqReaderProgress(Math.trunc(chapterIndex), domPos, percent, updatedAt);
     } catch (error) {
       return new FqReaderProgress(-1, '');
     }
   }
 
-  public static saveProgress(bookId: string, chapterIndex: number, domPos: string, percent: number = -1): void {
+  /** updatedAt：-1（默认）= 写入当前时间戳；≥0 = 保留传入值（备份恢复）。 */
+  public static saveProgress(bookId: string, chapterIndex: number, domPos: string,
+    percent: number = -1, updatedAt: number = -1): void {
     const pref: preferences.Preferences | null = FqReaderStore.pref;
     if (pref === null || bookId.length === 0) {
       return;
@@ -1137,6 +1148,7 @@ export class FqReaderStore {
     const rec: Record<string, Object> = {};
     rec['chapterIndex'] = chapterIndex;
     rec['domPos'] = domPos;
+    rec['updatedAt'] = updatedAt >= 0 ? Math.trunc(updatedAt) : Date.now();
     if (eff >= 0) {
       rec['percent'] = eff;
     }

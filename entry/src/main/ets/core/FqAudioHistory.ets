@@ -33,10 +33,17 @@ export class FqListenRecord {
   cover: string;
   /** 收听来源：'online' 在线音频 / 'tts' 离线朗读（章节进度两端共享）。 */
   mode: string;
+  /** 最近一次写入时间戳（ms）；0 = 旧记录未记录（听书→阅读同步取较新者）。 */
+  updatedAt: number;
+  /** 章内定位锚点：当前播放/朗读位置的正文片段（≤40 字符，空 = 无锚点）。 */
+  cueText: string;
+  /** 记录对应章节的 itemId（阅读页对位用；空 = 旧记录按下标兜底）。 */
+  chapterItemId: string;
 
   constructor(bookId: string, chapterIndex: number, positionSec: number, durationSec: number,
     toneId: string, rate: number, completed: boolean, title: string, cover: string,
-    mode: string = 'online') {
+    mode: string = 'online', updatedAt: number = 0, cueText: string = '',
+    chapterItemId: string = '') {
     this.bookId = bookId;
     this.chapterIndex = chapterIndex;
     this.positionSec = positionSec;
@@ -47,6 +54,9 @@ export class FqListenRecord {
     this.title = title;
     this.cover = cover;
     this.mode = mode === 'tts' ? 'tts' : 'online';
+    this.updatedAt = updatedAt > 0 ? Math.trunc(updatedAt) : 0;
+    this.cueText = cueText;
+    this.chapterItemId = chapterItemId;
   }
 }
 
@@ -96,7 +106,8 @@ export class FqAudioHistory {
           fqAsInt(rec['chapterIndex'], 0), fqNum(rec, 'positionSec'), fqNum(rec, 'durationSec'),
           fqStr(rec, 'toneId'), fqNum(rec, 'rate') > 0 ? fqNum(rec, 'rate') : 1,
           rec['completed'] === true, fqStr(rec, 'title'), fqStr(rec, 'cover'),
-          fqStr(rec, 'mode') === 'tts' ? 'tts' : 'online'));
+          fqStr(rec, 'mode') === 'tts' ? 'tts' : 'online',
+          fqNum(rec, 'updatedAt'), fqStr(rec, 'cueText'), fqStr(rec, 'chapterItemId')));
       }
     } catch (error) {
       // 损坏缓存按空历史处理
@@ -163,6 +174,9 @@ export class FqAudioHistory {
       rec['title'] = record.title;
       rec['cover'] = record.cover;
       rec['mode'] = record.mode;
+      rec['updatedAt'] = record.updatedAt;
+      rec['cueText'] = record.cueText;
+      rec['chapterItemId'] = record.chapterItemId;
       recs.push(rec);
     });
     try {

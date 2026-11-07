@@ -16,7 +16,7 @@ import { FqWatchedMergeOutcome, FqWatchedProgress, FqWatchedStore } from './FqWa
 import { FqReaderProgress, FqReaderSettings, FqReaderStore,
   fqDecodeReadRanges, fqEncodeReadRanges, fqNormalizeThemeFontColor } from './FqReaderStore';
 import { FqAppSettingsStore } from './FqAppSettingsStore';
-import { fqAsArray, fqAsRecord, fqStr } from './FqJson';
+import { fqAsArray, fqAsRecord, fqNum, fqStr } from './FqJson';
 
 const FQ_BACKUP_FORMAT: string = 'fqhouse.library-backup';
 /** 备份格式版本：v2 起包含应用设置段（外观/阅读偏好）；decode 兼容 v1（无设置段）。 */
@@ -163,14 +163,17 @@ export class FqBackupReaderProgress {
   readonly readRanges: string;
   /** 整书阅读百分比 0..100（书架封面角标）；-1 = 旧备份未记录。 */
   readonly percent: number;
+  /** 最近一次写入时间戳（ms）；0 = 旧备份未记录。 */
+  readonly updatedAt: number;
 
   constructor(bookId: string, chapterIndex: number, domPos: string, readRanges: string,
-    percent: number = -1) {
+    percent: number = -1, updatedAt: number = 0) {
     this.bookId = bookId;
     this.chapterIndex = chapterIndex;
     this.domPos = domPos;
     this.readRanges = readRanges;
     this.percent = percent;
+    this.updatedAt = updatedAt > 0 ? Math.trunc(updatedAt) : 0;
   }
 }
 
@@ -375,7 +378,8 @@ export class FqLibraryBackup {
       fqBackupCheckId(record.bookId);
       listen.push(new FqListenRecord(record.bookId, record.chapterIndex, record.positionSec,
         record.durationSec, record.toneId, record.rate, record.completed, record.title,
-        fqBackupPortableCover(record.cover), record.mode));
+        fqBackupPortableCover(record.cover), record.mode, record.updatedAt, record.cueText,
+        record.chapterItemId));
     }
     const watchedIds: Map<string, Set<string>> = FqWatchedStore.allWatched();
     const watchedProgress: Map<string, FqWatchedProgress> = FqWatchedStore.allProgress();
@@ -416,7 +420,8 @@ export class FqLibraryBackup {
         continue;
       }
       reader.push(new FqBackupReaderProgress(bookId, progress.chapterIndex, progress.domPos,
-        fqEncodeReadRanges(FqReaderStore.getReadChapters(bookId)), progress.percent));
+        fqEncodeReadRanges(FqReaderStore.getReadChapters(bookId)), progress.percent,
+        progress.updatedAt));
     }
     const readerSettings: FqReaderSettings = FqReaderStore.getSettings();
     // 自定义阅读主题：双模式参数（bgPath 取 basename）+ 背景图 base64 内嵌
@@ -547,6 +552,9 @@ export class FqLibraryBackup {
       rec['read'] = entry.readRanges;
       if (entry.percent >= 0) {
         rec['percent'] = entry.percent;
+      }
+      if (entry.updatedAt > 0) {
+        rec['updatedAt'] = entry.updatedAt;
       }
       reader.push(rec);
     }
@@ -690,7 +698,9 @@ export class FqLibraryBackup {
         rec['completed'] === true,
         fqBackupCheckText(rec, 'title'),
         fqBackupPortableCover(fqBackupCheckText(rec, 'cover')),
-        fqBackupCheckText(rec, 'mode') === 'tts' ? 'tts' : 'online'));
+        fqBackupCheckText(rec, 'mode') === 'tts' ? 'tts' : 'online',
+        // 新增字段（听书→阅读同步）：旧备份缺省
+        fqNum(rec, 'updatedAt'), fqStr(rec, 'cueText'), fqStr(rec, 'chapterItemId')));
     }
     const watched: FqBackupWatched[] = [];
     const watchedKeys: Set<string> = new Set<string>();
@@ -756,7 +766,7 @@ export class FqLibraryBackup {
         fqBackupCheckInt(rec, 'chapterIndex', 2147483647),
         fqBackupCheckText(rec, 'domPos'),
         fqBackupCheckText(rec, 'read'),
-        percent));
+        percent, fqNum(rec, 'updatedAt')));
     }
     let excluded: number = 0;
     if (root['excludedLocalRecords'] !== undefined) {
@@ -975,7 +985,8 @@ export class FqLibraryBackup {
     let readerAdded: number = 0;
     for (const entry of data.reader) {
       if (FqReaderStore.getProgress(entry.bookId).chapterIndex < 0) {
-        FqReaderStore.saveProgress(entry.bookId, entry.chapterIndex, entry.domPos, entry.percent);
+        FqReaderStore.saveProgress(entry.bookId, entry.chapterIndex, entry.domPos,
+          entry.percent, entry.updatedAt);
         const chapters: Set<number> = fqDecodeReadRanges(entry.readRanges);
         if (chapters.size > 0) {
           FqReaderStore.saveReadChapters(entry.bookId, chapters);

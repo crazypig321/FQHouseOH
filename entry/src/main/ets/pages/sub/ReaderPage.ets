@@ -31,6 +31,7 @@ import { FqAppSettingsStore, FQ_THEME_DARK, FQ_THEME_LIGHT } from '../../core/Fq
 import { FqReadStatsStore } from '../../core/FqReadStatsStore';
 import { FqLocalBookStore } from '../../core/FqLocalBookStore';
 import { FqChapterCacheStore, FqCachedCatalog } from '../../core/FqChapterCacheStore';
+import { FqAudioHistory, FqListenRecord } from '../../core/FqAudioHistory';
 import { ReaderNavParams, ListenNavParams, ROUTE_LISTEN } from '../../model/FqNavModels';
 import { CommonNav, titleBarOf } from '../../view/CommonNav';
 import { CommonLoading } from '../../view/CommonCom';
@@ -206,6 +207,17 @@ class FqParaCommentSource implements IDataSource {
     for (const listener of this.listeners) {
       listener.onDataReloaded();
     }
+  }
+}
+
+/** 续读解析结果（听书→阅读同步可能改写起始章/段内位置）。 */
+class FqReaderResumePos {
+  readonly index: number;
+  readonly domPos: string;
+
+  constructor(index: number, domPos: string) {
+    this.index = index;
+    this.domPos = domPos;
   }
 }
 
@@ -2892,6 +2904,75 @@ export struct ReaderPage {
   // 加载
   // ---------------------------------------------------------------------------
 
+  /** 听书→阅读同步：待消费的听书记录（openChapter 布局后按 cueText 定位段落）。 */
+  private pendingListenResume: FqListenRecord | null = null;
+
+  /**
+   * 听书→阅读进度同步：未指定起始章且听书记录比阅读进度新时，改从听书章节续读。
+   * 章节 itemId 不在本书目录（听书 tab 来源、章节体系不同）则不强行对位。
+   */
+  private syncListenResume(index: number, domPos: string): FqReaderResumePos {
+    if (this.startChapterIndex >= 0) {
+      return new FqReaderResumePos(index, domPos);
+    }
+    const record: FqListenRecord | null = FqAudioHistory.get(this.bookId);
+    if (record === null || record.updatedAt <= 0) {
+      return new FqReaderResumePos(index, domPos);
+    }
+    const progress: FqReaderProgress = FqReaderStore.getProgress(this.bookId);
+    if (record.updatedAt <= progress.updatedAt) {
+      return new FqReaderResumePos(index, domPos);
+    }
+    let target: number = -1;
+    if (record.chapterItemId.length > 0) {
+      for (let i: number = 0; i < this.chapters.length; i++) {
+        if (this.chapters[i].itemId === record.chapterItemId) {
+          target = i;
+          break;
+        }
+      }
+      if (target < 0) {
+        return new FqReaderResumePos(index, domPos);
+      }
+    } else if (record.chapterIndex >= 0 && record.chapterIndex < this.chapters.length) {
+      target = record.chapterIndex;
+    }
+    if (target < 0) {
+      return new FqReaderResumePos(index, domPos);
+    }
+    this.pendingListenResume = record;
+    hilog.info(0x0001, 'ReaderPage', `listen resume: book=${this.bookId} chapter=${target}`);
+    return new FqReaderResumePos(target, target === index ? domPos : '');
+  }
+
+  /** 听书续读章内定位：cueText 片段匹配正文段落 → 'p2:段:0'；未命中回退原 domPos。 */
+  private resolveListenDomPos(chapter: FqChapter, paragraphs: string[], domPos: string): string {
+    const record: FqListenRecord | null = this.pendingListenResume;
+    if (record === null) {
+      return domPos;
+    }
+    this.pendingListenResume = null;
+    if (record.chapterItemId.length > 0 && record.chapterItemId !== chapter.itemId) {
+      return domPos;
+    }
+    const cue: string = record.cueText.trim();
+    if (cue.length < 4) {
+      return domPos;
+    }
+    for (let i: number = 0; i < paragraphs.length; i++) {
+      if (paragraphs[i].indexOf(cue) >= 0) {
+        return `p2:${i}:0`;
+      }
+    }
+    const head: string = cue.length > 12 ? cue.substring(0, 12) : cue;
+    for (let i: number = 0; i < paragraphs.length; i++) {
+      if (paragraphs[i].indexOf(head) >= 0) {
+        return `p2:${i}:0`;
+      }
+    }
+    return domPos;
+  }
+
   private async load(): Promise<void> {
     if (this.bookId.length === 0) {
       this.errorMsg = '无效的作品';
@@ -2924,7 +3005,8 @@ export struct ReaderPage {
             ? progress.chapterIndex : 0;
           domPos = start === progress.chapterIndex ? progress.domPos : '';
         }
-        await this.openChapter(start, domPos);
+        const resumed: FqReaderResumePos = this.syncListenResume(start, domPos);
+        await this.openChapter(resumed.index, resumed.domPos);
         return;
       }
       // 本地导入书籍：目录/正文均来自本地文件，不请求后端
@@ -2949,7 +3031,8 @@ export struct ReaderPage {
             ? localProgress.chapterIndex : 0;
           localDomPos = localIndex === localProgress.chapterIndex ? localProgress.domPos : '';
         }
-        await this.openChapter(localIndex, localDomPos);
+        const resumed: FqReaderResumePos = this.syncListenResume(localIndex, localDomPos);
+        await this.openChapter(resumed.index, resumed.domPos);
         return;
       }
       await FqBackend.get().start(getContext(this));
@@ -2976,7 +3059,8 @@ export struct ReaderPage {
           ? progress.chapterIndex : 0;
         domPos = index === progress.chapterIndex ? progress.domPos : '';
       }
-      await this.openChapter(index, domPos);
+      const resumed: FqReaderResumePos = this.syncListenResume(index, domPos);
+      await this.openChapter(resumed.index, resumed.domPos);
     } catch (error) {
       // 离线兜底：目录拉取失败时回退章节缓存目录（离线打开缓存书）
       if (token === this.loadToken && this.chapters.length === 0
@@ -2994,7 +3078,8 @@ export struct ReaderPage {
               ? progress.chapterIndex : 0;
             domPos = index === progress.chapterIndex ? progress.domPos : '';
           }
-          await this.openChapter(index, domPos);
+          const resumed: FqReaderResumePos = this.syncListenResume(index, domPos);
+          await this.openChapter(resumed.index, resumed.domPos);
           return;
         }
       }
@@ -3046,7 +3131,8 @@ export struct ReaderPage {
       this.curLayout = layout;
       this.prevLayout = null;
       this.nextLayout = null;
-      this.pageIndex = this.restorePageIndex(layout, domPos);
+      this.pageIndex = this.restorePageIndex(layout,
+        this.resolveListenDomPos(chapter, paragraphs, domPos));
       this.shownPageOffset = this.pageIndex;
       this.chapterPages.set(index, layout.pages.length);
       this.persistChapterPages();
