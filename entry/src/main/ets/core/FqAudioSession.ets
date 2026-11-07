@@ -204,6 +204,9 @@ export class FqAudioSession {
   private ttsSynthDone: boolean = false;
   private ttsExpectedSeq: number = 0;
   private ttsPendingChunks: FqTtsAudioChunk[] = [];
+  /** 章尾停滞检测：上一 tick 已播字节数 / 连续停滞 tick 数。 */
+  private ttsPlayedAtLastTick: number = 0;
+  private ttsEndStallTicks: number = 0;
   // ---- 内部 ----
   private context: common.UIAbilityContext | null = null;
   private readonly engine: FqAudioEngine = new FqAudioEngine();
@@ -1311,12 +1314,34 @@ export class FqAudioSession {
         this.updateTtsProgress();
         this.persistHistory();
       }
+    } else if (this.ttsSynthDone && !this.ttsSynthInFlight && playedBytes >= totalBytes - 640) {
+      // 已播完所有已合成音频且合成完毕：章尾（精确判尾：pieceIndex == -1
+      // 时 playedBytes 已越过全部片段边界）
+      this.ttsEndStallTicks = 0;
+      this.finishTtsPlayback();
       return;
     }
-    // 已播完所有已合成音频且合成完毕：章尾
-    if (this.ttsSynthDone && !this.ttsSynthInFlight && playedBytes >= totalBytes - 640) {
-      this.finishTtsPlayback();
+    // 停滞兜底：合成已全部完毕、PCM 已全部写入渲染器，但播放位置停滞
+    // （部分设备的 framePos 推不到末尾、或时间戳接口异常恒回 0，上面的
+    // 精确判尾永远到不了）。连续 2 个 tick（约 1 秒）无推进同样判章尾，
+    // 否则离线朗读播完一章后卡住不自动切下一章。
+    if (this.ttsSynthDone && !this.ttsSynthInFlight && this.ttsQueue.length === 0) {
+      if (playedBytes === this.ttsPlayedAtLastTick) {
+        this.ttsEndStallTicks += 1;
+      } else {
+        this.ttsEndStallTicks = 0;
+      }
+      if (this.ttsEndStallTicks >= 2) {
+        this.ttsEndStallTicks = 0;
+        hilog.info(0x0001, TAG,
+          `tts end by stall: played=${playedBytes} total=${totalBytes}`);
+        this.finishTtsPlayback();
+        return;
+      }
+    } else {
+      this.ttsEndStallTicks = 0;
     }
+    this.ttsPlayedAtLastTick = playedBytes;
   }
 
   /** 播放追平后继续预合成（lookahead 预算内）。 */
@@ -1351,6 +1376,8 @@ export class FqAudioSession {
     this.ttsSynthInFlight = false;
     this.ttsSynthDone = false;
     this.ttsExpectedSeq = 0;
+    this.ttsPlayedAtLastTick = 0;
+    this.ttsEndStallTicks = 0;
     const renderer: audio.AudioRenderer | null = this.ttsRenderer;
     this.ttsRenderer = null;
     if (renderer !== null) {
@@ -1481,6 +1508,8 @@ export class FqAudioSession {
   }
 
   private handleTtsChapterEnd(): void {
+    hilog.info(0x0001, TAG,
+      `tts chapter end: index=${this.index}/${this.chapters.length} auto=${this.autoAdvance}`);
     this.completed = true;
     this.wantPlay = false;
     this.ttsProgress = 1;

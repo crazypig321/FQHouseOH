@@ -120,7 +120,14 @@ async fn download_playinfo_audio(ctx: &Ctx, payload: &mut Value, chapter_id: &st
             continue;
         };
         let Some((stream_idx, url, key)) = first_encrypted_audio_stream(&model) else {
-            // 无可解密的加密流时无需下载：明文流 mpv 直接播 CDN。
+            // 无可解密的加密流时无需下载：明文流 mpv 直接播 CDN。确有
+            // encrypt=true 的流但全部无法解密（非 cenc-aes-ctr / spade_a
+            // 缺失）时留痕：OH 客户端直开该 CDN 流会听到电流音。
+            if model_has_encrypted_stream(&model) {
+                log::warn!(
+                    "audio chapter {chapter_id}: encrypted stream not decryptable, keep CDN source"
+                );
+            }
             continue;
         };
         let cache_id = format!("{chapter_id}_{tone_id}");
@@ -143,6 +150,25 @@ async fn download_playinfo_audio(ctx: &Ctx, payload: &mut Value, chapter_id: &st
             }
         }
     }
+}
+
+/// model 里是否存在任一 encrypt=true 的流（用于「有加密流但全部不可
+/// 解密」的留痕日志）。
+fn model_has_encrypted_stream(model: &Map<String, Value>) -> bool {
+    model
+        .get("video_list")
+        .and_then(|v| v.as_array())
+        .map(|list| {
+            list.iter().any(|item| {
+                item.as_object()
+                    .and_then(|s| s.get("encrypt_info"))
+                    .and_then(|v| v.as_object())
+                    .and_then(|e| e.get("encrypt"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
 }
 
 /// 选出 model 里第一条可解密的加密音频流（与 Dart `_playinfoStream` 的

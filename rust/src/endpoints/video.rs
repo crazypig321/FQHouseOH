@@ -1425,7 +1425,7 @@ async fn stream_download_to_file_with_cap(
 pub(crate) enum DownloadKind {
     Video,
     /// ohos 听书：mpv 解不了 CENC 密文，音频与视频同样整段下载解密供流。
-    /// CENC 音频是 ISO-BMFF 容器（.m4a），老源另有 .mp3。
+    /// CENC 音频是 ISO-BMFF 容器，缓存恒落 `.m4a`（不采纳 URL 后缀）。
     Audio,
 }
 
@@ -1440,11 +1440,13 @@ impl DownloadKind {
     fn accepts_url_ext(self, candidate: &str) -> bool {
         match self {
             DownloadKind::Video => candidate == ".mp4" || candidate == ".m4s" || candidate == ".ts",
+            // ohos 听书：Audio 只在 playinfo 命中加密流时下载（CENC 音频恒为
+            // ISO-BMFF/.m4a 容器）。若采纳 URL 后缀（.m4s/.ts/.mp3），缓存文件
+            // 会绕过 serve_src_file 的 mp4/m4a 解密门槛，密文被静态直出成电流
+            // 音，故 Audio 一律不采纳 URL 后缀、统一落 .m4a。
             DownloadKind::Audio => {
-                candidate == ".m4a"
-                    || candidate == ".mp3"
-                    || candidate == ".m4s"
-                    || candidate == ".ts"
+                let _ = candidate;
+                false
             }
         }
     }
