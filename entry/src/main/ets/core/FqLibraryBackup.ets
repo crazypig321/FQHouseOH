@@ -29,7 +29,8 @@ const FQ_BACKUP_MAX_THEMES: number = 50;
 const FQ_BACKUP_MAX_TIME: number = 8640000000000000;
 const FQ_BACKUP_MAX_TEXT: number = 8192;
 const FQ_BACKUP_KINDS: string[] = ['book', 'audio', 'manga', 'video', 'manju'];
-const FQ_BACKUP_ID_PATTERN: RegExp = /^[A-Za-z0-9_-]{1,128}$/;
+/** 作品标识白名单（含 ':' 允许 shuqi: 前缀命名空间，与 FqChapterCacheStore 一致）。 */
+const FQ_BACKUP_ID_PATTERN: RegExp = /^[A-Za-z0-9_:-]{1,128}$/;
 const FQ_BACKUP_HTTPS_PREFIX: RegExp = /^https?:\/\/[^/\s]+/;
 /** 背景图原文件 ≤ 此字节数直接内嵌；超限先压缩转 JPEG 再内嵌。 */
 const FQ_BACKUP_BG_RAW_MAX: number = 512 * 1024;
