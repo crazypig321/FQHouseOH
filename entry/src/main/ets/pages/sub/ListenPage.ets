@@ -26,6 +26,7 @@ import { fqAudioSession, FqChapterOpenOptions, FqTtsVoice } from '../../core/FqA
 import { FqAudioTone, FqRelatedWork, FqSubtitleTrack, fqSubtitleStartSec } from '../../model/FqAudioModels';
 import { FqChapter, FqCacheTaskView } from '../../model/FqModels';
 import { FqShelfItem, FqShelfStore } from '../../core/FqShelfStore';
+import { FqLocalBookStore } from '../../core/FqLocalBookStore';
 import { FqAudioCacheStore } from '../../core/FqAudioCacheStore';
 import {
   fqAudioDownloader,
@@ -153,6 +154,12 @@ export struct ListenPage {
   get inShelf(): boolean {
     const tick: number = this.shelfRefresh;
     return tick >= 0 && FqShelfStore.contains(fqAudioSession.bookId);
+  }
+
+  /** 本地导入书：仅离线朗读（无在线音源/段评/缓存）。 */
+  @Computed
+  get isLocalBook(): boolean {
+    return FqLocalBookStore.isLocalBookId(fqAudioSession.bookId);
   }
 
   /** 播放中（控制排图标）。 */
@@ -408,21 +415,23 @@ export struct ListenPage {
     })
   }
 
-  /** 动作排：语速 / 书架 / 下载 / 章评 / 更多。 */
+  /** 动作排：语速 / 书架 / 下载 / 章评 / 更多（本地书：语速 / 更多）。 */
   @Builder
   private ActionRow() {
     Row() {
-     this.ActionItem($r('sys.symbol.timer'), '语速', false, (): void => {
+      this.ActionItem($r('sys.symbol.timer'), '语速', false, (): void => {
         this.openSheet(FqListenSheetKind.rates);
       })
-      this.ShelfActionItem()
-      this.ActionItem($r('sys.symbol.download'), '下载', false, (): void => {
-        this.openCacheSheet();
-      })
-      this.ActionItem($r('sys.symbol.message'), '章评', false, (): void => {
-        this.commentsOpenToken += 1;
-        this.openSheet(FqListenSheetKind.comments);
-      })
+      if (!this.isLocalBook) {
+        this.ShelfActionItem()
+        this.ActionItem($r('sys.symbol.download'), '下载', false, (): void => {
+          this.openCacheSheet();
+        })
+        this.ActionItem($r('sys.symbol.message'), '章评', false, (): void => {
+          this.commentsOpenToken += 1;
+          this.openSheet(FqListenSheetKind.comments);
+        })
+      }
       this.ActionItem($r('sys.symbol.ellipsis_circle'), '更多', false, (): void => {
         this.openSheet(FqListenSheetKind.more);
       })
@@ -785,35 +794,37 @@ export struct ListenPage {
       },
     }) {
       List({ space: 16 }) {
-        ListItem() {
-          Column({ space: 10 }) {
-            Row({ space: 12 }) {
-              Column({ space: 3 }) {
-                Text('离线朗读')
-                  .fontSize(15)
-                  .fontWeight(FontWeight.Bold)
-                  .fontColor($r('sys.color.font_primary'))
-                Text('系统语音引擎朗读正文，无网络也能听')
-                  .fontSize(12)
-                  .fontColor($r('sys.color.font_secondary'))
+        if (!this.isLocalBook) {
+          ListItem() {
+            Column({ space: 10 }) {
+              Row({ space: 12 }) {
+                Column({ space: 3 }) {
+                  Text('离线朗读')
+                    .fontSize(15)
+                    .fontWeight(FontWeight.Bold)
+                    .fontColor($r('sys.color.font_primary'))
+                  Text('系统语音引擎朗读正文，无网络也能听')
+                    .fontSize(12)
+                    .fontColor($r('sys.color.font_secondary'))
+                }
+                .alignItems(HorizontalAlign.Start)
+                .layoutWeight(1)
+                Toggle({ type: ToggleType.Switch, isOn: fqAudioSession.ttsMode })
+                  .onChange((isOn: boolean): void => {
+                    if (isOn) {
+                      fqAudioSession.switchToTts();
+                    } else {
+                      fqAudioSession.switchToOnline();
+                    }
+                  })
               }
-              .alignItems(HorizontalAlign.Start)
-              .layoutWeight(1)
-              Toggle({ type: ToggleType.Switch, isOn: fqAudioSession.ttsMode })
-                .onChange((isOn: boolean): void => {
-                  if (isOn) {
-                    fqAudioSession.switchToTts();
-                  } else {
-                    fqAudioSession.switchToOnline();
-                  }
-                })
+              .width('100%')
+              .padding({ left: 12, right: 12, top: 12, bottom: 12 })
+              .borderRadius(8)
+              .backgroundColor($r('sys.color.comp_background_list_card'))
             }
             .width('100%')
-            .padding({ left: 12, right: 12, top: 12, bottom: 12 })
-            .borderRadius(8)
-            .backgroundColor($r('sys.color.comp_background_list_card'))
           }
-          .width('100%')
         }
         if (fqAudioSession.ttsMode) {
           ListItem() {

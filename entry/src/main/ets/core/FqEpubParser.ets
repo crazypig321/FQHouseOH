@@ -10,7 +10,8 @@
  * - XHTML 转纯文本：块级元素断段、script/style/noscript/nav 剔除、实体反转义；
  * - 章节标题取文档首个 h1~h6，无标题回退「第N章」；
  * - 只有标题没有正文的文档（目录页、纯标题前言页）丢弃；
- * - 嵌入封面不提取（书架沿用网络封面匹配）。
+ * - 图片页（含 <img/<image 且正文极短）的残留文本（「cover」类）丢弃；
+ * - 内嵌封面 best-effort 提取（发现顺序对齐 Legado/fqapp），失败不阻断导入。
  */
 
 import { zlib, BusinessError } from '@kit.BasicServicesKit';
@@ -24,6 +25,10 @@ const FQ_EPUB_MAX_EXPANDED_BYTES: number = 64 * 1024 * 1024;
 /** 单条目解压上限（防解压炸弹 / 异常超大分配）。 */
 const FQ_EPUB_MAX_ENTRY_BYTES: number = 64 * 1024 * 1024;
 const FQ_EPUB_MAX_CHAPTERS: number = 20000;
+/** 图片页残留文本上限：含图文档折叠空白后正文不超过该长度视为图片页，丢弃。 */
+const FQ_EPUB_IMAGE_PAGE_MAX_TEXT: number = 20;
+/** 图片标签探测：<img / <image（SVG 内嵌图）。 */
+const FQ_EPUB_IMAGE_TAG_PATTERN: RegExp = /<(?:img|image)[\s/>]/i;
 /** 封面单资源字节上限（对齐 fqapp _maxCoverResourceBytes）。 */
 const FQ_EPUB_MAX_COVER_RESOURCE_BYTES: number = 8 * 1024 * 1024;
 /** 封面文档（XHTML/SVG 包装层）字节上限（对齐 fqapp _maxCoverDocumentBytes）。 */
@@ -276,6 +281,12 @@ export class FqEpubParser {
       if (converted.heading.length > 0
         && FqEpubParser.collapseWhitespace(converted.text)
         === FqEpubParser.collapseWhitespace(converted.heading)) {
+        continue;
+      }
+      // 图片页（插图页/封面页）残留的极短文本（figcaption/alt 类「cover」）不作为章节
+      if (FQ_EPUB_IMAGE_TAG_PATTERN.test(source)
+        && FqEpubParser.collapseWhitespace(converted.text).length
+        <= FQ_EPUB_IMAGE_PAGE_MAX_TEXT) {
         continue;
       }
       const chapterTitle: string = converted.heading.length > 0

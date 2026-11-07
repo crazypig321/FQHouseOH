@@ -22,7 +22,7 @@ import { curves, display, LengthMetrics, promptAction, window } from '@kit.ArkUI
 import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
 import { batteryInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { HdsAnimationMode, HdsTabsController, TitleBarContentOptions } from '@kit.UIDesignKit';
+import { HdsAnimationMode, HdsNavigationMenuItemOptions, HdsTabsController, TitleBarContentOptions } from '@kit.UIDesignKit';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { FqChapter, fqFormatCountInt, fqKindToTab } from '../../model/FqModels';
 import { FqReaderProgress, FqReaderStore, FqCustomReaderFont, FqCustomReaderTheme, fqCustomThemeUseDark, fqCustomThemeBothModesSet } from '../../core/FqReaderStore';
@@ -346,13 +346,15 @@ export struct ReaderPage {
     ReaderNavParams.presetChapters = [];
     this.chapterLoader = ReaderNavParams.chapterLoader;
     ReaderNavParams.chapterLoader = null;
-    // 本地导入书籍无后端数据：隐藏段评入口；书旗只读来源同样隐藏（无番茄书评/听书）
+    // 本地导入书籍无段评数据：隐藏段评入口（听书走离线朗读，照常显示）；
+    // 书旗只读来源无番茄书评/在线听书：两者都隐藏
     const isLocalBook: boolean = FqLocalBookStore.isLocalBookId(this.bookId);
-    if (isLocalBook || this.readOnly) {
+    if (this.readOnly) {
       this.titleBarOp = titleBarOf(this.bookTitle);
     } else {
-      this.titleBarOp = titleBarOf(this.bookTitle, undefined, [
-        {
+      const menus: Array<HdsNavigationMenuItemOptions> = [];
+      if (!isLocalBook) {
+        menus.push({
           content: {
             icon: $r('sys.symbol.message'),
             label: 'comments',
@@ -360,17 +362,18 @@ export struct ReaderPage {
               this.openCommentSheet();
             },
           },
-        },
-        {
-          content: {
-            icon: $r('sys.symbol.waveform_headphones'),
-            label: 'listen',
-            action: (): void => {
-              this.openListenFromReader();
-            },
+        });
+      }
+      menus.push({
+        content: {
+          icon: $r('sys.symbol.waveform_headphones'),
+          label: 'listen',
+          action: (): void => {
+            this.openListenFromReader();
           },
         },
-      ]);
+      });
+      this.titleBarOp = titleBarOf(this.bookTitle, undefined, menus);
     }
     this.startChapterIndex = ReaderNavParams.chapterIndex;
     ReaderNavParams.chapterIndex = -1;

@@ -289,6 +289,8 @@ export class FqAudioSession {
     }
     this.generation += 1;
     const gen: number = this.generation;
+    // 本地导入书：无在线音源/装饰数据，强制走离线朗读（TTS 正文按导入偏移切片）
+    const isLocalBook: boolean = FqLocalBookStore.isLocalBookId(bookId);
     this.hasSession = true;
     this.bookId = bookId;
     this.tab = tab;
@@ -373,7 +375,16 @@ export class FqAudioSession {
       }
       autoplay = !completed;
     }
-    this.loadDecorations(this.nextDecorationsGeneration());
+    if (isLocalBook) {
+      // 本地书：跳过在线装饰（音色/相关作品），只装封面像素；强制离线朗读续读
+      this.ttsMode = true;
+      this.ttsVoicePerson = FqAppSettingsStore.getTtsPerson();
+      this.rate = FqAppSettingsStore.getTtsRate();
+      this.refreshTtsVoices(false);
+      this.loadCoverPixel(this.nextDecorationsGeneration());
+    } else {
+      this.loadDecorations(this.nextDecorationsGeneration());
+    }
     if (this.ttsMode) {
       await this.openTtsChapter(openIndex, autoplay, completed ? 1 : 0, '');
       return;
@@ -812,6 +823,10 @@ export class FqAudioSession {
   /** 切回在线听书：保留当前章，按朗读字符比折算秒级位置续播。 */
   public switchToOnline(): void {
     if (!this.hasSession || !this.ttsMode) {
+      return;
+    }
+    // 本地书无在线音源：不切回在线
+    if (FqLocalBookStore.isLocalBookId(this.bookId)) {
       return;
     }
     this.stopTtsSpeak();
@@ -2363,6 +2378,26 @@ export class FqAudioSession {
   private loadCoverPixel(decGen: number): void {
     const url: string = this.cover;
     if (url.length === 0 || url === this.coverPixelUrl) {
+      return;
+    }
+    if (url.startsWith('file://')) {
+      // 本地书封面（沙箱 file URI）：直接解码，不走 http
+      try {
+        const localSource: image.ImageSource = image.createImageSource(url);
+        localSource.createPixelMap()
+          .then((pixel: image.PixelMap): void => {
+            if (decGen !== this.decorationsGeneration) {
+              return;
+            }
+            this.coverPixel = pixel;
+            this.coverPixelUrl = url;
+            this.syncAvMetadata();
+          })
+          .catch((): void => {
+          });
+      } catch (error) {
+        // 沙箱 URI 解码失败：无封面像素（播控不显示封面）
+      }
       return;
     }
     const client: http.HttpRequest = http.createHttp();
