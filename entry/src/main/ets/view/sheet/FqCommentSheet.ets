@@ -17,7 +17,17 @@ import { FqBookComment, FqBookCommentPage, FqChapterIdeaMeta, FqCommentReplyPage
 import { CommonLoading } from '../CommonCom';
 import { CommonSheet } from './CommonSheet';
 import { FqReplySection } from './FqReplySheet';
+import { FqCommentImages } from '../FqImageViewer';
+import { FqCommentEmojiText } from '../FqCommentEmoji';
 import { appState } from '../../entryability/AppState';
+
+/** 瓦片实例序号（geometryTransition 一镜到底 id 唯一化用）。 */
+let fqCommentTileSeq: number = 0;
+
+function fqNextCommentTileSeq(): number {
+  fqCommentTileSeq += 1;
+  return fqCommentTileSeq;
+}
 
 /** 书评懒加载数据源：持已加载书评，续拉按 comment_id 去重后通知 LazyForEach 刷新。 */
 class FqCommentSource implements IDataSource {
@@ -96,8 +106,9 @@ export struct FqCommentTile {
   /** 正文最大行数（0 不限；详情页预览传 4）。 */
   @Param textMaxLines: number = 0;
   @Param paddingValue: number = 20
-  /** 回复加载器（宿主注入，group_id=book_id=书 id）；未注入保持只读回复计数。 */
-  @Param replyLoader: ((commentId: string) => Promise<FqCommentReplyPage>) | undefined = undefined;
+  /** 回复加载器（宿主注入，group_id=book_id=书 id；count 为拉取条数）；未注入保持只读回复计数。 */
+  @Param replyLoader: ((commentId: string, count: number) => Promise<FqCommentReplyPage>) | undefined = undefined;
+  private readonly tileSeq: number = fqNextCommentTileSeq();
 
   build() {
     Column({ space: 10 }) {
@@ -172,26 +183,19 @@ export struct FqCommentTile {
       .alignItems(VerticalAlign.Top)
       .width('100%')
 
-      Text(this.comment.text)
-        .fontSize(13.5)
-        .lineHeight(22)
-        .fontColor(this.fontColor)
-        .width('100%')
-        .maxLines(this.textMaxLines > 0 ? this.textMaxLines : 9999)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
+      FqCommentEmojiText({
+        text: this.comment.text,
+        fontSize: 13.5,
+        fontColor: this.fontColor,
+        lineHeight: 22,
+        maxLines: this.textMaxLines,
+      })
 
       if (this.comment.imageUrls.length > 0) {
-        Row({ space: 6 }) {
-          ForEach(this.comment.imageUrls.slice(0, 3), (url: string) => {
-            Image(url)
-              .width(76)
-              .height(76)
-              .borderRadius(6)
-              .objectFit(ImageFit.Cover)
-              .draggable(false)
-          }, (url: string): string => url)
-        }
-        .alignItems(VerticalAlign.Top)
+        FqCommentImages({
+          imageUrls: this.comment.imageUrls,
+          geometryPrefix: `c${this.tileSeq}_${this.comment.id}`,
+        })
       }
 
       Row({ space: 14 }) {
@@ -299,12 +303,12 @@ export struct FqCommentSheet {
   }
 
   /** 回复加载器工厂：replyBookId 为空（剧评等）不启用，返回 undefined 保持只读计数。 */
-  private makeReplyLoader(): ((commentId: string) => Promise<FqCommentReplyPage>) | undefined {
+  private makeReplyLoader(): ((commentId: string, count: number) => Promise<FqCommentReplyPage>) | undefined {
     if (this.replyBookId.length === 0) {
       return undefined;
     }
-    return (commentId: string): Promise<FqCommentReplyPage> =>
-      FqBackend.get().commentReplies(commentId, this.replyBookId, this.replyBookId, 50);
+    return (commentId: string, count: number): Promise<FqCommentReplyPage> =>
+      FqBackend.get().commentReplies(commentId, this.replyBookId, this.replyBookId, count < 1 ? 50 : count);
   }
 
   /** 拉取评论一页：refresh 重置分页（首开/重试），否则触底续拉；

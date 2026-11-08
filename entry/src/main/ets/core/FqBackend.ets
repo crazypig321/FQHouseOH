@@ -578,6 +578,23 @@ export class FqBackend {
   }
 
   /**
+   * 评论接口业务码校验：code 非 0/200（如上游瞬断 code=100）直接抛错，
+   * 避免 parser 把异常载荷静默解析成空页、被 UI 当成「暂无评论」。
+   */
+  private ensureCommentBizOk(payload: Record<string, Object>): void {
+    const code: Object | undefined = payload['code'];
+    let ok: boolean = false;
+    if (typeof code === 'number') {
+      ok = code === 0 || code === 200;
+    } else if (typeof code === 'string') {
+      ok = code === '0' || code === '200';
+    }
+    if (!ok) {
+      throw new FqRequestError(`评论服务暂时不可用（code=${code}），请重试`, 0);
+    }
+  }
+
+  /**
    * 某段段评一页（/api/v1/books/{bookId}/reviews 段评配方，fqapp paragraphComments）：
    * group_id=章节 itemId、group_type=15、server_channel=38（43 官方值恒空、39 仅部分书命中）、
    * item_version 必传（目录 version）；cursor 为上页 common_list_info.cursor 数字串（首页空）。
@@ -595,6 +612,7 @@ export class FqBackend {
     }
     const payload: Record<string, Object> =
       await this.getJson(`/api/v1/books/${encodeURIComponent(bookId)}/reviews`, query);
+    this.ensureCommentBizOk(payload);
     const page: FqParagraphCommentPage = fqParseParagraphCommentPage(payload);
     hilog.info(0x0001, 'FqBackend',
       `paragraphComments ver=${itemVersion} para=${paraIndex} code=${payload['code']} n=${page.comments.length} total=${page.totalCount} more=${page.hasMore}`);
@@ -603,11 +621,12 @@ export class FqBackend {
 
   /**
    * 章末章评聚合信息（/api/v1/chapters/{itemId}/reviews?comment_source=3 的
-   * 最大段键桶，官方端章评入口；业务码非 0/200 视为无章评，传输错误抛出由调用方处理）。
+   * 最大段键桶，官方端章评入口；业务码非 0/200 抛错由调用方处理）。
    */
   public async chapterIdeaMeta(itemId: string): Promise<FqChapterIdeaMeta> {
     const payload: Record<string, Object> = await this.getJson(
       `/api/v1/chapters/${encodeURIComponent(itemId)}/reviews`, 'comment_source=3');
+    this.ensureCommentBizOk(payload);
     return fqParseChapterIdeaMeta(payload);
   }
 
@@ -629,6 +648,7 @@ export class FqBackend {
     }
     const payload: Record<string, Object> =
       await this.getJson(`/api/v1/books/${encodeURIComponent(bookId)}/reviews`, query);
+    this.ensureCommentBizOk(payload);
     const page: FqBookCommentPage = fqParseChapterCommentPage(payload);
     hilog.info(0x0001, 'FqBackend',
       `chapterComments ver=${itemVersion} para=${paraIndex} code=${payload['code']} n=${page.comments.length} total=${page.totalCount}`);
@@ -648,6 +668,7 @@ export class FqBackend {
       + `&count=${count < 1 ? 20 : count}`;
     const payload: Record<string, Object> = await this.getJson(
       `/api/v1/comments/${encodeURIComponent(commentId)}/replies`, query);
+    this.ensureCommentBizOk(payload);
     const page: FqCommentReplyPage = fqParseCommentReplies(payload);
     hilog.info(0x0001, 'FqBackend',
       `commentReplies cid=${commentId} code=${payload['code']} n=${page.replies.length} total=${page.totalCount} more=${page.hasMore}`);

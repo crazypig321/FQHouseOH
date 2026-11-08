@@ -27,7 +27,7 @@ import { batteryInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { HdsAnimationMode, HdsNavigationMenuItemOptions, HdsTabsController, TitleBarContentOptions } from '@kit.UIDesignKit';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
-import { FqChapter, FqCommentReplyPage, fqFormatCountInt, fqKindToTab } from '../../model/FqModels';
+import { FqBookComment, FqChapter, FqCommentReplyPage, fqKindToTab } from '../../model/FqModels';
 import { FqReaderProgress, FqReaderStore, FqCustomReaderFont, FqCustomReaderTheme, fqCustomThemeUseDark, fqCustomThemeBothModesSet } from '../../core/FqReaderStore';
 import { fqEnsureDownloadSubdir } from '../../core/FqCacheExport';
 import { FqAppSettingsStore, FQ_THEME_DARK, FQ_THEME_LIGHT } from '../../core/FqAppSettingsStore';
@@ -39,7 +39,7 @@ import { ReaderNavParams, ListenNavParams, ROUTE_LISTEN } from '../../model/FqNa
 import { CommonNav, titleBarOf } from '../../view/CommonNav';
 import { CommonLoading } from '../../view/CommonCom';
 import { CommonSheet, FqSheetOptions } from '../../view/sheet/CommonSheet';
-import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/sheet/FqCommentSheet';
+import { FqCommentSheet, FqCommentTile, fqCommentSheetHeightVp } from '../../view/sheet/FqCommentSheet';
 import { FqReplySection } from '../../view/sheet/FqReplySheet';
 import { FqCatalogSheet } from '../../view/sheet/FqCatalogSheet';
 import { FQ_FONT_OPTIONS, FqFontOption } from '../../core/FqOnlineParser';
@@ -2222,6 +2222,7 @@ export struct ReaderPage {
     this.paraSource.setItems([]);
     this.paraCount = 0;
     this.paraHasMore = false;
+    this.paraLoading = false;
     this.paraLoadingMore = false;
     this.paraMoreFailed = false;
     this.paraNextOffset = 0;
@@ -2344,31 +2345,30 @@ export struct ReaderPage {
     }
   }
 
-  /** 段评相对时间（刚刚/N分钟前/N小时前/N天前）。 */
-  private paraRelativeTime(ms: number): string {
-    if (ms <= 0) {
-      return '';
-    }
-    const diff: number = Date.now() - ms;
-    if (diff < 60 * 1000) {
-      return '刚刚';
-    }
-    if (diff < 60 * 60 * 1000) {
-      return `${Math.floor(diff / (60 * 1000))}分钟前`;
-    }
-    if (diff < 24 * 60 * 60 * 1000) {
-      return `${Math.floor(diff / (60 * 60 * 1000))}小时前`;
-    }
-    return `${Math.floor(diff / (24 * 60 * 60 * 1000))}天前`;
+  /** 段评 → 书评模型归一（三种评论统一走 FqCommentTile 公共瓦片）。 */
+  private paraToBookComment(comment: FqParagraphComment): FqBookComment {
+    return new FqBookComment(
+      comment.id,
+      comment.text,
+      comment.imageUrls,
+      0,
+      comment.diggCount,
+      comment.replyCount,
+      0,
+      comment.createdAtMs,
+      comment.userName,
+      comment.userAvatar,
+      comment.isAuthor,
+    );
   }
 
   /** 段评回复加载器工厂（group_id=book_id=书 id，对齐 fqapp 段评回复；本地书不启用）。 */
-  private makeParaReplyLoader(): ((commentId: string) => Promise<FqCommentReplyPage>) | undefined {
+  private makeParaReplyLoader(): ((commentId: string, count: number) => Promise<FqCommentReplyPage>) | undefined {
     if (this.bookId.length === 0 || FqLocalBookStore.isLocalBookId(this.bookId)) {
       return undefined;
     }
-    return (commentId: string): Promise<FqCommentReplyPage> =>
-      FqBackend.get().commentReplies(commentId, this.bookId, this.bookId, 50);
+    return (commentId: string, count: number): Promise<FqCommentReplyPage> =>
+      FqBackend.get().commentReplies(commentId, this.bookId, this.bookId, count < 1 ? 50 : count);
   }
 
   // ---------------------------------------------------------------------------
@@ -3374,7 +3374,11 @@ export struct ReaderPage {
           List() {
             LazyForEach(this.paraSource, (comment: FqParagraphComment) => {
               ListItem() {
-                this.ParaCommentTile(comment)
+                FqCommentTile({
+                  comment: this.paraToBookComment(comment),
+                  fontColor: this.theme().fontColor,
+                  replyLoader: this.makeParaReplyLoader(),
+                })
               }
             }, (comment: FqParagraphComment): string =>
               comment.id.length > 0 ? comment.id : `c${comment.createdAtMs}_${comment.text.length}`)
@@ -3401,111 +3405,6 @@ export struct ReaderPage {
       .width('100%')
       .height('100%')
     }
-  }
-
-  /** 单条段评：头像 + 名字/时间 + 正文 + 点赞计数。 */
-  @Builder
-  private ParaCommentTile(comment: FqParagraphComment) {
-    Column({ space: 8 }) {
-      Row({ space: 10 }) {
-        Stack() {
-          Column() {
-            SymbolGlyph($r('sys.symbol.person'))
-              .fontSize(15)
-              .fontColor([this.theme().fontColor])
-              .opacity(0.55)
-          }
-          .width(28)
-          .height(28)
-          .borderRadius(14)
-          .justifyContent(FlexAlign.Center)
-          .backgroundColor($r('sys.color.comp_background_tertiary'))
-          if (comment.userAvatar.length > 0) {
-            Image(comment.userAvatar)
-              .width(28)
-              .height(28)
-              .borderRadius(14)
-              .objectFit(ImageFit.Cover)
-              .draggable(false)
-          }
-        }
-        Column({ space: 2 }) {
-          Row({ space: 6 }) {
-            Text(comment.userName.length > 0 ? comment.userName : '书友')
-              .fontSize(13)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.theme().fontColor)
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .layoutWeight(1)
-            if (comment.isAuthor) {
-              Text('作者')
-                .fontSize(9)
-                .fontColor(Color.White)
-                .backgroundColor(appState.accentColor)
-                .borderRadius(4)
-                .padding({ left: 5, right: 5, top: 1, bottom: 1 })
-            }
-          }
-          .width('100%')
-          if (this.paraRelativeTime(comment.createdAtMs).length > 0) {
-            Text(this.paraRelativeTime(comment.createdAtMs))
-              .fontSize(11)
-              .fontColor(this.theme().fontColor)
-              .opacity(0.55)
-              .maxLines(1)
-          }
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-      }
-      .alignItems(VerticalAlign.Top)
-      .width('100%')
-
-      Text(comment.text)
-        .fontSize(13.5)
-        .lineHeight(22)
-        .fontColor(this.theme().fontColor)
-        .width('100%')
-
-      if (comment.imageUrls.length > 0) {
-        Row({ space: 6 }) {
-          ForEach(comment.imageUrls.slice(0, 3), (url: string) => {
-            Image(url)
-              .width(76)
-              .height(76)
-              .borderRadius(6)
-              .objectFit(ImageFit.Cover)
-              .draggable(false)
-          }, (url: string): string => url)
-        }
-        .alignItems(VerticalAlign.Top)
-      }
-
-      Row({ space: 4 }) {
-        SymbolGlyph($r('sys.symbol.hand_thumbsup'))
-          .fontSize(13)
-          .fontColor([this.theme().fontColor])
-          .opacity(0.55)
-        Text(fqFormatCountInt(comment.diggCount))
-          .fontSize(11)
-          .fontColor(this.theme().fontColor)
-          .opacity(0.55)
-      }
-      .alignItems(VerticalAlign.Center)
-
-      if (comment.replyCount > 0 && comment.id.length > 0) {
-        FqReplySection({
-          commentId: comment.id,
-          replyCount: comment.replyCount,
-          fontColor: this.theme().fontColor,
-          replyLoader: this.makeParaReplyLoader(),
-        })
-      }
-    }
-    .width('100%')
-    .alignItems(HorizontalAlign.Start)
-    .padding({ top: 12, bottom: 12, left: 20, right: 20 })
   }
 
   /** 面板内分隔线颜色（随阅读主题）。 */
