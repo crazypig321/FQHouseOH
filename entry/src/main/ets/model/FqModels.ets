@@ -846,6 +846,82 @@ export class FqEpisodeCommentPage {
   }
 }
 
+/** 单条评论回复（/api/v1/comments/{id}/replies 的 data.reply_list[] 条目，主体藏于 Common/common）。 */
+export class FqCommentReply {
+  readonly id: string;
+  readonly text: string;
+  readonly imageUrls: string[];
+  readonly diggCount: number;
+  /** 发布时间（毫秒），0 表示未知。 */
+  readonly createdAtMs: number;
+  readonly userName: string;
+  readonly userAvatar: string;
+
+  constructor(
+    id: string,
+    text: string,
+    imageUrls: string[],
+    diggCount: number,
+    createdAtMs: number,
+    userName: string,
+    userAvatar: string,
+  ) {
+    this.id = id;
+    this.text = text;
+    this.imageUrls = imageUrls;
+    this.diggCount = diggCount;
+    this.createdAtMs = createdAtMs;
+    this.userName = userName;
+    this.userAvatar = userAvatar;
+  }
+
+  /** 相对发布时间（`1天前`），未知时间返回空串。 */
+  relativeTime(nowMs?: number): string {
+    if (this.createdAtMs <= 0) {
+      return '';
+    }
+    const reference: number = nowMs !== undefined ? nowMs : Date.now();
+    const seconds: number = Math.floor((reference - this.createdAtMs) / 1000);
+    if (seconds < 60) {
+      return '刚刚';
+    }
+    if (seconds < 3600) {
+      return `${Math.floor(seconds / 60)}分钟前`;
+    }
+    if (seconds < 86400) {
+      return `${Math.floor(seconds / 3600)}小时前`;
+    }
+    if (seconds < 86400 * 30) {
+      return `${Math.floor(seconds / 86400)}天前`;
+    }
+    if (seconds < 86400 * 365) {
+      return `${Math.floor(seconds / (86400 * 30))}个月前`;
+    }
+    return `${Math.floor(seconds / (86400 * 365))}年前`;
+  }
+
+  get isEmpty(): boolean {
+    return this.text.trim().length === 0 && this.imageUrls.length === 0;
+  }
+}
+
+/** 回复一页（单页拉取，cursor 恒空串无翻页；total/has_more 来自 common_list_info）。 */
+export class FqCommentReplyPage {
+  readonly replies: FqCommentReply[];
+  readonly totalCount: number;
+  readonly hasMore: boolean;
+
+  constructor(replies: FqCommentReply[], totalCount: number, hasMore: boolean) {
+    this.replies = replies;
+    this.totalCount = totalCount;
+    this.hasMore = hasMore;
+  }
+
+  get isEmpty(): boolean {
+    return this.replies.length === 0;
+  }
+}
+
 /** 章末章评聚合信息（/api/v1/chapters/{itemId}/reviews 的最大段键桶，官方章评入口）。 */
 export class FqChapterIdeaMeta {
   /** 章末章评段键（ideas data.data 最大键，如 10000；-1 无章评）。 */

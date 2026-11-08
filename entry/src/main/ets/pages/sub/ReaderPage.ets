@@ -27,7 +27,7 @@ import { batteryInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { HdsAnimationMode, HdsNavigationMenuItemOptions, HdsTabsController, TitleBarContentOptions } from '@kit.UIDesignKit';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
-import { FqChapter, fqFormatCountInt, fqKindToTab } from '../../model/FqModels';
+import { FqChapter, FqCommentReplyPage, fqFormatCountInt, fqKindToTab } from '../../model/FqModels';
 import { FqReaderProgress, FqReaderStore, FqCustomReaderFont, FqCustomReaderTheme, fqCustomThemeUseDark, fqCustomThemeBothModesSet } from '../../core/FqReaderStore';
 import { fqEnsureDownloadSubdir } from '../../core/FqCacheExport';
 import { FqAppSettingsStore, FQ_THEME_DARK, FQ_THEME_LIGHT } from '../../core/FqAppSettingsStore';
@@ -40,6 +40,7 @@ import { CommonNav, titleBarOf } from '../../view/CommonNav';
 import { CommonLoading } from '../../view/CommonCom';
 import { CommonSheet, FqSheetOptions } from '../../view/sheet/CommonSheet';
 import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/sheet/FqCommentSheet';
+import { FqReplySection } from '../../view/sheet/FqReplySheet';
 import { FqCatalogSheet } from '../../view/sheet/FqCatalogSheet';
 import { FQ_FONT_OPTIONS, FqFontOption } from '../../core/FqOnlineParser';
 import { fqAudioSession } from '../../core/FqAudioSession';
@@ -2361,6 +2362,15 @@ export struct ReaderPage {
     return `${Math.floor(diff / (24 * 60 * 60 * 1000))}天前`;
   }
 
+  /** 段评回复加载器工厂（group_id=book_id=书 id，对齐 fqapp 段评回复；本地书不启用）。 */
+  private makeParaReplyLoader(): ((commentId: string) => Promise<FqCommentReplyPage>) | undefined {
+    if (this.bookId.length === 0 || FqLocalBookStore.isLocalBookId(this.bookId)) {
+      return undefined;
+    }
+    return (commentId: string): Promise<FqCommentReplyPage> =>
+      FqBackend.get().commentReplies(commentId, this.bookId, this.bookId, 50);
+  }
+
   // ---------------------------------------------------------------------------
   // 字体 / 设置
   // ---------------------------------------------------------------------------
@@ -3293,6 +3303,7 @@ export struct ReaderPage {
       chapterItemId: this.currentChapterItemId(),
       chapterVersion: this.currentChapterVersion(),
       openToken: this.commentOpenToken,
+      replyBookId: this.bookId,
     })
   }
 
@@ -3457,6 +3468,20 @@ export struct ReaderPage {
         .fontColor(this.theme().fontColor)
         .width('100%')
 
+      if (comment.imageUrls.length > 0) {
+        Row({ space: 6 }) {
+          ForEach(comment.imageUrls.slice(0, 3), (url: string) => {
+            Image(url)
+              .width(76)
+              .height(76)
+              .borderRadius(6)
+              .objectFit(ImageFit.Cover)
+              .draggable(false)
+          }, (url: string): string => url)
+        }
+        .alignItems(VerticalAlign.Top)
+      }
+
       Row({ space: 4 }) {
         SymbolGlyph($r('sys.symbol.hand_thumbsup'))
           .fontSize(13)
@@ -3468,6 +3493,15 @@ export struct ReaderPage {
           .opacity(0.55)
       }
       .alignItems(VerticalAlign.Center)
+
+      if (comment.replyCount > 0 && comment.id.length > 0) {
+        FqReplySection({
+          commentId: comment.id,
+          replyCount: comment.replyCount,
+          fontColor: this.theme().fontColor,
+          replyLoader: this.makeParaReplyLoader(),
+        })
+      }
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)

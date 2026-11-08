@@ -26,6 +26,8 @@ import {
   FqAuthorWork,
   FqBookComment,
   FqBookCommentPage,
+  FqCommentReply,
+  FqCommentReplyPage,
   FqBookDetail,
   FqChapter,
   FqDanmaku,
@@ -1274,7 +1276,11 @@ export function fqParseParagraphComments(payload: Record<string, Object>): FqPar
     const common: Record<string, Object> | null = fqAsRecord(commentRec['common']);
     const content: Record<string, Object> | null = common !== null ? fqAsRecord(common['content']) : null;
     const text: string = content !== null ? fqStr(content, 'text') : '';
-    if (text.trim().length === 0) {
+    const imageList: Record<string, Object> | null =
+      content !== null ? fqAsRecord(content['image_data_list']) : null;
+    const imageUrls: string[] = imageList !== null
+      ? fqCommentImageUrls(imageList['image_data']) : [];
+    if (text.trim().length === 0 && imageUrls.length === 0) {
       continue;
     }
     const userInfo: Record<string, Object> | null = common !== null ? fqAsRecord(common['user_info']) : null;
@@ -1285,7 +1291,9 @@ export function fqParseParagraphComments(payload: Record<string, Object>): FqPar
     const comment: FqParagraphComment = new FqParagraphComment();
     comment.id = fqStr(commentRec, 'comment_id');
     comment.text = text;
+    comment.imageUrls = imageUrls;
     comment.diggCount = stat !== null ? fqAsInt(stat['digg_count'], 0) : 0;
+    comment.replyCount = stat !== null ? fqAsInt(stat['reply_count'], 0) : 0;
     comment.createdAtMs = common !== null ? fqCommentTimestampMs(common['create_timestamp']) : 0;
     comment.userName = baseInfo !== null ? fqStr(baseInfo, 'user_name') : '';
     comment.userAvatar = baseInfo !== null ? fqStr(baseInfo, 'user_avatar') : '';
@@ -1317,6 +1325,61 @@ export function fqParseParagraphCommentPage(payload: Record<string, Object>): Fq
     fqAsInt(info['total'], 0),
     info['has_more'] === true,
     fqCursorOffset(fqStr(info, 'cursor')),
+  );
+}
+
+/**
+ * 评论回复一页（/api/v1/comments/{commentId}/replies：data.reply_list[] 条目
+ * 主体藏于 Common（大写 C）或 common——对齐 fqapp CommentReply.fromRaw；
+ * 页级 total/has_more 在 common_list_info ?? comment_list_info；业务码非 0/200 返回空页）。
+ */
+export function fqParseCommentReplies(payload: Record<string, Object>): FqCommentReplyPage {
+  const replies: FqCommentReply[] = [];
+  const code: number = fqAsInt(payload['code'], 0);
+  if (code !== 0 && code !== 200) {
+    return new FqCommentReplyPage(replies, 0, false);
+  }
+  const dataRec: Record<string, Object> | null = fqAsRecord(payload['data']);
+  if (dataRec === null) {
+    return new FqCommentReplyPage(replies, 0, false);
+  }
+  const list: Object[] | null = fqAsArray(dataRec['reply_list']);
+  if (list !== null) {
+    for (const entry of list) {
+      const rec: Record<string, Object> | null = fqAsRecord(entry);
+      if (rec === null) {
+        continue;
+      }
+      const body: Record<string, Object> = fqAsRecord(rec['Common']) ?? fqAsRecord(rec['common'])
+        ?? fqEmptyRecord();
+      const content: Record<string, Object> = fqAsRecord(body['content']) ?? fqEmptyRecord();
+      const text: string = fqStr(content, 'text');
+      const imageList: Record<string, Object> | null = fqAsRecord(content['image_data_list']);
+      const imageUrls: string[] = imageList !== null
+        ? fqCommentImageUrls(imageList['image_data']) : [];
+      if (text.length === 0 && imageUrls.length === 0) {
+        continue;
+      }
+      const userInfo: Record<string, Object> = fqAsRecord(body['user_info']) ?? fqEmptyRecord();
+      const baseInfo: Record<string, Object> = fqAsRecord(userInfo['base_info']) ?? fqEmptyRecord();
+      const stat: Record<string, Object> = fqAsRecord(rec['stat']) ?? fqEmptyRecord();
+      replies.push(new FqCommentReply(
+        fqStr(rec, 'reply_id'),
+        text,
+        imageUrls,
+        fqAsInt(stat['digg_count'], 0),
+        fqCommentTimestampMs(body['create_timestamp']),
+        fqStr(baseInfo, 'user_name'),
+        fqStr(baseInfo, 'user_avatar'),
+      ));
+    }
+  }
+  const info: Record<string, Object> = fqAsRecord(dataRec['common_list_info'])
+    ?? fqAsRecord(dataRec['comment_list_info']) ?? fqEmptyRecord();
+  return new FqCommentReplyPage(
+    replies,
+    fqAsInt(info['total'], 0),
+    info['has_more'] === true,
   );
 }
 

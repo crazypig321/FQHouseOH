@@ -165,7 +165,11 @@ export class FqParagraphComment {
   userName: string = '';
   userAvatar: string = '';
   text: string = '';
+  /** 段评配图（content.image_data_list.image_data，仅 http(s)）。 */
+  imageUrls: string[] = [];
   diggCount: number = 0;
+  /** 回复数（stat.reply_count）。 */
+  replyCount: number = 0;
   createdAtMs: number = 0;
   isAuthor: boolean = false;
 }

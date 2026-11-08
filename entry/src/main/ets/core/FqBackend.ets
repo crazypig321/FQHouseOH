@@ -15,6 +15,7 @@ import fq, { FqBridgeResponse } from 'libfqapi_napi.so';
 import { FqDeployer } from './FqDeployer';
 import { FqKeyStore } from './FqKeyStore';
 import {   fqParseAuthorProfile, fqParseBookComments, fqParseBookDetail, fqParseChapterCommentPage, fqParseChapterIdeaCounts, fqParseChapterIdeaMeta, fqParseChapterSummaries,
+  fqParseCommentReplies,
   fqParseDanmaku, fqParseDirectory, fqParseEpisodeComments, fqParseEpisodeSource, fqParseHomepage, fqParseParagraphCommentPage, fqParseRankBoard, fqParseRankCatalog,
   fqParseSearchTabs, fqParseSeriesFeed, fqParseSeriesRelateBook, fqParseRelatedSeries, fqLegacyChapterText, fqNormalizeChapterWithIdx, fqParseNovelChapter,
   fqParseHotSearch,
@@ -35,6 +36,7 @@ import { FqAppSettingsStore } from './FqAppSettingsStore';
 import {
   FqAuthorProfile,
   FqBookCommentPage,
+  FqCommentReplyPage,
   FqBookDetail,
   FqChapter,
   FqChapterIdeaMeta,
@@ -630,6 +632,25 @@ export class FqBackend {
     const page: FqBookCommentPage = fqParseChapterCommentPage(payload);
     hilog.info(0x0001, 'FqBackend',
       `chapterComments ver=${itemVersion} para=${paraIndex} code=${payload['code']} n=${page.comments.length} total=${page.totalCount}`);
+    return page;
+  }
+
+  /**
+   * 评论回复一页（/api/v1/comments/{commentId}/replies，对齐 fqapp commentReplies）：
+   * comment_id / group_id / book_id 三参必填；段评/章评/书评/漫评均 group_id=bookId
+   * （fqapp 段评回复实证）；后端单页返回（cursor 恒空串），count 即拉取条数。
+   */
+  public async commentReplies(commentId: string, groupId: string, bookId: string,
+    count: number = 20): Promise<FqCommentReplyPage> {
+    const query: string = `comment_id=${encodeURIComponent(commentId)}`
+      + `&group_id=${encodeURIComponent(groupId)}`
+      + `&book_id=${encodeURIComponent(bookId)}`
+      + `&count=${count < 1 ? 20 : count}`;
+    const payload: Record<string, Object> = await this.getJson(
+      `/api/v1/comments/${encodeURIComponent(commentId)}/replies`, query);
+    const page: FqCommentReplyPage = fqParseCommentReplies(payload);
+    hilog.info(0x0001, 'FqBackend',
+      `commentReplies cid=${commentId} code=${payload['code']} n=${page.replies.length} total=${page.totalCount} more=${page.hasMore}`);
     return page;
   }
 

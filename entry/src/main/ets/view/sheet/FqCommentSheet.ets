@@ -13,9 +13,10 @@
 
 import { display } from '@kit.ArkUI';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
-import { FqBookComment, FqBookCommentPage, FqChapterIdeaMeta, fqFormatCountInt } from '../../model/FqModels';
+import { FqBookComment, FqBookCommentPage, FqChapterIdeaMeta, FqCommentReplyPage, fqFormatCountInt } from '../../model/FqModels';
 import { CommonLoading } from '../CommonCom';
 import { CommonSheet } from './CommonSheet';
+import { FqReplySection } from './FqReplySheet';
 import { appState } from '../../entryability/AppState';
 
 /** 书评懒加载数据源：持已加载书评，续拉按 comment_id 去重后通知 LazyForEach 刷新。 */
@@ -95,6 +96,8 @@ export struct FqCommentTile {
   /** 正文最大行数（0 不限；详情页预览传 4）。 */
   @Param textMaxLines: number = 0;
   @Param paddingValue: number = 20
+  /** 回复加载器（宿主注入，group_id=book_id=书 id）；未注入保持只读回复计数。 */
+  @Param replyLoader: ((commentId: string) => Promise<FqCommentReplyPage>) | undefined = undefined;
 
   build() {
     Column({ space: 10 }) {
@@ -216,6 +219,15 @@ export struct FqCommentTile {
         .alignItems(VerticalAlign.Center)
       }
       .alignItems(VerticalAlign.Center)
+
+      if (this.replyLoader !== undefined && this.comment.replyCount > 0 && this.comment.id.length > 0) {
+        FqReplySection({
+          commentId: this.comment.id,
+          replyCount: this.comment.replyCount,
+          fontColor: this.fontColor,
+          replyLoader: this.replyLoader,
+        })
+      }
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
@@ -240,6 +252,8 @@ export struct FqCommentSheet {
   @Param cursorLoader: ((refresh: boolean) => Promise<FqBookCommentPage>) | undefined = undefined;
   /** 打开令牌：宿主每次打开 +1，组件据此重置分页并重拉（兼容内容重建/复用两种挂载）。 */
   @Param openToken: number = 0;
+  /** 回复书 id（非空启用「展开 N 条回复」；group_id=book_id=此值。剧评不传，保持只读计数）。 */
+  @Param replyBookId: string = '';
   @Local loading: boolean = false;
   @Local errorMsg: string = '';
   @Local count: number = 0;
@@ -282,6 +296,15 @@ export struct FqCommentSheet {
   /** Sheet 标题：总数就绪后带计数（章评 · 123）。 */
   private sheetTitle(): string {
     return this.total > 0 ? `${this.commentLabel} · ${this.total}` : this.commentLabel;
+  }
+
+  /** 回复加载器工厂：replyBookId 为空（剧评等）不启用，返回 undefined 保持只读计数。 */
+  private makeReplyLoader(): ((commentId: string) => Promise<FqCommentReplyPage>) | undefined {
+    if (this.replyBookId.length === 0) {
+      return undefined;
+    }
+    return (commentId: string): Promise<FqCommentReplyPage> =>
+      FqBackend.get().commentReplies(commentId, this.replyBookId, this.replyBookId, 50);
   }
 
   /** 拉取评论一页：refresh 重置分页（首开/重试），否则触底续拉；
@@ -428,6 +451,7 @@ export struct FqCommentSheet {
                 FqCommentTile({
                   comment: comment,
                   fontColor: this.fontColor,
+                  replyLoader: this.makeReplyLoader(),
                 })
               }
             }, (comment: FqBookComment): string =>

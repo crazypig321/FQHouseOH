@@ -1315,6 +1315,7 @@ export struct ListenPage {
       chapterItemId: this.currentChapterItemId(),
       chapterVersion: this.currentChapterVersion(),
       openToken: this.commentsOpenToken,
+      replyBookId: fqAudioSession.bookId,
     })
   }
 

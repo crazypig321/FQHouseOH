@@ -1482,6 +1482,7 @@ export struct ComicPage {
       bookId: this.bookId,
       fontColor: $r('sys.color.font_primary'),
       commentLabel: '漫评',
+      replyBookId: this.bookId,
     })
   }
 

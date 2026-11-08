@@ -658,6 +658,9 @@ export struct DetailPage {
       bookId: this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId,
       fontColor: $r('sys.color.font_primary'),
       commentLabel: this.commentLabel(),
+      // 剧评回复走短剧独立端点（本期未接），仅书评/漫评启用回复展开
+      replyBookId: this.itemKind === 'video' || this.itemKind === 'manju' ? ''
+        : (this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId),
     })
   }
 
