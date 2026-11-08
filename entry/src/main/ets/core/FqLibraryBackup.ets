@@ -15,7 +15,8 @@ import { FqListenRecord, FqAudioHistory } from './FqAudioHistory';
 import { FqWatchedMergeOutcome, FqWatchedProgress, FqWatchedStore } from './FqWatchedStore';
 import { FqReaderProgress, FqReaderSettings, FqReaderStore,
   fqDecodeReadRanges, fqEncodeReadRanges, fqNormalizeThemeFontColor } from './FqReaderStore';
-import { FqAppSettingsStore } from './FqAppSettingsStore';
+import { FqAppSettingsStore, FQ_DRAMA_AUTO_CACHE_AHEAD_MAX,
+  FQ_DANMAKU_ALPHA_MIN_PERCENT, FQ_DANMAKU_ALPHA_MAX_PERCENT } from './FqAppSettingsStore';
 import { fqAsArray, fqAsRecord, fqNum, fqStr } from './FqJson';
 
 const FQ_BACKUP_FORMAT: string = 'fqhouse.library-backup';
@@ -97,6 +98,15 @@ function fqBackupCheckRange(rec: Record<string, Object>, key: string, min: numbe
   const raw: Object | undefined = rec[key];
   if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < min || raw > max ||
     Math.trunc(raw) !== raw) {
+    throw new Error(`备份字段 ${key} 无效`);
+  }
+  return raw;
+}
+
+/** 布尔字段校验（播放设置段：必须为 boolean，缺省/类型错误即拒绝）。 */
+function fqBackupCheckBool(rec: Record<string, Object>, key: string): boolean {
+  const raw: Object | undefined = rec[key];
+  if (typeof raw !== 'boolean') {
     throw new Error(`备份字段 ${key} 无效`);
   }
   return raw;
@@ -240,6 +250,41 @@ function fqBackupBaseName(path: string): string {
   return slash >= 0 ? path.substring(slash + 1) : path;
 }
 
+/** 备份内播放设置段：弹幕样式（不透明度/速度/行数/显示区域/字号/背景透明）+
+ *  解码方式（硬解/软解）+ 边看边缓存（集数/仅 Wi-Fi）+ 画中画 + 朗读音色语速。 */
+export class FqBackupPlaybackSettings {
+  readonly danmakuAlphaPercent: number;
+  readonly danmakuSpeedTier: number;
+  readonly danmakuLineCount: number;
+  readonly danmakuLineSpaceTier: number;
+  readonly danmakuSizeTier: number;
+  readonly danmakuBgTransparent: boolean;
+  readonly videoHwdec: boolean;
+  readonly dramaAutoCacheAhead: number;
+  readonly dramaAutoCacheWifiOnly: boolean;
+  readonly pipVideo: boolean;
+  readonly ttsPerson: number;
+  readonly ttsRate: number;
+
+  constructor(danmakuAlphaPercent: number, danmakuSpeedTier: number, danmakuLineCount: number,
+    danmakuLineSpaceTier: number, danmakuSizeTier: number, danmakuBgTransparent: boolean,
+    videoHwdec: boolean, dramaAutoCacheAhead: number, dramaAutoCacheWifiOnly: boolean,
+    pipVideo: boolean, ttsPerson: number, ttsRate: number) {
+    this.danmakuAlphaPercent = danmakuAlphaPercent;
+    this.danmakuSpeedTier = danmakuSpeedTier;
+    this.danmakuLineCount = danmakuLineCount;
+    this.danmakuLineSpaceTier = danmakuLineSpaceTier;
+    this.danmakuSizeTier = danmakuSizeTier;
+    this.danmakuBgTransparent = danmakuBgTransparent;
+    this.videoHwdec = videoHwdec;
+    this.dramaAutoCacheAhead = dramaAutoCacheAhead;
+    this.dramaAutoCacheWifiOnly = dramaAutoCacheWifiOnly;
+    this.pipVideo = pipVideo;
+    this.ttsPerson = ttsPerson;
+    this.ttsRate = ttsRate;
+  }
+}
+
 /** 备份内应用设置段：外观（深浅模式/主题色）+ 阅读偏好（字号/行距/主题/翻页/字体）。 */
 export class FqBackupAppSettings {
   readonly themeMode: number;
@@ -259,13 +304,16 @@ export class FqBackupAppSettings {
   readonly readerCustomThemes: FqBackupCustomTheme[];
   /** 当前选中的自定义主题 id（旧备份缺省为空串）。 */
   readonly readerCustomThemeId: string;
+  /** 播放设置段（旧备份无此段时为 null，恢复时跳过播放设置）。 */
+  readonly playback: FqBackupPlaybackSettings | null;
 
   constructor(themeMode: number, themeColor: string, themeCustomColor: string,
     backgroundAudio: boolean, readerFontSize: number, readerLineHeight: number,
     readerThemeIndex: number, readerFlipIndex: number, readerComicFlipIndex: number,
     readerFontIndex: number, readerShowParagraphComment: boolean,
     readerVolumeKeyPaging: boolean,
-    readerCustomThemes: FqBackupCustomTheme[], readerCustomThemeId: string) {
+    readerCustomThemes: FqBackupCustomTheme[], readerCustomThemeId: string,
+    playback: FqBackupPlaybackSettings | null = null) {
     this.themeMode = themeMode;
     this.themeColor = themeColor;
     this.themeCustomColor = themeCustomColor;
@@ -280,6 +328,7 @@ export class FqBackupAppSettings {
     this.readerVolumeKeyPaging = readerVolumeKeyPaging;
     this.readerCustomThemes = readerCustomThemes;
     this.readerCustomThemeId = readerCustomThemeId;
+    this.playback = playback;
   }
 }
 
@@ -331,10 +380,12 @@ export class FqLibraryBackupRestoreResult {
   readonly progressAdded: number;
   /** 应用设置段是否已随恢复应用（v1 备份无设置段时为 false）。 */
   readonly settingsApplied: boolean;
+  /** 播放设置段是否已随恢复应用（备份无播放段时为 false）。 */
+  readonly playbackApplied: boolean;
 
   constructor(shelfAdded: number, browseAdded: number, listenAdded: number,
     readerAdded: number, episodesAdded: number, progressAdded: number,
-    settingsApplied: boolean) {
+    settingsApplied: boolean, playbackApplied: boolean = false) {
     this.shelfAdded = shelfAdded;
     this.browseAdded = browseAdded;
     this.listenAdded = listenAdded;
@@ -342,6 +393,7 @@ export class FqLibraryBackupRestoreResult {
     this.episodesAdded = episodesAdded;
     this.progressAdded = progressAdded;
     this.settingsApplied = settingsApplied;
+    this.playbackApplied = playbackApplied;
   }
 }
 
@@ -458,6 +510,19 @@ export class FqLibraryBackup {
         lightBgData, darkBgData, theme.lightBgColor, theme.darkBgColor,
         theme.lightCustomFontId, theme.darkCustomFontId));
     }
+    const playback: FqBackupPlaybackSettings = new FqBackupPlaybackSettings(
+      FqAppSettingsStore.getDanmakuAlphaPercent(),
+      FqAppSettingsStore.getDanmakuSpeedTier(),
+      FqAppSettingsStore.getDanmakuLineCount(),
+      FqAppSettingsStore.getDanmakuLineSpaceTier(),
+      FqAppSettingsStore.getDanmakuSizeTier(),
+      FqAppSettingsStore.isDanmakuBgTransparent(),
+      FqAppSettingsStore.isVideoHwdec(),
+      FqAppSettingsStore.getDramaAutoCacheAhead(),
+      FqAppSettingsStore.isDramaAutoCacheWifiOnly(),
+      FqAppSettingsStore.isPipVideoEnabled(),
+      FqAppSettingsStore.getTtsPerson(),
+      FqAppSettingsStore.getTtsRate());
     const settings: FqBackupAppSettings = new FqBackupAppSettings(
       FqAppSettingsStore.getThemeMode(),
       FqAppSettingsStore.getThemeColor(),
@@ -472,7 +537,8 @@ export class FqLibraryBackup {
       readerSettings.showParagraphComment,
       readerSettings.volumeKeyPaging,
       customThemes,
-      readerSettings.customThemeId);
+      readerSettings.customThemeId,
+      playback);
     return new FqLibraryBackupData(Date.now(), FqLibraryBackup.appVersion(),
       shelf, browse, listen, watched, reader, excluded, settings);
   }
@@ -603,6 +669,22 @@ export class FqLibraryBackup {
       }
       settings['readerCustomThemes'] = customThemes;
       settings['readerCustomThemeId'] = data.settings.readerCustomThemeId;
+      if (data.settings.playback !== null) {
+        const playback: Record<string, Object> = {};
+        playback['danmakuAlphaPercent'] = data.settings.playback.danmakuAlphaPercent;
+        playback['danmakuSpeedTier'] = data.settings.playback.danmakuSpeedTier;
+        playback['danmakuLineCount'] = data.settings.playback.danmakuLineCount;
+        playback['danmakuLineSpaceTier'] = data.settings.playback.danmakuLineSpaceTier;
+        playback['danmakuSizeTier'] = data.settings.playback.danmakuSizeTier;
+        playback['danmakuBgTransparent'] = data.settings.playback.danmakuBgTransparent;
+        playback['videoHwdec'] = data.settings.playback.videoHwdec;
+        playback['dramaAutoCacheAhead'] = data.settings.playback.dramaAutoCacheAhead;
+        playback['dramaAutoCacheWifiOnly'] = data.settings.playback.dramaAutoCacheWifiOnly;
+        playback['pipVideo'] = data.settings.playback.pipVideo;
+        playback['ttsPerson'] = data.settings.playback.ttsPerson;
+        playback['ttsRate'] = data.settings.playback.ttsRate;
+        settings['playback'] = playback;
+      }
       root['settings'] = settings;
     }
     const text: string = JSON.stringify(root);
@@ -936,6 +1018,33 @@ export class FqLibraryBackup {
       if (customThemeId.length > 0 && !FQ_BACKUP_ID_PATTERN.test(customThemeId)) {
         throw new Error('备份字段 readerCustomThemeId 无效');
       }
+      // 播放设置段（旧备份无此段：null，恢复时跳过播放设置；存在则全量白名单校验）
+      let playback: FqBackupPlaybackSettings | null = null;
+      const playbackRaw: Object | undefined = settingsRec['playback'];
+      if (playbackRaw !== undefined) {
+        const pbRec: Record<string, Object> | null = fqAsRecord(playbackRaw);
+        if (pbRec === null) {
+          throw new Error('备份播放设置段格式无效');
+        }
+        const pbAlpha: number = fqBackupCheckRange(pbRec, 'danmakuAlphaPercent',
+          FQ_DANMAKU_ALPHA_MIN_PERCENT, FQ_DANMAKU_ALPHA_MAX_PERCENT);
+        const pbSpeed: number = fqBackupCheckRange(pbRec, 'danmakuSpeedTier', 1, 5);
+        const pbLines: number = fqBackupCheckRange(pbRec, 'danmakuLineCount', 1, 4);
+        const pbSpace: number = fqBackupCheckRange(pbRec, 'danmakuLineSpaceTier', 1, 4);
+        const pbSize: number = fqBackupCheckRange(pbRec, 'danmakuSizeTier', 1, 5);
+        const pbTtsRate: number = fqBackupCheckNumber(pbRec, 'ttsRate', 2);
+        if (pbTtsRate < 0.5) {
+          throw new Error('备份字段 ttsRate 无效');
+        }
+        playback = new FqBackupPlaybackSettings(pbAlpha, pbSpeed, pbLines, pbSpace, pbSize,
+          fqBackupCheckBool(pbRec, 'danmakuBgTransparent'),
+          fqBackupCheckBool(pbRec, 'videoHwdec'),
+          fqBackupCheckInt(pbRec, 'dramaAutoCacheAhead', FQ_DRAMA_AUTO_CACHE_AHEAD_MAX),
+          fqBackupCheckBool(pbRec, 'dramaAutoCacheWifiOnly'),
+          fqBackupCheckBool(pbRec, 'pipVideo'),
+          fqBackupCheckInt(pbRec, 'ttsPerson', 2147483647),
+          pbTtsRate);
+      }
       // 旧备份（v1/v2）主题档位迁移：2=夜间→3，3=自定义→4；v3 备份已是新档位。
       let readerThemeIndex: number =
         fqBackupCheckRange(settingsRec, 'readerThemeIndex', -1, backupVersion < 3 ? 3 : 4);
@@ -957,7 +1066,8 @@ export class FqLibraryBackup {
         typeof showParaRaw === 'boolean' ? showParaRaw : true,
         typeof volumeKeyRaw === 'boolean' ? volumeKeyRaw : false,
         customThemes,
-        customThemeId);
+        customThemeId,
+        playback);
     }
     return new FqLibraryBackupData(createdAt, appVersion, shelf, browse, listen,
       watched, reader, excluded, settings);
@@ -997,12 +1107,30 @@ export class FqLibraryBackup {
     }
     // 应用设置段：深浅模式/主题色/后台播放 + 阅读偏好即时应用（v1 备份无此段跳过）。
     let settingsApplied: boolean = false;
+    let playbackApplied: boolean = false;
     if (data.settings !== null) {
       const settings: FqBackupAppSettings = data.settings;
       FqAppSettingsStore.setThemeCustomColor(settings.themeCustomColor);
       FqAppSettingsStore.setThemeMode(settings.themeMode);
       FqAppSettingsStore.setThemeColor(settings.themeColor);
       FqAppSettingsStore.setBackgroundAudio(settings.backgroundAudio);
+      // 播放设置段（旧备份无此段跳过；弹幕样式/解码方式/边看边缓存/画中画/朗读音色语速）
+      if (settings.playback !== null) {
+        const playback: FqBackupPlaybackSettings = settings.playback;
+        FqAppSettingsStore.setDanmakuAlphaPercent(playback.danmakuAlphaPercent);
+        FqAppSettingsStore.setDanmakuSpeedTier(playback.danmakuSpeedTier);
+        FqAppSettingsStore.setDanmakuLineCount(playback.danmakuLineCount);
+        FqAppSettingsStore.setDanmakuLineSpaceTier(playback.danmakuLineSpaceTier);
+        FqAppSettingsStore.setDanmakuSizeTier(playback.danmakuSizeTier);
+        FqAppSettingsStore.setDanmakuBgTransparent(playback.danmakuBgTransparent);
+        FqAppSettingsStore.setVideoHwdec(playback.videoHwdec);
+        FqAppSettingsStore.setDramaAutoCacheAhead(playback.dramaAutoCacheAhead);
+        FqAppSettingsStore.setDramaAutoCacheWifiOnly(playback.dramaAutoCacheWifiOnly);
+        FqAppSettingsStore.setPipVideoEnabled(playback.pipVideo);
+        FqAppSettingsStore.setTtsPerson(playback.ttsPerson);
+        FqAppSettingsStore.setTtsRate(playback.ttsRate);
+        playbackApplied = true;
+      }
       FqReaderStore.saveSettings(settings.readerFontSize, settings.readerLineHeight,
         settings.readerThemeIndex, settings.readerFlipIndex, settings.readerFontIndex,
         settings.readerShowParagraphComment);
@@ -1040,7 +1168,7 @@ export class FqLibraryBackup {
       settingsApplied = true;
     }
     return new FqLibraryBackupRestoreResult(shelfAdded, browseAdded, listenAdded,
-      readerAdded, episodesAdded, progressAdded, settingsApplied);
+      readerAdded, episodesAdded, progressAdded, settingsApplied, playbackApplied);
   }
 
   /** 当前应用版本号（备份元信息；获取失败返回空串）。 */

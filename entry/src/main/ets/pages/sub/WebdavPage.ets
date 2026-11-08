@@ -165,7 +165,7 @@ export struct WebdavPage {
                 .fontWeight(FontWeight.Medium)
                 .fontColor($r('sys.color.font_primary'))
                 .width('100%')
-              Text('备份内容与本机导出一致：书架收藏、浏览记录、收听进度、阅读进度、已看剧集与外观、阅读设置，' +
+              Text('备份内容与本机导出一致：书架收藏、浏览记录、收听进度、阅读进度、已看剧集与外观、阅读、播放设置，' +
                 '不含本地 TXT 书籍与缓存。\n\n' +
                 `每次备份在服务器的 ${FqWebDav.BACKUP_DIRNAME}/ 目录生成独立文件（文件名含时间与设备名），` +
                 '超出保留数量时自动删除最老备份；恢复采用合并方式，只补充缺失记录，' +
@@ -283,6 +283,9 @@ export struct WebdavPage {
         `已看剧集 ${restoreResult.episodesAdded} 集。\n本机已有记录保持不变，可重复恢复。`;
       if (restoreResult.settingsApplied) {
         summary += '\n外观与阅读设置已同步。';
+      }
+      if (restoreResult.playbackApplied) {
+        summary += '\n播放设置（弹幕/解码/缓存等）已同步。';
       }
       this.message = summary;
     } catch (error) {

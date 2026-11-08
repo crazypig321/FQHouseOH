@@ -175,7 +175,8 @@ export struct BackupPage {
                 .fontWeight(FontWeight.Medium)
                 .fontColor($r('sys.color.font_primary'))
                 .width('100%')
-              Text(`包含书架收藏、浏览记录、收听进度、阅读进度、已看剧集（含续播进度）与外观、阅读设置。\n\n` +
+              Text(`包含书架收藏、浏览记录、收听进度、阅读进度、已看剧集（含续播进度）与外观、阅读设置，` +
+                '以及播放设置（弹幕样式、解码方式、边看边缓存、画中画、朗读音色语速）。\n\n' +
                 '不含本地 TXT 书籍、下载缓存、阅读时长统计与搜索历史，这些需要另行保留。\n\n' +
                 `导出的备份保存在 ${FQ_BACKUP_DIR_TEXT} 目录，可跨设备传输；` +
                 '恢复采用合并方式，只补充缺失记录，不会覆盖本机已有数据，可重复导入。')
@@ -206,7 +207,7 @@ export struct BackupPage {
     }
     DialogManager.ShowConfirm('导出备份',
       `备份将保存到 ${FQ_BACKUP_DIR_TEXT} 目录，包含书架收藏、浏览记录、收听进度、` +
-      '阅读进度、已看剧集与外观、阅读设置。将文件传到新设备，在本页选择导入即可恢复。',
+      '阅读进度、已看剧集与外观、阅读、播放设置。将文件传到新设备，在本页选择导入即可恢复。',
       '导出', (): void => {
         this.runExport();
       });
@@ -299,6 +300,9 @@ export struct BackupPage {
         `已看剧集 ${result.episodesAdded} 集。\n本机已有记录保持不变，可重复导入。`;
       if (result.settingsApplied) {
         summary += '\n外观与阅读设置已同步。';
+      }
+      if (result.playbackApplied) {
+        summary += '\n播放设置（弹幕/解码/缓存等）已同步。';
       }
       this.message = summary;
     } catch (error) {
