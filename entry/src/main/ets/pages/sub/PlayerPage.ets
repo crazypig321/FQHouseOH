@@ -149,10 +149,14 @@ const FQ_ADJUST_FULL_SWIPE: number = 1.2;
 const FQ_ADJUST_INIT_PERCENT: number = 50;
 /** 切集竖滑提示浮层出现阈值（vp，|位移| 超过亮出方向与目标集）。 */
 const FQ_EPISODE_SWIPE_HINT_VP: number = 12;
-/** 切集竖滑触发阈值（vp，|位移| 超过即切一集并锁到松手）。 */
-const FQ_EPISODE_SWIPE_TRIGGER_VP: number = 56;
-/** 切集划走动画：整页沿手势方向滑出时长（ms）。 */
+/** 切集竖滑触发阈值下限（vp）；实际取「页高 × 比例 与此值」较大者，松手时判定切不切集。 */
+const FQ_EPISODE_SWIPE_TRIGGER_VP: number = 100;
+/** 切集竖滑触发阈值的页高比例（松手时 |位移| 过阈值才沿手势方向划走换集）。 */
+const FQ_EPISODE_SWIPE_TRIGGER_PAGE_RATIO: number = 0.25;
+/** 切集划走动画：整页沿手势方向滑出时长基准（ms；按剩余行程比例缩短，跟手松手即续滑）。 */
 const FQ_EPISODE_SWITCH_OUT_MS: number = 260;
+/** 切集划走动画：滑出最短时长（ms；跟手位置已接近离屏时兜底）。 */
+const FQ_EPISODE_SWITCH_OUT_MIN_MS: number = 120;
 /** 切集划走动画：换集后新页从对侧滑入时长（ms）。 */
 const FQ_EPISODE_SWITCH_IN_MS: number = 320;
 /** 切集竖滑未过阈值松手整页回弹时长（ms）。 */
@@ -427,8 +431,8 @@ export struct PlayerPage {
   private episodeSwipeStartY: number = 0;
   /** 切集竖滑方向（0 未定 / 1 下一集 / -1 上一集）。 */
   private episodeSwipeDir: number = 0;
-  /** 切集竖滑已触发（一次手势只切一集，触发后锁到松手）。 */
-  private episodeSwipeDone: boolean = false;
+  /** 切集竖滑最新位移（vp，上滑为正；松手判定是否过触发阈值）。 */
+  private episodeSwipeLastDy: number = 0;
   /** 切集竖滑提示浮层（'' 隐藏；滑动中显示方向与目标集）。 */
   @Local episodeSwipeHint: string = '';
   /** 切集划走动画进行中（禁止再次触发竖滑/隔空切集）。 */
@@ -824,10 +828,10 @@ export struct PlayerPage {
                 this.onAdjustPanUpdate(event);
               })
               .onActionEnd((): void => {
-                this.onAdjustPanEnd();
+                this.onAdjustPanEnd(true);
               })
               .onActionCancel((): void => {
-                this.onAdjustPanEnd();
+                this.onAdjustPanEnd(false);
               }),
             PanGesture({ fingers: 1, direction: PanDirection.Horizontal })
               .onActionStart((event?: GestureEvent): void => {
@@ -4287,10 +4291,11 @@ export struct PlayerPage {
     }
   }
 
-  /** 竖滑结束/取消：切集竖滑清态；调节浮层短驻后自隐（连续滑动重新开始则保持显示）。 */
-  private onAdjustPanEnd(): void {
+  /** 竖滑结束/取消：切集竖滑按松手位移判定切集或回弹（commit=false 中断必回弹）；
+   *  调节浮层短驻后自隐（连续滑动重新开始则保持显示）。 */
+  private onAdjustPanEnd(commit: boolean): void {
     if (this.episodeSwipeActive) {
-      this.endEpisodeSwipe();
+      this.endEpisodeSwipe(commit);
       return;
     }
     if (this.gestureAdjust.length === 0) {
@@ -4335,7 +4340,7 @@ export struct PlayerPage {
     return '上滑下一集 · 下滑上一集';
   }
 
-  /** 切集竖滑起始：记录起点并亮出初始提示（跟手位移与是否切集在 update 里按位移判定）。 */
+  /** 切集竖滑起始：记录起点并亮出初始提示（整页跟手，切不切集松手判定）。 */
   private startEpisodeSwipe(event?: GestureEvent): void {
     this.resetEpisodeSwipeState();
     if (!this.episodeSwipeReady() || event === undefined || event.fingerList.length === 0) {
@@ -4352,30 +4357,18 @@ export struct PlayerPage {
   }
 
   /**
-   * 切集竖滑过程：整页跟随手指；过提示阈值亮方向文案，过触发阈值沿当前
-   * 方向整页划走换集（一次手势一集）；无上/下一集方向橡皮筋阻尼（拉不动）。
+   * 切集竖滑过程：整页 1:1 跟手（切不切集松手判定，过程不锁死）；过提示阈值
+   * 亮方向文案；无上/下一集方向橡皮筋阻尼（拉不动）。
    */
   private updateEpisodeSwipe(event?: GestureEvent): void {
-    if (!this.episodeSwipeActive || this.episodeSwipeDone ||
+    if (!this.episodeSwipeActive ||
       event === undefined || event.fingerList.length === 0) {
       return;
     }
     const dy: number = this.episodeSwipeStartY - event.fingerList[0].globalY;
+    this.episodeSwipeLastDy = dy;
     const canNext: boolean = this.index + 1 < this.episodes.length;
     const canPrev: boolean = this.index > 0;
-    // 过触发阈值：整页划走换集并锁到松手（一次手势只切一集）
-    if (dy > FQ_EPISODE_SWIPE_TRIGGER_VP && canNext) {
-      this.episodeSwipeDone = true;
-      this.episodeSwipeHint = '';
-      this.playEpisodeSwitchAnim(this.index + 1);
-      return;
-    }
-    if (dy < -FQ_EPISODE_SWIPE_TRIGGER_VP && canPrev) {
-      this.episodeSwipeDone = true;
-      this.episodeSwipeHint = '';
-      this.playEpisodeSwitchAnim(this.index - 1);
-      return;
-    }
     // 方向提示（边界集提示已是第一/最后一集）
     let dir: number = 0;
     if (dy > FQ_EPISODE_SWIPE_HINT_VP) {
@@ -4387,21 +4380,36 @@ export struct PlayerPage {
       this.episodeSwipeDir = dir;
       this.episodeSwipeHint = this.episodeSwipeHintText(dir);
     }
-    // 整页跟手；无上/下一集方向橡皮筋阻尼（位移衰减，松手回弹）
+    // 整页跟手（-dy：手上移页上移）；无上/下一集方向橡皮筋阻尼（位移衰减，松手回弹）
     if ((dy > 0 && !canNext) || (dy < 0 && !canPrev)) {
-      this.episodeSwitchOffset = dy / FQ_EPISODE_SWIPE_RUBBER;
+      this.episodeSwitchOffset = -dy / FQ_EPISODE_SWIPE_RUBBER;
     } else {
-      this.episodeSwitchOffset = dy;
+      this.episodeSwitchOffset = -dy;
     }
   }
 
-  /** 切集竖滑结束/取消：未划走则整页弹回原位，随后清态。 */
-  private endEpisodeSwipe(): void {
-    if (this.episodeSwipeActive && !this.episodeSwipeDone && !this.episodeSwitchAnimating &&
-      this.episodeSwitchOffset !== 0) {
-      this.getUIContext().animateTo({ duration: FQ_EPISODE_SWIPE_BACK_MS, curve: Curve.Friction }, (): void => {
-        this.episodeSwitchOffset = 0;
-      });
+  /** 切集竖滑触发阈值（vp）：页高 1/4 与下限较大者（需多划一些，松手时判定）。 */
+  private episodeSwipeTriggerVp(): number {
+    return Math.max(this.pageH() * FQ_EPISODE_SWIPE_TRIGGER_PAGE_RATIO, FQ_EPISODE_SWIPE_TRIGGER_VP);
+  }
+
+  /** 切集竖滑结束：|位移| 过触发阈值沿手势方向划走换集；未过阈值/中断/
+   *  无目标集整页弹回原位；随后清态。 */
+  private endEpisodeSwipe(commit: boolean): void {
+    if (this.episodeSwipeActive) {
+      const dy: number = this.episodeSwipeLastDy;
+      const threshold: number = this.episodeSwipeTriggerVp();
+      let switched: boolean = false;
+      if (commit && dy >= threshold && this.index + 1 < this.episodes.length) {
+        switched = this.playEpisodeSwitchAnim(this.index + 1);
+      } else if (commit && dy <= -threshold && this.index > 0) {
+        switched = this.playEpisodeSwitchAnim(this.index - 1);
+      }
+      if (!switched && !this.episodeSwitchAnimating && this.episodeSwitchOffset !== 0) {
+        this.getUIContext().animateTo({ duration: FQ_EPISODE_SWIPE_BACK_MS, curve: Curve.Friction }, (): void => {
+          this.episodeSwitchOffset = 0;
+        });
+      }
     }
     this.resetEpisodeSwipeState();
   }
@@ -4410,14 +4418,15 @@ export struct PlayerPage {
   private resetEpisodeSwipeState(): void {
     this.episodeSwipeActive = false;
     this.episodeSwipeDir = 0;
-    this.episodeSwipeDone = false;
+    this.episodeSwipeLastDy = 0;
     this.episodeSwipeHint = '';
   }
 
   /**
-   * 切集划走动画（竖滑/隔空共用）：整页沿手势方向滑出（下一集向上/上一集
-   * 向下），出场后瞬移到对侧、加载目标集、再滑入复位；动画期间禁止再次
-   * 触发；令牌作废离页后仍在排队的延时回调。返回是否成功启动。
+   * 切集划走动画：整页沿手势方向滑出（下一集向上/上一集向下），出场后瞬移到
+   * 对侧、加载目标集、再滑入复位；从跟手松手位置续滑时按剩余行程比例缩短时长
+   * （松手即续走不顿挫）；动画期间禁止再次触发；令牌作废离页后仍在排队的延时
+   * 回调。返回是否成功启动。
    */
   private playEpisodeSwitchAnim(target: number): boolean {
     if (this.episodeSwitchAnimating || target < 0 || target >= this.episodes.length) {
@@ -4428,8 +4437,15 @@ export struct PlayerPage {
     const token: number = this.episodeSwitchToken;
     const travel: number = this.pageH();
     const outOffset: number = target > this.index ? -travel : travel;
-    // 出场：整页沿手势方向滑出
-    this.getUIContext().animateTo({ duration: FQ_EPISODE_SWITCH_OUT_MS, curve: Curve.EaseIn }, (): void => {
+    // 出场：从当前跟手位置沿手势方向续滑离屏（静止起滑用 EaseIn，续滑用 EaseOut 更顺）
+    const from: number = this.episodeSwitchOffset;
+    const remainRatio: number = travel > 0
+      ? Math.min(1, Math.max(0, Math.abs(outOffset - from) / travel))
+      : 1;
+    const outMs: number = Math.max(FQ_EPISODE_SWITCH_OUT_MIN_MS,
+      Math.round(FQ_EPISODE_SWITCH_OUT_MS * remainRatio));
+    const outCurve: Curve = from === 0 ? Curve.EaseIn : Curve.EaseOut;
+    this.getUIContext().animateTo({ duration: outMs, curve: outCurve }, (): void => {
       this.episodeSwitchOffset = outOffset;
     });
     setTimeout((): void => {
@@ -4454,7 +4470,7 @@ export struct PlayerPage {
           this.episodeSwitchOffset = 0;
         }, FQ_EPISODE_SWITCH_IN_MS + 60);
       }, 40);
-    }, FQ_EPISODE_SWITCH_OUT_MS + 30);
+    }, outMs + 30);
     return true;
   }
 
