@@ -1,5 +1,6 @@
 import { FqPageFragment, FqReaderLayoutMetrics, FqReaderPageData } from './ReaderTypes';
 import { drawing } from '@kit.ArkGraphics2D';
+import { fqBubbleIcon } from '../utils/FqBubbleIcon';
 
 /**
  * 仿真/覆盖翻页正文画布：引擎切好的行逐行 Text 呈现（maxLines(1)，行数与装页记账
@@ -60,7 +61,7 @@ export struct FqPageCanvas {
               Text() {
                 Span(line)
                 if (this.lineHasBubble(frag, lineIdx)) {
-                  ImageSpan($r('app.media.ellipsis_message'))
+                  ImageSpan(fqBubbleIcon(this.bubbleCount(frag)))
                     .width(this.metrics.bubbleIconFp)
                     .height(this.metrics.bubbleIconFp)
                     .supportSvg2(true)
@@ -69,13 +70,13 @@ export struct FqPageCanvas {
                     .onClick(() => {
                       this.onBubbleTap(frag.paraIndex);
                     })
-                  Span(` ${this.bubbleCount(frag)}`)
+               /*   Span(` ${this.bubbleCount(frag)}`)
                     .fontSize(this.metrics.bubbleTextFp)
                     .fontColor($r('sys.color.icon_tertiary'))
                     .fontFamily(this.fontFamily)
                     .onClick(() => {
                       this.onBubbleTap(frag.paraIndex);
-                    })
+                    })*/
                 }
               }
               .fontSize(frag.isTitle ? this.metrics.titleFontFp : this.metrics.fontSizeFp)
