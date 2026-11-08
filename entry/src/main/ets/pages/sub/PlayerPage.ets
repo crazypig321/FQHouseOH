@@ -47,9 +47,9 @@
  * - 竖滑切集：非全屏整个视频区上滑下一集/下滑上一集；全屏中三分之一竖滑
  *   同切集（整页跟随手指，过阈值沿手势方向整页划走、换集后从对侧滑回，
  *   滑动中提示方向与目标集；无上/下一集方向橡皮筋阻尼、松手回弹）。
- * - 隔空手势（智慧手势，公共封装 utils/FqSmartGesture.ets）：划一划→下一集、
- *   翻腕→上一集（registerMonitor 拦截消费，同样走整页划走动画；末/首集或
- *   遮挡态交还系统默认行为）。
+ * - 隔空手势：手机端由系统「隔空滑动」直接向窗口注入定向模拟滑动，由视频区
+ *   竖滑切集手势消费（上滑下一集、下滑上一集），无需接入 SmartGesture API
+ *   （敲一敲/划一划为穿戴产品能力，手机上不触发）。
  * - 全屏防误触锁（官方 fullscreen/d.K6）：横屏片源左侧竖直居中（圆形
  *   半透明黑底），竖屏片源最底部左边（无底色）；锁定后上下工具不可呼出、
  *   画面操作与返回手势全吞（禁止手势退出全屏），仅锁按钮可唤出
@@ -72,7 +72,7 @@
  *   pageW()/pageH()（根 Stack 实测），不出侧边栏的设备回退屏宽屏高。
  */
 
-import { display, window, PiPWindow, BaseGestureHandlingProposal, GestureHandlingResolution } from '@kit.ArkUI';
+import { display, window, PiPWindow } from '@kit.ArkUI';
 import { connection } from '@kit.NetworkKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { common } from '@kit.AbilityKit';
@@ -105,7 +105,6 @@ import { FqDramaCacheStore } from '../../core/FqDramaCacheStore';
 import { fqDramaDownloader, FqDramaDownloader, FqDramaDownloadTask, DramaDownloadStatus } from '../../core/FqDramaDownloader';
 import { FqReadStatsStore } from '../../core/FqReadStatsStore';
 import { NavPathUtils } from '../../utils/NavPathUtils';
-import { FqSmartGesture, FqSmartGestureHandler, fqConsumeSmartGesture, fqPassSmartGesture } from '../../utils/FqSmartGesture';
 import { useSidebarLayout } from '../../utils/BreakpointUtils';
 import { appState } from '../../entryability/AppState';
 
@@ -486,24 +485,6 @@ export struct PlayerPage {
   private pipSystemSwitch: boolean = true;
   /** onHidden 延迟解除武装令牌（++ 使正在等待的延迟判定作废：onShown/离页取消）。 */
   private pipHideToken: number = 0;
-  /** 隔空手势注册器（公共封装 utils/FqSmartGesture.ets；null 未初始化）。 */
-  private smartGesture: FqSmartGesture | null = null;
-  /** 智慧手势监听回调（划一划→下一集、翻腕→上一集，走整页划走动画；末/首集或遮挡态不消费，交还系统默认行为）。 */
-  private smartGestureMonitor: FqSmartGestureHandler =
-    (proposal: BaseGestureHandlingProposal): GestureHandlingResolution => {
-      const intent: OperateIntention = proposal.operateIntention;
-      let target: number = -1;
-      if (intent === OperateIntention.SLIDE_FORWARD) {
-        target = this.index + 1;
-      } else if (intent === OperateIntention.BACK_PRESS) {
-        target = this.index - 1;
-      }
-      if (target < 0 || target >= this.episodes.length || !this.airGestureReady() ||
-        !this.playEpisodeSwitchAnim(target)) {
-        return fqPassSmartGesture();
-      }
-      return fqConsumeSmartGesture();
-    };
 
   aboutToAppear(): void {
     this.title = PlayerNavParams.title;
@@ -636,8 +617,6 @@ export struct PlayerPage {
     }
     // 关联原著（官方 _loadBandExtras：装饰性数据，失败静默不影响播放）
     this.loadOriginalBook();
-    // 隔空手势（智慧手势）：划一划→下一集、翻腕→上一集（不支持设备注册静默 no-op）
-    this.setupSmartGesture();
   }
 
   aboutToDisappear(): void {
@@ -659,7 +638,6 @@ export struct PlayerPage {
     this.resetEpisodeSwipeState();
     // 作废划走动画进行中的延时回调（离页不再换集/复位位移）
     this.episodeSwitchToken += 1;
-    this.teardownSmartGesture();
     this.cancelSideLocate();
     if (this.autoCacheTimer !== 0) {
       clearTimeout(this.autoCacheTimer);
@@ -703,12 +681,10 @@ export struct PlayerPage {
       showPlaybackBall: false,
       onShown: (): void => {
         appState.hidePcSideNav = true;
-        this.registerSmartGesture();
         this.onNavPipShown();
       },
       onHidden: (): void => {
         appState.hidePcSideNav = false;
-        this.unregisterSmartGesture();
         this.onNavPipHidden();
       },
       backPressed: (): boolean => {
@@ -861,9 +837,6 @@ export struct PlayerPage {
               })
           )
         )
-        // 隔空手势（智慧手势）目标：播放区标记可响应（划一划/敲一敲以此为落点）
-        .id('fq_player_video_area')
-        .smartGestureShortcut({ action: GestureShortcut.PRIMARY, enabled: true, selectable: false })
         // 右上角菜单呼出的播放设置半模态（公共框架，不触发前景模糊）；
         // 二级「弹幕设置」页行数多，sheet 高度随之抬高
         .bindSheet(this.settingsVisible, this.SettingsSheetBuilder(),
@@ -4417,34 +4390,6 @@ export struct PlayerPage {
       }, 40);
     }, FQ_EPISODE_SWITCH_OUT_MS + 30);
     return true;
-  }
-
-  /** 隔空切集前置（无错误、非加载、划走动画不在进行、无半模态/侧边栏遮挡）。 */
-  private airGestureReady(): boolean {
-    return this.errorMsg.length === 0 && !this.loading && !this.episodeSwitchAnimating && !this.sheetVisible &&
-      !this.settingsVisible && !this.commentSheetVisible && this.sidePanel.length === 0;
-  }
-
-  /** 初始化隔空手势：经公共封装注册监听（不支持设备注册静默 no-op）。 */
-  private setupSmartGesture(): void {
-    this.smartGesture = new FqSmartGesture(this.getUIContext().getSmartGestureController(), this.smartGestureMonitor);
-    this.smartGesture.register();
-  }
-
-  /** 注册隔空手势监听（onShown 重入防重复注册）。 */
-  private registerSmartGesture(): void {
-    this.smartGesture?.register();
-  }
-
-  /** 注销隔空手势监听（onHidden 被覆盖页时停用，防隔空误切集）。 */
-  private unregisterSmartGesture(): void {
-    this.smartGesture?.unregister();
-  }
-
-  /** 离页销毁隔空手势：注销监听并释放引用。 */
-  private teardownSmartGesture(): void {
-    this.unregisterSmartGesture();
-    this.smartGesture = null;
   }
 
   /**

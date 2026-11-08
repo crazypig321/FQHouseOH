@@ -7,6 +7,9 @@
  * - 翻页：0 仿真 / 1 横滑（FqReaderFlip 三层 Stack，拖动跟手 + 松手阈值判定，
  *   邻章预载后跨章无缝衔接）/ 2 上下滚动（整章段落连续纵向滚动，眉页/眉脚
  *   固定不随滚，滚到章尾自动追加下一章段落）；
+ * - 隔空手势：手机端由系统「隔空滑动」直接向窗口注入定向模拟滑动，由
+ *   FqReaderFlip 的竖直滑动手势消费（上滑下一页、下滑上一页），无需接入
+ *   SmartGesture API（敲一敲/划一划为穿戴产品能力，手机上不触发）；
  * - 段评：段尾气泡（引擎装页时记录命中区，翻页容器触区代理点击）→ 段评半模态
  *   （气泡计数 /api/v1/chapters/{itemId}/reviews；评论体 /api/v1/books/{bookId}/reviews
  *   段评配方 server_channel=38，item_version 取目录 version）；
@@ -1739,7 +1742,7 @@ export struct ReaderPage {
     });
   }
 
-  /** 音量键动作：分页模式（仿真/横滑/覆盖）走触区点击同款动画翻页，上下滚动模式整屏平滑滚动。 */
+  /** 音量键/隔空手势动作：分页模式（仿真/横滑/覆盖）走触区点击同款动画翻页，上下滚动模式整屏平滑滚动。 */
   private onVolumeKey(next: boolean): void {
     if (this.flipIndex === 2) {
       this.verticalScrollPage(next);

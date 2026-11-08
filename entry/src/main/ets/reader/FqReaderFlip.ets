@@ -31,6 +31,8 @@ const FQ_SIM_TIMER_MS: number = 8.3;
 const FQ_SIM_BACK_STEP_PX: number = 100;
 /** 仿真前进式收敛份数（对齐示例 DISTANCE_FRACTION）。 */
 const FQ_SIM_SETTLE_DIV: number = 20;
+/** 竖直滑动翻页判定：竖向位移超过该值（vp）才翻页（系统隔空手势注入的滑动远超此值）。 */
+const FQ_FLIP_VSWIPE_VP: number = 30;
 
 @ComponentV2
 export struct FqReaderFlip {
@@ -232,6 +234,18 @@ export struct FqReaderFlip {
     }
     if (!this.animating && !this.simDrawing && this.simTimer === -1) {
       this.onMenuTap();
+    }
+  }
+
+  /** 竖直滑动翻页（系统隔空手势注入的定向滑动/真实竖滑）：上滑下一页、下滑上一页，
+   *  走与点击翻页相同的路径与守卫（含 hasNext/hasPrev/canTurn）。 */
+  private turnByVerticalSwipe(isNext: boolean): void {
+    if (this.flipMode === 0) {
+      this.tapFlipSim(this.pageWidthVp() / 2, isNext);
+    } else if (this.flipMode === 2) {
+      this.tapFlipCover(isNext);
+    } else {
+      this.tapFlip(isNext);
     }
   }
 
@@ -734,6 +748,7 @@ export struct FqReaderFlip {
       this.onAreaChanged(newArea);
     })
     .gesture(
+      GestureGroup(GestureMode.Exclusive,
       PanGesture({ fingers: 1, direction: PanDirection.Horizontal })
         .onActionStart((event: GestureEvent) => {
           if (this.flipMode === 1) {
@@ -856,7 +871,17 @@ export struct FqReaderFlip {
           } else if (this.simDrawing) {
             this.startSimAuto(false);
           }
+        }),
+      PanGesture({ fingers: 1, direction: PanDirection.Vertical })
+        .onActionEnd((event: GestureEvent) => {
+          const dy: number = event.offsetY;
+          if (dy <= -FQ_FLIP_VSWIPE_VP) {
+            this.turnByVerticalSwipe(true);
+          } else if (dy >= FQ_FLIP_VSWIPE_VP) {
+            this.turnByVerticalSwipe(false);
+          }
         })
+      )
     )
   }
 }
