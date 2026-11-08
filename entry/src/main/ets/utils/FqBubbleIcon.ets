@@ -19,7 +19,7 @@ export function fqBubbleIconPath(value: number): string {
   }
   const clamped: number = n < 1 ? 1 : n;
   const pad: string = clamped < 10 ? '0' : '';
-  return `bubble-${pad}${clamped}.svg`;
+  return `${FQ_BUBBLE_DIR}/${FQ_BUBBLE_DIR}-${pad}${clamped}.svg`;
 }
 
 /** 数值 → 气泡图标资源（直接用于 Image(fqBubbleIcon(n))）。 */
