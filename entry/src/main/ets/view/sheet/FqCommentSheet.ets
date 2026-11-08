@@ -108,6 +108,9 @@ export struct FqCommentTile {
   @Param paddingValue: number = 20
   /** 回复加载器（宿主注入，group_id=book_id=书 id；count 为拉取条数）；未注入保持只读回复计数。 */
   @Param replyLoader: ((commentId: string, count: number) => Promise<FqCommentReplyPage>) | undefined = undefined;
+  /** 剧评回复加载器（宿主注入，series 剧评回复端点 cursor 分页）；非空优先于 replyLoader。 */
+  @Param replyCursorLoader:
+    ((commentId: string, cursor: string) => Promise<FqCommentReplyPage>) | undefined = undefined;
   private readonly tileSeq: number = fqNextCommentTileSeq();
 
   build() {
@@ -224,12 +227,14 @@ export struct FqCommentTile {
       }
       .alignItems(VerticalAlign.Center)
 
-      if (this.replyLoader !== undefined && this.comment.replyCount > 0 && this.comment.id.length > 0) {
+      if ((this.replyLoader !== undefined || this.replyCursorLoader !== undefined)
+        && this.comment.replyCount > 0 && this.comment.id.length > 0) {
         FqReplySection({
           commentId: this.comment.id,
           replyCount: this.comment.replyCount,
           fontColor: this.fontColor,
           replyLoader: this.replyLoader,
+          replyCursorLoader: this.replyCursorLoader,
         })
       }
     }
@@ -256,8 +261,12 @@ export struct FqCommentSheet {
   @Param cursorLoader: ((refresh: boolean) => Promise<FqBookCommentPage>) | undefined = undefined;
   /** 打开令牌：宿主每次打开 +1，组件据此重置分页并重拉（兼容内容重建/复用两种挂载）。 */
   @Param openToken: number = 0;
-  /** 回复书 id（非空启用「展开 N 条回复」；group_id=book_id=此值。剧评不传，保持只读计数）。 */
+  /** 回复书 id（非空启用「展开 N 条回复」；group_id=book_id=此值。剧评不传，改走 replyCursorLoader）。 */
   @Param replyBookId: string = '';
+  /** 剧评回复加载器（宿主注入，series 剧评回复端点 cursor 分页）；
+   *  剧评场景与 replyBookId 互斥使用，非空启用剧评回复展开。 */
+  @Param replyCursorLoader:
+    ((commentId: string, cursor: string) => Promise<FqCommentReplyPage>) | undefined = undefined;
   @Local loading: boolean = false;
   @Local errorMsg: string = '';
   @Local count: number = 0;
@@ -456,6 +465,7 @@ export struct FqCommentSheet {
                   comment: comment,
                   fontColor: this.fontColor,
                   replyLoader: this.makeReplyLoader(),
+                  replyCursorLoader: this.replyCursorLoader,
                 })
               }
             }, (comment: FqBookComment): string =>

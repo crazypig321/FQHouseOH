@@ -15,6 +15,7 @@ import {
   FqBookCommentPage,
   FqBookDetail,
   FqChapter,
+  FqCommentReplyPage,
   FqEpisodeCommentPage,
   fqEmptyBookDetail,
   fqFormatCountInt,
@@ -655,7 +656,8 @@ export struct DetailPage {
   }
 
   /** 书评/剧评半模态：公共 FqCommentSheet（懒加载分页，文案随作品类型）；
-   *  剧 kind 走剧评 cursorLoader（series 端点），其余走内置书评配方。 */
+   *  剧 kind 走剧评 cursorLoader + 剧评回复 loader（series 端点），
+   *  其余走内置书评配方 + 书评回复（replyBookId）。 */
   @Builder
   private CommentSheetBuilder() {
     FqCommentSheet({
@@ -663,7 +665,7 @@ export struct DetailPage {
       fontColor: $r('sys.color.font_primary'),
       commentLabel: this.commentLabel(),
       cursorLoader: this.makeSeriesCommentLoader(),
-      // 剧评回复走短剧独立端点（本期未接），仅书评/漫评启用回复展开
+      replyCursorLoader: this.makeSeriesReplyLoader(),
       replyBookId: this.isDramaKind() ? '' : (this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId),
     })
   }
@@ -696,6 +698,26 @@ export struct DetailPage {
     const page: FqEpisodeCommentPage = await FqBackend.get().seriesComments(contentId, cursorIn);
     this.seriesCommentCursor = page.cursor;
     return new FqBookCommentPage(page.comments, page.totalCount, 0, '', page.hasMore, 0);
+  }
+
+  /** 剧评回复加载器工厂：剧 kind 返回 series 剧评回复 cursor 加载器，其余返回 undefined。 */
+  private makeSeriesReplyLoader():
+    ((commentId: string, cursor: string) => Promise<FqCommentReplyPage>) | undefined {
+    if (!this.isDramaKind()) {
+      return undefined;
+    }
+    return (commentId: string, cursor: string): Promise<FqCommentReplyPage> =>
+      this.loadSeriesCommentReplies(commentId, cursor);
+  }
+
+  /** 剧评回复一页（/api/v1/series/{id}/comments/{cid}/replies，cursor 续拉；
+   *  游标由 FqReplySection 记账，本方法无状态直通）。 */
+  private async loadSeriesCommentReplies(commentId: string, cursor: string): Promise<FqCommentReplyPage> {
+    const contentId: string = this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId;
+    if (contentId.length === 0) {
+      return new FqCommentReplyPage([], 0, false);
+    }
+    return FqBackend.get().seriesCommentReplies(contentId, commentId, cursor);
   }
 
   /** 评论类型文案：小说书评 / 短剧·漫剧剧评 / 漫画漫评。 */

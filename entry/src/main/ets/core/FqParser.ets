@@ -1329,9 +1329,10 @@ export function fqParseParagraphCommentPage(payload: Record<string, Object>): Fq
 }
 
 /**
- * 评论回复一页（/api/v1/comments/{commentId}/replies：data.reply_list[] 条目
- * 主体藏于 Common（大写 C）或 common——对齐 fqapp CommentReply.fromRaw；
- * 页级 total/has_more 在 common_list_info ?? comment_list_info；业务码非 0/200 返回空页）。
+ * 评论回复一页（/api/v1/comments/{commentId}/replies 与 /api/v1/series/{sid}/comments/{cid}/replies：
+ * data.reply_list[] 条目主体藏于 Common（大写 C）或 common——对齐 fqapp CommentReply.fromRaw；
+ * 页级 total/has_more/cursor 在 common_list_info ?? comment_list_info（剧评回复 cursor 分页续拉）；
+ * 业务码非 0/200 返回空页）。
  */
 export function fqParseCommentReplies(payload: Record<string, Object>): FqCommentReplyPage {
   const replies: FqCommentReply[] = [];
@@ -1380,6 +1381,7 @@ export function fqParseCommentReplies(payload: Record<string, Object>): FqCommen
     replies,
     fqAsInt(info['total'], 0),
     info['has_more'] === true,
+    fqStr(info, 'cursor'),
   );
 }
 

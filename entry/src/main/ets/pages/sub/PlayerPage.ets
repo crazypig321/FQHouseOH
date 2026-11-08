@@ -90,7 +90,7 @@ import { FqPlayerSettingsSheet } from '../../view/player/FqPlayerSettingsSheet';
 import { FqPlayerSettingsPanel } from '../../view/player/FqPlayerSettingsPanel';
 import { FqDanmakuSettingsPanel } from '../../view/player/FqDanmakuSettingsPanel';
 import { fqPushBookOrDetail, PlayerNavParams, ListenVideoNavParams, ROUTE_LISTEN_VIDEO, ROUTE_CACHED_DRAMAS, DetailNavParams, ROUTE_DETAIL } from '../../model/FqNavModels';
-import { FqBookCommentPage, FqChapter, FqDanmaku, FqDanmakuPage, FqEpisodeCommentPage, FqEpisodeSource, FqEpisodeVariant, FqSeriesRelateBook, FqRelatedSeries, fqKindToTab, FqCacheTaskView } from '../../model/FqModels';
+import { FqBookCommentPage, FqChapter, FqCommentReplyPage, FqDanmaku, FqDanmakuPage, FqEpisodeCommentPage, FqEpisodeSource, FqEpisodeVariant, FqSeriesRelateBook, FqRelatedSeries, fqKindToTab, FqCacheTaskView } from '../../model/FqModels';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { fqAudioSession } from '../../core/FqAudioSession';
 import { FqVideoMedia } from '../../core/FqVideoMedia';
@@ -1671,8 +1671,9 @@ export struct PlayerPage {
     })
   }
 
-  /** 剧评半模态：公共 FqCommentSheet + 剧评接口加载器
-   *  （首拉 Loading / 错误重试 / 空态 / cursor 分页列表，评论为整部剧的）。 */
+  /** 剧评半模态：公共 FqCommentSheet + 剧评接口加载器 + 剧评回复 cursor 加载器
+   *  （首拉 Loading / 错误重试 / 空态 / cursor 分页列表，评论为整部剧的；
+   *  回复展开走 series 剧评回复端点，游标由 FqReplySection 记账）。 */
   @Builder
   private CommentsSheetBuilder() {
     FqCommentSheet({
@@ -1680,6 +1681,8 @@ export struct PlayerPage {
       fontColor: $r('sys.color.font_primary'),
       commentLabel: '剧评',
       cursorLoader: (refresh: boolean): Promise<FqBookCommentPage> => this.loadSeriesComments(refresh),
+      replyCursorLoader: (commentId: string, cursor: string): Promise<FqCommentReplyPage> =>
+        FqBackend.get().seriesCommentReplies(PlayerNavParams.contentId, commentId, cursor),
       openToken: this.commentOpenToken,
     })
   }

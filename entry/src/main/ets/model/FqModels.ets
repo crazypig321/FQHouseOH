@@ -905,16 +905,20 @@ export class FqCommentReply {
   }
 }
 
-/** 回复一页（单页拉取，cursor 恒空串无翻页；total/has_more 来自 common_list_info）。 */
+/** 回复一页（书评回复单页拉取，cursor 恒空串无翻页；剧评回复为 cursor 续拉分页）；
+ *  total/has_more/cursor 来自 common_list_info。 */
 export class FqCommentReplyPage {
   readonly replies: FqCommentReply[];
   readonly totalCount: number;
   readonly hasMore: boolean;
+  /** 续拉游标（剧评回复分页；书评回复恒空串）。 */
+  readonly cursor: string;
 
-  constructor(replies: FqCommentReply[], totalCount: number, hasMore: boolean) {
+  constructor(replies: FqCommentReply[], totalCount: number, hasMore: boolean, cursor: string = '') {
     this.replies = replies;
     this.totalCount = totalCount;
     this.hasMore = hasMore;
+    this.cursor = cursor;
   }
 
   get isEmpty(): boolean {

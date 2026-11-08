@@ -188,6 +188,10 @@ export struct FqReplySection {
   @Param fontColor: ResourceColor = $r('sys.color.font_primary');
   /** 回复加载器（宿主注入，group_id=book_id=书 id；count 为拉取条数）；未注入保持只读计数不展开。 */
   @Param replyLoader: ((commentId: string, count: number) => Promise<FqCommentReplyPage>) | undefined = undefined;
+  /** 剧评回复加载器（宿主注入，series 剧评回复端点 cursor 分页：loader 收上页游标返回下一页）；
+   *  非空优先于 replyLoader（书评 count 单页模式），游标推进由本组件记账。 */
+  @Param replyCursorLoader:
+    ((commentId: string, cursor: string) => Promise<FqCommentReplyPage>) | undefined = undefined;
   @Local expanded: boolean = false;
   @Local loading: boolean = false;
   @Local failed: boolean = false;
@@ -196,6 +200,8 @@ export struct FqReplySection {
   @Local loadedCount: number = 0;
   @Local total: number = 0;
   @Local hasMore: boolean = false;
+  /** 剧评回复续拉游标（书评 count 模式恒空串）。 */
+  private nextCursor: string = '';
   private source: FqReplySource = new FqReplySource();
 
   /** 展开/收起：首次点击拉取回复后展开，再点切换开合（数据保留秒开）；失败可点击重试。 */
@@ -203,8 +209,10 @@ export struct FqReplySection {
     if (this.loading) {
       return;
     }
+    const cursorLoader: ((commentId: string, cursor: string) => Promise<FqCommentReplyPage>) | undefined =
+      this.replyCursorLoader;
     const loader: ((commentId: string, count: number) => Promise<FqCommentReplyPage>) | undefined = this.replyLoader;
-    if (loader === undefined || this.commentId.length === 0) {
+    if ((cursorLoader === undefined && loader === undefined) || this.commentId.length === 0) {
       return;
     }
     if (this.loaded) {
@@ -213,7 +221,15 @@ export struct FqReplySection {
     }
     this.loading = true;
     this.failed = false;
-    loader(this.commentId, 50)
+    let first: Promise<FqCommentReplyPage>;
+    if (cursorLoader !== undefined) {
+      first = cursorLoader(this.commentId, '');
+    } else if (loader !== undefined) {
+      first = loader(this.commentId, 50);
+    } else {
+      return;
+    }
+    first
       .then((page: FqCommentReplyPage): void => {
         this.loading = false;
         this.loaded = true;
@@ -221,6 +237,7 @@ export struct FqReplySection {
         this.loadedCount = page.replies.length;
         this.total = page.totalCount;
         this.hasMore = page.hasMore;
+        this.nextCursor = page.cursor;
         this.expanded = true;
       })
       .catch((_error: BusinessError): void => {
@@ -229,21 +246,41 @@ export struct FqReplySection {
       });
   }
 
-  /** 续拉更多回复：cursor 恒空串无翻页，靠 count 递增（已载 + 50）重拉换更多条目；
+  /** 续拉更多回复：剧评 cursor 模式按游标拉下一页直接追加（游标不前进即止拉）；
+   *  书评 cursor 恒空串无翻页，靠 count 递增（已载 + 50）重拉换更多条目，
    *  返回条数无增长（服务端单页上限）即停止续拉。 */
   private loadMoreReplies(): void {
     if (this.loading || this.loadingMore || !this.hasMore) {
       return;
     }
+    const cursorLoader: ((commentId: string, cursor: string) => Promise<FqCommentReplyPage>) | undefined =
+      this.replyCursorLoader;
     const loader: ((commentId: string, count: number) => Promise<FqCommentReplyPage>) | undefined = this.replyLoader;
-    if (loader === undefined || this.commentId.length === 0) {
+    if ((cursorLoader === undefined && loader === undefined) || this.commentId.length === 0) {
       return;
     }
     this.loadingMore = true;
-    loader(this.commentId, this.loadedCount + 50)
+    const cursorIn: string = this.nextCursor;
+    let request: Promise<FqCommentReplyPage>;
+    if (cursorLoader !== undefined) {
+      request = cursorLoader(this.commentId, cursorIn);
+    } else if (loader !== undefined) {
+      request = loader(this.commentId, this.loadedCount + 50);
+    } else {
+      return;
+    }
+    request
       .then((page: FqCommentReplyPage): void => {
         this.loadingMore = false;
-        if (page.replies.length > this.loadedCount) {
+        if (cursorLoader !== undefined) {
+          this.source.appendItems(page.replies);
+          this.loadedCount += page.replies.length;
+          if (page.totalCount > 0) {
+            this.total = page.totalCount;
+          }
+          this.nextCursor = page.cursor;
+          this.hasMore = page.hasMore && page.replies.length > 0 && page.cursor !== cursorIn;
+        } else if (page.replies.length > this.loadedCount) {
           this.source.appendItems(page.replies.slice(this.loadedCount));
           this.loadedCount = page.replies.length;
           this.total = page.totalCount;

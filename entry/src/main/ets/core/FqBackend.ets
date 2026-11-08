@@ -678,6 +678,26 @@ export class FqBackend {
   }
 
   /**
+    * 短剧剧评回复一页（/api/v1/series/{sid}/comments/{cid}/replies，官方
+    * playlet/detail/page/content/y.java:161-165：group_id=series_id、group_type=1、
+    * comment_type=2、comment_source=501，cursor 续拉）——与书评回复（comment_source=502、
+    * group_type=15）分属不同评论体系，端点与参数均不能复用；响应同 reply_list 形状。
+    */
+  public async seriesCommentReplies(seriesId: string, commentId: string, cursor: string,
+    count: number = 50): Promise<FqCommentReplyPage> {
+    const query: string = `count=${count < 1 ? 50 : count > 50 ? 50 : count}`
+      + (cursor.length > 0 ? `&cursor=${encodeURIComponent(cursor)}` : '');
+    const payload: Record<string, Object> = await this.getJson(
+      `/api/v1/series/${encodeURIComponent(seriesId)}/comments/${encodeURIComponent(commentId)}/replies`,
+      query);
+    this.ensureCommentBizOk(payload);
+    const page: FqCommentReplyPage = fqParseCommentReplies(payload);
+    hilog.info(0x0001, 'FqBackend',
+      `seriesCommentReplies sid=${seriesId} cid=${commentId} code=${payload['code']} n=${page.replies.length} total=${page.totalCount} more=${page.hasMore}`);
+    return page;
+  }
+
+  /**
    * 排行榜目录（藏于 novel homepage tab_type=2 载荷）。
    * 30s 内存 TTL：每次进排行榜页必拉，短缓存内直接复用。
    */
