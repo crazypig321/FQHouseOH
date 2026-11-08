@@ -52,10 +52,13 @@ const FQ_EPUB_COVER_CSS_URL_PATTERN: RegExp =
 export class FqEpubChapter {
   public readonly title: string;
   public readonly text: string;
+  /** NCX 分卷名（navMap 顶层容器 navPoint 的 label；空串不分组）。 */
+  public readonly group: string;
 
-  constructor(title: string, text: string) {
+  constructor(title: string, text: string, group: string = '') {
     this.title = title;
     this.text = text;
+    this.group = group;
   }
 }
 
@@ -248,6 +251,15 @@ export class FqEpubParser {
       ? opfPath.substring(0, opfPath.lastIndexOf('/')) : '';
     const manifest: Map<string, FqEpubManifestItem> = FqEpubParser.parseManifest(opf);
     const spine: string[] = FqEpubParser.parseSpine(opf);
+    // NCX 分卷分组（best-effort）：navMap 顶层容器 navPoint 的 label 作为其覆盖
+    // 文档的 group（如「查理九世1：黑贝街的亡灵」），供目录手风琴分组；
+    // 缺失 / 损坏不阻断导入
+    let ncxGroups: Map<string, string> = new Map<string, string>();
+    try {
+      ncxGroups = await FqEpubParser.parseNcxGroups(file, entries, manifest, opf, baseDirectory);
+    } catch (error) {
+      // NCX 解析失败忽略
+    }
     const chapters: FqEpubChapter[] = [];
     let expandedBytes: number = 0;
     for (const idref of spine) {
@@ -291,7 +303,9 @@ export class FqEpubParser {
       }
       const chapterTitle: string = converted.heading.length > 0
         ? converted.heading : `第${chapters.length + 1}章`;
-      chapters.push(new FqEpubChapter(chapterTitle, converted.text));
+      const docGroup: string | undefined = ncxGroups.get(path);
+      chapters.push(new FqEpubChapter(chapterTitle, converted.text,
+        docGroup === undefined ? '' : docGroup));
       if (chapters.length > FQ_EPUB_MAX_CHAPTERS) {
         throw new Error('章节数量超过支持上限');
       }
@@ -913,11 +927,116 @@ export class FqEpubParser {
   }
 
   /**
+   * NCX 分组解析：navMap 顶层 navPoint 若含嵌套 navPoint（分卷/部容器），
+   * 其 label 作为该容器（含嵌套子 navPoint）全部 content src 文档的 group；
+   * 叶子顶层 navPoint（扁平目录，一章一个）不产生分组。
+   */
+  private static async parseNcxGroups(file: FqEpubRandomFile,
+    entries: Map<string, FqZipEntry>, manifest: Map<string, FqEpubManifestItem>,
+    opf: string, baseDirectory: string): Promise<Map<string, string>> {
+    const groups: Map<string, string> = new Map<string, string>();
+    // 定位 NCX：spine toc 属性优先，其次 manifest media-type 扫描
+    let ncxHref: string = '';
+    const tocId: string =
+      FqEpubParser.attrOf(FqEpubParser.firstTagOf(opf, 'spine'), 'toc').trim();
+    if (tocId.length > 0) {
+      const tocItem: FqEpubManifestItem | undefined = manifest.get(tocId);
+      if (tocItem !== undefined) {
+        ncxHref = tocItem.href;
+      }
+    }
+    if (ncxHref.length === 0) {
+      manifest.forEach((item: FqEpubManifestItem, _id: string): void => {
+        if (ncxHref.length === 0
+          && item.mediaType.trim().toLowerCase() === 'application/x-dtbncx+xml') {
+          ncxHref = item.href;
+        }
+      });
+    }
+    if (ncxHref.length === 0) {
+      return groups;
+    }
+    const ncxPath: string = FqEpubParser.resolveHref(baseDirectory, ncxHref);
+    if (ncxPath.length === 0) {
+      return groups;
+    }
+    const ncxEntry: FqZipEntry | undefined = entries.get(ncxPath);
+    if (ncxEntry === undefined || ncxEntry.size === 0
+      || ncxEntry.size > FQ_EPUB_MAX_ENTRY_BYTES) {
+      return groups;
+    }
+    const ncx: string =
+      FqEpubParser.decodeXmlBytes(await FqEpubParser.readEntry(file, ncxEntry));
+    const mapStart: number = ncx.indexOf('<navMap');
+    if (mapStart < 0) {
+      return groups;
+    }
+    const mapEnd: number = ncx.indexOf('</navMap>', mapStart);
+    if (mapEnd < 0) {
+      return groups;
+    }
+    const region: string = ncx.substring(mapStart, mapEnd);
+    // 深度扫描：提取 navMap 直接子级（顶层）navPoint 的完整块（含嵌套子 navPoint）
+    const token: RegExp = /<navPoint\b|<\/navPoint\s*>/g;
+    let depth: number = 0;
+    let blockStart: number = -1;
+    let match: RegExpExecArray | null = token.exec(region);
+    while (match !== null) {
+      if (!match[0].startsWith('</')) {
+        depth++;
+        if (depth === 1) {
+          blockStart = match.index;
+        }
+      } else {
+        if (depth === 1 && blockStart >= 0) {
+          FqEpubParser.mapNcxContainerGroups(
+            region.substring(blockStart, match.index + match[0].length),
+            groups, baseDirectory);
+        }
+        depth = depth > 0 ? depth - 1 : 0;
+      }
+      match = token.exec(region);
+    }
+    return groups;
+  }
+
+  /** 单个顶层 navPoint 块 → 分组映射：label = 首个 navLabel 文本；src = 块内全部 content。 */
+  private static mapNcxContainerGroups(block: string, groups: Map<string, string>,
+    baseDirectory: string): void {
+    // 只处理真正的容器（块内还有嵌套 navPoint）；叶子 navPoint 不分组
+    const opens: RegExpMatchArray | null = block.match(/<navPoint\b/g);
+    if (opens === null || opens.length < 2) {
+      return;
+    }
+    const labelMatch: RegExpExecArray | null =
+      /<text\b[^>]*>([^<]*)<\/text\s*>/i.exec(block);
+    if (labelMatch === null) {
+      return;
+    }
+    const label: string = FqEpubParser.unescapeEntities(labelMatch[1]).trim();
+    if (label.length === 0) {
+      return;
+    }
+    const contentPattern: RegExp = /<content\b[^>]*>/g;
+    let contentMatch: RegExpExecArray | null = contentPattern.exec(block);
+    while (contentMatch !== null) {
+      const src: string = FqEpubParser.attrOf(contentMatch[0], 'src');
+      const path: string = FqEpubParser.resolveHref(baseDirectory, src);
+      if (path.length > 0 && !groups.has(path)) {
+        groups.set(path, label);
+      }
+      contentMatch = contentPattern.exec(block);
+    }
+  }
+
+  /**
    * XHTML 转纯文本：块级元素断段（\n）、br 断行、script/style/noscript/nav 整段剔除、
    * 注释与 CDATA 处理、实体反转义；heading 取首个 h1~h6 内文本。
    */
   private static htmlToText(source: string): FqEpubHtmlText {
-    const skipTags: string[] = ['script', 'style', 'noscript', 'nav'];
+    // title：head 内 <title>（calibre/Sigil 常为占位「未知」/「Table of Contents」）
+    // 与 SVG 图题都不进正文
+    const skipTags: string[] = ['script', 'style', 'noscript', 'nav', 'title'];
     const blockTags: string[] = ['address', 'article', 'aside', 'blockquote', 'dd', 'div',
       'dl', 'dt', 'figcaption', 'figure', 'footer', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
       'header', 'li', 'main', 'ol', 'p', 'section', 'table', 'tr', 'ul'];

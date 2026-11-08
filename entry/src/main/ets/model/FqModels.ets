@@ -357,11 +357,14 @@ export class FqChapter {
   readonly title: string;
   /** 章节内容版本（目录 item_data_list.version；段评接口必传，缺失回目录刷新）。 */
   readonly version: string;
+  /** 分组标题（本地导入书 EPUB 卷/文档级分组；空串不分组，在线书恒空）。 */
+  readonly group: string;
 
-  constructor(itemId: string, title: string, version: string = '') {
+  constructor(itemId: string, title: string, version: string = '', group: string = '') {
     this.itemId = itemId;
     this.title = title;
     this.version = version;
+    this.group = group;
   }
 }
 

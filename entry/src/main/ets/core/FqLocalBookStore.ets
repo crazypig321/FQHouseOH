@@ -27,17 +27,23 @@ const FQ_LOCAL_ID_PREFIX: string = 'local_';
 /** 章节标题行：行首「第X章/回/节/卷」+ 少量补充文字。 */
 const FQ_CHAPTER_LINE: RegExp =
   /^\s{0,4}(第[0-9零一二三四五六七八九十百千万两]+[章回节卷])[^\n]{0,40}$/;
+/** EPUB 细分切片废章阈值：短于该长度（目录页「Table of Contents」残留、占位「未知」）
+ *  不进目录，但正文保留（文件内容不变，重复导入命中同一本书）。 */
+const FQ_EPUB_JUNK_SUB_MAX: number = 40;
 
-/** 章节索引（正文字符偏移 + 长度）。 */
+/** 章节索引（正文字符偏移 + 长度 + 分组标题）。 */
 export class FqLocalChapter {
   readonly title: string;
   readonly offset: number;
   readonly length: number;
+  /** 分组标题（EPUB spine 文档标题；空串不分组）。 */
+  readonly group: string;
 
-  constructor(title: string, offset: number, length: number) {
+  constructor(title: string, offset: number, length: number, group: string = '') {
     this.title = title;
     this.offset = offset;
     this.length = length;
+    this.group = group;
   }
 }
 
@@ -114,7 +120,8 @@ export class FqLocalBookStore {
     }
     const out: FqChapter[] = [];
     for (let i = 0; i < meta.chapters.length; i++) {
-      out.push(new FqChapter(`${bookId}_c${i}`, meta.chapters[i].title));
+      out.push(new FqChapter(`${bookId}_c${i}`, meta.chapters[i].title, '',
+        meta.chapters[i].group));
     }
     return out;
   }
@@ -226,16 +233,75 @@ export class FqLocalBookStore {
     }
     const fileTitle: string = FqLocalBookStore.titleFromUri(uri);
     const book: FqEpubBook = await FqEpubParser.parse(uri, fileTitle);
-    // 章节拼接：parts 一次 join，避免 O(n²) 字符串拼接
+    // 章节拼接：每个 spine 文档再细分章（一章 = splitChapters 的一个切片），
+    // parts 一次 join，避免 O(n²) 字符串拼接。
+    // 纯标题行连续段（目录页条目等）不写入文件；偏移必须按 parts 实际写入
+    // 顺序顺序累计——按 doc.text 原位映射会因被丢弃的尾巴/间隙而漂移。
     const parts: string[] = [];
     const chapters: FqLocalChapter[] = [];
     let offset: number = 0;
-    for (const chapter of book.chapters) {
-      const text: string = chapter.text;
-      chapters.push(new FqLocalChapter(chapter.title, offset, text.length));
-      parts.push(text);
+    // 孤儿文档归并：root NCX 漏映射的文档（如分卷中段被 calibre 拆出的续篇文件）
+    // 无分组也无标题，单切片且不以章标题行开头时并入上一章，避免伪章节行。
+    let lastGroup: string = '';
+    let lastDocKept: boolean = false;
+    for (const doc of book.chapters) {
+      // 裸目录页（整页纯章标题行、无引导标题）：整页丢弃，不进正文也不进目录
+      if (FqLocalBookStore.isBareTocText(doc.text)) {
+        continue;
+      }
+      const subs: FqLocalChapter[] = FqLocalBookStore.splitChapters(doc.text);
+      let keptCount: number = 0;
+      let keptTitle: string = '';
+      for (const sub of subs) {
+        if (sub.length >= FQ_EPUB_JUNK_SUB_MAX) {
+          keptCount++;
+          if (keptTitle.length === 0) {
+            keptTitle = sub.title;
+          }
+        }
+      }
+      // 续篇片段：无 NCX 分组 + 上文已有分组且产章 + 单切片非章标题行开头 → 并入上一章
+      const mergeFragment: boolean = doc.group.length === 0 && lastGroup.length > 0
+        && lastDocKept && keptCount === 1 && chapters.length > 0
+        && !FqLocalBookStore.isChapterTitleLine(keptTitle.trim());
+      if (mergeFragment) {
+        const before: number = offset;
+        for (const sub of subs) {
+          parts.push(doc.text.substring(sub.offset, sub.offset + sub.length));
+          offset += sub.length;
+        }
+        const last: FqLocalChapter = chapters[chapters.length - 1];
+        // 上一章延伸到本片段末尾（+2 为上一文档结尾的分隔空行）
+        chapters[chapters.length - 1] = new FqLocalChapter(last.title, last.offset,
+          last.length + (offset - before) + 2, last.group);
+        parts.push('\n\n');
+        offset += 2;
+        continue;
+      }
+      const multi: boolean = keptCount > 1;
+      // 分组：NCX 分卷名 > 上文分组继承（NCX 漏映射文档）> 文档标题（细分多章且非章标题行）
+      let group: string = doc.group;
+      if (group.length === 0) {
+        group = lastGroup;
+      }
+      if (group.length === 0 && multi
+        && !FqLocalBookStore.isChapterTitleLine(doc.title.trim())) {
+        group = doc.title;
+      }
+      for (const sub of subs) {
+        const title: string = !multi || sub.title.length === 0 ? doc.title : sub.title;
+        if (sub.length >= FQ_EPUB_JUNK_SUB_MAX) {
+          chapters.push(new FqLocalChapter(title, offset, sub.length, group));
+        }
+        parts.push(doc.text.substring(sub.offset, sub.offset + sub.length));
+        offset += sub.length;
+      }
       parts.push('\n\n');
-      offset += text.length + 2;
+      offset += 2;
+      if (doc.group.length > 0) {
+        lastGroup = doc.group;
+      }
+      lastDocKept = keptCount > 0;
     }
     const full: string = parts.join('');
     // 正文内容哈希稳定 id（与 TXT 同域）：相同正文的 EPUB / TXT 复用同一本书
@@ -448,6 +514,23 @@ export class FqLocalBookStore {
     return true;
   }
 
+  /** 裸目录页判定：非空行 ≥2 且全部是章标题行（无引导标题的纯目录）。 */
+  private static isBareTocText(text: string): boolean {
+    const lines: string[] = text.split('\n');
+    let count: number = 0;
+    for (const line of lines) {
+      const trimmed: string = line.trim();
+      if (trimmed.length === 0) {
+        continue;
+      }
+      if (!FqLocalBookStore.isChapterTitleLine(trimmed)) {
+        return false;
+      }
+      count++;
+    }
+    return count >= 2;
+  }
+
   private static writeBookFile(context: common.Context, id: string, text: string): string {
     const dir: string = `${context.filesDir}/${FQ_LOCAL_BOOK_DIR}`;
     try {
@@ -500,7 +583,8 @@ export class FqLocalBookStore {
           continue;
         }
         chapters.push(new FqLocalChapter(fqStr(chapterRec, 'title'),
-          fqNum(chapterRec, 'offset'), fqNum(chapterRec, 'length')));
+          fqNum(chapterRec, 'offset'), fqNum(chapterRec, 'length'),
+          fqStr(chapterRec, 'group')));
       }
     }
     if (chapters.length === 0) {
@@ -522,6 +606,7 @@ export class FqLocalBookStore {
         chapterRec['title'] = chapter.title;
         chapterRec['offset'] = chapter.offset;
         chapterRec['length'] = chapter.length;
+        chapterRec['group'] = chapter.group;
         chapters.push(chapterRec);
       }
       const rec: Record<string, Object> = {};
