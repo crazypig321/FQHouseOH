@@ -25,7 +25,7 @@ import { FqMediaCard } from '../view/FqMediaCard';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import { appState, AppState } from '../entryability/AppState';
 import { rowImmersiveModifier, stackImmersiveModifier } from '../utils/ModifierUtils';
-import { shelfColumns } from '../utils/BreakpointUtils';
+import { shelfColumns, useSidebarLayout } from '../utils/BreakpointUtils';
 import { HdsNavigationMenuItemOptions } from '@kit.UIDesignKit';
 import preferences from '@ohos.data.preferences';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -278,7 +278,13 @@ export struct ShelfPage {
             }
             .width('100%')
             .position({ bottom: 0 })
-            .padding({ top: 14, left: 16, right: 16, bottom: appState.bottomRect  })
+            .padding({
+              top: 14,
+              left: 16,
+              right: 16,
+              // PC 侧边栏布局无底部手势条避让，固定留白 16；其余按手势条高度避让
+              bottom: useSidebarLayout(appState.WidthBp, appState.windowWidthVp, appState.displayWidthVp) ? 16 : appState.bottomRect,
+            })
             .transition(TransitionEffect.OPACITY)
           }.layoutGravity(LocalizedAlignment.BOTTOM_END)// stack组件中子组件对齐位置
           .transition(TransitionEffect.move(TransitionEdge.BOTTOM).animation({ duration: 300, curve: Curve.EaseOut }))
