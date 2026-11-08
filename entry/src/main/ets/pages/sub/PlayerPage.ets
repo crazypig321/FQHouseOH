@@ -40,10 +40,16 @@
  * - 播完自动连播；aboutToDisappear 销毁 mpv 实例并恢复沉浸前的系统 UI。
  * - 长按屏幕右侧 2 倍速快进（官方 jq3 长按带外分支 / fqapp _startBoost）：
  *   按住期间 2x、松开恢复原倍速，画面中央「2倍速快进中」指示。
- * - 全屏半屏竖滑调节：左半屏上下滑调窗口亮度（setWindowBrightness 0-100%，
- *   离页恢复跟随系统）、右半屏上下滑调播放音量（mpv 软音量 0-100，
- *   无需权限；系统 AudioManager.setVolume 已废弃不走）；滑动中中央
+ * - 全屏三分区竖滑调节：左三分之一上下滑调窗口亮度（setWindowBrightness
+ *   0-100%，离页恢复跟随系统）、右三分之一上下滑调播放音量（mpv 软音量
+ *   0-100，无需权限；系统 AudioManager.setVolume 已废弃不走）；滑动中中央
  *   浮层显示档位图标与百分比，松手后短驻自隐。
+ * - 竖滑切集：非全屏整个视频区上滑下一集/下滑上一集；全屏中三分之一竖滑
+ *   同切集（整页跟随手指，过阈值沿手势方向整页划走、换集后从对侧滑回，
+ *   滑动中提示方向与目标集；无上/下一集方向橡皮筋阻尼、松手回弹）。
+ * - 隔空手势（智慧手势，公共封装 utils/FqSmartGesture.ets）：划一划→下一集、
+ *   翻腕→上一集（registerMonitor 拦截消费，同样走整页划走动画；末/首集或
+ *   遮挡态交还系统默认行为）。
  * - 全屏防误触锁（官方 fullscreen/d.K6）：横屏片源左侧竖直居中（圆形
  *   半透明黑底），竖屏片源最底部左边（无底色）；锁定后上下工具不可呼出、
  *   画面操作与返回手势全吞（禁止手势退出全屏），仅锁按钮可唤出
@@ -66,7 +72,7 @@
  *   pageW()/pageH()（根 Stack 实测），不出侧边栏的设备回退屏宽屏高。
  */
 
-import { display, window, PiPWindow } from '@kit.ArkUI';
+import { display, window, PiPWindow, BaseGestureHandlingProposal, GestureHandlingResolution } from '@kit.ArkUI';
 import { connection } from '@kit.NetworkKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { common } from '@kit.AbilityKit';
@@ -99,6 +105,7 @@ import { FqDramaCacheStore } from '../../core/FqDramaCacheStore';
 import { fqDramaDownloader, FqDramaDownloader, FqDramaDownloadTask, DramaDownloadStatus } from '../../core/FqDramaDownloader';
 import { FqReadStatsStore } from '../../core/FqReadStatsStore';
 import { NavPathUtils } from '../../utils/NavPathUtils';
+import { FqSmartGesture, FqSmartGestureHandler, fqConsumeSmartGesture, fqPassSmartGesture } from '../../utils/FqSmartGesture';
 import { useSidebarLayout } from '../../utils/BreakpointUtils';
 import { appState } from '../../entryability/AppState';
 
@@ -141,6 +148,18 @@ const FQ_ADJUST_HIDE_MS: number = 600;
 const FQ_ADJUST_FULL_SWIPE: number = 1.2;
 /** 首次调节亮度起始百分比（窗口亮度只写不读，无从取当前值）。 */
 const FQ_ADJUST_INIT_PERCENT: number = 50;
+/** 切集竖滑提示浮层出现阈值（vp，|位移| 超过亮出方向与目标集）。 */
+const FQ_EPISODE_SWIPE_HINT_VP: number = 12;
+/** 切集竖滑触发阈值（vp，|位移| 超过即切一集并锁到松手）。 */
+const FQ_EPISODE_SWIPE_TRIGGER_VP: number = 56;
+/** 切集划走动画：整页沿手势方向滑出时长（ms）。 */
+const FQ_EPISODE_SWITCH_OUT_MS: number = 260;
+/** 切集划走动画：换集后新页从对侧滑入时长（ms）。 */
+const FQ_EPISODE_SWITCH_IN_MS: number = 320;
+/** 切集竖滑未过阈值松手整页回弹时长（ms）。 */
+const FQ_EPISODE_SWIPE_BACK_MS: number = 220;
+/** 切集竖滑边界橡皮筋阻尼系数（无上/下一集方向位移按此衰减）。 */
+const FQ_EPISODE_SWIPE_RUBBER: number = 3;
 /** 边看边往后缓存起播延时（fqapp Timer 2s：起播稳定后再排，避免抢起播带宽）。 */
 const FQ_AUTO_CACHE_DELAY_MS: number = 2000;
 /** 边看边往后缓存诊断日志 tag。 */
@@ -396,6 +415,22 @@ export struct PlayerPage {
   private adjustHideTimer: number = 0;
   /** 窗口亮度百分比（-1 未手动调过；首次滑动从 50 起，离页恢复跟随系统）。 */
   private brightnessPercent: number = -1;
+  /** 切集竖滑进行中（非全屏整面 / 全屏中三分之一；true 时 update/end 走切集分支）。 */
+  private episodeSwipeActive: boolean = false;
+  /** 切集竖滑起始纵坐标（vp，globalY）。 */
+  private episodeSwipeStartY: number = 0;
+  /** 切集竖滑方向（0 未定 / 1 下一集 / -1 上一集）。 */
+  private episodeSwipeDir: number = 0;
+  /** 切集竖滑已触发（一次手势只切一集，触发后锁到松手）。 */
+  private episodeSwipeDone: boolean = false;
+  /** 切集竖滑提示浮层（'' 隐藏；滑动中显示方向与目标集）。 */
+  @Local episodeSwipeHint: string = '';
+  /** 切集划走动画进行中（禁止再次触发竖滑/隔空切集）。 */
+  private episodeSwitchAnimating: boolean = false;
+  /** 切集划走位移（vp，整页 translateY：跟手或动画值，0 复位）。 */
+  @Local episodeSwitchOffset: number = 0;
+  /** 切集划走动画令牌（++ 作废进行中的延时回调：新动画/离页）。 */
+  private episodeSwitchToken: number = 0;
   /** 侧边栏选集滚动器（打开时滚到当前集竖直居中）。 */
   private sideScroller: Scroller = new Scroller();
   /** 侧边栏选集定位定时器（0 无任务）。 */
@@ -451,6 +486,24 @@ export struct PlayerPage {
   private pipSystemSwitch: boolean = true;
   /** onHidden 延迟解除武装令牌（++ 使正在等待的延迟判定作废：onShown/离页取消）。 */
   private pipHideToken: number = 0;
+  /** 隔空手势注册器（公共封装 utils/FqSmartGesture.ets；null 未初始化）。 */
+  private smartGesture: FqSmartGesture | null = null;
+  /** 智慧手势监听回调（划一划→下一集、翻腕→上一集，走整页划走动画；末/首集或遮挡态不消费，交还系统默认行为）。 */
+  private smartGestureMonitor: FqSmartGestureHandler =
+    (proposal: BaseGestureHandlingProposal): GestureHandlingResolution => {
+      const intent: OperateIntention = proposal.operateIntention;
+      let target: number = -1;
+      if (intent === OperateIntention.SLIDE_FORWARD) {
+        target = this.index + 1;
+      } else if (intent === OperateIntention.BACK_PRESS) {
+        target = this.index - 1;
+      }
+      if (target < 0 || target >= this.episodes.length || !this.airGestureReady() ||
+        !this.playEpisodeSwitchAnim(target)) {
+        return fqPassSmartGesture();
+      }
+      return fqConsumeSmartGesture();
+    };
 
   aboutToAppear(): void {
     this.title = PlayerNavParams.title;
@@ -583,6 +636,8 @@ export struct PlayerPage {
     }
     // 关联原著（官方 _loadBandExtras：装饰性数据，失败静默不影响播放）
     this.loadOriginalBook();
+    // 隔空手势（智慧手势）：划一划→下一集、翻腕→上一集（不支持设备注册静默 no-op）
+    this.setupSmartGesture();
   }
 
   aboutToDisappear(): void {
@@ -601,6 +656,10 @@ export struct PlayerPage {
     this.cancelCenterHide();
     this.cancelLockHide();
     this.cancelAdjustHide();
+    this.resetEpisodeSwipeState();
+    // 作废划走动画进行中的延时回调（离页不再换集/复位位移）
+    this.episodeSwitchToken += 1;
+    this.teardownSmartGesture();
     this.cancelSideLocate();
     if (this.autoCacheTimer !== 0) {
       clearTimeout(this.autoCacheTimer);
@@ -644,10 +703,12 @@ export struct PlayerPage {
       showPlaybackBall: false,
       onShown: (): void => {
         appState.hidePcSideNav = true;
+        this.registerSmartGesture();
         this.onNavPipShown();
       },
       onHidden: (): void => {
         appState.hidePcSideNav = false;
+        this.unregisterSmartGesture();
         this.onNavPipHidden();
       },
       backPressed: (): boolean => {
@@ -719,6 +780,20 @@ export struct PlayerPage {
             .backgroundColor('rgba(0,0,0,0.55)')
           }
 
+          // 切集竖滑提示浮层（非全屏整面 / 全屏中三分之一竖滑：方向 + 目标集；
+          // 边界集提示已是第一/最后一集；松手或切集即隐）
+          if (this.episodeSwipeHint.length > 0) {
+            Text(this.episodeSwipeHint)
+              .fontSize(15)
+              .fontColor(Color.White)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .constraintSize({ maxWidth: '80%' })
+              .padding({ left: 16, right: 16, top: 9, bottom: 9 })
+              .borderRadius(18)
+              .backgroundColor('rgba(0,0,0,0.55)')
+          }
+
           if (this.errorMsg.length > 0) {
             this.ErrorOverlay()
           }
@@ -729,9 +804,9 @@ export struct PlayerPage {
         .backgroundColor(Color.Black)
         // 全屏：单击切控件显隐、双击切播放/暂停（互斥识别，双击优先）；
         // 长按屏幕右侧 2 倍速快进（锁定态全部吞掉，只唤出锁按钮）；
-        // 全屏竖滑：左半屏调亮度、右半屏调音量（滑过 1.2 倍屏高走完全量程）；
-        // 横滑：快进/快退（滑过一屏走 90s，复用中央时间浮层与进度条预览）；
-        // 非全屏：单击切播放（保持原样）
+        // 全屏竖滑：左三分之一调亮度、右三分之一调音量（滑过 1.2 倍屏高走完全量程）、
+        // 中三分之一切集；横滑：快进/快退（滑过一屏走 90s，复用中央时间浮层与进度条预览）；
+        // 非全屏：单击切播放，整个视频区竖滑切集
         .gesture(
           GestureGroup(GestureMode.Exclusive,
             TapGesture({ count: 2 })
@@ -786,6 +861,9 @@ export struct PlayerPage {
               })
           )
         )
+        // 隔空手势（智慧手势）目标：播放区标记可响应（划一划/敲一敲以此为落点）
+        .id('fq_player_video_area')
+        .smartGestureShortcut({ action: GestureShortcut.PRIMARY, enabled: true, selectable: false })
         // 右上角菜单呼出的播放设置半模态（公共框架，不触发前景模糊）；
         // 二级「弹幕设置」页行数多，sheet 高度随之抬高
         .bindSheet(this.settingsVisible, this.SettingsSheetBuilder(),
@@ -910,6 +988,8 @@ export struct PlayerPage {
       .width('100%')
       .height('100%')
       .backgroundColor(Color.Black)
+      // 切集划走动画：竖滑跟手/隔空切集时整页（视频+控件+侧栏）沿 y 划走
+      .translate({ y: this.episodeSwitchOffset })
     }
   }
 
@@ -4090,25 +4170,36 @@ export struct PlayerPage {
   }
 
   /**
-   * 全屏半屏竖滑调节起始：左半屏 → 窗口亮度（-1 未调过从 50 起）、
-   * 右半屏 → 播放器软音量（mpv state.volume，钳制 0-100）；
-   * 锁定态只唤出锁按钮；半模态/侧边栏打开时不响应；非全屏不响应。
+   * 竖滑手势起始：非全屏整个视频区 / 全屏中三分之一 → 切集竖滑；
+   * 全屏左三分之一 → 窗口亮度（-1 未调过从 50 起）、右三分之一 → 播放器
+   * 软音量（mpv state.volume，钳制 0-100）；锁定态只唤出锁按钮；
+   * 半模态/侧边栏打开时不响应。
    */
   private onAdjustPanStart(event?: GestureEvent): void {
     if (this.fsLocked) {
       this.refreshLockVisibility();
       return;
     }
-    if (!this.fullScreen || this.sheetVisible || this.settingsVisible || this.commentSheetVisible ||
+    if (this.sheetVisible || this.settingsVisible || this.commentSheetVisible ||
       this.sidePanel.length > 0 || event === undefined || event.fingerList.length === 0) {
       return;
     }
+    // 非全屏：整个视频区竖滑 = 切集（上滑下一集 / 下滑上一集）
+    if (!this.fullScreen) {
+      this.startEpisodeSwipe(event);
+      return;
+    }
     this.cancelAdjustHide();
-    // 左右半屏判定（globalX 与 display 宽同取当前方向、统一换算 vp，同长按快进）
+    // 左中右三分区判定（globalX 与 display 宽同取当前方向、统一换算 vp，同长按快进）
     const displayData: display.Display = display.getDefaultDisplaySync();
     const density: number = displayData.densityPixels > 0 ? displayData.densityPixels : 1;
     const widthVp: number = displayData.width / density;
-    if (event.fingerList[0].globalX < widthVp / 2) {
+    const globalX: number = event.fingerList[0].globalX;
+    if (globalX > widthVp / 3 && globalX < widthVp * 2 / 3) {
+      this.startEpisodeSwipe(event);
+      return;
+    }
+    if (globalX <= widthVp / 3) {
       this.gestureAdjust = 'brightness';
       this.adjustStartValue = this.brightnessPercent >= 0 ? this.brightnessPercent : FQ_ADJUST_INIT_PERCENT;
     } else {
@@ -4125,6 +4216,10 @@ export struct PlayerPage {
    * 亮度即时写窗口 setWindowBrightness（最小 0.01 防全黑），音量即时写 mpv setVolume。
    */
   private onAdjustPanUpdate(event?: GestureEvent): void {
+    if (this.episodeSwipeActive) {
+      this.updateEpisodeSwipe(event);
+      return;
+    }
     if (this.gestureAdjust.length === 0 || event === undefined || event.fingerList.length === 0) {
       return;
     }
@@ -4153,8 +4248,12 @@ export struct PlayerPage {
     }
   }
 
-  /** 竖滑结束/取消：浮层短驻后自隐（连续滑动重新开始则保持显示）。 */
+  /** 竖滑结束/取消：切集竖滑清态；调节浮层短驻后自隐（连续滑动重新开始则保持显示）。 */
   private onAdjustPanEnd(): void {
+    if (this.episodeSwipeActive) {
+      this.endEpisodeSwipe();
+      return;
+    }
     if (this.gestureAdjust.length === 0) {
       return;
     }
@@ -4170,6 +4269,182 @@ export struct PlayerPage {
       clearTimeout(this.adjustHideTimer);
       this.adjustHideTimer = 0;
     }
+  }
+
+  /** 切集竖滑可用前置（有集数、无错误、划走动画不在进行、无半模态/侧边栏遮挡）。 */
+  private episodeSwipeReady(): boolean {
+    return this.episodes.length > 1 && this.errorMsg.length === 0 && !this.episodeSwitchAnimating &&
+      !this.sheetVisible && !this.settingsVisible && !this.commentSheetVisible && this.sidePanel.length === 0;
+  }
+
+  /** 切集竖滑提示文案（方向 + 目标集；边界集提示已是第一/最后一集）。 */
+  private episodeSwipeHintText(dir: number): string {
+    if (dir > 0) {
+      const next: FqChapter | undefined = this.episodes[this.index + 1];
+      if (next === undefined) {
+        return '已是最后一集';
+      }
+      return `下一集 ${next.title}`;
+    }
+    if (dir < 0) {
+      const prev: FqChapter | undefined = this.episodes[this.index - 1];
+      if (prev === undefined) {
+        return '已是第一集';
+      }
+      return `上一集 ${prev.title}`;
+    }
+    return '上滑下一集 · 下滑上一集';
+  }
+
+  /** 切集竖滑起始：记录起点并亮出初始提示（跟手位移与是否切集在 update 里按位移判定）。 */
+  private startEpisodeSwipe(event?: GestureEvent): void {
+    this.resetEpisodeSwipeState();
+    if (!this.episodeSwipeReady() || event === undefined || event.fingerList.length === 0) {
+      return;
+    }
+    // 挤掉上一轮调节浮层（两浮层同居中会叠影）
+    if (this.gestureAdjust.length > 0) {
+      this.cancelAdjustHide();
+      this.gestureAdjust = '';
+    }
+    this.episodeSwipeActive = true;
+    this.episodeSwipeStartY = event.fingerList[0].globalY;
+    this.episodeSwipeHint = this.episodeSwipeHintText(0);
+  }
+
+  /**
+   * 切集竖滑过程：整页跟随手指；过提示阈值亮方向文案，过触发阈值沿当前
+   * 方向整页划走换集（一次手势一集）；无上/下一集方向橡皮筋阻尼（拉不动）。
+   */
+  private updateEpisodeSwipe(event?: GestureEvent): void {
+    if (!this.episodeSwipeActive || this.episodeSwipeDone ||
+      event === undefined || event.fingerList.length === 0) {
+      return;
+    }
+    const dy: number = this.episodeSwipeStartY - event.fingerList[0].globalY;
+    const canNext: boolean = this.index + 1 < this.episodes.length;
+    const canPrev: boolean = this.index > 0;
+    // 过触发阈值：整页划走换集并锁到松手（一次手势只切一集）
+    if (dy > FQ_EPISODE_SWIPE_TRIGGER_VP && canNext) {
+      this.episodeSwipeDone = true;
+      this.episodeSwipeHint = '';
+      this.playEpisodeSwitchAnim(this.index + 1);
+      return;
+    }
+    if (dy < -FQ_EPISODE_SWIPE_TRIGGER_VP && canPrev) {
+      this.episodeSwipeDone = true;
+      this.episodeSwipeHint = '';
+      this.playEpisodeSwitchAnim(this.index - 1);
+      return;
+    }
+    // 方向提示（边界集提示已是第一/最后一集）
+    let dir: number = 0;
+    if (dy > FQ_EPISODE_SWIPE_HINT_VP) {
+      dir = 1;
+    } else if (dy < -FQ_EPISODE_SWIPE_HINT_VP) {
+      dir = -1;
+    }
+    if (dir !== this.episodeSwipeDir) {
+      this.episodeSwipeDir = dir;
+      this.episodeSwipeHint = this.episodeSwipeHintText(dir);
+    }
+    // 整页跟手；无上/下一集方向橡皮筋阻尼（位移衰减，松手回弹）
+    if ((dy > 0 && !canNext) || (dy < 0 && !canPrev)) {
+      this.episodeSwitchOffset = dy / FQ_EPISODE_SWIPE_RUBBER;
+    } else {
+      this.episodeSwitchOffset = dy;
+    }
+  }
+
+  /** 切集竖滑结束/取消：未划走则整页弹回原位，随后清态。 */
+  private endEpisodeSwipe(): void {
+    if (this.episodeSwipeActive && !this.episodeSwipeDone && !this.episodeSwitchAnimating &&
+      this.episodeSwitchOffset !== 0) {
+      this.getUIContext().animateTo({ duration: FQ_EPISODE_SWIPE_BACK_MS, curve: Curve.Friction }, (): void => {
+        this.episodeSwitchOffset = 0;
+      });
+    }
+    this.resetEpisodeSwipeState();
+  }
+
+  /** 清切集竖滑全部状态与提示浮层（不做回弹动画，重开滑/离页用）。 */
+  private resetEpisodeSwipeState(): void {
+    this.episodeSwipeActive = false;
+    this.episodeSwipeDir = 0;
+    this.episodeSwipeDone = false;
+    this.episodeSwipeHint = '';
+  }
+
+  /**
+   * 切集划走动画（竖滑/隔空共用）：整页沿手势方向滑出（下一集向上/上一集
+   * 向下），出场后瞬移到对侧、加载目标集、再滑入复位；动画期间禁止再次
+   * 触发；令牌作废离页后仍在排队的延时回调。返回是否成功启动。
+   */
+  private playEpisodeSwitchAnim(target: number): boolean {
+    if (this.episodeSwitchAnimating || target < 0 || target >= this.episodes.length) {
+      return false;
+    }
+    this.episodeSwitchAnimating = true;
+    this.episodeSwitchToken += 1;
+    const token: number = this.episodeSwitchToken;
+    const travel: number = this.pageH();
+    const outOffset: number = target > this.index ? -travel : travel;
+    // 出场：整页沿手势方向滑出
+    this.getUIContext().animateTo({ duration: FQ_EPISODE_SWITCH_OUT_MS, curve: Curve.EaseIn }, (): void => {
+      this.episodeSwitchOffset = outOffset;
+    });
+    setTimeout((): void => {
+      if (token !== this.episodeSwitchToken) {
+        return;
+      }
+      // 出场完成：瞬移对侧（间隔一帧让跳变先渲染），换集后滑入
+      this.episodeSwitchOffset = -outOffset;
+      this.loadEpisode(target);
+      setTimeout((): void => {
+        if (token !== this.episodeSwitchToken) {
+          return;
+        }
+        this.getUIContext().animateTo({ duration: FQ_EPISODE_SWITCH_IN_MS, curve: Curve.EaseOut }, (): void => {
+          this.episodeSwitchOffset = 0;
+        });
+        setTimeout((): void => {
+          if (token !== this.episodeSwitchToken) {
+            return;
+          }
+          this.episodeSwitchAnimating = false;
+          this.episodeSwitchOffset = 0;
+        }, FQ_EPISODE_SWITCH_IN_MS + 60);
+      }, 40);
+    }, FQ_EPISODE_SWITCH_OUT_MS + 30);
+    return true;
+  }
+
+  /** 隔空切集前置（无错误、非加载、划走动画不在进行、无半模态/侧边栏遮挡）。 */
+  private airGestureReady(): boolean {
+    return this.errorMsg.length === 0 && !this.loading && !this.episodeSwitchAnimating && !this.sheetVisible &&
+      !this.settingsVisible && !this.commentSheetVisible && this.sidePanel.length === 0;
+  }
+
+  /** 初始化隔空手势：经公共封装注册监听（不支持设备注册静默 no-op）。 */
+  private setupSmartGesture(): void {
+    this.smartGesture = new FqSmartGesture(this.getUIContext().getSmartGestureController(), this.smartGestureMonitor);
+    this.smartGesture.register();
+  }
+
+  /** 注册隔空手势监听（onShown 重入防重复注册）。 */
+  private registerSmartGesture(): void {
+    this.smartGesture?.register();
+  }
+
+  /** 注销隔空手势监听（onHidden 被覆盖页时停用，防隔空误切集）。 */
+  private unregisterSmartGesture(): void {
+    this.smartGesture?.unregister();
+  }
+
+  /** 离页销毁隔空手势：注销监听并释放引用。 */
+  private teardownSmartGesture(): void {
+    this.unregisterSmartGesture();
+    this.smartGesture = null;
   }
 
   /**
