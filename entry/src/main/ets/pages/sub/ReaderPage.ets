@@ -49,6 +49,7 @@ import { appState } from '../../entryability/AppState';
 import { themeUtils } from '../../utils/ThemeUtils';
 import { DialogManager } from '../../utils/DialogUtils';
 import { FqContinueKit } from '../../utils/continue/FqContinueKit';
+import { FqShareKit } from '../../utils/share/FqShareKit';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { FQ_READER_THEMES, FqReaderTheme } from '../../view/dialog/ReaderSettingsDialogContent';
 import { fqReaderSettingsBus } from '../../core/FqReaderSettingsBus';
@@ -378,6 +379,18 @@ export struct ReaderPage {
           },
         },
       });
+      // 分享：构建直达链接拉起系统分享面板（本地导入书 / 书旗来源不分享）
+      if (!isLocalBook && !this.bookId.startsWith('shuqi:')) {
+        menus.push({
+          content: {
+            icon: $r('sys.symbol.share'),
+            label: 'share',
+            action: (): void => {
+              FqShareKit.shareRead();
+            },
+          },
+        });
+      }
       // 应用流转：拉起系统设备选择面板（接续到其他设备续读）
       menus.push({
         content: {

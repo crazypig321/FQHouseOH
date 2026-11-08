@@ -107,6 +107,7 @@ import { FqReadStatsStore } from '../../core/FqReadStatsStore';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { useSidebarLayout } from '../../utils/BreakpointUtils';
 import { FqContinueKit } from '../../utils/continue/FqContinueKit';
+import { FqShareKit } from '../../utils/share/FqShareKit';
 import { appState } from '../../entryability/AppState';
 
 /** 官方竖屏播放页底部信息/进度/选集区高度（PlayerVideoLayout bottom 163）。 */
@@ -1486,6 +1487,15 @@ export struct PlayerPage {
             this.openCatalog();
           })
 
+        // 分享：构建直达链接拉起系统分享面板
+        Text('分享')
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(Color.White)
+          .onClick((): void => {
+            FqShareKit.shareVideo();
+          })
+
         // 应用流转：拉起系统接续设备选择面板（流转到其他设备续看）
         Text('流转')
           .fontSize(14)
@@ -2065,12 +2075,16 @@ export struct PlayerPage {
   }
 
   /** 设置行点击：听视频进听剧模式页；离线缓存呼出缓存选集半模态；
-   * 流转拉起接续设备选择面板；弹幕设置进二级设置页（倍速/弹幕行右侧控件自理）。 */
+   * 分享拉起系统分享面板（直达链接）；流转拉起接续设备选择面板；
+   * 弹幕设置进二级设置页（倍速/弹幕行右侧控件自理）。 */
   private onSettingRowClick(key: string): void {
     if (key === 'cache') {
       this.openCacheSheet(true);
     } else if (key === 'listen') {
       this.openListenMode();
+    } else if (key === 'share') {
+      this.closeSettings();
+      FqShareKit.shareVideo();
     } else if (key === 'continue') {
       this.closeSettings();
       FqContinueKit.startInAppContinuation();

@@ -42,6 +42,7 @@ import { appState } from './AppState';
 import { themeUtils } from '../utils/ThemeUtils';
 import { FqSmartReach } from '../utils/FqSmartReach';
 import { FqContinueKit } from '../utils/continue/FqContinueKit';
+import { FqShareKit } from '../utils/share/FqShareKit';
 
 const DOMAIN = 0x0000;
 
@@ -90,6 +91,9 @@ export default class EntryAbility extends UIAbility {
       hilog.info(DOMAIN, 'FqContinue', '%{public}s', 'cold start by continuation');
       FqContinueKit.parsePending(want);
       this.context.restoreWindowStage(new LocalStorage());
+    } else if (FqShareKit.parseUri(want)) {
+      // 分享链接冷启动：解析载荷（Index 挂载后延时消费直达 / 导入书架）
+      hilog.info(DOMAIN, 'FqShare', '%{public}s', 'cold start by share link');
     }
   }
 
@@ -99,6 +103,14 @@ export default class EntryAbility extends UIAbility {
       hilog.info(DOMAIN, 'FqContinue', '%{public}s', 'hot start by continuation');
       FqContinueKit.parsePending(want);
       this.context.restoreWindowStage(new LocalStorage());
+      return;
+    }
+    // 分享链接热启动：解析载荷，延时消费（导航已挂载，直接推入对应页面 / 导入书架）
+    if (FqShareKit.parseUri(want)) {
+      hilog.info(DOMAIN, 'FqShare', '%{public}s', 'hot start by share link');
+      setTimeout((): void => {
+        FqShareKit.applyPending();
+      }, 500);
     }
   }
 

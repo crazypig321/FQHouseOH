@@ -16,6 +16,7 @@ import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/sheet/FqComme
 import {
   FqTitleBarOptions,
   FqTitleBarMenuOptions,
+  FqTitleBarTwoMenusOptions,
   fqPushBookOrDetail,
   ListenNavParams,
   ReaderNavParams,
@@ -40,6 +41,8 @@ import { NavPathUtils } from '../../utils/NavPathUtils';
 import { appState } from '../../entryability/AppState';
 import { FqColorUtils } from '../../utils/FqColorUtils';
 import { FqContinueKit } from '../../utils/continue/FqContinueKit';
+import { FqShareKit } from '../../utils/share/FqShareKit';
+import { TitleBarContentOptions } from '@kit.UIDesignKit';
 
 /** 播放倍速档（avPlayer 0.75 ~ 2）。 */
 const FQ_RATES: number[] = [0.75, 1, 1.25, 1.5, 1.75, 2];
@@ -176,11 +179,25 @@ export struct ListenPage {
     return this.seekPreview >= 0 ? this.seekPreview : fqAudioSession.positionSec;
   }
 
+  /** 标题栏：可分享作品附分享菜单（分享直达链接），本地导入/书旗来源仅保留流转。 */
+  private buildTitleBar(): TitleBarContentOptions {
+    if (FqShareKit.isShareableId(fqAudioSession.bookId)) {
+      return FqTitleBarTwoMenusOptions('听书',
+        $r('sys.symbol.share'), 'share', (): void => {
+          FqShareKit.shareListen();
+        },
+        $r('sys.symbol.superdevice'), 'continue', (): void => {
+          FqContinueKit.startInAppContinuation();
+        });
+    }
+    return FqTitleBarMenuOptions('听书', $r('sys.symbol.superdevice'), 'continue', (): void => {
+      FqContinueKit.startInAppContinuation();
+    });
+  }
+
   build() {
     CommonNav({
-      titleBarOp: FqTitleBarMenuOptions('听书', $r('sys.symbol.superdevice'), 'continue', (): void => {
-        FqContinueKit.startInAppContinuation();
-      }),
+      titleBarOp: this.buildTitleBar(),
       scroller: this.scroller,
       showPlaybackBall: false,
     }) {

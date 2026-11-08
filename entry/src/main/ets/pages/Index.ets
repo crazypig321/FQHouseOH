@@ -28,6 +28,7 @@ import { HSBColorPicker, HSBColorPickerLayout } from '@keke/color-picker';
 import { useSidebarLayout } from '../utils/BreakpointUtils';
 import { PcMainLayout } from '../view/pcUI/PcMainLayout';
 import { FqContinueKit } from '../utils/continue/FqContinueKit';
+import { FqShareKit } from '../utils/share/FqShareKit';
 
 @Entry
 @ComponentV2
@@ -99,6 +100,12 @@ struct Index {
     if (FqContinueKit.hasPending()) {
       setTimeout((): void => {
         FqContinueKit.applyPending();
+      }, 500);
+    }
+    // 分享链接冷启动：待处理分享载荷 → 延迟待 Navigation 挂载后直达对应页面 / 导入书架
+    if (FqShareKit.hasPending()) {
+      setTimeout((): void => {
+        FqShareKit.applyPending();
       }, 500);
     }
   }

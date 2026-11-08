@@ -48,6 +48,17 @@
             "actions": [
               "ohos.want.action.home"
             ]
+          },
+          {
+            "actions": [
+              "ohos.want.action.viewData"
+            ],
+            "uris": [
+              {
+                "scheme": "fqhouse",
+                "host": "open"
+              }
+            ]
           }
         ]
       }

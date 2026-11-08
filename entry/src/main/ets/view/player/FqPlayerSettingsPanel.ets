@@ -71,7 +71,7 @@ export struct FqPlayerSettingsPanel {
   @Event danmakuToggle: (on: boolean) => void = (_on: boolean): void => {};
   /** 解码方式切换（宿主 setHwDecode：mpv 运行时切 hwdec + 持久化）。 */
   @Event hwdecToggle: (on: boolean) => void = (_on: boolean): void => {};
-  /** 设置行点击（cache/listen/danmakuSettings；倍速/弹幕行右侧控件自理）。 */
+  /** 设置行点击（cache/listen/share/danmakuSettings；倍速/弹幕行右侧控件自理）。 */
   @Event rowClick: (key: string) => void = (_key: string): void => {};
 
   build() {
@@ -185,6 +185,7 @@ export struct FqPlayerSettingsPanel {
       new FqSettingItem('hwdec', '解码方式', $r('sys.symbol.video')),
       new FqSettingItem('cache', '离线缓存', $r('sys.symbol.download')),
       new FqSettingItem('listen', '听视频', $r('sys.symbol.waveform_tv')),
+      new FqSettingItem('share', '分享', $r('sys.symbol.share')),
       new FqSettingItem('continue', '流转', $r('sys.symbol.superdevice')),
       new FqSettingItem('danmaku', '弹幕开关', $r('sys.symbol.ellipsis_bubble')),
       new FqSettingItem('danmakuSettings', '弹幕设置', $r('sys.symbol.textformat'))

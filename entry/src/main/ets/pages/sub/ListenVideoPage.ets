@@ -16,11 +16,11 @@
 
 import { promptAction } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
-import { CommonNav } from '../../view/CommonNav';
+import { CommonNav, titleBarOf } from '../../view/CommonNav';
 import { CommonSheet, FqSheetOptions } from '../../view/sheet/CommonSheet';
 import { FqCatalogSheet } from '../../view/sheet/FqCatalogSheet';
 import { FqSettingRow } from '../../view/FqSettingRow';
-import { FqTitleBarMenuOptions, FqTitleBarTwoMenusOptions, ListenVideoNavParams } from '../../model/FqNavModels';
+import { ListenVideoNavParams } from '../../model/FqNavModels';
 import { FqChapter } from '../../model/FqModels';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { FqVideoMedia } from '../../core/FqVideoMedia';
@@ -31,6 +31,8 @@ import { appState } from '../../entryability/AppState';
 import { Player, Media, PlayerConfig } from '@mpv-ohos/mpv-arkts';
 import { FqColorUtils } from '../../utils/FqColorUtils';
 import { FqContinueKit } from '../../utils/continue/FqContinueKit';
+import { FqShareKit } from '../../utils/share/FqShareKit';
+import { HdsNavigationMenuItemOptions, TitleBarContentOptions } from '@kit.UIDesignKit';
 
 /** 定时分钟档（对齐听书页 -1/15/30/60）。 */
 const FQ_SLEEP_MINUTES: number[] = [15, 30, 60];
@@ -252,15 +254,43 @@ export struct ListenVideoPage {
     return this.sleepDeadline > 0 || this.sleepAtEpisodeEnd;
   }
 
-  build() {
-    CommonNav({
-      titleBarOp: FqTitleBarTwoMenusOptions('听视频', $r('sys.symbol.speed_multiple'), 'speed',
-        (): void => {
+  /** 标题栏：可分享剧集附分享菜单（分享直达链接），本地导入/书旗来源仅保留倍速+流转。 */
+  private buildTitleBar(): TitleBarContentOptions {
+    const menus: Array<HdsNavigationMenuItemOptions> = [{
+      content: {
+        icon: $r('sys.symbol.speed_multiple'),
+        label: 'speed',
+        action: (): void => {
           this.openSheet(FqListenVideoSheetKind.rates);
         },
-        $r('sys.symbol.superdevice'), 'continue', (): void => {
+      },
+    }];
+    if (FqShareKit.isShareableId(ListenVideoNavParams.contentId)) {
+      menus.push({
+        content: {
+          icon: $r('sys.symbol.share'),
+          label: 'share',
+          action: (): void => {
+            FqShareKit.shareListenVideo();
+          },
+        },
+      });
+    }
+    menus.push({
+      content: {
+        icon: $r('sys.symbol.superdevice'),
+        label: 'continue',
+        action: (): void => {
           FqContinueKit.startInAppContinuation();
-        }),
+        },
+      },
+    });
+    return titleBarOf('听视频', undefined, menus);
+  }
+
+  build() {
+    CommonNav({
+      titleBarOp: this.buildTitleBar(),
       scroller: this.scroller,
       showPlaybackBall: false,
     }) {

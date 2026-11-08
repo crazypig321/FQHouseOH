@@ -18,6 +18,7 @@ import { fqStoreBus, FqStoreBus } from '../core/FqStoreBus';
 import { DialogManager } from '../utils/DialogUtils';
 import { FqReadStatsStore } from '../core/FqReadStatsStore';
 import { FqLocalBookStore } from '../core/FqLocalBookStore';
+import { FqShareKit } from '../utils/share/FqShareKit';
 import { FqBackend } from '../core/FqBackend';
 import { FqMediaItem, FqSearchTab, fqKindLabel } from '../model/FqModels';
 import { FqMediaCard } from '../view/FqMediaCard';
@@ -248,6 +249,18 @@ export struct ShelfPage {
                   .fontColor($r('sys.color.font_primary'))
                   .onClick(() => {
                     this.toggleSelectAll();
+                  })
+                // 多选分享：所选作品生成书单链接（目标端打开直接导入书架）
+                Button('分享')
+                  .layoutWeight(1)
+                  .height(36)
+                  .fontSize(14)
+                  .fontWeight(FontWeight.Medium)
+                  .borderRadius(10)
+                  .backgroundColor($r('sys.color.comp_background_tertiary'))
+                  .fontColor($r('sys.color.font_primary'))
+                  .onClick(() => {
+                    this.shareBatchSelected();
                   })
                 Button(this.currentTab === 0 ? '移出书架' : '删除')
                   .layoutWeight(1)
@@ -525,6 +538,18 @@ export struct ShelfPage {
     };
     items.push(offlineItem);
 
+    // 整架分享：当前书架全量作品生成书单链接（目标端打开直接导入书架）
+    if (this.currentTab === 0) {
+      const shareItem = new FqMenuItem();
+      shareItem.icon = $r('sys.symbol.share');
+      shareItem.label = '分享书架';
+      shareItem.onAction = (): void => {
+        FqMenu.dismiss();
+        this.shareWholeShelf();
+      };
+      items.push(shareItem);
+    }
+
     const clearItem = new FqMenuItem();
     clearItem.icon = $r('sys.symbol.trash');
     clearItem.label = this.currentTab === 0 ? '清空书架' : '清空浏览历史';
@@ -707,9 +732,38 @@ export struct ShelfPage {
     }
   }
 
-  /** 多选清除（先弹共用确认弹窗）：书架 tab 移出书架，历史 tab 删除记录。 */
-  private batchClearSelected(): void {
+  /** 多选分享：所选作品生成书单链接拉起系统分享面板（目标端打开直接导入书架）。 */
+  private shareBatchSelected(): void {
     if (this.batchSelected.length === 0) {
+      this.showToast('请先选择条目');
+      return;
+    }
+    const items: FqShelfItem[] = [];
+    const count: number = this.dataSource.totalCount();
+    for (let i = 0; i < count; i++) {
+      const row: ShelfRow = this.dataSource.getData(i);
+      if (this.isSelectedId(row.id)) {
+        items.push(new FqShelfItem(row.id, row.kind, row.title, row.cover));
+      }
+    }
+    if (!FqShareKit.shareShelf(items, '书单分享')) {
+      this.showToast('所选作品均不支持分享');
+    }
+  }
+
+  /** 整架分享：书架全量作品生成书单链接（本地导入/书旗自动过滤）。 */
+  private shareWholeShelf(): void {
+    const items: FqShelfItem[] = [];
+    for (const entry of FqShelfStore.all()) {
+      items.push(new FqShelfItem(entry.id, entry.kind, entry.title, entry.cover));
+    }
+    if (!FqShareKit.shareShelf(items, '我的书架')) {
+      this.showToast('书架暂无可分享作品');
+    }
+  }
+
+  /** 多选清除（先弹共用确认弹窗）：书架 tab 移出书架，历史 tab 删除记录。 */
+  private batchClearSelected(): void {    if (this.batchSelected.length === 0) {
       this.showToast('请先选择条目');
       return;
     }
