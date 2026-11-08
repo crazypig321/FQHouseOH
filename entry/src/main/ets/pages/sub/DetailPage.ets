@@ -15,6 +15,7 @@ import {
   FqBookCommentPage,
   FqBookDetail,
   FqChapter,
+  FqEpisodeCommentPage,
   fqEmptyBookDetail,
   fqFormatCountInt,
   fqKindToTab,
@@ -80,6 +81,8 @@ export struct DetailPage {
   private shuqiMode: boolean = false;
   private loadToken: number = 0;
   private scroller: Scroller = new Scroller();
+  /** 剧评游标（/api/v1/series/{id}/comments 不透明续拉串；重开由加载器重置）。 */
+  private seriesCommentCursor: string = '';
   /** 进入页面时捕获的顶部避让：阅读页隐藏状态栏期间 topRect 变小，
    * 用捕获值保持 List 顶部内边稳定（返回详情页内容位置与首进一致）。 */
   private stableTopInset: number = 0;
@@ -651,22 +654,53 @@ export struct DetailPage {
     .alignItems(HorizontalAlign.Start)
   }
 
-  /** 书评半模态：公共 FqCommentSheet（懒加载分页，文案随作品类型）。 */
+  /** 书评/剧评半模态：公共 FqCommentSheet（懒加载分页，文案随作品类型）；
+   *  剧 kind 走剧评 cursorLoader（series 端点），其余走内置书评配方。 */
   @Builder
   private CommentSheetBuilder() {
     FqCommentSheet({
       bookId: this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId,
       fontColor: $r('sys.color.font_primary'),
       commentLabel: this.commentLabel(),
+      cursorLoader: this.makeSeriesCommentLoader(),
       // 剧评回复走短剧独立端点（本期未接），仅书评/漫评启用回复展开
-      replyBookId: this.itemKind === 'video' || this.itemKind === 'manju' ? ''
-        : (this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId),
+      replyBookId: this.isDramaKind() ? '' : (this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId),
     })
+  }
+
+  /** 剧 kind（短剧/漫剧）：评论走 series 剧评端点；书籍/漫画走书评端点。 */
+  private isDramaKind(): boolean {
+    return this.itemKind === 'video' || this.itemKind === 'manju';
+  }
+
+  /** 剧评加载器工厂：剧 kind 返回 cursor 分页加载器（cursor 本页自理），
+   *  其余返回 undefined 走 FqCommentSheet 内置书评配方。 */
+  private makeSeriesCommentLoader(): ((refresh: boolean) => Promise<FqBookCommentPage>) | undefined {
+    if (!this.isDramaKind()) {
+      return undefined;
+    }
+    return (refresh: boolean): Promise<FqBookCommentPage> => this.loadSeriesComments(refresh);
+  }
+
+  /** 剧评一页（/api/v1/series/{id}/comments，sort=1 cursor 分页）：
+   *  refresh=true 重置游标拉首页，false 触底续拉；失败向上抛由 FqCommentSheet 落错误态。 */
+  private async loadSeriesComments(refresh: boolean): Promise<FqBookCommentPage> {
+    const contentId: string = this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId;
+    if (contentId.length === 0) {
+      return new FqBookCommentPage([], 0, 0, '', false, 0);
+    }
+    if (refresh) {
+      this.seriesCommentCursor = '';
+    }
+    const cursorIn: string = this.seriesCommentCursor;
+    const page: FqEpisodeCommentPage = await FqBackend.get().seriesComments(contentId, cursorIn);
+    this.seriesCommentCursor = page.cursor;
+    return new FqBookCommentPage(page.comments, page.totalCount, 0, '', page.hasMore, 0);
   }
 
   /** 评论类型文案：小说书评 / 短剧·漫剧剧评 / 漫画漫评。 */
   private commentLabel(): string {
-    if (this.itemKind === 'video' || this.itemKind === 'manju') {
+    if (this.isDramaKind()) {
       return '剧评';
     }
     if (this.itemKind === 'manga') {
@@ -1141,10 +1175,19 @@ export struct DetailPage {
       if (token !== this.loadToken) {
         return;
       }
-      // 书评预览：前 3 条 + 总数（失败不阻断详情，仅隐藏书评区）
+      // 书评/剧评预览：前 3 条 + 总数（失败不阻断详情，仅隐藏评论区）
       try {
-        const commentsPage: FqBookCommentPage =
-          await FqBackend.get().bookComments(contentId, FQ_PREVIEW_COMMENT_COUNT, 0, FQ_SHORT_TIMEOUT_MS);
+        let commentsPage: FqBookCommentPage;
+        if (this.isDramaKind()) {
+          // 剧评预览：series 剧评端点首页（短超时，对齐书评预览）
+          const seriesPage: FqEpisodeCommentPage =
+            await FqBackend.get().seriesComments(contentId, '', FQ_SHORT_TIMEOUT_MS);
+          commentsPage =
+            new FqBookCommentPage(seriesPage.comments, seriesPage.totalCount, 0, '', seriesPage.hasMore, 0);
+        } else {
+          commentsPage =
+            await FqBackend.get().bookComments(contentId, FQ_PREVIEW_COMMENT_COUNT, 0, FQ_SHORT_TIMEOUT_MS);
+        }
         if (token !== this.loadToken) {
           return;
         }

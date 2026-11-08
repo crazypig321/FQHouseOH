@@ -526,15 +526,17 @@ export class FqBackend {
   }
 
   /**
-   * 短剧剧评一页（/api/v1/series/{id}/comments，官方 gx1/m.java:168-181：
-   * 播放页评论区即整部剧的评论列表）：sort=1 官方「全部」排序，
-   * cursor 续拉（不透明串）；响应与弹幕列表同形（data_list + common_list_info）。
-   */
-  public async seriesComments(seriesId: string, cursor: string): Promise<FqEpisodeCommentPage> {
+    * 短剧剧评一页（/api/v1/series/{id}/comments，官方 gx1/m.java:168-181：
+    * 播放页评论区即整部剧的评论列表）：sort=1 官方「全部」排序，
+    * cursor 续拉（不透明串）；响应与弹幕列表同形（data_list + common_list_info）；
+    * 详情页预览传 timeoutMs=FQ_SHORT_TIMEOUT_MS，面板翻页保持默认。
+    */
+  public async seriesComments(seriesId: string, cursor: string,
+    timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<FqEpisodeCommentPage> {
     const query: string = 'sort=1&count=20'
       + (cursor.length > 0 ? `&cursor=${encodeURIComponent(cursor)}` : '');
     const payload: Record<string, Object> =
-      await this.getJson(`/api/v1/series/${encodeURIComponent(seriesId)}/comments`, query);
+      await this.getJson(`/api/v1/series/${encodeURIComponent(seriesId)}/comments`, query, timeoutMs);
     return fqParseEpisodeComments(payload);
   }
 
