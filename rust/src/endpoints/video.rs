@@ -108,9 +108,9 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
         let quality = sanitize_quality(&params.get_str("quality"));
         // 短剧 stream 仍以 shortplay 模型选流，但清晰度列表要合并两条接口：
         // 顶档（1080p）只出现在 phoenix 模型的 `fallback_api` 列表里，而两条
-        // 接口的编码分布并不相同——shortplay 各档是 h265，phoenix 的低档是解不
-        // 了的 bytevc2（实测 2026-10-12 同一集对拍）。二选一必然少档：只信
-        // shortplay 会丢 1080P，只信 phoenix 会让低档被编码门整片丢掉。
+        // 接口的编码分布并不相同——shortplay 各档是 h265，phoenix 的低档是
+        // bytevc2/VVC（实测 2026-10-12 同一集对拍）。二选一必然少档：只信
+        // shortplay 会丢 1080P，只信 phoenix 会缺低档的 h265 档。
         // 两个请求互不依赖，并发发出，不额外占用一个往返。
         let (parsed, phoenix_parsed, resolved) = if stream_mode {
             // Resolve the primary source while quality metadata is loading.
@@ -559,7 +559,8 @@ fn variant_display_name(height: i64) -> String {
 /// Every playable variant across the given response bodies, best-quality first
 /// (official panel lists resolutions high→low,
 /// `ShortSeriesMorePanelDialogV2$d$C0025d.a()` with `CollectionsKt.reversed`).
-/// The bytevc2 gate applies unchanged: rejected codecs never become variants.
+/// bytevc2/VVC tiers are included: the OHOS player (mpv / FFmpeg 8.0)
+/// soft-decodes VVC, so no codec is filtered here.
 ///
 /// Each body's `video_list` and its `fallback_api` list are merged, and several
 /// bodies are merged together, because no single list is complete and they are
@@ -721,7 +722,6 @@ fn variant_rows_scored(
             // （官方 Resolution 枚举同样以短边为准）。
             let short_edge = if w > 0 && h > 0 { w.min(h) } else { w.max(h) };
             let name = variant_display_name(short_edge);
-            // 编码门丢 bytevc2 是**预期行为**（`CRIT-004`：该编码没有解码器），不打点。
             let score = video_quality_score(info)?;
             let Some((url, key)) = decrypt_variant_entry(info, key_seed.as_deref()) else {
                 // 地址解不出来是静默丢**整档**的一类——`4e85437` 修过同款缺陷，且
@@ -918,9 +918,10 @@ fn select_video_source<'a>(
 }
 
 fn video_quality_score(info: &Map<String, Value>) -> Option<i64> {
-    // Codec gates mirror the reference short-drama client: bytevc2
-    // (H.266-class) has no decoder on the playback path, so a variant that
-    // carries it must never win the quality race even as a last resort;
+    // 本项目播放内核是 mpv（FFmpeg 8.0，含原生 VVC 软解与 NEON 优化），
+    // bytevc2/H.266 档位照常参选并进清晰度面板——上游 fqapp 面向的 Flutter
+    // 播放器解不了 VVC 才设此门，实测 2026-11-08 漫剧 4K 集因全档 bytevc2
+    // 被整集 500「该视频暂不支持播放」，故在此完全放行。
     // H.264 decodes everywhere, so it wins ties at equal quality.
     let codec = {
         let mut value = String::new();
@@ -939,9 +940,6 @@ fn video_quality_score(info: &Map<String, Value>) -> Option<i64> {
         }
         value
     };
-    if codec.contains("bytevc2") {
-        return None;
-    }
     let w = int64_from_any(info.get("vwidth").unwrap_or(&Value::Null));
     let h = int64_from_any(info.get("vheight").unwrap_or(&Value::Null));
     let mut b = int64_from_any(info.get("bitrate").unwrap_or(&Value::Null));
@@ -2349,7 +2347,8 @@ fn build_cenc_index(
 /// place (encv -> hvc1, enca -> mp4a, `sinf` blanked into a `free` box) as
 /// offset patches instead, so the file on disk keeps its original bytes.
 /// The replacement tag comes from `sinf/frma` when present, falling back to
-/// the hardcoded pair.
+/// the hardcoded pair. frma = bvc2 (ByteDance VVC) maps to vvi1 and the
+/// sinf box becomes a minimal vvcC instead of a blank.
 fn collect_sample_entry_patches(
     data: &[u8],
     boxes: &HashMap<[u8; 4], Vec<Mp4Box>>,
@@ -2380,6 +2379,15 @@ fn collect_sample_entry_patches(
                     break;
                 }
             }
+            // ByteDance VVC (frma = bvc2, config box bv2C) is a codec tag
+            // libavformat does not know: map the entry to the in-band
+            // parameter-set tag vvi1 and inject a minimal vvcC below so the
+            // VVC decoder learns the NALFF length-prefix layout.
+            let mut inject_vvcc = false;
+            if *typ == *b"encv" && target == *b"bvc2" {
+                target = *b"vvi1";
+                inject_vvcc = true;
+            }
             if b.off + 8 <= data.len() {
                 out.push(CencPatch {
                     off: base_off + (b.off + 4) as u64,
@@ -2389,6 +2397,32 @@ fn collect_sample_entry_patches(
             let Some(child) = sinf else {
                 continue;
             };
+            if inject_vvcc && child.size >= 14 && child.off + child.size <= data.len() {
+                // A 14-byte vvcC FullBox: mov.c skips the 4 version/flags
+                // bytes and hands cbs_h266 the rest — 0xFE encodes
+                // lengthSizeMinusOne = 3 (u32 NAL length prefixes) with
+                // ptl_present_flag = 0, 0x00 declares no parameter-set
+                // arrays (they ride in-band, which is what vvi1 means).
+                // The remainder of the sinf box becomes a free box so the
+                // entry's child box chain stays walkable; a tail too small
+                // for a free box (< 8 bytes) is zeroed — demuxers ignore a
+                // sub-8-byte remainder at the end of a container.
+                let mut rep = Vec::with_capacity(child.size);
+                rep.extend_from_slice(&14u32.to_be_bytes());
+                rep.extend_from_slice(b"vvcC");
+                rep.extend_from_slice(&[0u8; 4]);
+                rep.extend_from_slice(&[0xFE, 0x00]);
+                if child.size >= 22 {
+                    rep.extend_from_slice(&((child.size - 14) as u32).to_be_bytes());
+                    rep.extend_from_slice(b"free");
+                }
+                rep.resize(child.size, 0);
+                out.push(CencPatch {
+                    off: base_off + child.off as u64,
+                    bytes: rep,
+                });
+                continue;
+            }
             let mut header = Vec::with_capacity(8);
             header.extend_from_slice(&8u32.to_be_bytes());
             header.extend_from_slice(b"free");

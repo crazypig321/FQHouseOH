@@ -20,6 +20,8 @@ export struct FqPlayerSettingsSheet {
   @Param speedPreview: number = -1;
   /** 弹幕开关。 */
   @Param danmakuOn: boolean = true;
+  /** 解码方式（true 硬解 ohcodec / false 软解 FFmpeg）。 */
+  @Param hwdecOn: boolean = true;
   // ---- 弹幕设置参数 ----
   /** 「显示区域」行语义：true 横屏片源；false 竖屏片源。 */
   @Param danmakuIsLandscape: boolean = false;
@@ -39,6 +41,7 @@ export struct FqPlayerSettingsSheet {
   @Event speedCommit: (value: number) => void = (_value: number): void => {};
   @Event speedPreviewChange: (value: number) => void = (_value: number): void => {};
   @Event danmakuToggle: (on: boolean) => void = (_on: boolean): void => {};
+  @Event hwdecToggle: (on: boolean) => void = (_on: boolean): void => {};
   @Event rowClick: (key: string) => void = (_key: string): void => {};
   // ---- 弹幕设置事件 ----
   @Event alphaChange: (value: number) => void = (_value: number): void => {};
@@ -128,6 +131,7 @@ export struct FqPlayerSettingsSheet {
         speed: this.speed,
         speedPreview: this.speedPreview,
         danmakuOn: this.danmakuOn,
+        hwdecOn: this.hwdecOn,
         speedCommit: (value: number): void => {
           this.speedCommit(value);
         },
@@ -136,6 +140,9 @@ export struct FqPlayerSettingsSheet {
         },
         danmakuToggle: (on: boolean): void => {
           this.danmakuToggle(on);
+        },
+        hwdecToggle: (on: boolean): void => {
+          this.hwdecToggle(on);
         },
         rowClick: (key: string): void => {
           this.rowClick(key);

@@ -174,6 +174,8 @@ const FQ_FS_SIDE_BG: string = '#F0141414';
 const PLAYER_FS_SPEED_ANCHOR_ID: string = 'player_fs_speed_anchor';
 /** 全屏底部清晰度按钮锚点 id（FqMenu 档位菜单挂靠）。 */
 const PLAYER_FS_QUALITY_ANCHOR_ID: string = 'player_fs_quality_anchor';
+/** 全屏底部解码按钮锚点 id（FqMenu 档位菜单挂靠）。 */
+const PLAYER_FS_HWDEC_ANCHOR_ID: string = 'player_fs_hwdec_anchor';
 /** 播放设置深色（横屏侧边栏）配色：半透明白卡片/分隔线/滑轨/次级文字。 */
 const FQ_DARK_CARD_BG: string = '#26FFFFFF';
 const FQ_DARK_DIVIDER: string = '#1FFFFFFF';
@@ -227,7 +229,10 @@ export struct PlayerPage {
    * onReady = XComponent surface 挂载回调：离线缓存秒开时 open 可能先于
    * surface 创建执行（aboutToAppear 同步链路零 await），mpv 无 wid 起播
    * 后补挂 surface 概率性黑屏有声音——未就绪时暂存 Media，此回调补播。 */
-  private player: Player = new Player(new PlayerConfig({ onReady: (): void => this.onPlayerSurfaceReady() }));
+  private player: Player = new Player(new PlayerConfig({
+    onReady: (): void => this.onPlayerSurfaceReady(),
+    hwdec: FqAppSettingsStore.isVideoHwdec(),
+  }));
   /** XComponent surface 是否已挂载（PlayerSurface 首帧构建后为 true）。 */
   private surfaceReady: boolean = false;
   /** surface 未就绪时暂存的起播媒体（onReady 回调补 open）。 */
@@ -331,6 +336,8 @@ export struct PlayerPage {
   @Local qualityVariants: FqEpisodeVariant[] = [];
   /** 当前播放清晰度档下标（-1 = 默认流 source.url）。 */
   @Local qualityIndex: number = -1;
+  /** 解码方式（true 硬解 ohcodec / false 软解 FFmpeg；偏好经 FqAppSettingsStore 持久化）。 */
+  @Local hwDecode: boolean = FqAppSettingsStore.isVideoHwdec();
   /** 侧边栏缓存网格滚动器。 */
   private sideCacheScroller: Scroller = new Scroller();
   /** 侧边栏缓存面板打开后定位当前集的定时器（0 无任务）。 */
@@ -1457,6 +1464,15 @@ export struct PlayerPage {
             this.openQualityMenu();
           })
 
+        Text(this.hwDecode ? '硬解' : '软解')
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(Color.White)
+          .id(PLAYER_FS_HWDEC_ANCHOR_ID)
+          .onClick((): void => {
+            this.openDecodeMenu();
+          })
+
         Text('选集')
           .fontSize(14)
           .fontWeight(FontWeight.Medium)
@@ -1981,6 +1997,7 @@ export struct PlayerPage {
       speed: this.player.state.speed,
       speedPreview: this.speedPreview,
       danmakuOn: this.danmakuOn,
+      hwdecOn: this.hwDecode,
       danmakuIsLandscape: this.isLandscapeDanmaku(),
       alphaPercent: this.danmakuAlphaPercent,
       speedTier: this.danmakuSpeedTier,
@@ -1996,6 +2013,9 @@ export struct PlayerPage {
       },
       danmakuToggle: (on: boolean): void => {
         this.toggleDanmaku();
+      },
+      hwdecToggle: (on: boolean): void => {
+        this.setHwDecode(on);
       },
       rowClick: (key: string): void => {
         this.onSettingRowClick(key);
@@ -2864,6 +2884,7 @@ export struct PlayerPage {
         speed: this.player.state.speed,
         speedPreview: this.speedPreview,
         danmakuOn: this.danmakuOn,
+        hwdecOn: this.hwDecode,
         speedCommit: (value: number): void => {
           this.player.setSpeed(value);
         },
@@ -2872,6 +2893,9 @@ export struct PlayerPage {
         },
         danmakuToggle: (on: boolean): void => {
           this.toggleDanmaku();
+        },
+        hwdecToggle: (on: boolean): void => {
+          this.setHwDecode(on);
         },
         rowClick: (key: string): void => {
           this.onSettingRowClick(key);
@@ -3398,6 +3422,48 @@ export struct PlayerPage {
       this.fsMenuOpen = false;
       this.resumeFsAutoHide();
     });
+  }
+
+  /** 全屏底部解码按钮：公共 FqMenu 档位直选（硬件解码/软件解码，当前方式尾勾）。
+   *  切换即时生效（mpv 运行时切 hwdec 重初始化解码链）+ 偏好持久化。
+   *  菜单打开期间暂停控件自动隐藏（关闭后恢复空闲计时）。 */
+  private openDecodeMenu(): void {
+    const items: Array<FqMenuItem> = [];
+    const hwItem: FqMenuItem = new FqMenuItem();
+    hwItem.label = '硬件解码';
+    if (this.hwDecode) {
+      hwItem.endIcon = $r('sys.symbol.checkmark');
+    }
+    hwItem.onAction = (): void => {
+      this.setHwDecode(true);
+    };
+    items.push(hwItem);
+    const swItem: FqMenuItem = new FqMenuItem();
+    swItem.label = '软件解码';
+    if (!this.hwDecode) {
+      swItem.endIcon = $r('sys.symbol.checkmark');
+    }
+    swItem.onAction = (): void => {
+      this.setHwDecode(false);
+    };
+    items.push(swItem);
+    this.fsMenuOpen = true;
+    this.cancelFsHide();
+    FqMenu.open(this.getUIContext(), PLAYER_FS_HWDEC_ANCHOR_ID, items, (): void => {
+      this.fsMenuOpen = false;
+      this.resumeFsAutoHide();
+    });
+  }
+
+  /** 切换解码方式：mpv 运行时切 hwdec（当前视频即时生效，硬解失败自动回退软解），
+   *  偏好经 FqAppSettingsStore 持久化（下次进页随 PlayerConfig 初始化）。 */
+  private setHwDecode(enabled: boolean): void {
+    if (enabled === this.hwDecode) {
+      return;
+    }
+    this.hwDecode = enabled;
+    FqAppSettingsStore.setVideoHwdec(enabled);
+    this.player.setHardwareDecode(enabled);
   }
 
   /**

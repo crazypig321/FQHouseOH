@@ -35,9 +35,9 @@ fn merge_variant_rows_keeps_the_fallback_only_top_tier() {
 }
 
 #[test]
-fn merge_variant_rows_still_drops_bytevc2_from_the_fallback_list() {
+fn merge_variant_rows_keeps_bytevc2_tiers_from_the_fallback_list() {
     // fallback 列表里 1080p 常是 bytevc1、低档是 bytevc2（实测 4/6 部剧）。
-    // 合并不得把 bytevc2 带进面板。
+    // VVC 软解放行后 bytevc2 档照常进面板。
     const SPADE: &str = "orws8mOJLdlTlhnvZZQr32GULuhXkBvtUpAf7GWQKNtUohyPjw==";
     let fallback = json!({
         "video_1": { "main_url": "https://example.test/1080-vvc.mp4", "vwidth": 1080, "vheight": 1920,
@@ -52,5 +52,13 @@ fn merge_variant_rows_still_drops_bytevc2_from_the_fallback_list() {
         Some(b"AAAA".to_vec()),
     ));
     let names: Vec<&str> = rows.iter().map(|v| v["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["1080P"], "bytevc2 rows must never reach the panel");
+    assert_eq!(
+        names,
+        ["1080P", "720P"],
+        "bytevc2 rows must reach the panel"
+    );
+    assert_eq!(
+        rows[1]["url"], "https://example.test/720-vvc.mp4",
+        "the bytevc2 720 tier is kept"
+    );
 }

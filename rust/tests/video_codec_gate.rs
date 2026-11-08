@@ -1,5 +1,7 @@
-//! Exercise codec rejection through the real dispatcher, including the raw
+//! Exercise codec handling through the real dispatcher, including the raw
 //! response and download fallbacks that extractor-only tests cannot cover.
+//! bytevc2/VVC tiers are fully allowed here: the OHOS player (mpv / FFmpeg
+//! 8.0) soft-decodes VVC, so no tier is filtered for codec reasons.
 
 mod common;
 
@@ -9,7 +11,7 @@ use fqapi_core::endpoints::Server;
 use serde_json::{json, Value};
 
 const ALLOWED_URL: &str = "https://example.invalid/h264.mp4";
-const REJECTED_URL: &str = "https://example.invalid/bytevc2.mp4";
+const VVC_URL: &str = "https://example.invalid/bytevc2.mp4";
 const SPADE_A: &str = "kbwf80+1N+V9nwHQSp431GWvLeBlqizTYJ0o5FOrHuZhqimysg==";
 const KEY_HEX: &str = "4990a92de837e29e18031a370ab744e6";
 
@@ -70,65 +72,58 @@ async fn request_video(server: &Server, query: &str) -> (u16, Value) {
     )
 }
 
-fn assert_rejected(status: u16, body: &Value, context: &str) {
-    assert_eq!(status, 500, "{context}: {body}");
-    assert_eq!(body["success"], false, "{context}: {body}");
-    assert_eq!(body["error"], "该视频暂不支持播放", "{context}: {body}");
-    assert!(!body.to_string().contains("https://"), "{context}: {body}");
-}
-
 #[tokio::test]
-async fn bytevc2_only_is_terminal_across_response_shapes_and_modes() {
+async fn bytevc2_only_resolves_across_response_shapes() {
+    // VVC 软解放行后，bytevc2-only 列表照常选流，不再整片 500。
     for codec in [
         json!({"codec_type": "ByTeVc2"}),
         json!({"video_meta": {"codec_type": "BYTEVC2"}}),
         json!({"gear_des_key": "bytevc2_1080p"}),
     ] {
         let mut variant = codec;
-        variant["main_url"] = json!(REJECTED_URL);
+        variant["main_url"] = json!(VVC_URL);
         for (name, payload) in response_shapes(vec![variant]) {
             let upstream = MockUpstream::start(move |_| MockReply::json(payload.clone())).await;
-            let dir = TempDir::new("video-codec-reject");
+            let dir = TempDir::new("video-codec-allow");
             let server =
                 build_server(&dir, Some(upstream.origin.clone()), &[], &[], &pool_json(5)).await;
-            for mode in ["mode=stream", ""] {
-                let (status, body) = request_video(&server, mode).await;
-                assert_rejected(status, &body, &format!("{name}, {mode}"));
-            }
-            assert!(upstream
-                .requests()
-                .iter()
-                .all(|r| !r.path.ends_with(".mp4")));
+            let (status, body) = request_video(&server, "mode=stream").await;
+            assert_eq!(status, 200, "{name}: {body}");
+            assert_eq!(body["video_url"], VVC_URL, "{name}: {body}");
         }
     }
 }
 
 #[tokio::test]
-async fn missing_or_invalid_seed_cannot_hide_codec_rejection() {
+async fn invalid_seed_falls_back_to_the_raw_response() {
+    // key_seed 解不出时 shortplay 档无法解密：NotFound 原样透传上游响应。
+    // 编码门已放行（VVC 可软解），该场景不再是 500「该视频暂不支持播放」。
     for seed in [Value::Null, json!(""), json!("invalid!")] {
         let payload = json!({"data": {"video_model": {
             "key_seed": seed,
             "video_list": {"video_1": {
-                "codec_type": "bytevc2", "main_url": REJECTED_URL
+                "codec_type": "bytevc2", "main_url": VVC_URL
             }}
         }}});
+        let expected = payload.clone();
         let upstream = MockUpstream::start(move |_| MockReply::json(payload.clone())).await;
         let dir = TempDir::new("video-codec-seed");
         let server =
             build_server(&dir, Some(upstream.origin.clone()), &[], &[], &pool_json(5)).await;
         let (status, body) = request_video(&server, "mode=stream").await;
-        assert_rejected(status, &body, "invalid seed");
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(body, expected, "{body}");
     }
 }
 
 #[tokio::test]
-async fn mixed_variants_keep_h264_preference_across_response_shapes() {
-    // Put H.264 first: blindly taking the last array entry would pick bytevc2,
-    // and filtering without ranking would pick H.265 at the same quality.
+async fn mixed_variants_rank_by_resolution_first() {
+    // 分辨率优先：bytevc2 1080 压过 h264/h265 720（VVC 照常参选）；
+    // 同分辨率才轮到 h264 tie-break。
     let variants = vec![
         json!({"main_url": ALLOWED_URL, "codec_type": "h264", "vwidth": 720}),
         json!({"main_url": "https://example.invalid/h265.mp4", "codec_type": "h265", "vwidth": 720}),
-        json!({"main_url": REJECTED_URL, "codec_type": "bytevc2", "vwidth": 1080}),
+        json!({"main_url": VVC_URL, "codec_type": "bytevc2", "vwidth": 1080}),
     ];
     for (name, payload) in response_shapes(variants) {
         let upstream = MockUpstream::start(move |_| MockReply::json(payload.clone())).await;
@@ -137,8 +132,24 @@ async fn mixed_variants_keep_h264_preference_across_response_shapes() {
             build_server(&dir, Some(upstream.origin.clone()), &[], &[], &pool_json(5)).await;
         let (status, body) = request_video(&server, "mode=stream").await;
         assert_eq!(status, 200, "{name}: {body}");
+        assert_eq!(body["video_url"], VVC_URL, "{name}: {body}");
+    }
+}
+
+#[tokio::test]
+async fn h264_wins_the_tie_against_h265_at_equal_quality() {
+    let variants = vec![
+        json!({"main_url": "https://example.invalid/h265.mp4", "codec_type": "h265", "vwidth": 720}),
+        json!({"main_url": ALLOWED_URL, "codec_type": "h264", "vwidth": 720}),
+    ];
+    for (name, payload) in response_shapes(variants) {
+        let upstream = MockUpstream::start(move |_| MockReply::json(payload.clone())).await;
+        let dir = TempDir::new("video-codec-tie");
+        let server =
+            build_server(&dir, Some(upstream.origin.clone()), &[], &[], &pool_json(5)).await;
+        let (status, body) = request_video(&server, "mode=stream").await;
+        assert_eq!(status, 200, "{name}: {body}");
         assert_eq!(body["video_url"], ALLOWED_URL, "{name}: {body}");
-        assert!(!body.to_string().contains(REJECTED_URL), "{name}: {body}");
     }
 }
 
@@ -157,7 +168,9 @@ async fn unrecognized_payload_keeps_legacy_raw_response_compatibility() {
 }
 
 #[tokio::test]
-async fn fallback_rejection_cannot_return_the_original_model_url() {
+async fn fallback_list_resolves_when_the_original_model_is_encrypted() {
+    // 原始模型整档加密、解不出明文流：必须改走 `fallback_api` 列表重选，
+    // 列表里的 bytevc2 档照常可选（VVC 软解放行），原始密文 URL 绝不外泄。
     let model = json!({
         "fallback_api": "https://example.invalid/fallback",
         "video_list": [{
@@ -173,7 +186,7 @@ async fn fallback_rejection_cannot_return_the_original_model_url() {
             if req.path == "/fallback" {
                 return MockReply::json(json!({"video_info": {"data": {
                     "key_seed": "AAAA", "video_list": {"video_1": {
-                        "main_url": REJECTED_URL, "codec_type": "bytevc2"
+                        "main_url": VVC_URL, "codec_type": "bytevc2"
                     }}
                 }}}));
             }
@@ -183,13 +196,16 @@ async fn fallback_rejection_cannot_return_the_original_model_url() {
         let dir = TempDir::new("video-codec-fallback");
         let server =
             build_server(&dir, Some(upstream.origin.clone()), &[], &[], &pool_json(5)).await;
-        for mode in ["mode=stream", ""] {
-            let (status, body) = request_video(&server, mode).await;
-            assert_rejected(status, &body, "fallback rejected");
-        }
+        let (status, body) = request_video(&server, "mode=stream").await;
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(body["video_url"], VVC_URL, "{body}");
+        assert!(!body.to_string().contains("original.mp4"), "{body}");
+        let (status, body) = request_video(&server, "").await;
+        assert_eq!(status, 200, "{body}");
+        assert!(!body.to_string().contains("original.mp4"), "{body}");
         let requests = upstream.requests();
         assert!(requests.iter().any(|r| r.path == "/fallback"));
-        assert!(requests.iter().all(|r| !r.path.ends_with(".mp4")));
+        assert!(requests.iter().any(|r| r.path == "/bytevc2.mp4"));
     }
 }
 
@@ -202,7 +218,7 @@ async fn download_failure_returns_an_error_instead_of_the_encrypted_url() {
         MockReply::json(json!({"data": {"video_model": {
             "key_seed": "AAAA", "video_list": {
                 "video_1": {"main_url": ALLOWED_URL, "codec_type": "h264", "spade_a": SPADE_A},
-                "video_2": {"main_url": REJECTED_URL, "codec_type": "bytevc2"}
+                "video_2": {"main_url": VVC_URL, "codec_type": "bytevc2"}
             }
         }}}))
     })
@@ -216,7 +232,7 @@ async fn download_failure_returns_an_error_instead_of_the_encrypted_url() {
     assert_eq!(body["error"], "视频下载失败，请稍后重试", "{body}");
     assert!(!body.to_string().contains(ALLOWED_URL), "{body}");
     assert!(!body.to_string().contains(KEY_HEX), "{body}");
-    assert!(!body.to_string().contains(REJECTED_URL), "{body}");
+    assert!(!body.to_string().contains(VVC_URL), "{body}");
     let requests = upstream.requests();
     assert!(requests.iter().any(|r| r.path == "/h264.mp4"));
     assert!(requests.iter().all(|r| r.path != "/bytevc2.mp4"));
@@ -306,10 +322,10 @@ async fn stream_variants_merge_the_fallback_list_so_the_top_tier_survives() {
     assert!(upstream.requests().iter().any(|r| r.path == "/fallback"));
 }
 
-/// The fallback list's low tiers are often bytevc2. Merging must not smuggle
-/// them past the codec gate.
+/// The fallback list's low tiers are often bytevc2; they must reach the panel
+/// now that VVC is soft-decodable on the player.
 #[tokio::test]
-async fn stream_variants_do_not_merge_bytevc2_tiers() {
+async fn stream_variants_merge_bytevc2_tiers() {
     let upstream = MockUpstream::start(|req| {
         if req.path == "/fallback" {
             return MockReply::json(json!({"video_info": {"data": {
@@ -317,7 +333,7 @@ async fn stream_variants_do_not_merge_bytevc2_tiers() {
                 "video_list": {
                     "video_1": {"main_url": "https://example.invalid/1080.mp4",
                         "vwidth": 1080, "vheight": 1920, "codec_type": "bytevc1", "spade_a": SPADE_A},
-                    "video_2": {"main_url": REJECTED_URL,
+                    "video_2": {"main_url": VVC_URL,
                         "vwidth": 720, "vheight": 1280, "codec_type": "bytevc2", "spade_a": SPADE_A}
                 }
             }}}));
@@ -332,7 +348,7 @@ async fn stream_variants_do_not_merge_bytevc2_tiers() {
         }}}))
     })
     .await;
-    let dir = TempDir::new("video-variant-gate");
+    let dir = TempDir::new("video-variant-merge-vvc");
     let server = build_server(&dir, Some(upstream.origin.clone()), &[], &[], &pool_json(5)).await;
     let (status, body) = request_video(&server, "mode=stream").await;
     assert_eq!(status, 200, "{body}");
@@ -342,6 +358,6 @@ async fn stream_variants_do_not_merge_bytevc2_tiers() {
         .iter()
         .map(|v| v["name"].as_str().expect("variant name"))
         .collect();
-    assert_eq!(names, ["1080P", "360P"], "{body}");
-    assert!(!body.to_string().contains(REJECTED_URL), "{body}");
+    assert_eq!(names, ["1080P", "720P", "360P"], "{body}");
+    assert!(body.to_string().contains(VVC_URL), "{body}");
 }

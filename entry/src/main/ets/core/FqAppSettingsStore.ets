@@ -55,6 +55,7 @@ const FQ_SETTINGS_KEY_DANMAKU_LINE_COUNT: string = 'danmakuLineCount';
 const FQ_SETTINGS_KEY_DANMAKU_LINE_SPACE: string = 'danmakuLineSpaceTier';
 const FQ_SETTINGS_KEY_DANMAKU_SIZE: string = 'danmakuSizeTier';
 const FQ_SETTINGS_KEY_DANMAKU_BG_TRANSPARENT: string = 'danmakuBgTransparent';
+const FQ_SETTINGS_KEY_VIDEO_HWDEC: string = 'videoHwdec';
 
 /** 章节自动缓存大小上限默认值（MB）。 */
 export const FQ_CHAPTER_CACHE_LIMIT_DEFAULT_MB: number = 80;
@@ -131,6 +132,8 @@ export class FqAppSettingsStore {
   private static danmakuSizeTier: number = 3;
   /** 弹幕背景透明（不画 40% 黑底气泡，只留文字与阴影；官方气泡底色写死，此为本地开关）。 */
   private static danmakuBgTransparent: boolean = false;
+  /** 视频解码方式（true 硬解 ohcodec / false 软解 FFmpeg；播放页即时切换）。 */
+  private static videoHwdec: boolean = true;
 
   public static init(context: common.Context): void {
     if (FqAppSettingsStore.pref !== null) {
@@ -236,6 +239,10 @@ export class FqAppSettingsStore {
       const rawDmBg: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_DANMAKU_BG_TRANSPARENT, false);
       if (typeof rawDmBg === 'boolean') {
         FqAppSettingsStore.danmakuBgTransparent = rawDmBg;
+      }
+      const rawHwdec: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_VIDEO_HWDEC, true);
+      if (typeof rawHwdec === 'boolean') {
+        FqAppSettingsStore.videoHwdec = rawHwdec;
       }
     } catch (error) {
       // 损坏数据按默认值处理
@@ -635,6 +642,27 @@ export class FqAppSettingsStore {
   public static setDanmakuBgTransparent(transparent: boolean): void {
     FqAppSettingsStore.danmakuBgTransparent = transparent;
     FqAppSettingsStore.putDanmaku(FQ_SETTINGS_KEY_DANMAKU_BG_TRANSPARENT, transparent);
+  }
+
+  /** 视频解码方式（true 硬解 ohcodec / false 软解 FFmpeg）。 */
+  public static isVideoHwdec(): boolean {
+    return FqAppSettingsStore.videoHwdec;
+  }
+
+  public static setVideoHwdec(enabled: boolean): void {
+    FqAppSettingsStore.videoHwdec = enabled;
+    const pref: preferences.Preferences | null = FqAppSettingsStore.pref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.putSync(FQ_SETTINGS_KEY_VIDEO_HWDEC, enabled);
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
   }
 
   /** 弹幕设置恢复默认（fqapp 官方五键回出厂值；本地另含背景透明开关）。 */

@@ -63,6 +63,103 @@ fn renames_the_sample_entry_to_the_original_format_from_frma() {
 }
 
 #[test]
+fn maps_the_bytevc2_entry_to_vvi1_with_a_minimal_vvcc() {
+    let f = fixture();
+    let c = &f["cenc"];
+    let mut file = b64(c, "full_sample_b64");
+    let key = hex::decode(c["key_hex"].as_str().unwrap()).unwrap();
+    // Turn the fixture entry into the ByteDance VVC shape: frma = bvc2.
+    let entry = file
+        .windows(4)
+        .position(|w| w == b"encv")
+        .expect("encv sample entry");
+    let frma = file.windows(4).position(|w| w == b"frma").expect("frma");
+    file[frma + 4..frma + 8].copy_from_slice(b"bvc2");
+    let sinf = file.windows(4).position(|w| w == b"sinf").expect("sinf") - 4;
+    let sinf_size = u32_be(&file, sinf);
+
+    decrypt_cenc_mp4(&mut file, &key).expect("decrypt");
+
+    // The entry carries the in-band VVC tag, not the unknown frma tag.
+    assert_eq!(&file[entry..entry + 4], b"vvi1");
+    // The sinf box is replaced by a 14-byte vvcC FullBox: mov.c skips the
+    // 4 version/flags bytes, then 0xFE encodes lengthSizeMinusOne = 3
+    // (u32 NAL length prefixes) with ptl_present_flag = 0 and 0x00
+    // declares no parameter-set arrays (they ride in-band, vvi1-style).
+    assert_eq!(
+        &file[sinf..sinf + 14],
+        &[0, 0, 0, 0x0E, b'v', b'v', b'c', b'C', 0, 0, 0, 0, 0xFE, 0x00][..]
+    );
+    // The fixture's sinf is only 20 bytes (frma alone): the 6-byte tail is
+    // too small for a free box, so it is zeroed — demuxers ignore a
+    // sub-8-byte remainder at the end of a container.
+    assert_eq!(sinf_size, 20, "fixture sinf size");
+    assert!(file[sinf + 14..sinf + sinf_size as usize]
+        .iter()
+        .all(|&b| b == 0));
+    assert!(!mp4_needs_cenc_decrypt(&file));
+}
+
+/// The real device files carry a 80-byte sinf (frma + schm + schi); the
+/// fixture only fits a 20-byte one. A full-size sinf must come back as a
+/// 14-byte vvcC plus a free box covering the remainder, so the entry's
+/// child box chain stays walkable.
+#[test]
+fn fills_a_real_sized_sinf_with_vvcc_and_a_free_box() {
+    let frma = box_bytes(b"frma", b"bvc2");
+    let schm = box_bytes(b"schm", &[0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0]);
+    let schi = box_bytes(b"schi", &vec![0u8; 32]);
+    let sinf = box_bytes(b"sinf", &[frma, schm, schi].concat());
+    assert_eq!(sinf.len(), 80, "real sinf size");
+    let entry = box_bytes(b"encv", &[vec![0u8; 78], sinf].concat());
+    // stsd payload: version/flags + entry_count(1) + the entry itself.
+    let stsd = box_bytes(b"stsd", &[vec![0, 0, 0, 0, 0, 0, 0, 1], entry].concat());
+    let moov = box_bytes(
+        b"moov",
+        box_bytes(
+            b"trak",
+            &box_bytes(b"mdia", &box_bytes(b"minf", &box_bytes(b"stbl", &stsd))),
+        )
+        .as_slice(),
+    );
+
+    let mut patches = Vec::new();
+    for boxes in mp4_track_boxes(&moov) {
+        collect_sample_entry_patches(&moov, &boxes, 0, &mut patches);
+    }
+    assert_eq!(patches.len(), 2, "entry tag + sinf replacement");
+    patches.sort_by_key(|p| p.off);
+    let mut patched = moov.clone();
+    for p in &patches {
+        patched[p.off as usize..p.off as usize + p.bytes.len()].copy_from_slice(&p.bytes);
+    }
+
+    // Layout: moov 8 + trak 8 + mdia 8 + minf 8 + stbl 8 + stsd 8 + 8
+    // version/flags + entry_count = 56, entry fourcc at 60, its 78-byte
+    // fixed part ends at 142 where the sinf box sits.
+    assert_eq!(&patched[60..64], b"vvi1", "entry tag");
+    assert_eq!(
+        &patched[142..156],
+        &[0, 0, 0, 0x0E, b'v', b'v', b'c', b'C', 0, 0, 0, 0, 0xFE, 0x00][..]
+    );
+    let free_size = u32_be(&patched, 156);
+    assert_eq!(&patched[160..164], b"free", "free box type");
+    assert_eq!(free_size as usize, 80 - 14, "vvcC + free == sinf size");
+    assert!(patched[164..222].iter().all(|&b| b == 0));
+    assert_eq!(patched.len(), 222, "moov size");
+    assert_eq!(patches[0].bytes, b"vvi1".to_vec());
+    assert_eq!(patches[1].bytes.len(), 80, "sinf-sized replacement");
+}
+
+fn box_bytes(typ: &[u8; 4], payload: &[u8]) -> Vec<u8> {
+    let mut v = Vec::with_capacity(8 + payload.len());
+    v.extend_from_slice(&((8 + payload.len()) as u32).to_be_bytes());
+    v.extend_from_slice(typ);
+    v.extend_from_slice(payload);
+    v
+}
+
+#[test]
 fn keeps_the_hardcoded_fallback_when_frma_is_unreadable() {
     let f = fixture();
     let c = &f["cenc"];

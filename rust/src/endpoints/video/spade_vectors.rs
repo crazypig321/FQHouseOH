@@ -122,7 +122,8 @@ fn fallback_source_prefers_the_highest_quality_and_keeps_its_key() {
 }
 
 #[test]
-fn fallback_source_skips_bytevc2_even_when_it_scores_highest() {
+fn fallback_source_picks_bytevc2_when_it_scores_highest() {
+    // VVC 软解放行后 bytevc2 档照常参选：分辨率高者胜，不再因编码落选。
     let root = json!({
         "video_info": { "data": {
             "key_seed": "AAAA",
@@ -142,11 +143,11 @@ fn fallback_source_skips_bytevc2_even_when_it_scores_highest() {
     });
     let map = root.as_object().unwrap();
     let (url, _) = expect_source(extract_fallback_video_source(map));
-    assert_eq!(url, "https://example.test/h264.mp4");
+    assert_eq!(url, "https://example.test/vvc.mp4");
 }
 
 #[test]
-fn fallback_source_never_serves_a_bytevc2_only_list() {
+fn fallback_source_serves_a_bytevc2_only_list() {
     let root = json!({
         "video_info": { "data": {
             "key_seed": "AAAA",
@@ -160,10 +161,8 @@ fn fallback_source_never_serves_a_bytevc2_only_list() {
         } }
     });
     let map = root.as_object().unwrap();
-    assert_eq!(
-        extract_fallback_video_source(map),
-        VideoSourceResolution::CodecRejected
-    );
+    let (url, _) = expect_source(extract_fallback_video_source(map));
+    assert_eq!(url, "https://example.test/vvc.mp4");
 }
 
 #[test]
@@ -179,9 +178,10 @@ fn variant_display_name_follows_the_short_edge_mapping() {
 }
 
 #[test]
-fn variant_rows_skip_bytevc2_and_sort_by_the_short_edge() {
+fn variant_rows_sort_by_the_short_edge_with_h264_winning_ties() {
     // 竖屏漫剧（series 7686494169098898456 实测形状）：video_list 是
-    // object，vheight 是长边——档位名必须取短边，bytevc2 档被排除。
+    // object，vheight 是长边——档位名必须取短边。bytevc2 档照常参选，
+    // 但同档 h264 凭 tie-break 加分胜出，720P 行取 h264 档。
     let video_list = json!({
         "video_4": {
             "main_url": "https://example.test/a.mp4",
