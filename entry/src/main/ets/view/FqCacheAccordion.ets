@@ -148,8 +148,8 @@ export struct FqCacheAccordionList {
   };
 
   private source: FqAccordionSource = new FqAccordionSource();
-  /** 展开的分组 id（进入默认收起）。 */
-  private expandedIds: string[] = [];
+  /** 展开的分组 id（进入默认收起；@Local 保证缓存行内箭头局部刷新）。 */
+  @Local expandedIds: string[] = [];
 
   aboutToAppear(): void {
     this.rebuild();
@@ -322,9 +322,9 @@ export struct FqCacheAccordionList {
     .border({ width: 0.6, color: appState.isDark ? $r('sys.color.comp_divider') : Color.Transparent })
     .width('100%')
     .onClick((): void => {
-      this.getUIContext().animateTo({ duration: 250, curve: Curve.EaseInOut }, (): void => {
+     // this.getUIContext().animateTo({ duration: 250, curve: Curve.EaseInOut }, (): void => {
         this.toggleExpanded(group.id);
-      });
+     // });
     })
   }
 
