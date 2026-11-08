@@ -27,6 +27,7 @@ import { FqReaderStore } from '../core/FqReaderStore';
 import { HSBColorPicker, HSBColorPickerLayout } from '@keke/color-picker';
 import { useSidebarLayout } from '../utils/BreakpointUtils';
 import { PcMainLayout } from '../view/pcUI/PcMainLayout';
+import { FqContinueKit } from '../utils/continue/FqContinueKit';
 
 @Entry
 @ComponentV2
@@ -94,6 +95,12 @@ struct Index {
       }
     })
     this.checkChangelogOnLaunch()
+    // 应用流转目标端：待恢复接续载荷 → 延迟待 Navigation 挂载后推入对应场景页面
+    if (FqContinueKit.hasPending()) {
+      setTimeout((): void => {
+        FqContinueKit.applyPending();
+      }, 500);
+    }
   }
 
   /**

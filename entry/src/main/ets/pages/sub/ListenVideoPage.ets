@@ -20,7 +20,7 @@ import { CommonNav } from '../../view/CommonNav';
 import { CommonSheet, FqSheetOptions } from '../../view/sheet/CommonSheet';
 import { FqCatalogSheet } from '../../view/sheet/FqCatalogSheet';
 import { FqSettingRow } from '../../view/FqSettingRow';
-import { FqTitleBarMenuOptions, ListenVideoNavParams } from '../../model/FqNavModels';
+import { FqTitleBarMenuOptions, FqTitleBarTwoMenusOptions, ListenVideoNavParams } from '../../model/FqNavModels';
 import { FqChapter } from '../../model/FqModels';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { FqVideoMedia } from '../../core/FqVideoMedia';
@@ -30,6 +30,7 @@ import { NavPathUtils } from '../../utils/NavPathUtils';
 import { appState } from '../../entryability/AppState';
 import { Player, Media, PlayerConfig } from '@mpv-ohos/mpv-arkts';
 import { FqColorUtils } from '../../utils/FqColorUtils';
+import { FqContinueKit } from '../../utils/continue/FqContinueKit';
 
 /** 定时分钟档（对齐听书页 -1/15/30/60）。 */
 const FQ_SLEEP_MINUTES: number[] = [15, 30, 60];
@@ -253,9 +254,12 @@ export struct ListenVideoPage {
 
   build() {
     CommonNav({
-      titleBarOp: FqTitleBarMenuOptions('听视频', $r('sys.symbol.speed_multiple'), 'speed',
+      titleBarOp: FqTitleBarTwoMenusOptions('听视频', $r('sys.symbol.speed_multiple'), 'speed',
         (): void => {
           this.openSheet(FqListenVideoSheetKind.rates);
+        },
+        $r('sys.symbol.superdevice'), 'continue', (): void => {
+          FqContinueKit.startInAppContinuation();
         }),
       scroller: this.scroller,
       showPlaybackBall: false,

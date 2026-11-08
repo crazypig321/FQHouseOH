@@ -41,6 +41,7 @@ import { FqWebDav } from '../core/FqWebDav';
 import { appState } from './AppState';
 import { themeUtils } from '../utils/ThemeUtils';
 import { FqSmartReach } from '../utils/FqSmartReach';
+import { FqContinueKit } from '../utils/continue/FqContinueKit';
 
 const DOMAIN = 0x0000;
 
@@ -84,6 +85,34 @@ export default class EntryAbility extends UIAbility {
     FqBackend.get().start(this.context).catch((error: Object): void => {
       hilog.error(DOMAIN, 'FqBackend', 'backend start failed: %{public}s', `${error}`);
     });
+    // 应用流转（接续）目标端：解析迁移载荷 + 同步恢复窗口阶段（触发 onWindowStageRestore）
+    if (launchParam.launchReason === AbilityConstant.LaunchReason.CONTINUATION) {
+      hilog.info(DOMAIN, 'FqContinue', '%{public}s', 'cold start by continuation');
+      FqContinueKit.parsePending(want);
+      this.context.restoreWindowStage(new LocalStorage());
+    }
+  }
+
+  /** 应用流转：热启动接续（目标端已在运行）——解析载荷 + 恢复窗口阶段。 */
+  onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    if (launchParam.launchReason === AbilityConstant.LaunchReason.CONTINUATION) {
+      hilog.info(DOMAIN, 'FqContinue', '%{public}s', 'hot start by continuation');
+      FqContinueKit.parsePending(want);
+      this.context.restoreWindowStage(new LocalStorage());
+    }
+  }
+
+  /**
+   * 应用流转源端：迁移时采集四场景（阅读 / 听书 / 视频 / 听视频）载荷写入 wantParam。
+   * 采集失败仍同意接续（目标端按普通启动打开）。
+   */
+  onContinue(wantParam: Record<string, Object>): AbilityConstant.OnContinueResult {
+    try {
+      FqContinueKit.writeToWantParam(wantParam);
+    } catch (error) {
+      hilog.error(DOMAIN, 'FqContinue', 'build payload failed: %{public}s', `${error}`);
+    }
+    return AbilityConstant.OnContinueResult.AGREE;
   }
 
   onDestroy(): void {
@@ -138,6 +167,17 @@ export default class EntryAbility extends UIAbility {
   onWindowStageCreate(windowStage: window.WindowStage): void {
     // Main window is created, set main page for this ability
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onWindowStageCreate');
+    this.setupMainWindow(windowStage);
+  }
+
+  /** 应用流转目标端：窗口阶段恢复（代替 onWindowStageCreate 触发），装配与冷启动一致。 */
+  onWindowStageRestore(windowStage: window.WindowStage): void {
+    hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onWindowStageRestore');
+    this.setupMainWindow(windowStage);
+  }
+
+  /** 主窗口装配（onWindowStageCreate / onWindowStageRestore 共用）。 */
+  private setupMainWindow(windowStage: window.WindowStage): void {
     this.syncColorMode();
 
     windowStage.loadContent('pages/Index', (err) => {

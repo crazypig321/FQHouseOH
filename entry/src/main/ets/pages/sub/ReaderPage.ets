@@ -48,6 +48,7 @@ import { FqSubtitleCue, FqSubtitleTrack } from '../../model/FqAudioModels';
 import { appState } from '../../entryability/AppState';
 import { themeUtils } from '../../utils/ThemeUtils';
 import { DialogManager } from '../../utils/DialogUtils';
+import { FqContinueKit } from '../../utils/continue/FqContinueKit';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { FQ_READER_THEMES, FqReaderTheme } from '../../view/dialog/ReaderSettingsDialogContent';
 import { fqReaderSettingsBus } from '../../core/FqReaderSettingsBus';
@@ -374,6 +375,16 @@ export struct ReaderPage {
           label: 'listen',
           action: (): void => {
             this.openListenFromReader();
+          },
+        },
+      });
+      // 应用流转：拉起系统设备选择面板（接续到其他设备续读）
+      menus.push({
+        content: {
+          icon: $r('sys.symbol.superdevice'),
+          label: 'continue',
+          action: (): void => {
+            FqContinueKit.startInAppContinuation();
           },
         },
       });

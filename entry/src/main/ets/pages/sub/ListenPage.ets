@@ -15,6 +15,7 @@ import { FqCatalogSheet } from '../../view/sheet/FqCatalogSheet';
 import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/sheet/FqCommentSheet';
 import {
   FqTitleBarOptions,
+  FqTitleBarMenuOptions,
   fqPushBookOrDetail,
   ListenNavParams,
   ReaderNavParams,
@@ -38,6 +39,7 @@ import { FqCacheSheet } from '../../view/sheet/FqCacheSheet';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { appState } from '../../entryability/AppState';
 import { FqColorUtils } from '../../utils/FqColorUtils';
+import { FqContinueKit } from '../../utils/continue/FqContinueKit';
 
 /** 播放倍速档（avPlayer 0.75 ~ 2）。 */
 const FQ_RATES: number[] = [0.75, 1, 1.25, 1.5, 1.75, 2];
@@ -176,7 +178,9 @@ export struct ListenPage {
 
   build() {
     CommonNav({
-      titleBarOp: FqTitleBarOptions('听书', false),
+      titleBarOp: FqTitleBarMenuOptions('听书', $r('sys.symbol.superdevice'), 'continue', (): void => {
+        FqContinueKit.startInAppContinuation();
+      }),
       scroller: this.scroller,
       showPlaybackBall: false,
     }) {

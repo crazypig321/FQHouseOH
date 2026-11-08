@@ -185,6 +185,7 @@ export struct FqPlayerSettingsPanel {
       new FqSettingItem('hwdec', '解码方式', $r('sys.symbol.video')),
       new FqSettingItem('cache', '离线缓存', $r('sys.symbol.download')),
       new FqSettingItem('listen', '听视频', $r('sys.symbol.waveform_tv')),
+      new FqSettingItem('continue', '流转', $r('sys.symbol.superdevice')),
       new FqSettingItem('danmaku', '弹幕开关', $r('sys.symbol.ellipsis_bubble')),
       new FqSettingItem('danmakuSettings', '弹幕设置', $r('sys.symbol.textformat'))
     ];
