@@ -538,36 +538,15 @@ export struct ShelfPage {
     }
   }
 
-  /** 更多菜单：预览方式（两 tab 共享）+ 离线缓存 + 清空（按 tab 区分）。 */
+  /** 更多菜单：视图方式 + 排序方式（书架 tab）+ 离线缓存 + 清空（按 tab 区分）。 */
   private openMoreMenu(): void {
     const items: Array<FqMenuItem> = [];
 
-    const gridItem = new FqMenuItem();
-    gridItem.label = '网格视图';
-    gridItem.endIcon = this.layout === 0 ? $r('sys.symbol.checkmark') : '';
-    gridItem.onAction = (): void => {
-      FqMenu.dismiss();
-      this.setLayout(0);
-    };
-    items.push(gridItem);
-
-    const doubleItem = new FqMenuItem();
-    doubleItem.label = '双列卡片';
-    doubleItem.endIcon = this.layout === 1 ? $r('sys.symbol.checkmark') : '';
-    doubleItem.onAction = (): void => {
-      FqMenu.dismiss();
-      this.setLayout(1);
-    };
-    items.push(doubleItem);
-
-    const listItem = new FqMenuItem();
-    listItem.label = '列表视图';
-    listItem.endIcon = this.layout === 2 ? $r('sys.symbol.checkmark') : '';
-    listItem.onAction = (): void => {
-      FqMenu.dismiss();
-      this.setLayout(2);
-    };
-    items.push(listItem);
+    // 视图方式（两 tab 共享）：级联二级菜单
+    const viewItem = new FqMenuItem();
+    viewItem.label = '视图方式';
+    viewItem.subItems = this.buildViewSubItems();
+    items.push(viewItem);
 
     // 排序方式（仅书架 tab）：级联二级菜单
     if (this.currentTab === 0) {
@@ -630,6 +609,23 @@ export struct ShelfPage {
         // 忽略写入失败
       }
     }
+  }
+
+  /** 视图方式二级菜单（3 项，当前项打勾）。 */
+  private buildViewSubItems(): Array<FqMenuItem> {
+    const labels: string[] = ['网格视图', '双列卡片', '列表视图'];
+    const subItems: Array<FqMenuItem> = [];
+    for (let layout: number = 0; layout < labels.length; layout++) {
+      const sub = new FqMenuItem();
+      sub.label = labels[layout];
+      sub.endIcon = this.layout === layout ? $r('sys.symbol.checkmark') : '';
+      sub.onAction = (): void => {
+        FqMenu.dismiss();
+        this.setLayout(layout);
+      };
+      subItems.push(sub);
+    }
+    return subItems;
   }
 
   /** 排序方式二级菜单（8 项，当前项打勾）。 */
