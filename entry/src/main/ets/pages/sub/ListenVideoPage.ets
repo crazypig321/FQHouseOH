@@ -123,6 +123,8 @@ export struct ListenVideoPage {
   private loadToken: number = 0;
   /** 当前集已实际播放（position > 0；切集重置，已看标记 guard）。 */
   private hasDisplayed: boolean = false;
+  /** 预览模式（分享「保持我的进度」）：本次不写已看/续播记录。 */
+  private previewNoSave: boolean = false;
   /** 周期保存计数（5s 一存，仅播放中）。 */
   private progressTick: number = 0;
   /** 周期保存定时器（0 无任务）。 */
@@ -144,6 +146,8 @@ export struct ListenVideoPage {
       start = 0;
     }
     this.index = start;
+    this.previewNoSave = ListenVideoNavParams.previewNoSave;
+    ListenVideoNavParams.previewNoSave = false;
     FqWatchedStore.init(getContext(this));
     this.player.stream.eof.listen((eof: boolean): void => {
       if (eof) {
@@ -996,6 +1000,10 @@ export struct ListenVideoPage {
     if (!this.hasDisplayed) {
       return;
     }
+    // 预览模式（分享「保持我的进度」）：本次不标已看
+    if (this.previewNoSave) {
+      return;
+    }
     const episode: FqChapter | undefined = this.episodes[this.index];
     if (episode === undefined || episode.itemId.length === 0) {
       return;
@@ -1006,6 +1014,10 @@ export struct ListenVideoPage {
   /** 保存当前集续播进度（与播放页同键：FqWatchedStore，按集 itemId 记录）。 */
   private saveCurrentProgress(): void {
     if (!this.hasDisplayed) {
+      return;
+    }
+    // 预览模式（分享「保持我的进度」）：本次不写续播
+    if (this.previewNoSave) {
       return;
     }
     const episode: FqChapter | undefined = this.episodes[this.index];

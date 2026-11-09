@@ -308,6 +308,10 @@ export struct ReaderPage {
   private kind: string = 'book';
   private bookTitle: string = '';
   private startChapterIndex: number = -1;
+  /** 外部定位章内段（分享链接 dp / 书旗 ci+dp 直达；空 = 不定位）。 */
+  private initialDomPos: string = '';
+  /** 预览模式（分享「保持我的进度」）：本次退出前不写阅读进度/已读章节。 */
+  private previewNoSave: boolean = false;
   private chapters: FqChapter[] = [];
   private filesDir: string = '';
   private loadToken: number = 0;
@@ -423,6 +427,10 @@ export struct ReaderPage {
     }
     this.startChapterIndex = ReaderNavParams.chapterIndex;
     ReaderNavParams.chapterIndex = -1;
+    this.initialDomPos = ReaderNavParams.initialDomPos;
+    ReaderNavParams.initialDomPos = '';
+    this.previewNoSave = ReaderNavParams.previewNoSave;
+    ReaderNavParams.previewNoSave = false;
     this.listenAlong = ReaderNavParams.listenAlong;
     ReaderNavParams.listenAlong = false;
     FqReaderStore.init(getContext(this));
@@ -846,6 +854,10 @@ export struct ReaderPage {
   }
 
   private saveProgressNow(): void {
+    // 预览模式（分享「保持我的进度」）：本次不写阅读进度
+    if (this.previewNoSave) {
+      return;
+    }
     const layout: FqChapterLayout | null = this.curLayout;
     if (layout === null || this.pageIndex < 0 || this.pageIndex >= layout.pages.length) {
       return;
@@ -1073,9 +1085,11 @@ export struct ReaderPage {
       this.pageIndex = pageIdx;
       this.afterPageShown();
     }
-    // 段级精确进度（覆盖页级保存）
-    FqReaderStore.saveProgress(this.bookId, this.chapterIndex, `p2:${item.paraIndex}:0`,
-      this.bookPercent());
+    // 段级精确进度（覆盖页级保存）；预览模式本次不写
+    if (!this.previewNoSave) {
+      FqReaderStore.saveProgress(this.bookId, this.chapterIndex, `p2:${item.paraIndex}:0`,
+        this.bookPercent());
+    }
   }
 
   /** 滚到已载内容末尾：兜底重试追加下一章（预取失败/未完成时）；无下章提示一次。 */
@@ -3062,6 +3076,9 @@ export struct ReaderPage {
           start = progress.chapterIndex >= 0 && progress.chapterIndex < this.chapters.length
             ? progress.chapterIndex : 0;
           domPos = start === progress.chapterIndex ? progress.domPos : '';
+        } else {
+          // 分享/书旗链接指定章：按 dp 段定位章内位置
+          domPos = this.initialDomPos;
         }
         const resumed: FqReaderResumePos = this.syncListenResume(start, domPos);
         await this.openChapter(resumed.index, resumed.domPos);
@@ -3088,6 +3105,9 @@ export struct ReaderPage {
           localIndex = localProgress.chapterIndex >= 0 && localProgress.chapterIndex < localChapters.length
             ? localProgress.chapterIndex : 0;
           localDomPos = localIndex === localProgress.chapterIndex ? localProgress.domPos : '';
+        } else {
+          // 分享链接指定章：按 dp 段定位章内位置
+          localDomPos = this.initialDomPos;
         }
         const resumed: FqReaderResumePos = this.syncListenResume(localIndex, localDomPos);
         await this.openChapter(resumed.index, resumed.domPos);
@@ -3116,6 +3136,9 @@ export struct ReaderPage {
         index = progress.chapterIndex >= 0 && progress.chapterIndex < chapters.length
           ? progress.chapterIndex : 0;
         domPos = index === progress.chapterIndex ? progress.domPos : '';
+      } else {
+        // 分享链接指定章：按 dp 段定位章内位置
+        domPos = this.initialDomPos;
       }
       const resumed: FqReaderResumePos = this.syncListenResume(index, domPos);
       await this.openChapter(resumed.index, resumed.domPos);
@@ -3135,6 +3158,9 @@ export struct ReaderPage {
             index = progress.chapterIndex >= 0 && progress.chapterIndex < cachedCatalog.chapters.length
               ? progress.chapterIndex : 0;
             domPos = index === progress.chapterIndex ? progress.domPos : '';
+          } else {
+            // 分享链接指定章：按 dp 段定位章内位置
+            domPos = this.initialDomPos;
           }
           const resumed: FqReaderResumePos = this.syncListenResume(index, domPos);
           await this.openChapter(resumed.index, resumed.domPos);
@@ -3281,6 +3307,10 @@ export struct ReaderPage {
       return;
     }
     this.readChapters.add(index);
+    // 预览模式：仅内存标记（目录显示正常），不落盘已读章节
+    if (this.previewNoSave) {
+      return;
+    }
     FqReaderStore.saveReadChapters(this.bookId, this.readChapters);
   }
 

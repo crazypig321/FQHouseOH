@@ -401,6 +401,8 @@ export struct PlayerPage {
   private pendingResumeSec: number = -1;
   /** 显式起播集下标（详情目录点击进页播对应集）；-1 未指定走续播/从头。 */
   private explicitStartIndex: number = -1;
+  /** 预览模式（分享「保持我的进度」）：本次不写已看/续播记录。 */
+  private previewNoSave: boolean = false;
   /** 周期保存计数（5s 一存，仅播放中）。 */
   private progressTick: number = 0;
   /** 长按右侧 2 倍速快进中（松开恢复原倍速）。 */
@@ -509,6 +511,13 @@ export struct PlayerPage {
     if (PlayerNavParams.startIndex >= 0) {
       this.explicitStartIndex = PlayerNavParams.startIndex;
     }
+    // 分享链接定位：显式起播集带分享秒偏移（loadEpisode 首开 Media start 消费）
+    if (this.explicitStartIndex >= 0 && PlayerNavParams.startPositionSec > 0) {
+      this.pendingResumeSec = PlayerNavParams.startPositionSec;
+    }
+    PlayerNavParams.startPositionSec = -1;
+    this.previewNoSave = PlayerNavParams.previewNoSave;
+    PlayerNavParams.previewNoSave = false;
     let start: number = PlayerNavParams.startIndex;
     if (start < 0 || start >= this.episodes.length) {
       start = 0;
@@ -2108,6 +2117,8 @@ export struct PlayerPage {
     ListenVideoNavParams.startPositionSec = this.player.state.position;
     ListenVideoNavParams.resultIndex = -1;
     ListenVideoNavParams.resultPositionSec = 0;
+    // 预览模式（分享「保持我的进度」）透传：听视频页同样不写已看/续播
+    ListenVideoNavParams.previewNoSave = this.previewNoSave;
     this.listenReturnPending = true;
     NavPathUtils.push(ROUTE_LISTEN_VIDEO);
   }
@@ -3953,10 +3964,11 @@ export struct PlayerPage {
     this.media.ensureSession('video');
     this.media.startBackground();
     this.pushMediaMetadata();
-    if (wasDisplayed && switched && !keepListenProgress) {
+    if (wasDisplayed && switched && !keepListenProgress && !this.previewNoSave) {
       // 切集：续播记录立即指向新集（位置 0；周期/暂停/退出再精化），
       // 避免切集后立刻退出仍续播回旧集；同集重试不覆盖原位置
-      // （听视频返回切集跳过：新集起播位置由听到的位置决定，不重置为 0）
+      // （听视频返回切集跳过：新集起播位置由听到的位置决定，不重置为 0；
+      //  预览模式跳过：续播记录保持本机值）
       this.progress = new FqWatchedProgress(episode.itemId, 0, 0, this.seriesPercent(0));
       FqWatchedStore.saveProgress(PlayerNavParams.contentId, this.progress);
     }
@@ -4102,6 +4114,10 @@ export struct PlayerPage {
     if (!this.hasDisplayed) {
       return;
     }
+    // 预览模式（分享「保持我的进度」）：本次不标已看
+    if (this.previewNoSave) {
+      return;
+    }
     const episode: FqChapter | undefined = this.episodes[this.index];
     if (episode === undefined || episode.itemId.length === 0) {
       return;
@@ -4146,6 +4162,10 @@ export struct PlayerPage {
    */
   private saveCurrentProgress(): void {
     if (!this.hasDisplayed) {
+      return;
+    }
+    // 预览模式（分享「保持我的进度」）：本次不写续播（this.progress 保持本机值）
+    if (this.previewNoSave) {
       return;
     }
     const episode: FqChapter | undefined = this.episodes[this.index];

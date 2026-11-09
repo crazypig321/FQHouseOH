@@ -76,6 +76,10 @@ export class ReaderNavParams {
   static presetChapters: FqChapter[] = [];
   /** 只读模式正文加载器（null 时章节正文为空）。 */
   static chapterLoader: ((chapter: FqChapter) => Promise<string>) | null = null;
+  /** 定位段（domPos，如 p2:12:340；分享链接带入，进入时由阅读页消费并复位）。 */
+  static initialDomPos: string = '';
+  /** 预览模式（分享链接「保持我的进度」进入）：本次会话跳过全部进度写入（消费后由阅读页复位）。 */
+  static previewNoSave: boolean = false;
 }
 
 /** 作者主页跳转参数。 */
@@ -101,6 +105,10 @@ export class ListenNavParams {
   static chapterIndex: number = -1;
   /** 阅读页带入的当前段原文：听书页拉章节字幕后匹配定位起播秒（消费后由听书页复位）。 */
   static startCueText: string = '';
+  /** 定位起播秒（分享链接带入；-1 未指定，消费后由听书页复位）。 */
+  static startPositionSec: number = -1;
+  /** 预览模式（分享链接「保持我的进度」进入）：本次会话跳过历史/进度写入（消费后由听书页复位）。 */
+  static previewNoSave: boolean = false;
 }
 
 /** 播放页跳转参数（短剧/漫剧，mpv 播放器）。 */
@@ -119,6 +127,10 @@ export class PlayerNavParams {
   static creationStatus: number = -1;
   /** 剧简介（FqBookDetail.abstractText，选集面板头部小字展示）。 */
   static intro: string = '';
+  /** 定位起播秒（分享链接带入；-1 未指定，消费后由播放页复位）。 */
+  static startPositionSec: number = -1;
+  /** 预览模式（分享链接「保持我的进度」进入）：本次会话跳过已看/进度写入（消费后由播放页复位）。 */
+  static previewNoSave: boolean = false;
 }
 
 /** 听视频页跳转参数（播放页「听视频」进入；退出结果由播放页 onShown 消费）。 */
@@ -139,6 +151,8 @@ export class ListenVideoNavParams {
   static resultIndex: number = -1;
   /** 退出回传：听到位置（秒）。 */
   static resultPositionSec: number = 0;
+  /** 预览模式（播放页预览态「听视频」带入）：本次会话跳过已看/进度写入（消费后由听视频页复位）。 */
+  static previewNoSave: boolean = false;
 }
 
 /** 漫画页跳转参数。 */
@@ -149,6 +163,10 @@ export class ComicNavParams {
   static title: string = '';
   /** 封面（分享 / 流转载荷用）。 */
   static cover: string = '';
+  /** 定位图（domPos，如 img:5；分享链接带入，进入时由漫画页消费并复位）。 */
+  static initialDomPos: string = '';
+  /** 预览模式（分享链接「保持我的进度」进入）：本次会话跳过全部进度写入（消费后由漫画页复位）。 */
+  static previewNoSave: boolean = false;
 }
 
 /**

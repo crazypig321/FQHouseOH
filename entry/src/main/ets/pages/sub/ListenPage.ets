@@ -122,10 +122,18 @@ export struct ListenPage {
     // 阅读页带入的当前段原文：拉章节字幕匹配起播秒（失败/无命中回退章首）
     const startCueText: string = ListenNavParams.startCueText;
     ListenNavParams.startCueText = '';
+    // 分享链接定位秒（-1 未携带）：起播章内位置
+    const startPositionSec: number = ListenNavParams.startPositionSec > 0
+      ? ListenNavParams.startPositionSec : 0;
+    ListenNavParams.startPositionSec = -1;
+    // 预览模式（分享「保持我的进度」）：本次收听不写收听历史
+    const previewNoSave: boolean = ListenNavParams.previewNoSave;
+    ListenNavParams.previewNoSave = false;
     fqAudioSession.open(ListenNavParams.bookId, ListenNavParams.tab,
       ListenNavParams.title, ListenNavParams.cover, ListenNavParams.chapters)
       .then(async (): Promise<void> => {
         ListenNavParams.chapterIndex = -1;
+        fqAudioSession.noPersist = previewNoSave;
         if (fqAudioSession.ttsMode) {
           // 离线朗读：目录定位按朗读模式续读，原文 cue 字符定位（装载中自动延后）
           if (startChapter >= 0 && startChapter < fqAudioSession.chapters.length) {
@@ -138,14 +146,18 @@ export struct ListenPage {
           return;
         }
         if (startChapter >= 0 && startChapter < fqAudioSession.chapters.length) {
-          let positionSec: number = 0;
+          // 分享定位秒兜底，分享 cue 锚点命中（>0）时覆写
+          let positionSec: number = startPositionSec;
           if (startCueText.trim().length > 0) {
             try {
               const track: FqSubtitleTrack = await FqBackend.get().chapterTimeline(
                 fqAudioSession.chapters[startChapter].itemId, fqAudioSession.toneId);
-              positionSec = fqSubtitleStartSec(track, startCueText);
+              const matched: number = fqSubtitleStartSec(track, startCueText);
+              if (matched > 0) {
+                positionSec = matched;
+              }
             } catch (error) {
-              // 字幕拉取失败：回退章首起播
+              // 字幕拉取失败：回退分享定位秒/章首起播
             }
           }
           fqAudioSession.openChapter(startChapter,

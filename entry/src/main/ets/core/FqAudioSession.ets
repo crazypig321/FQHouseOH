@@ -217,6 +217,9 @@ export class FqAudioSession {
   private tickTimer: number = -1;
   private lastAvSyncAt: number = 0;
   private lastHistorySaveAt: number = 0;
+  /** 预览模式（分享链接「保持我的进度」进入听书）：true 期间 persistHistory 全跳过；
+   *  open() 复位 false，听书页在 open().then 开头按需置位。 */
+  public noPersist: boolean = false;
   /** 今日已读统计：播放中 tick 计数，满 10 次（5s）累计一次。 */
   private statPlayingTicks: number = 0;
   private avSessionValue: avSession.AVSession | null = null;
@@ -284,6 +287,8 @@ export class FqAudioSession {
    */
   public async open(bookId: string, tab: string, title: string, cover: string,
     presetChapters?: FqChapter[]): Promise<void> {
+    // 复位预览模式（上次分享预览不应影响本次正常进入；听书页按需在 .then 重新置位）
+    this.noPersist = false;
     if (this.hasSession && this.bookId === bookId) {
       return;
     }
@@ -2156,6 +2161,9 @@ export class FqAudioSession {
   }
 
   private persistHistory(): void {
+    if (this.noPersist) {
+      return;
+    }
     if (!this.hasSession || this.bookId.length === 0 || this.chapters.length === 0) {
       return;
     }

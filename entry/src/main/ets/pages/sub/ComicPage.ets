@@ -167,6 +167,10 @@ export struct ComicPage {
   private bookId: string = '';
   private bookTitle: string = '';
   private startChapterIndex: number = -1;
+  /** 外部定位话内图片（分享链接 dp；空 = 不定位）。 */
+  private initialDomPos: string = '';
+  /** 预览模式（分享「保持我的进度」）：本次退出前不写阅读进度/已读话。 */
+  private previewNoSave: boolean = false;
   private chapters: FqChapter[] = [];
   private loadToken: number = 0;
   private clockTimer: number = -1;
@@ -202,6 +206,10 @@ export struct ComicPage {
     this.bookId = ComicNavParams.id;
     this.bookTitle = ComicNavParams.title;
     this.startChapterIndex = ComicNavParams.chapterIndex;
+    this.initialDomPos = ComicNavParams.initialDomPos;
+    ComicNavParams.initialDomPos = '';
+    this.previewNoSave = ComicNavParams.previewNoSave;
+    ComicNavParams.previewNoSave = false;
     this.titleBarOp = titleBarOf(this.bookTitle, undefined, [
       {
         content: {
@@ -1302,6 +1310,9 @@ export struct ComicPage {
         index = progress.chapterIndex >= 0 && progress.chapterIndex < chapters.length
           ? progress.chapterIndex : 0;
         domPos = index === progress.chapterIndex ? progress.domPos : '';
+      } else {
+        // 分享链接指定话：按 dp 定位话内图片
+        domPos = this.initialDomPos;
       }
       await this.openChapter(index, domPos);
     } catch (error) {
@@ -1435,6 +1446,10 @@ export struct ComicPage {
 
   /** 进度持久化：domPos = 'img:章内图下标'；percent = 整书百分比（封面角标用）。 */
   private saveProgressNow(): void {
+    // 预览模式（分享「保持我的进度」）：本次不写阅读进度
+    if (this.previewNoSave) {
+      return;
+    }
     if (this.chapters.length === 0
       || this.chapterIndex < 0 || this.chapterIndex >= this.chapters.length) {
       return;
@@ -1474,6 +1489,10 @@ export struct ComicPage {
       return;
     }
     this.readChapters.add(index);
+    // 预览模式：仅内存标记（目录显示正常），不落盘已读话
+    if (this.previewNoSave) {
+      return;
+    }
     FqReaderStore.saveReadChapters(this.bookId, this.readChapters);
   }
 

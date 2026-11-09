@@ -29,6 +29,10 @@ export class DialogManager {
   public static confirmLabel: string = '确定';
   /** 通用确认弹窗确认回调（点击确认后执行；取消/关闭弹窗不触发）。 */
   public static confirmCallback: (() => void) | null = null;
+  /** 通用确认弹窗取消按钮文案（默认「取消」，ShowConfirm 可自定义）。 */
+  public static confirmCancelLabel: string = '取消';
+  /** 通用确认弹窗取消回调（点击取消按钮后执行；确认/遮罩关闭不触发）。 */
+  public static confirmCancelCallback: (() => void) | null = null;
 
   // ===== 自定义颜色弹窗参数（打开前由调用方赋值，弹窗关闭后自动清空） =====
   /** 自定义颜色弹窗：取色器起始色。 */
@@ -160,12 +164,16 @@ export class DialogManager {
   }
 
   /** 通用确认弹窗（移出书架/删除记录/清空书架/清空浏览历史等共用）：
-   *  title 标题、message 正文、confirmLabel 确认按钮文案，onConfirm 点确认后执行（取消/关闭不触发）。 */
-  public static ShowConfirm(title: string, message: string, confirmLabel: string, onConfirm: () => void): void {
+   *  title 标题、message 正文、confirmLabel 确认按钮文案，onConfirm 点确认后执行（取消/关闭不触发）；
+   *  cancelLabel/onCancel 可选：取消按钮自定义文案与回调（点击取消后执行，确认/遮罩关闭不触发）。 */
+  public static ShowConfirm(title: string, message: string, confirmLabel: string, onConfirm: () => void,
+    cancelLabel?: string, onCancel?: () => void): void {
     DialogManager.confirmTitle = title;
     DialogManager.confirmMessage = message;
     DialogManager.confirmLabel = confirmLabel;
     DialogManager.confirmCallback = onConfirm;
+    DialogManager.confirmCancelLabel = cancelLabel === undefined ? '取消' : cancelLabel;
+    DialogManager.confirmCancelCallback = onCancel === undefined ? null : onCancel;
     DialogManager.OpenDialog('通用确认');
   }
 
@@ -403,11 +411,21 @@ export class DialogManager {
     if (key === '通用确认' || key === '自定义颜色' ||
       key === '选择WebDAV备份' || key === '备份保留数量' || key === '自定义主题编辑' ||
       key === '章节缓存限制') {
+      // 通用确认弹窗支持自定义取消文案与取消回调（分享进度「保持我的进度」等二选一场景）
+      let cancelLabel: string = '取消';
+      let cancelAction: (() => void) | null = null;
+      if (key === '通用确认') {
+        cancelLabel = DialogManager.confirmCancelLabel;
+        cancelAction = DialogManager.confirmCancelCallback;
+      }
       const cancel: ButtonOptions = {
-        value: '取消',
+        value: cancelLabel,
         fontColor: appState.accentColor,
         buttonStyle: ButtonStyleMode.TEXTUAL,
         action: (): void => {
+          if (cancelAction !== null) {
+            cancelAction();
+          }
         }
       };
       let confirmLabel: string = '确认';
@@ -508,6 +526,8 @@ export class DialogManager {
       DialogManager.confirmMessage = '';
       DialogManager.confirmLabel = '确定';
       DialogManager.confirmCallback = null;
+      DialogManager.confirmCancelLabel = '取消';
+      DialogManager.confirmCancelCallback = null;
     }
     // 自定义颜色弹窗参数一次性，关闭后清理（取消丢弃拖选色）
     if (key === '自定义颜色') {
