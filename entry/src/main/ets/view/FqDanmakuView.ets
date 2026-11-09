@@ -1,13 +1,17 @@
 /**
  * 弹幕层（对齐 fqapp playlet_danmaku_layer 语义的轻量实现）：
- * - 右→左匀速飞行（animateTo 线性动画驱动 @Trace x）；官方时长制：
- *   竖屏 10000ms / 横屏 12000ms 基准 ÷（弹幕速度档 × 播放倍速），
+ * - 右→左匀速飞行（帧时钟 16ms 步进推进 @Trace x，同 fqapp Ticker 模型，不用
+ *   animateTo——暂停顶帧依赖动画打断语义，onFinish 误触发会连回收一起出错）；
+ *   官方时长制：竖屏 10000ms / 横屏 12000ms 基准 ÷（弹幕速度档 × 播放倍速），
  *   时长恒定、文本越长像素速度越快（container/l.java:782-784,1371-1373）；
  * - 车道避让：每条车道记录下一次可复用的墙钟时刻，满道丢弃（官方同语义）；
+ *   暂停期间车道占用计时同步冻结顺延，长暂停后不串道；
  * - 车道数 = maxLanes 与层实际高度按行高自适应的较小者；
  * - 播放位置喂入驱动出现时机，超过追补窗口的旧弹幕静默跳过；
- * - 暂停时全体冻结在当前像素位置，恢复播放后按剩余时长续飞；
+ * - 暂停时停帧冻结在当前像素位置，恢复播放后按剩余时长续飞；
  * - resetToken 变化（seek/切集）清空已飞/在飞状态；
+ * - 片尾收尾：飞行终点超出本集时长时压缩飞行时长，赶在片尾前完整飞出，
+ *   不随切集截断（保底最短时长，剩得太少时最多在最后 2 秒内被截）；
  * - 样式经 config 可调（fqapp danmaku_config：字号/不透明度/速度倍率/背景透明气泡）；
  * - 正文官方括号表情（`[微笑]` 等）复用评论表情切段渲染为内联图（与段评同款）；
  * - 整棵子树不参与触摸测试，不影响任何交互。
@@ -21,6 +25,12 @@ const FQ_DANMAKU_FLIGHT_MS: number = 10000;
 const FQ_DANMAKU_FLIGHT_MS_LANDSCAPE: number = 12000;
 /** 追补窗口：位置跳变后多久内的弹幕仍允许起飞（毫秒）。 */
 const FQ_DANMAKU_CATCHUP_MS: number = 1500;
+/** 片尾压缩飞行的最短墙钟时长（毫秒）：再短就看不清，宁可在最后 2 秒内被切集截断。 */
+const FQ_DANMAKU_TAIL_MIN_MS: number = 2000;
+/** 帧时钟步进间隔（毫秒）：约 60fps，弹幕低速匀移足够顺滑。 */
+const FQ_DANMAKU_FRAME_MS: number = 16;
+/** 单帧最大步进（毫秒）：后台/卡顿的长帧按上限折算，防止恢复瞬间弹幕瞬移。 */
+const FQ_DANMAKU_MAX_FRAME_MS: number = 100;
 /** 弹幕气泡底色（官方 40% 黑底圆角气泡；transparentBg 时不画）。 */
 const FQ_DANMAKU_BUBBLE_BG: string = '#66000000';
 
@@ -44,7 +54,7 @@ export class FqDanmakuViewConfig {
   }
 }
 
-/** 飞行中的弹幕（@Trace x 驱动 translate 动画；墙钟起点支持暂停冻结）。 */
+/** 飞行中的弹幕（@Trace x 由帧时钟推进；墙钟已飞时长支持暂停冻结）。 */
 @ObservedV2
 class FqFlyingDanmaku {
   readonly key: string;
@@ -54,24 +64,21 @@ class FqFlyingDanmaku {
   readonly startX: number;
   /** 终点 x（-文本宽，全出左缘）。 */
   readonly endX: number;
-  /** 本次动画的墙钟起点（暂停时前移，剔除冻结时长）。 */
-  startWallMs: number;
-  /** 本次动画的剩余时长（暂停续飞时收窄）。 */
-  durationMs: number;
-  /** 暂停时刻已飞行时长（未暂停为 -1）。 */
-  pausedElapsedMs: number;
+  /** 飞行总时长（墙钟毫秒）。 */
+  readonly totalMs: number;
+  /** 已飞行时长（墙钟毫秒；暂停时停帧自然冻结）。 */
+  elapsedMs: number;
   @Trace x: number;
 
   constructor(key: string, text: string, lane: number, startX: number, endX: number,
-    startWallMs: number, durationMs: number) {
+    totalMs: number) {
     this.key = key;
     this.text = text;
     this.lane = lane;
     this.startX = startX;
     this.endX = endX;
-    this.startWallMs = startWallMs;
-    this.durationMs = durationMs;
-    this.pausedElapsedMs = -1;
+    this.totalMs = totalMs;
+    this.elapsedMs = 0;
     this.x = startX;
   }
 }
@@ -94,12 +101,28 @@ export struct FqDanmakuView {
   @Param landscape: boolean = false;
   /** 播放倍速：飞行墙钟时长 = 基准 ÷（速度档倍率 × 倍速）。 */
   @Param playbackRate: number = 1;
+  /** 本集媒体总时长（毫秒）：>0 时片尾弹幕压缩飞行，赶在片尾前完整飞出。 */
+  @Param durationMs: number = 0;
   @Local flying: FqFlyingDanmaku[] = [];
   private spawned: Set<string> = new Set<string>();
   private laneFreeAt: number[] = [];
   private viewWidth: number = 0;
   private viewHeight: number = 0;
-  private paused: boolean = false;
+  /** 帧时钟定时器 id（-1 未运行）。 */
+  private tickerId: number = -1;
+  private lastTickAt: number = 0;
+  /** 暂停时刻（0 表示未暂停）：恢复时车道占用计时按暂停时长顺延。 */
+  private pausedAt: number = 0;
+
+  aboutToAppear(): void {
+    if (this.playing) {
+      this.startTicker();
+    }
+  }
+
+  aboutToDisappear(): void {
+    this.stopTicker();
+  }
 
   @Monitor('positionMs')
   private onPositionChange(): void {
@@ -116,9 +139,9 @@ export struct FqDanmakuView {
   @Monitor('playing')
   private onPlayingChange(): void {
     if (this.playing) {
-      this.resumeAll();
+      this.startTicker();
     } else {
-      this.pauseAll();
+      this.stopTicker();
     }
   }
 
@@ -169,92 +192,81 @@ export struct FqDanmakuView {
     // 官方时长制：基准 ÷（速度档 × 倍速），时长恒定、长文本像素速度更快
     const speed: number = Math.max(0.1, this.config.speedMultiplier);
     const rate: number = Math.max(0.1, this.playbackRate);
-    const durationMs: number = Math.round(
+    let durationMs: number = Math.round(
       (this.landscape ? FQ_DANMAKU_FLIGHT_MS_LANDSCAPE : FQ_DANMAKU_FLIGHT_MS) / (speed * rate));
-    this.laneFreeAt[lane] = now + durationMs;
-    const flyer: FqFlyingDanmaku = new FqFlyingDanmaku(
-      item.id, item.text, lane, width, -textWidth, now, durationMs);
-    this.flying.push(flyer);
-    // 下一拍再启动动画，确保初始位置先完成一次渲染；已暂停则等恢复续飞
-    setTimeout((): void => {
-      if (this.paused || !this.flying.includes(flyer)) {
-        return;
+    // 片尾收尾（fqapp/官方未处理的原生缺陷）：飞行终点超出本集时长时压缩到「片尾前飞完」，
+    // 避免切集时弹幕飘到一半被截；剩得太少则保底最短时长，最多在最后 2 秒内被截
+    if (this.durationMs > 0 && this.positionMs < this.durationMs) {
+      const remainWallMs: number = (this.durationMs - this.positionMs) / rate;
+      if (remainWallMs < durationMs) {
+        durationMs = Math.max(FQ_DANMAKU_TAIL_MIN_MS, Math.round(remainWallMs));
       }
-      this.fly(flyer);
-    }, 0);
+    }
+    this.laneFreeAt[lane] = now + durationMs;
+    this.flying.push(new FqFlyingDanmaku(
+      item.id, item.text, lane, width, -textWidth, durationMs));
   }
 
-  /** 启动（或续飞）单条线性动画。 */
-  private fly(flyer: FqFlyingDanmaku): void {
-    this.getUIContext().animateTo({
-      duration: flyer.durationMs,
-      curve: Curve.Linear,
-      onFinish: (): void => {
-        this.retire(flyer);
-      },
-    }, (): void => {
-      flyer.x = flyer.endX;
-    });
-  }
-
-  /** 暂停：全体按已飞行进度冻结在当前像素位置（0 时长动画顶掉在飞动画）。 */
-  private pauseAll(): void {
-    if (this.paused) {
+  /** 启动帧时钟（幂等）：恢复时先按暂停时长顺延仍在占用的车道释放时刻。 */
+  private startTicker(): void {
+    if (this.tickerId >= 0) {
       return;
     }
-    this.paused = true;
+    const now: number = Date.now();
+    if (this.pausedAt > 0) {
+      const pausedMs: number = now - this.pausedAt;
+      for (let i: number = 0; i < this.laneFreeAt.length; i++) {
+        // 只顺延暂停时仍被冻结弹幕占用的车道，空闲车道保持原状
+        if (this.laneFreeAt[i] > this.pausedAt) {
+          this.laneFreeAt[i] += pausedMs;
+        }
+      }
+      this.pausedAt = 0;
+    }
+    this.lastTickAt = now;
+    this.tickerId = setInterval((): void => this.tickFrame(), FQ_DANMAKU_FRAME_MS);
+  }
+
+  /** 停帧（幂等）：冻结全体弹幕在当前像素位置，记录暂停时刻。 */
+  private stopTicker(): void {
+    if (this.tickerId >= 0) {
+      clearInterval(this.tickerId);
+      this.tickerId = -1;
+    }
+    if (this.pausedAt === 0) {
+      this.pausedAt = Date.now();
+    }
+  }
+
+  /** 帧步进：全体按墙钟推进剩余飞行，飞完的出列回收。 */
+  private tickFrame(): void {
     if (this.flying.length === 0) {
       return;
     }
     const now: number = Date.now();
-    const finished: FqFlyingDanmaku[] = [];
-    for (const flyer of this.flying) {
-      const elapsed: number = now - flyer.startWallMs;
-      if (elapsed >= flyer.durationMs) {
-        finished.push(flyer);
-        continue;
-      }
-      const progress: number = elapsed / flyer.durationMs;
-      flyer.pausedElapsedMs = elapsed;
-      const frozenX: number = flyer.startX + (flyer.endX - flyer.startX) * progress;
-      this.getUIContext().animateTo({ duration: 0 }, (): void => {
-        flyer.x = frozenX;
-      });
-    }
-    if (finished.length > 0) {
-      const done: Set<FqFlyingDanmaku> = new Set<FqFlyingDanmaku>(finished);
-      this.flying = this.flying.filter((item: FqFlyingDanmaku): boolean => !done.has(item));
-    }
-  }
-
-  /** 恢复：墙钟起点前移剔除冻结时长，按剩余时长续飞。 */
-  private resumeAll(): void {
-    if (!this.paused) {
+    let dt: number = now - this.lastTickAt;
+    this.lastTickAt = now;
+    if (dt <= 0) {
       return;
     }
-    this.paused = false;
-    const now: number = Date.now();
-    for (const flyer of this.flying) {
-      if (flyer.pausedElapsedMs < 0) {
-        // 冻结期间才起飞、还没动过的：从起点正常起飞
-        this.fly(flyer);
-        continue;
-      }
-      const elapsed: number = flyer.pausedElapsedMs;
-      flyer.pausedElapsedMs = -1;
-      const remaining: number = flyer.durationMs - elapsed;
-      if (remaining <= 0) {
-        this.retire(flyer);
-        continue;
-      }
-      flyer.startWallMs = now - elapsed;
-      flyer.durationMs = remaining;
-      this.fly(flyer);
+    if (dt > FQ_DANMAKU_MAX_FRAME_MS) {
+      dt = FQ_DANMAKU_MAX_FRAME_MS;
     }
-  }
-
-  private retire(flyer: FqFlyingDanmaku): void {
-    this.flying = this.flying.filter((item: FqFlyingDanmaku): boolean => item !== flyer);
+    let retired = false;
+    for (const flyer of this.flying) {
+      flyer.elapsedMs += dt;
+      if (flyer.elapsedMs >= flyer.totalMs) {
+        flyer.x = flyer.endX;
+        retired = true;
+        continue;
+      }
+      const progress: number = flyer.elapsedMs / flyer.totalMs;
+      flyer.x = flyer.startX + (flyer.endX - flyer.startX) * progress;
+    }
+    if (retired) {
+      this.flying = this.flying.filter(
+        (item: FqFlyingDanmaku): boolean => item.elapsedMs < item.totalMs);
+    }
   }
 
   /** 车道数：maxLanes 与层高度自适应（行高随字号）取较小者，至少 1 条。 */

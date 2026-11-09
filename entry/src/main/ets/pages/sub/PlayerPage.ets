@@ -886,6 +886,7 @@ export struct PlayerPage {
             maxLanes: this.danmakuMaxLanes(),
             landscape: this.isLandscapeDanmaku(),
             playbackRate: this.player.state.speed,
+            durationMs: Math.floor(this.player.state.duration * 1000),
           })
             .width('100%')
             .height(this.fullScreen ? this.danmakuLayerHeight() : Math.max(1, this.pageH() - this.videoTopAbs()))
