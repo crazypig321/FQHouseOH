@@ -17,7 +17,6 @@ import { fqAudioSession } from '../core/FqAudioSession';
 import { appState } from '../entryability/AppState';
 import { ListenNavParams, ROUTE_LISTEN } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
-import { FqColorUtils } from '../utils/FqColorUtils';
 import { hdsEffect } from '@kit.UIDesignKit';
 import { rowImmersiveModifier } from '../utils/ModifierUtils';
 
@@ -215,7 +214,7 @@ export struct FqPlaybackBall {
           total: this.progressTotal(),
           type: ProgressType.Ring,
         })
-          .style({ strokeWidth: this.expanded ? 4 : 6 })
+          .style({ strokeWidth: 6 })
           .color(appState.accentColor)
           .backgroundColor(Color.Transparent)
           .width(FQ_BALL_SIZE - 1)
@@ -226,6 +225,7 @@ export struct FqPlaybackBall {
             .height(FQ_BALL_SIZE - 12)
             .borderRadius((FQ_BALL_SIZE - 12) / 2)
             .objectFit(ImageFit.Cover)
+            .draggable(false)
         } else {
           Stack() {
             SymbolGlyph($r('sys.symbol.headphones'))
