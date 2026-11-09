@@ -1,19 +1,24 @@
 /**
  * 弹幕层（对齐 fqapp playlet_danmaku_layer 语义的轻量实现）：
- * - 右→左匀速飞行（animateTo 线性动画驱动 @Trace x）；
+ * - 右→左匀速飞行（animateTo 线性动画驱动 @Trace x）；官方时长制：
+ *   竖屏 10000ms / 横屏 12000ms 基准 ÷（弹幕速度档 × 播放倍速），
+ *   时长恒定、文本越长像素速度越快（container/l.java:782-784,1371-1373）；
  * - 车道避让：每条车道记录下一次可复用的墙钟时刻，满道丢弃（官方同语义）；
  * - 车道数 = maxLanes 与层实际高度按行高自适应的较小者；
  * - 播放位置喂入驱动出现时机，超过追补窗口的旧弹幕静默跳过；
  * - 暂停时全体冻结在当前像素位置，恢复播放后按剩余时长续飞；
  * - resetToken 变化（seek/切集）清空已飞/在飞状态；
  * - 样式经 config 可调（fqapp danmaku_config：字号/不透明度/速度倍率/背景透明气泡）；
+ * - 正文官方括号表情（`[微笑]` 等）复用评论表情切段渲染为内联图（与段评同款）；
  * - 整棵子树不参与触摸测试，不影响任何交互。
  */
 
 import { FqDanmaku } from '../model/FqModels';
+import { FqEmojiSegment, fqCommentEmojiSegments, fqHasCommentEmoji } from './FqCommentEmoji';
 
-/** 基准飞行速度（vp/s；实际 = 基准 × 速度档倍率）。 */
-const FQ_DANMAKU_SPEED_VP: number = 90;
+/** 官方飞行时长基准（毫秒）：竖屏 10000、横屏 12000（container/l.java）。 */
+const FQ_DANMAKU_FLIGHT_MS: number = 10000;
+const FQ_DANMAKU_FLIGHT_MS_LANDSCAPE: number = 12000;
 /** 追补窗口：位置跳变后多久内的弹幕仍允许起飞（毫秒）。 */
 const FQ_DANMAKU_CATCHUP_MS: number = 1500;
 /** 弹幕气泡底色（官方 40% 黑底圆角气泡；transparentBg 时不画）。 */
@@ -85,6 +90,10 @@ export struct FqDanmakuView {
   @Param config: FqDanmakuViewConfig = new FqDanmakuViewConfig();
   /** 最大车道数（竖屏=设置行数 1-4；横屏=显示区域高度折算，宿主计算）。 */
   @Param maxLanes: number = 4;
+  /** 横屏片源（官方横屏飞行 12000ms、竖屏 10000ms）。 */
+  @Param landscape: boolean = false;
+  /** 播放倍速：飞行墙钟时长 = 基准 ÷（速度档倍率 × 倍速）。 */
+  @Param playbackRate: number = 1;
   @Local flying: FqFlyingDanmaku[] = [];
   private spawned: Set<string> = new Set<string>();
   private laneFreeAt: number[] = [];
@@ -157,8 +166,11 @@ export struct FqDanmakuView {
     }
     const textWidth: number = this.estimateTextWidth(item.text);
     const width: number = this.viewWidth > 0 ? this.viewWidth : 360;
-    const speed: number = FQ_DANMAKU_SPEED_VP * this.config.speedMultiplier;
-    const durationMs: number = Math.round((width + textWidth) / speed * 1000);
+    // 官方时长制：基准 ÷（速度档 × 倍速），时长恒定、长文本像素速度更快
+    const speed: number = Math.max(0.1, this.config.speedMultiplier);
+    const rate: number = Math.max(0.1, this.playbackRate);
+    const durationMs: number = Math.round(
+      (this.landscape ? FQ_DANMAKU_FLIGHT_MS_LANDSCAPE : FQ_DANMAKU_FLIGHT_MS) / (speed * rate));
     this.laneFreeAt[lane] = now + durationMs;
     const flyer: FqFlyingDanmaku = new FqFlyingDanmaku(
       item.id, item.text, lane, width, -textWidth, now, durationMs);
@@ -267,8 +279,23 @@ export struct FqDanmakuView {
     }
   }
 
-  /** 文本宽度估算：CJK 全宽、其余约 0.55 倍字号。 */
+  /** 文本宽度估算：CJK 全宽、其余约 0.55 倍字号；
+   *  官方括号表情按内联图实际宽度（1.4 倍字号）计，不按 token 原文。 */
   private estimateTextWidth(text: string): number {
+    if (fqHasCommentEmoji(text)) {
+      let width: number = 0;
+      for (const segment of fqCommentEmojiSegments(text)) {
+        width += segment.emoji !== null
+          ? this.config.fontSize * 1.4
+          : this.estimatePlainWidth(segment.plain);
+      }
+      return Math.max(this.config.fontSize, Math.ceil(width));
+    }
+    return this.estimatePlainWidth(text);
+  }
+
+  /** 纯文本宽度估算（CJK 全宽、其余约 0.55 倍字号）。 */
+  private estimatePlainWidth(text: string): number {
     let units: number = 0;
     for (let i: number = 0; i < text.length; i++) {
       units += text.charCodeAt(i) > 0x2E7F ? 1 : 0.55;
@@ -285,12 +312,30 @@ export struct FqDanmakuView {
   build() {
     Stack() {
       ForEach(this.flying, (flyer: FqFlyingDanmaku) => {
-        Text(flyer.text)
-          .fontSize(this.config.fontSize)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(this.textColor())
-          .textShadow({ radius: 2, color: '#CC000000', offsetX: 0, offsetY: 0 })
-          .maxLines(1)
+        if (fqHasCommentEmoji(flyer.text)) {
+          // 官方括号表情弹幕：切段横排（文本段纯 Text + 表情段 Image，1.4 倍字号）。
+          // 不用 Text 富文本（Span/ImageSpan）：实测在该动画场景下静默不渲染，整条弹幕消失
+          Row({ space: 0 }) {
+            ForEach(fqCommentEmojiSegments(flyer.text), (segment: FqEmojiSegment, index: number) => {
+              if (segment.emoji !== null) {
+                Image(segment.emoji)
+                  .width(this.config.fontSize * 1.4)
+                  .height(this.config.fontSize * 1.4)
+                  .objectFit(ImageFit.Contain)
+                  .draggable(false)
+                  // 表情与文字同等受弹幕不透明度设置影响
+                  .opacity(this.config.alphaPercent / 100)
+              } else {
+                Text(segment.plain)
+                  .fontSize(this.config.fontSize)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(this.textColor())
+                  .textShadow({ radius: 2, color: '#CC000000', offsetX: 0, offsetY: 0 })
+                  .maxLines(1)
+              }
+            }, (segment: FqEmojiSegment, index: number): string => `${flyer.key}_${index}_${segment.plain.length}`)
+          }
+          .alignItems(VerticalAlign.Center)
           .position({ x: 0, y: flyer.lane * this.laneHeight() })
           .translate({ x: flyer.x })
           .padding({
@@ -301,6 +346,24 @@ export struct FqDanmakuView {
           })
           .borderRadius(this.config.transparentBg ? 0 : 4)
           .backgroundColor(this.config.transparentBg ? Color.Transparent : FQ_DANMAKU_BUBBLE_BG)
+        } else {
+          Text(flyer.text)
+            .fontSize(this.config.fontSize)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.textColor())
+            .textShadow({ radius: 2, color: '#CC000000', offsetX: 0, offsetY: 0 })
+            .maxLines(1)
+            .position({ x: 0, y: flyer.lane * this.laneHeight() })
+            .translate({ x: flyer.x })
+            .padding({
+              left: this.config.transparentBg ? 0 : 6,
+              right: this.config.transparentBg ? 0 : 6,
+              top: this.config.transparentBg ? 0 : 2,
+              bottom: this.config.transparentBg ? 0 : 2,
+            })
+            .borderRadius(this.config.transparentBg ? 0 : 4)
+            .backgroundColor(this.config.transparentBg ? Color.Transparent : FQ_DANMAKU_BUBBLE_BG)
+        }
       }, (flyer: FqFlyingDanmaku) => flyer.key)
     }
     .width('100%')

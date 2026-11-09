@@ -872,10 +872,11 @@ export struct PlayerPage {
           this.CenterPlayButton()
         }
 
-        // 弹幕层：竖屏片源占屏上 20%、横屏片源按「显示区域」档（fqapp danmaku_config）；
-        // 竖屏片源全屏沉浸后 topRect 归零，用 maxTopRect 保底下移避开摄像头孔条（同 FsTopBar 语义）；
-        // 且整棵子树不参与触摸测试，绝不影响底部控制条交互
-        if (this.fullScreen && this.danmakuOn && this.errorMsg.length === 0 && this.danmakuItems.length > 0) {
+        // 弹幕层：全屏竖屏片源占屏上 20%、全屏横屏片源按「显示区域」档（fqapp danmaku_config）；
+        // 非全屏常驻态铺满标题栏 + 顶部安全区以下的整屏（原版 video_player_chrome 竖屏页面同款）；
+        // 全屏竖屏片源沉浸后 topRect 归零，用 maxTopRect 保底下移避开摄像头孔条
+        // （同 FsTopBar 语义）；且整棵子树不参与触摸测试，绝不影响底部控制条交互
+        if (this.danmakuOn && this.errorMsg.length === 0 && this.danmakuItems.length > 0) {
           FqDanmakuView({
             items: this.danmakuItems,
             positionMs: Math.floor(this.player.state.position * 1000),
@@ -883,10 +884,17 @@ export struct PlayerPage {
             playing: this.player.state.playing,
             config: this.danmakuCfg,
             maxLanes: this.danmakuMaxLanes(),
+            landscape: this.isLandscapeDanmaku(),
+            playbackRate: this.player.state.speed,
           })
             .width('100%')
-            .height(this.danmakuLayerHeight())
-            .position({ x: 0, y: this.isLandscapeVideo() ? appState.topRect : appState.maxTopRect })
+            .height(this.fullScreen ? this.danmakuLayerHeight() : Math.max(1, this.pageH() - this.videoTopAbs()))
+            .position({
+              x: 0,
+              y: this.fullScreen
+                ? (this.isLandscapeVideo() ? appState.topRect : appState.maxTopRect)
+                : this.videoTopAbs(),
+            })
             .hitTestBehavior(HitTestMode.None)
         }
 
