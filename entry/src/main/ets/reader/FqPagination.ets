@@ -146,11 +146,11 @@ export class FqPaginationEngine {
     return count;
   }
 
-  /** 气泡宽度（px）：内边距/间距随字号缩放，图标按 fp 实高换算，计数文本实测 + 安全余量。 */
-  private bubbleWidthPx(metrics: FqReaderLayoutMetrics, count: number): number {
-    const chromePx: number = (metrics.bubblePadHVp * 2 + metrics.bubbleSpaceVp) * metrics.density
-      + metrics.bubbleIconFp * metrics.textDensity * 1.2;
-    return chromePx + this.measureFn(`${count}`, metrics.bubbleTextFp, '400') + 2 * metrics.density;
+  /** 气泡宽度（px）：行内渲染仅一枚图标（FqPageCanvas ImageSpan，计数 Span 已移除），
+   *  估算 = 图标宽（vp→px）+ 安全余量；与实际渲染宽一致，inline 判定不虚报
+   *  （虚报会每段多记一行幻影行高，多段累积成页底大片空白）。 */
+  private bubbleWidthPx(metrics: FqReaderLayoutMetrics): number {
+    return metrics.bubbleIconFp * metrics.density + 2 * metrics.density;
   }
 
   /** 章节装页：返回带片段/行/页首位置的完整分页结果。 */
@@ -214,17 +214,19 @@ export class FqPaginationEngine {
       if (isTitle) {
         used += metrics.titleBottomPx;
       } else if (commentCounts.length > para && commentCounts[para] > 0) {
-        // 段评气泡行内渲染在段尾 Text 内（FqPageCanvas：ImageSpan+计数 Span 拼在末行后）：
+        // 段评气泡行内渲染在段尾 Text 内（FqPageCanvas：ImageSpan 图标拼在末行后）：
         // 末行剩余宽度放得下 → 0 额外行高；放不下气泡随 Text 换行 → 计一行行高；
         // 连该行也放不下 → 收页，气泡独立片段开新页（同计一行行高）。
-        // bubbleWidthPx 为胶囊全宽估算（略大于实际行内渲染宽），判inline偏保守：
-        // 宁可多计一行（页底略空）也不少计（页底溢出裁切）。
+        // bubbleWidthPx 与渲染同为纯图标宽：inline 判定须与实际渲染宽一致，
+        // 虚报会每段多记一行幻影行高（页底大片空白的根因）。
         const count: number = commentCounts[para];
-        const bubbleW: number = this.bubbleWidthPx(metrics, count);
+        const bubbleW: number = this.bubbleWidthPx(metrics);
         const lastLineW: number = this.measureFn(lines[lines.length - 1], fontFp, weight);
-        // 判定预算与断行同扣全角字宽余量：自然换行末行可略宽于引擎末行，须保守判放不下
+        // inline 判定：末行 + 图标宽 + 小安全余量 ≤ 内容宽（测量与渲染同源，余量只需吸收
+        // 字体度量误差，不再扣整字宽）。判「放不下」时图标独立成行渲染（bubbleOwnRow），
+        // 收一行行高、渲染一行行高——判定偏差不再产生幻影行高（页底空白）或行溢出。
         const inline: boolean = lastLineW + bubbleW
-          <= metrics.contentWidthPx - this.measureFn('汉', fontFp, weight);
+          <= metrics.contentWidthPx - 4 * metrics.density;
         const charge: number = inline ? 0 : lineH;
         if (!inline && page.fragments.length > 0 && used + charge > contentH) {
           pages.push(page);
@@ -248,6 +250,7 @@ export class FqPaginationEngine {
             bubbleW / metrics.density));
         } else if (frag !== null) {
           frag.showBubble = true;
+          frag.bubbleOwnRow = !inline;
           page.bubbles.push(new FqPageBubble(para,
             metrics.headerZoneVp + metrics.contentTopVp + (used - (inline ? lineH : 0)) / metrics.density,
             metrics.bubbleRowPx / metrics.density,

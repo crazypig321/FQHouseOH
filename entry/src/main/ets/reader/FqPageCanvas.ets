@@ -39,9 +39,10 @@ export struct FqPageCanvas {
     return frag.isTitle ? this.metrics.titleTopVp : this.metrics.paraGapVp;
   }
 
-  /** 行内段评气泡：只挂片段末行（引擎气泡行高记账与渲染一致）。 */
+  /** 行内段评气泡：只挂片段末行且引擎判定可内联（独立成行时走片段尾部独立行）。 */
   private lineHasBubble(frag: FqPageFragment, lineIdx: number): boolean {
-    return frag.showBubble && this.bubbleCount(frag) > 0 && lineIdx === frag.lines.length - 1;
+    return frag.showBubble && !frag.bubbleOwnRow && this.bubbleCount(frag) > 0
+      && lineIdx === frag.lines.length - 1;
   }
 
   /** 行尾拉伸字符串（带显式 fp 单位，规避 number 的 fp/vp 歧义；越界回退 '0fp'）。 */
@@ -90,13 +91,30 @@ export struct FqPageCanvas {
               .maxLines(this.lineHasBubble(frag, lineIdx) ? 2 : 1)
               .width('100%')
             }, (line: string, lineIdx: number): string => `${lineIdx}_${line.length}_${line}`)
+            // 引擎判定末行放不下气泡：图标独立成行（行高与装页记账同为一行行高，零分歧）
+            if (frag.showBubble && frag.bubbleOwnRow && this.bubbleCount(frag) > 0) {
+              Text() {
+                ImageSpan(fqBubbleIcon(this.bubbleCount(frag)))
+                  .width(this.metrics.bubbleIconFp)
+                  .height(this.metrics.bubbleIconFp)
+                  .supportSvg2(true)
+                  .colorFilter(drawing.ColorFilter.createBlendModeColorFilter(
+                    drawing.Tool.makeColorFromResourceColor($r('sys.color.icon_tertiary')), drawing.BlendMode.SRC_IN))
+                  .onClick(() => {
+                    this.onBubbleTap(frag.paraIndex);
+                  })
+              }
+              .lineHeight(this.metrics.lineHeightFp)
+              .maxLines(1)
+              .width('100%')
+            }
           }
           .width('100%')
           .margin({ top: this.topMarginVp(frag), bottom: frag.isTitle ? this.metrics.titleBottomVp : 0 })
           .borderRadius(this.paraHighlighted(frag) ? 6 : 0)
           .backgroundColor(this.paraHighlighted(frag) ? this.highlightColor : 'transparent')
         }, (frag: FqPageFragment): string =>
-          `f_${frag.paraIndex}_${frag.startChar}_${frag.endChar}_${frag.showBubble ? 1 : 0}_${this.bubbleCount(frag)}_${frag.lines.length}_${frag.text.length}_${this.metrics.fontSizeFp}_${this.metrics.contentWidthPx}_${this.metrics.textDensity}`)
+          `f_${frag.paraIndex}_${frag.startChar}_${frag.endChar}_${frag.showBubble ? 1 : 0}_${frag.bubbleOwnRow ? 1 : 0}_${this.bubbleCount(frag)}_${frag.lines.length}_${frag.text.length}_${this.metrics.fontSizeFp}_${this.metrics.contentWidthPx}_${this.metrics.textDensity}`)
       }
     }
     .padding({

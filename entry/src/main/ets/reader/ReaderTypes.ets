@@ -30,6 +30,8 @@ export class FqPageFragment {
   isParaEnd: boolean = false;
   /** 是否在片段末尾渲染段评气泡。 */
   showBubble: boolean = false;
+  /** 气泡独立成行（引擎判定末行放不下：图标不拼末行，单独一行渲染，行数与装页记账一致）。 */
+  bubbleOwnRow: boolean = false;
 
   constructor(paraIndex: number, isTitle: boolean) {
     this.paraIndex = paraIndex;
