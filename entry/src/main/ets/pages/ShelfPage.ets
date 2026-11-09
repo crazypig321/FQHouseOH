@@ -38,6 +38,8 @@ const SHELF_SEARCH_FOCUS_ID: string = 'shelf_page_search';
 /** 版式偏好存储。 */
 const SHELF_PREF_NAME: string = 'fq_shelf_prefs';
 const SHELF_PREF_LAYOUT: string = 'layout';
+/** 书架排序偏好（0..7，见 sortMode）。 */
+const SHELF_PREF_SORT: string = 'sort';
 
 /** 书架/浏览历史统一展示行（勾选态由 batchSelected 实时派生，不随行快照，避免批量操作整表重载闪烁）。 */
 class ShelfRow {
@@ -57,6 +59,21 @@ class ShelfRow {
     this.cover = cover;
     this.sub = sub;
     this.percent = percent;
+  }
+}
+
+/** 书架排序辅助行：行数据随行携带加入顺序与最近浏览时间，排序后仅取 row。 */
+class ShelfSortEntry {
+  readonly row: ShelfRow;
+  /** 加入顺序（书架 store 插入序，0 最早）。 */
+  readonly addedIndex: number;
+  /** 最近浏览时间戳（毫秒；0 = 未浏览过）。 */
+  readonly visitedAt: number;
+
+  constructor(row: ShelfRow, addedIndex: number, visitedAt: number) {
+    this.row = row;
+    this.addedIndex = addedIndex;
+    this.visitedAt = visitedAt;
   }
 }
 
@@ -103,6 +120,8 @@ export struct ShelfPage {
   @Local searchKeyword: string = '';
   /** 0=网格 1=双列卡片 2=列表（两 tab 共享，持久化）。 */
   @Local layout: number = 0;
+  /** 书架排序：0/1=名称正/倒序 2/3=进度正/倒序 4/5=最近观看正/倒序 6/7=加入时间正/倒序（持久化，默认 6 保持加入顺序）。 */
+  @Local sortMode: number = 6;
   @Local todayMinutesNum: number = 0;
   @Local importing: boolean = false;
   @Local visibleCount: number = 0;
@@ -141,6 +160,10 @@ export struct ShelfPage {
       const raw: preferences.ValueType = this.layoutPref.getSync(SHELF_PREF_LAYOUT, 0);
       if (typeof raw === 'number' && raw >= 0 && raw <= 2) {
         this.layout = raw;
+      }
+      const rawSort: preferences.ValueType = this.layoutPref.getSync(SHELF_PREF_SORT, 6);
+      if (typeof rawSort === 'number' && rawSort >= 0 && rawSort <= 7) {
+        this.sortMode = rawSort;
       }
     } catch (error) {
       this.layoutPref = null;
@@ -323,12 +346,24 @@ export struct ShelfPage {
     const keyword: string = this.searchKeyword;
     const rows: ShelfRow[] = [];
     if (this.currentTab === 0) {
+      // 最近观看排序依据：浏览记录的 visitedAt
+      const visitedAtMap: Map<string, number> = new Map<string, number>();
+      for (const browse of FqBrowseStore.all()) {
+        visitedAtMap.set(browse.id, browse.visitedAt);
+      }
+      const entries: ShelfSortEntry[] = [];
+      let addedIndex: number = 0;
       for (const entry of FqShelfStore.all()) {
         if (keyword.length === 0 || entry.title.includes(keyword)) {
-          rows.push(new ShelfRow(entry.id, entry.kind, entry.title, entry.cover,
+          entries.push(new ShelfSortEntry(new ShelfRow(entry.id, entry.kind, entry.title, entry.cover,
             FqLocalBookStore.isLocalBookId(entry.id) ? '本地书籍' : fqKindLabel(entry.kind),
-            this.entryPercent(entry.id, entry.kind)));
+            this.entryPercent(entry.id, entry.kind)), addedIndex, visitedAtMap.get(entry.id) ?? 0));
         }
+        addedIndex++;
+      }
+      entries.sort((a: ShelfSortEntry, b: ShelfSortEntry): number => this.compareShelfEntries(a, b));
+      for (const entry of entries) {
+        rows.push(entry.row);
       }
     } else {
       for (const entry of FqBrowseStore.all()) {
@@ -534,6 +569,14 @@ export struct ShelfPage {
     };
     items.push(listItem);
 
+    // 排序方式（仅书架 tab）：级联二级菜单
+    if (this.currentTab === 0) {
+      const sortItem = new FqMenuItem();
+      sortItem.label = '排序方式';
+      sortItem.subItems = this.buildSortSubItems();
+      items.push(sortItem);
+    }
+
     const offlineItem = new FqMenuItem();
     offlineItem.icon = $r('sys.symbol.download');
     offlineItem.label = '离线缓存';
@@ -587,6 +630,95 @@ export struct ShelfPage {
         // 忽略写入失败
       }
     }
+  }
+
+  /** 排序方式二级菜单（8 项，当前项打勾）。 */
+  private buildSortSubItems(): Array<FqMenuItem> {
+    const labels: string[] = ['名称（正序）', '名称（倒序）', '进度（正序）', '进度（倒序）',
+      '最近观看（正序）', '最近观看（倒序）', '加入时间（正序）', '加入时间（倒序）'];
+    const subItems: Array<FqMenuItem> = [];
+    for (let mode: number = 0; mode < labels.length; mode++) {
+      const sub = new FqMenuItem();
+      sub.label = labels[mode];
+      sub.endIcon = this.sortMode === mode ? $r('sys.symbol.checkmark') : '';
+      sub.onAction = (): void => {
+        FqMenu.dismiss();
+        this.setSortMode(mode);
+      };
+      subItems.push(sub);
+    }
+    return subItems;
+  }
+
+  /** 切换书架排序（持久化，浏览历史不排序保持原序）。 */
+  private setSortMode(mode: number): void {
+    if (this.sortMode === mode) {
+      return;
+    }
+    this.sortMode = mode;
+    this.rebuildRows();
+    const pref: preferences.Preferences | null = this.layoutPref;
+    if (pref !== null) {
+      try {
+        pref.putSync(SHELF_PREF_SORT, mode);
+        pref.flush().catch((_error: BusinessError): void => {
+          // 落盘失败不阻断
+        });
+      } catch (error) {
+        // 忽略写入失败
+      }
+    }
+  }
+
+  /** 书架排序比较器：按 sortMode 分发，同值按加入顺序稳定排列。 */
+  private compareShelfEntries(a: ShelfSortEntry, b: ShelfSortEntry): number {
+    switch (this.sortMode) {
+      case 0:
+        return this.stableByAdded(a, b, this.compareChineseTitle(a.row.title, b.row.title));
+      case 1:
+        return this.stableByAdded(a, b, this.compareChineseTitle(b.row.title, a.row.title));
+      case 2:
+        return this.stableByAdded(a, b, this.sortPercent(a) - this.sortPercent(b));
+      case 3:
+        return this.stableByAdded(a, b, this.sortPercent(b) - this.sortPercent(a));
+      case 4:
+        return this.compareByVisited(a, b, a.visitedAt - b.visitedAt);
+      case 5:
+        return this.compareByVisited(a, b, b.visitedAt - a.visitedAt);
+      case 7:
+        return b.addedIndex - a.addedIndex;
+      default:
+        return a.addedIndex - b.addedIndex;
+    }
+  }
+
+  /** 名称排序按中文拼音序比较（zh 区域规则，非中文字符跟随系统规则）。 */
+  private compareChineseTitle(a: string, b: string): number {
+    return a.localeCompare(b, 'zh-Hans-CN');
+  }
+
+  /** 排序用进度（无进度视作 0）。 */
+  private sortPercent(entry: ShelfSortEntry): number {
+    return entry.row.percent < 0 ? 0 : entry.row.percent;
+  }
+
+  /** 同值按加入顺序稳定排列。 */
+  private stableByAdded(a: ShelfSortEntry, b: ShelfSortEntry, cmp: number): number {
+    return cmp !== 0 ? cmp : a.addedIndex - b.addedIndex;
+  }
+
+  /** 最近观看排序：从未浏览过的条目两种方向都排在末尾，其余按时间。 */
+  private compareByVisited(a: ShelfSortEntry, b: ShelfSortEntry, cmp: number): number {
+    if (a.visitedAt <= 0 && b.visitedAt <= 0) {
+      return a.addedIndex - b.addedIndex;
+    }
+    if (a.visitedAt <= 0) {
+      return 1;
+    }
+    if (b.visitedAt <= 0) {
+      return -1;
+    }
+    return cmp !== 0 ? cmp : a.addedIndex - b.addedIndex;
   }
 
   /** 清空确认（按当前 tab：书架 / 浏览历史；共用确认弹窗）。 */

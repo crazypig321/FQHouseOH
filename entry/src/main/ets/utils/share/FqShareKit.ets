@@ -670,7 +670,7 @@ export class FqShareKit {
       const hasShared: boolean = shared.chapterIndex >= 0;
       const hasLocal: boolean = FqReaderStore.getProgress(id).chapterIndex >= 0;
       if (hasShared && hasLocal) {
-        DialogManager.ShowConfirm('从分享处观看？',
+        DialogManager.ShowConfirm('同步分享进度',
           `对方分享时读到第 ${shared.chapterIndex + 1} 章。${FqShareKit.progressChoiceMessage()}`,
           '同步分享进度', (): void => {
             FqShareKit.openRead(id, kind, title, cover, shared, false);
@@ -687,7 +687,7 @@ export class FqShareKit {
       const hasShared: boolean = shared.chapterIndex >= 0;
       const hasLocal: boolean = FqReaderStore.getProgress(id).chapterIndex >= 0;
       if (hasShared && hasLocal) {
-        DialogManager.ShowConfirm('从分享处观看？',
+        DialogManager.ShowConfirm('同步分享进度',
           `对方分享时看到第 ${shared.chapterIndex + 1} 话。${FqShareKit.progressChoiceMessage()}`,
           '同步分享进度', (): void => {
             FqShareKit.openComic(id, title, cover, shared, false);
@@ -704,7 +704,7 @@ export class FqShareKit {
       const hasShared: boolean = shared.chapterIndex >= 0;
       const hasLocal: boolean = FqAudioHistory.get(id) !== null;
       if (hasShared && hasLocal) {
-        DialogManager.ShowConfirm('从分享处收听？',
+        DialogManager.ShowConfirm('同步分享进度',
           `对方分享时听到第 ${shared.chapterIndex + 1} 章${FqShareKit.positionSuffix(shared.positionSec)}。` +
           FqShareKit.progressChoiceMessage(),
           '同步分享进度', (): void => {
@@ -1018,7 +1018,7 @@ export class FqShareKit {
     const sharedIndex: number = FqShareKit.indexOfEpisode(episodes, shared.episodeItemId);
     const hasLocal: boolean = FqWatchedStore.progress(id) !== null;
     if (sharedIndex >= 0 && hasLocal) {
-      DialogManager.ShowConfirm('从分享处观看？',
+      DialogManager.ShowConfirm('同步分享进度',
         `对方分享时看到第 ${sharedIndex + 1} 集${FqShareKit.positionSuffix(shared.positionSec)}。` +
         FqShareKit.progressChoiceMessage(),
         '同步分享进度', (): void => {
@@ -1058,7 +1058,7 @@ export class FqShareKit {
     const sharedIndex: number = FqShareKit.indexOfEpisode(episodes, shared.episodeItemId);
     const hasLocal: boolean = FqWatchedStore.progress(id) !== null;
     if (sharedIndex >= 0 && hasLocal) {
-      DialogManager.ShowConfirm('从分享处收听？',
+      DialogManager.ShowConfirm('同步分享进度',
         `对方分享时听到第 ${sharedIndex + 1} 集${FqShareKit.positionSuffix(shared.positionSec)}。` +
         FqShareKit.progressChoiceMessage(),
         '同步分享进度', (): void => {
