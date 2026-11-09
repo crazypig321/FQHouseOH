@@ -186,7 +186,7 @@ export struct CommonNav {
       content: this.titleBarOp,
       style: {
         originalStyle: {
-          backgroundStyle: { maskExtraHeight: 0, blurRadius: this.navBlurRadius },
+          backgroundStyle: { maskExtraHeight: 0, blurRadius: this.navBlurRadius, backgroundColor: Color.Transparent, },
           contentStyle: {
             // 深浅模式切换时由 themeUtils 触发重渲染（HDS 不会自动刷新系统色）；
             // barForegroundColor 固定前景色（漫画页黑底白字）优先
