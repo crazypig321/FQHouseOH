@@ -1,6 +1,7 @@
 /**
  * 播放设置面板（公共 FqSettingRow 设置行 List：倍速滑杆/解码方式菜单/离线缓存/听视频/
- * 弹幕开关/弹幕设置）：设置 sheet（浅色）与横屏全屏侧边栏（深色）共用，dark 控配色。
+ * 弹幕开关/弹幕设置 + 底部独立分组的分享/流转）：设置 sheet（浅色）与横屏全屏侧边栏
+ * （深色）共用，dark 控配色。
  * 行点击/滑杆/开关经 @Event 回调宿主（PlayerPage 持有播放器与业务状态）。
  */
 import { FqSettingRow } from '../FqSettingRow';
@@ -75,89 +76,25 @@ export struct FqPlayerSettingsPanel {
   @Event rowClick: (key: string) => void = (_key: string): void => {};
 
   build() {
-    List() {
+    List({ space: 12 }) {
       ListItemGroup() {
         ForEach(this.settingItems(), (item: FqSettingItem) => {
-          ListItem() {
-            FqSettingRow({
-              icon: item.icon,
-              title: item.title,
-              tintColor: this.dark ? Color.White : $r('sys.color.font'),
-              click: (): void => {
-                this.rowClick(item.key);
-              }
-            }) {
-              if (item.key === 'speed') {
-                // 倍速：滑杆切换（轨道分段刻度 + 断点倍速文本标识；拖动实时预览，松手提交 mpv）
-                Column({ space: 2 }) {
-                  Slider({
-                    value: this.speed,
-                    min: FQ_SPEED_MIN,
-                    max: FQ_SPEED_MAX,
-                    step: FQ_SPEED_STEP,
-                    style: SliderStyle.InSet
-                  })
-                    .width('100%')
-                    .height(30)
-                    .showSteps(true)
-                    .stepColor(this.dark ? FQ_DARK_TRACK : $r('sys.color.comp_background_tertiary'))
-                    .blockColor(FQ_STORY_ORANGE)
-                    .selectedColor('#33FA6725')
-                    .trackColor(this.dark ? FQ_DARK_TRACK : $r('sys.color.comp_background_tertiary'))
-                    .onChange((value: number, mode: SliderChangeMode): void => {
-                      if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) {
-                        this.speedCommit(value);
-                      } else {
-                        this.speedPreviewChange(value);
-                      }
-                    })
+          this.SettingRowItem(item)
+        }, (item: FqSettingItem) => item.key)
+      }
+      .borderRadius(14)
+      .backgroundColor(this.dark ? FQ_DARK_CARD_BG : $r('sys.color.comp_background_list_card'))
+      .divider({
+        strokeWidth: 0.5,
+        color: this.dark ? FQ_DARK_DIVIDER : $r('sys.color.comp_divider'),
+        startMargin: 48,
+        endMargin: 14
+      })
 
-                  // 断点倍速文本标识：第 i 档锚定在 i/(档数-1)*100% 处，与滑杆刻度两端对齐
-                  Row() {
-                    ForEach(fqSpeedSteps(), (step: number) => {
-                      Text(fqSpeedStepLabel(step))
-                        .fontSize(7)
-                        .fontWeight(this.isCurrentSpeedStep(step) ? FontWeight.Bold : FontWeight.Normal)
-                        .fontColor(this.isCurrentSpeedStep(step) ? FQ_STORY_ORANGE :
-                          (this.dark ? FQ_DARK_TERTIARY_TEXT : $r('sys.color.font_tertiary')))
-                    }, (step: number) => `${step}`)
-                  }
-                  .justifyContent(FlexAlign.SpaceBetween)
-                  .width('100%')
-                  .hitTestBehavior(HitTestMode.None)
-                }.layoutWeight(1)
-              } else if (item.key === 'hwdec') {
-                // 解码方式：当前值 + 公共 FqMenu 直选（硬件解码/软件解码，当前方式尾勾；
-                // 选中即切 mpv 运行时 hwdec + 持久化，同全屏底栏解码菜单）
-                Row({ space: 3 }) {
-                  Text(this.hwdecOn ? '硬解' : '软解')
-                    .fontSize(12.5)
-                    .fontColor(this.dark ? FQ_DARK_TERTIARY_TEXT : $r('sys.color.font_secondary'))
-                  SymbolGlyph($r('sys.symbol.chevron_right'))
-                    .fontSize(13)
-                    .fontColor([this.dark ? FQ_DARK_TERTIARY_TEXT : $r('sys.color.font_tertiary')])
-                }
-                .id(FQ_SETTINGS_HWDEC_ANCHOR_ID)
-                .onClick((): void => {
-                  this.openHwdecMenu();
-                })
-              } else if (item.key === 'danmaku') {
-                // 弹幕开关：Switch（宿主 toggleDanmaku，含官方 Toast 文案）
-                Toggle({ type: ToggleType.Switch, isOn: this.danmakuOn })
-                  .selectedColor(FQ_STORY_ORANGE)
-                  .onChange((isOn: boolean): void => {
-                    if (isOn !== this.danmakuOn) {
-                      this.danmakuToggle(isOn);
-                    }
-                  })
-              } else {
-                // 离线缓存/听视频/弹幕设置：跳转箭头
-                SymbolGlyph($r('sys.symbol.chevron_right'))
-                  .fontSize(16)
-                  .fontColor([this.dark ? '#99FFFFFF' : $r('sys.color.font_tertiary')])
-              }
-            }
-          }
+      // 分享/流转：底部独立分组，与上面设置条目隔开
+      ListItemGroup() {
+        ForEach(this.shareItems(), (item: FqSettingItem) => {
+          this.SettingRowItem(item)
         }, (item: FqSettingItem) => item.key)
       }
       .borderRadius(14)
@@ -178,17 +115,109 @@ export struct FqPlayerSettingsPanel {
     .contentEndOffset(appState.bottomRect === 0 ? 16 : appState.bottomRect)
   }
 
-  /** 播放设置行描述（key 决定右侧控件：speed 滑杆 / cache、listen、danmakuSettings 箭头 / danmaku 开关）。 */
+  /** 设置行（两组共用：key 决定右侧控件——speed 滑杆 / hwdec 菜单 / danmaku 开关 / 其余箭头）。 */
+  @Builder
+  private SettingRowItem(item: FqSettingItem) {
+    ListItem() {
+      FqSettingRow({
+        icon: item.icon,
+        title: item.title,
+        tintColor: this.dark ? Color.White : $r('sys.color.font'),
+        click: (): void => {
+          this.rowClick(item.key);
+        }
+      }) {
+        if (item.key === 'speed') {
+          // 倍速：滑杆切换（轨道分段刻度 + 断点倍速文本标识；拖动实时预览，松手提交 mpv）
+          Column({ space: 2 }) {
+            Slider({
+              value: this.speed,
+              min: FQ_SPEED_MIN,
+              max: FQ_SPEED_MAX,
+              step: FQ_SPEED_STEP,
+              style: SliderStyle.InSet
+            })
+              .width('100%')
+              .height(30)
+              .showSteps(true)
+              .stepColor(this.dark ? FQ_DARK_TRACK : $r('sys.color.comp_background_tertiary'))
+              .blockColor(FQ_STORY_ORANGE)
+              .selectedColor('#33FA6725')
+              .trackColor(this.dark ? FQ_DARK_TRACK : $r('sys.color.comp_background_tertiary'))
+              .onChange((value: number, mode: SliderChangeMode): void => {
+                if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) {
+                  this.speedCommit(value);
+                } else {
+                  this.speedPreviewChange(value);
+                }
+              })
+
+            // 断点倍速文本标识：第 i 档锚定在 i/(档数-1)*100% 处，与滑杆刻度两端对齐
+            Row() {
+              ForEach(fqSpeedSteps(), (step: number) => {
+                Text(fqSpeedStepLabel(step))
+                  .fontSize(7)
+                  .fontWeight(this.isCurrentSpeedStep(step) ? FontWeight.Bold : FontWeight.Normal)
+                  .fontColor(this.isCurrentSpeedStep(step) ? FQ_STORY_ORANGE :
+                    (this.dark ? FQ_DARK_TERTIARY_TEXT : $r('sys.color.font_tertiary')))
+              }, (step: number) => `${step}`)
+            }
+            .justifyContent(FlexAlign.SpaceBetween)
+            .width('100%')
+            .hitTestBehavior(HitTestMode.None)
+          }.layoutWeight(1)
+        } else if (item.key === 'hwdec') {
+          // 解码方式：当前值 + 公共 FqMenu 直选（硬件解码/软件解码，当前方式尾勾；
+          // 选中即切 mpv 运行时 hwdec + 持久化，同全屏底栏解码菜单）
+          Row({ space: 3 }) {
+            Text(this.hwdecOn ? '硬解' : '软解')
+              .fontSize(12.5)
+              .fontColor(this.dark ? FQ_DARK_TERTIARY_TEXT : $r('sys.color.font_secondary'))
+            SymbolGlyph($r('sys.symbol.chevron_right'))
+              .fontSize(13)
+              .fontColor([this.dark ? FQ_DARK_TERTIARY_TEXT : $r('sys.color.font_tertiary')])
+          }
+          .id(FQ_SETTINGS_HWDEC_ANCHOR_ID)
+          .onClick((): void => {
+            this.openHwdecMenu();
+          })
+        } else if (item.key === 'danmaku') {
+          // 弹幕开关：Switch（宿主 toggleDanmaku，含官方 Toast 文案）
+          Toggle({ type: ToggleType.Switch, isOn: this.danmakuOn })
+            .selectedColor(FQ_STORY_ORANGE)
+            .onChange((isOn: boolean): void => {
+              if (isOn !== this.danmakuOn) {
+                this.danmakuToggle(isOn);
+              }
+            })
+        } else {
+          // 离线缓存/听视频/分享/流转/弹幕设置：跳转箭头
+          SymbolGlyph($r('sys.symbol.chevron_right'))
+            .fontSize(16)
+            .fontColor([this.dark ? '#99FFFFFF' : $r('sys.color.font_tertiary')])
+        }
+      }
+    }
+  }
+
+  /** 播放设置行（设置组：key 决定右侧控件——speed 滑杆 / cache、listen、danmakuSettings 箭头 / danmaku 开关）。 */
   private settingItems(): FqSettingItem[] {
     const items: FqSettingItem[] = [
       new FqSettingItem('speed', '倍速', $r('sys.symbol.speed_multiple')),
       new FqSettingItem('hwdec', '解码方式', $r('sys.symbol.video')),
       new FqSettingItem('cache', '离线缓存', $r('sys.symbol.download')),
       new FqSettingItem('listen', '听视频', $r('sys.symbol.waveform_tv')),
-      new FqSettingItem('share', '分享', $r('sys.symbol.share')),
-      new FqSettingItem('continue', '流转', $r('sys.symbol.superdevice')),
       new FqSettingItem('danmaku', '弹幕开关', $r('sys.symbol.ellipsis_bubble')),
       new FqSettingItem('danmakuSettings', '弹幕设置', $r('sys.symbol.textformat'))
+    ];
+    return items;
+  }
+
+  /** 分享/流转行（底部独立分组）。 */
+  private shareItems(): FqSettingItem[] {
+    const items: FqSettingItem[] = [
+      new FqSettingItem('share', '分享', $r('sys.symbol.share')),
+      new FqSettingItem('continue', '流转', $r('sys.symbol.superdevice'))
     ];
     return items;
   }

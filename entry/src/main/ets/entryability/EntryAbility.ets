@@ -94,6 +94,9 @@ export default class EntryAbility extends UIAbility {
     } else if (FqShareKit.parseUri(want)) {
       // 分享链接冷启动：解析载荷（Index 挂载后延时消费直达 / 导入书架）
       hilog.info(DOMAIN, 'FqShare', '%{public}s', 'cold start by share link');
+    } else if (FqShareKit.parseFileUri(want)) {
+      // 本地书文件打开冷启动（分享文件接收 / 文件管理器打开）：Index 挂载后导入
+      hilog.info(DOMAIN, 'FqShare', '%{public}s', 'cold start by file open');
     }
   }
 
@@ -108,6 +111,12 @@ export default class EntryAbility extends UIAbility {
     // 分享链接热启动：解析载荷，延时消费（导航已挂载，直接推入对应页面 / 导入书架）
     if (FqShareKit.parseUri(want)) {
       hilog.info(DOMAIN, 'FqShare', '%{public}s', 'hot start by share link');
+      setTimeout((): void => {
+        FqShareKit.applyPending();
+      }, 500);
+    } else if (FqShareKit.parseFileUri(want)) {
+      // 本地书文件打开热启动：延时导入书架并直达阅读页
+      hilog.info(DOMAIN, 'FqShare', '%{public}s', 'hot start by file open');
       setTimeout((): void => {
         FqShareKit.applyPending();
       }, 500);

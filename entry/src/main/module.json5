@@ -59,6 +59,23 @@
                 "host": "open"
               }
             ]
+          },
+          {
+            "actions": [
+              "ohos.want.action.viewData"
+            ],
+            "uris": [
+              {
+                "scheme": "file",
+                "type": "general.plain-text",
+                "linkFeature": "FileOpen"
+              },
+              {
+                "scheme": "file",
+                "type": "general.epub",
+                "linkFeature": "FileOpen"
+              }
+            ]
           }
         ]
       }

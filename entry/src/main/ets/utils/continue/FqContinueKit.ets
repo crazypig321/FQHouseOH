@@ -1,7 +1,7 @@
 /**
  * 应用流转（应用接续）工具：
- * - 源端：writeToWantParam() 在 EntryAbility.onContinue 中采集四场景
- *   （阅读 / 听书 / 视频 / 听视频）接续载荷并序列化进 wantParam；
+ * - 源端：writeToWantParam() 在 EntryAbility.onContinue 中采集五场景
+ *   （阅读 / 听书 / 漫画 / 视频 / 听视频）接续载荷并序列化进 wantParam；
  * - 目标端：parsePending() 在 onCreate / onNewWant（LaunchReason.CONTINUATION）解析载荷，
  *   applyPending() 写入进度 store + 设静态跳转参数 + 推入对应页面完成精确恢复
  *   （Navigation 页面栈不迁移：SUPPORT_CONTINUE_PAGE_STACK_KEY = false，目标端手动导航）；
@@ -26,30 +26,35 @@ import {
   ListenNavParams,
   PlayerNavParams,
   ListenVideoNavParams,
+  ComicNavParams,
   ROUTE_READER2,
   ROUTE_LISTEN,
   ROUTE_PLAYER,
   ROUTE_LISTEN_VIDEO,
+  ROUTE_COMIC,
 } from '../../model/FqNavModels';
 import { NavPathUtils } from '../NavPathUtils';
+import { FqShareKit } from '../share/FqShareKit';
 
 const DOMAIN = 0x0000;
 /** wantParam 载荷键（序列化 JSON，规避与系统键冲突）。 */
 const FQ_CONTINUE_WANT_KEY = 'fqContinue';
 /** 场景：阅读（小说）。 */
 const FQ_CONTINUE_SCENE_READ = 'read';
+/** 场景：漫画阅读。 */
+const FQ_CONTINUE_SCENE_COMIC = 'comic';
 /** 场景：听书（在线音频 / 离线朗读）。 */
 const FQ_CONTINUE_SCENE_LISTEN = 'listen';
 /** 场景：视频（短剧 / 漫剧）。 */
 const FQ_CONTINUE_SCENE_VIDEO = 'video';
 /** 场景：听视频（听剧模式）。 */
 const FQ_CONTINUE_SCENE_LISTEN_VIDEO = 'listenVideo';
-/** 书旗只读来源 id 前缀（内容仅本机可取，不参与接续）。 */
+/** 书旗只读来源 id 前缀（目标端按 raw id 拉目录正文，正常接续）。 */
 const FQ_SHUQI_ID_PREFIX = 'shuqi:';
 
 /** 接续载荷（源端采集 → wantParam 序列化 → 目标端解析恢复）。 */
 export class FqContinuePayload {
-  /** 场景（read / listen / video / listenVideo）。 */
+  /** 场景（read / comic / listen / video / listenVideo）。 */
   scene: string = '';
   /** 作品 id：阅读 / 听书为 bookId，视频 / 听视频为 seriesId。 */
   id: string = '';
@@ -201,7 +206,8 @@ export class FqContinueKit {
   }
 
   /**
-   * 源端载荷采集：栈顶路由 → 场景；本地导入书与书旗只读来源内容仅本机可取，跳过。
+   * 源端载荷采集：栈顶路由 → 场景；本地导入书内容仅本机可取，跳过；
+   * 书旗来源目标端同款后端可按 id 自取，正常采集。
    */
   private static buildPayload(): FqContinuePayload | null {
     const names: string[] = appState.pageInfos.getAllPathName();
@@ -215,6 +221,11 @@ export class FqContinueKit {
       const listenPayload: FqContinuePayload | null = FqContinueKit.buildListenPayload();
       if (listenPayload !== null) {
         return listenPayload;
+      }
+    } else if (top === ROUTE_COMIC) {
+      const comicPayload: FqContinuePayload | null = FqContinueKit.buildComicPayload();
+      if (comicPayload !== null) {
+        return comicPayload;
       }
     } else if (top === ROUTE_PLAYER) {
       const videoPayload: FqContinuePayload | null = FqContinueKit.buildVideoPayload();
@@ -234,8 +245,7 @@ export class FqContinueKit {
   /** 阅读：身份取 ReaderNavParams，进度取 FqReaderStore（翻页即存，章内定位精确）。 */
   private static buildReadPayload(): FqContinuePayload | null {
     const id: string = ReaderNavParams.id;
-    if (id.length === 0 || id.startsWith(FQ_SHUQI_ID_PREFIX)
-      || FqLocalBookStore.isLocalBookId(id)) {
+    if (id.length === 0 || FqLocalBookStore.isLocalBookId(id)) {
       return null;
     }
     const payload: FqContinuePayload = new FqContinuePayload();
@@ -258,7 +268,7 @@ export class FqContinueKit {
       return null;
     }
     const id: string = fqAudioSession.bookId;
-    if (id.startsWith(FQ_SHUQI_ID_PREFIX) || FqLocalBookStore.isLocalBookId(id)) {
+    if (id.length === 0 || FqLocalBookStore.isLocalBookId(id)) {
       return null;
     }
     const payload: FqContinuePayload = new FqContinuePayload();
@@ -290,6 +300,26 @@ export class FqContinueKit {
     payload.completed = fqAudioSession.completed;
     payload.mode = fqAudioSession.ttsMode ? 'tts' : 'online';
     payload.updatedAt = Date.now();
+    return payload;
+  }
+
+  /** 漫画：身份取 ComicNavParams，进度取 FqReaderStore（domPos 'img:N' 章内图定位）。 */
+  private static buildComicPayload(): FqContinuePayload | null {
+    const id: string = ComicNavParams.id;
+    if (id.length === 0) {
+      return null;
+    }
+    const payload: FqContinuePayload = new FqContinuePayload();
+    payload.scene = FQ_CONTINUE_SCENE_COMIC;
+    payload.id = id;
+    payload.kind = 'manga';
+    payload.title = ComicNavParams.title;
+    payload.cover = ComicNavParams.cover;
+    const progress: FqReaderProgress = FqReaderStore.getProgress(id);
+    payload.chapterIndex = Math.max(0, progress.chapterIndex);
+    payload.domPos = progress.domPos;
+    payload.percent = progress.percent;
+    payload.updatedAt = progress.updatedAt;
     return payload;
   }
 
@@ -351,6 +381,12 @@ export class FqContinueKit {
     if (payload.scene === FQ_CONTINUE_SCENE_READ) {
       FqReaderStore.saveProgress(payload.id, payload.chapterIndex, payload.domPos,
         payload.percent, payload.updatedAt > 0 ? payload.updatedAt : -1);
+      // 书旗来源：目标端后端按 raw id 拉目录 + 只读阅读器（进度已落本机，续读生效）
+      if (payload.id.startsWith(FQ_SHUQI_ID_PREFIX)) {
+        await FqShareKit.openShuqiReader(payload.id.substring(FQ_SHUQI_ID_PREFIX.length),
+          payload.title, payload.cover);
+        return;
+      }
       ReaderNavParams.id = payload.id;
       ReaderNavParams.kind = payload.kind;
       ReaderNavParams.title = payload.title;
@@ -361,6 +397,16 @@ export class FqContinueKit {
       ReaderNavParams.presetChapters = [];
       ReaderNavParams.chapterLoader = null;
       NavPathUtils.push(ROUTE_READER2);
+      return;
+    }
+    if (payload.scene === FQ_CONTINUE_SCENE_COMIC) {
+      FqReaderStore.saveProgress(payload.id, payload.chapterIndex, payload.domPos,
+        payload.percent, payload.updatedAt > 0 ? payload.updatedAt : -1);
+      ComicNavParams.id = payload.id;
+      ComicNavParams.chapterIndex = -1;
+      ComicNavParams.title = payload.title;
+      ComicNavParams.cover = payload.cover;
+      NavPathUtils.push(ROUTE_COMIC);
       return;
     }
     if (payload.scene === FQ_CONTINUE_SCENE_LISTEN) {

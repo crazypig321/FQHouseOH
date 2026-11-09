@@ -254,7 +254,7 @@ export struct ListenVideoPage {
     return this.sleepDeadline > 0 || this.sleepAtEpisodeEnd;
   }
 
-  /** 标题栏：可分享剧集附分享菜单（分享直达链接），本地导入/书旗来源仅保留倍速+流转。 */
+  /** 标题栏：倍速 + 分享（直达链接）+ 流转接续。 */
   private buildTitleBar(): TitleBarContentOptions {
     const menus: Array<HdsNavigationMenuItemOptions> = [{
       content: {
@@ -269,7 +269,7 @@ export struct ListenVideoPage {
       menus.push({
         content: {
           icon: $r('sys.symbol.share'),
-          label: 'share',
+          label: '分享',
           action: (): void => {
             FqShareKit.shareListenVideo();
           },
@@ -279,7 +279,7 @@ export struct ListenVideoPage {
     menus.push({
       content: {
         icon: $r('sys.symbol.superdevice'),
-        label: 'continue',
+        label: '流转',
         action: (): void => {
           FqContinueKit.startInAppContinuation();
         },

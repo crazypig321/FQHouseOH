@@ -1486,24 +1486,6 @@ export struct PlayerPage {
           .onClick((): void => {
             this.openCatalog();
           })
-
-        // 分享：构建直达链接拉起系统分享面板
-        Text('分享')
-          .fontSize(14)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(Color.White)
-          .onClick((): void => {
-            FqShareKit.shareVideo();
-          })
-
-        // 应用流转：拉起系统接续设备选择面板（流转到其他设备续看）
-        Text('流转')
-          .fontSize(14)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(Color.White)
-          .onClick((): void => {
-            FqContinueKit.startInAppContinuation();
-          })
       }
       .width('100%')
       .height(36)

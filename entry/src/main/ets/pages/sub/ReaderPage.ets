@@ -356,7 +356,27 @@ export struct ReaderPage {
     // 书旗只读来源无番茄书评/在线听书：两者都隐藏
     const isLocalBook: boolean = FqLocalBookStore.isLocalBookId(this.bookId);
     if (this.readOnly) {
-      this.titleBarOp = titleBarOf(this.bookTitle);
+      // 书旗只读来源：分享（链接直达）+ 应用流转接续
+      const roMenus: Array<HdsNavigationMenuItemOptions> = [];
+      roMenus.push({
+        content: {
+          icon: $r('sys.symbol.share'),
+            label: '分享',
+          action: (): void => {
+            FqShareKit.shareRead();
+          },
+        },
+      });
+      roMenus.push({
+        content: {
+          icon: $r('sys.symbol.superdevice'),
+            label: '流转',
+          action: (): void => {
+            FqContinueKit.startInAppContinuation();
+          },
+        },
+      });
+      this.titleBarOp = titleBarOf(this.bookTitle, undefined, roMenus);
     } else {
       const menus: Array<HdsNavigationMenuItemOptions> = [];
       if (!isLocalBook) {
@@ -379,23 +399,21 @@ export struct ReaderPage {
           },
         },
       });
-      // 分享：构建直达链接拉起系统分享面板（本地导入书 / 书旗来源不分享）
-      if (!isLocalBook && !this.bookId.startsWith('shuqi:')) {
-        menus.push({
-          content: {
-            icon: $r('sys.symbol.share'),
-            label: 'share',
-            action: (): void => {
-              FqShareKit.shareRead();
-            },
+      // 分享：拉起系统分享面板（书旗走链接直达，本地导入书分享正文文件本体）
+      menus.push({
+        content: {
+          icon: $r('sys.symbol.share'),
+            label: '分享',
+          action: (): void => {
+            FqShareKit.shareRead();
           },
-        });
-      }
+        },
+      });
       // 应用流转：拉起系统设备选择面板（接续到其他设备续读）
       menus.push({
         content: {
           icon: $r('sys.symbol.superdevice'),
-          label: 'continue',
+            label: '流转',
           action: (): void => {
             FqContinueKit.startInAppContinuation();
           },

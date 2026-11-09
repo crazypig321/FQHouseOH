@@ -108,6 +108,8 @@ struct Index {
         FqShareKit.applyPending();
       }, 500);
     }
+    // 碰一碰 / 隔空手势（握拳）分享：进程内一次注册（按导航栈顶页面构建分享内容）
+    FqShareKit.setupHarmonyShare();
   }
 
   /**

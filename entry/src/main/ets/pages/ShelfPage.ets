@@ -103,7 +103,6 @@ export struct ShelfPage {
   @Local searchKeyword: string = '';
   /** 0=网格 1=双列卡片 2=列表（两 tab 共享，持久化）。 */
   @Local layout: number = 0;
-  @Local batchSelected: string[] = [];
   @Local todayMinutesNum: number = 0;
   @Local importing: boolean = false;
   @Local visibleCount: number = 0;
@@ -128,7 +127,7 @@ export struct ShelfPage {
   @Monitor('appStateUse.isBatchMode')
   onBatchModeChange(): void {
     if (!this.appStateUse.isBatchMode) {
-      this.batchSelected = [];
+      appState.batchSelectedIds = [];
     }
   }
 
@@ -225,7 +224,7 @@ export struct ShelfPage {
 
             Column({ space: 10 }) {
               Row() {
-                Text(`已选 ${this.batchSelected.length} 本`)
+                Text(`已选 ${appState.batchSelectedIds.length} 本`)
                   .fontSize(13)
                   .fontColor($r('sys.color.font_secondary'))
                 Blank()
@@ -691,7 +690,7 @@ export struct ShelfPage {
 
   /** 进入多选（appState 单源 + key 稳定 + V2 参数绑定：列表原地淡入勾选态，不重载数据源）。 */
   private enterBatchMode(firstId: string): void {
-    this.batchSelected = [firstId];
+    appState.batchSelectedIds = [firstId];
     this.getUIContext().animateTo({ duration: 250, curve: Curve.EaseInOut }, (): void => {
       appState.isBatchMode = true;
     });
@@ -702,45 +701,45 @@ export struct ShelfPage {
     this.getUIContext().animateTo({ duration: 250, curve: Curve.EaseInOut }, (): void => {
       appState.isBatchMode = false;
     });
-    this.batchSelected = [];
+    appState.batchSelectedIds = [];
   }
 
   private isSelectedId(id: string): boolean {
-    return this.batchSelected.indexOf(id) !== -1;
+    return appState.batchSelectedIds.indexOf(id) !== -1;
   }
 
   /** 勾选切换（batchSelected 整体替换驱动 V2 参数绑定原地刷新，不重载）。 */
   private toggleSelected(id: string): void {
-    const next: string[] = this.batchSelected.slice();
+    const next: string[] = appState.batchSelectedIds.slice();
     const idx: number = next.indexOf(id);
     if (idx === -1) {
       next.push(id);
     } else {
       next.splice(idx, 1);
     }
-    this.batchSelected = next;
+    appState.batchSelectedIds = next;
   }
 
   private allSelected(): boolean {
-    return this.visibleCount > 0 && this.batchSelected.length === this.visibleCount;
+    return this.visibleCount > 0 && appState.batchSelectedIds.length === this.visibleCount;
   }
 
   private toggleSelectAll(): void {
     if (this.allSelected()) {
-      this.batchSelected = [];
+      appState.batchSelectedIds = [];
     } else {
       const ids: string[] = [];
       const count: number = this.dataSource.totalCount();
       for (let i = 0; i < count; i++) {
         ids.push(this.dataSource.getData(i).id);
       }
-      this.batchSelected = ids;
+      appState.batchSelectedIds = ids;
     }
   }
 
   /** 多选分享：所选作品生成书单链接拉起系统分享面板（目标端打开直接导入书架）。 */
   private shareBatchSelected(): void {
-    if (this.batchSelected.length === 0) {
+    if (appState.batchSelectedIds.length === 0) {
       this.showToast('请先选择条目');
       return;
     }
@@ -769,11 +768,11 @@ export struct ShelfPage {
   }
 
   /** 多选清除（先弹共用确认弹窗）：书架 tab 移出书架，历史 tab 删除记录。 */
-  private batchClearSelected(): void {    if (this.batchSelected.length === 0) {
+  private batchClearSelected(): void {    if (appState.batchSelectedIds.length === 0) {
       this.showToast('请先选择条目');
       return;
     }
-    const ids: string[] = this.batchSelected.slice();
+    const ids: string[] = appState.batchSelectedIds.slice();
     const count: number = ids.length;
     const isShelf: boolean = this.currentTab === 0;
     const hasLocal: boolean = ids.some((id: string): boolean => FqLocalBookStore.isLocalBookId(id));

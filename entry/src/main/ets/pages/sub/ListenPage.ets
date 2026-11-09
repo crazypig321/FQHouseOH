@@ -179,18 +179,18 @@ export struct ListenPage {
     return this.seekPreview >= 0 ? this.seekPreview : fqAudioSession.positionSec;
   }
 
-  /** 标题栏：可分享作品附分享菜单（分享直达链接），本地导入/书旗来源仅保留流转。 */
+  /** 标题栏：分享菜单（链接直达；本地导入书改分享正文文件）+ 流转接续。 */
   private buildTitleBar(): TitleBarContentOptions {
     if (FqShareKit.isShareableId(fqAudioSession.bookId)) {
       return FqTitleBarTwoMenusOptions('听书',
-        $r('sys.symbol.share'), 'share', (): void => {
+        $r('sys.symbol.share'), '分享', (): void => {
           FqShareKit.shareListen();
         },
-        $r('sys.symbol.superdevice'), 'continue', (): void => {
+        $r('sys.symbol.superdevice'), '流转', (): void => {
           FqContinueKit.startInAppContinuation();
         });
     }
-    return FqTitleBarMenuOptions('听书', $r('sys.symbol.superdevice'), 'continue', (): void => {
+    return FqTitleBarMenuOptions('听书', $r('sys.symbol.superdevice'), '流转', (): void => {
       FqContinueKit.startInAppContinuation();
     });
   }

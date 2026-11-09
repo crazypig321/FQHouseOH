@@ -193,7 +193,14 @@ export class FqLocalBookStore {
     if (uris.length === 0) {
       return null;
     }
-    const uri: string = uris[0];
+    return FqLocalBookStore.importFromUri(context, uris[0]);
+  }
+
+  /**
+   * 从文件 URI 导入一本本地 TXT / EPUB（选择器 / 分享文件打开复用）。
+   * 同内容幂等复用同一本书（哈希稳定 id）；调用方负责写入书架与提示。
+   */
+  public static async importFromUri(context: common.Context, uri: string): Promise<FqShelfItem> {
     const suffix: string = FqLocalBookStore.suffixFromUri(uri);
     if (suffix === 'epub') {
       return FqLocalBookStore.importEpub(context, uri);
@@ -214,6 +221,18 @@ export class FqLocalBookStore {
     FqLocalBookStore.books.set(id, meta);
     FqLocalBookStore.persist();
     return new FqShelfItem(id, 'book', title, '');
+  }
+
+  /** 本地书沙箱正文文件路径（分享文件本体用；未知 id 返回空串）。 */
+  public static bookFilePath(bookId: string): string {
+    const meta: FqLocalBookMeta | undefined = FqLocalBookStore.books.get(bookId);
+    return meta !== undefined ? meta.file : '';
+  }
+
+  /** 本地书标题（分享面板标题用；未知 id 返回空串）。 */
+  public static bookTitle(bookId: string): string {
+    const meta: FqLocalBookMeta | undefined = FqLocalBookStore.books.get(bookId);
+    return meta !== undefined ? meta.title : '';
   }
 
   /** 48 位 djb2 文本哈希（运算量控制在双精度可精确表示区间）；同内容文件得到相同哈希。 */

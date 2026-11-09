@@ -147,6 +147,8 @@ export class ComicNavParams {
   /** 定位章节下标；-1 表示跟随上次阅读进度。 */
   static chapterIndex: number = -1;
   static title: string = '';
+  /** 封面（分享 / 流转载荷用）。 */
+  static cover: string = '';
 }
 
 /**
@@ -169,6 +171,7 @@ export function fqPushBookOrDetail(id: string, kind: string, title: string, cove
     ComicNavParams.id = id;
     ComicNavParams.title = title;
     ComicNavParams.chapterIndex = -1;
+    ComicNavParams.cover = cover;
     NavPathUtils.push(ROUTE_COMIC);
     return;
   }

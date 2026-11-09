@@ -1011,6 +1011,7 @@ export struct DetailPage {
       ComicNavParams.id = this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId;
       ComicNavParams.title = this.detail.title;
       ComicNavParams.chapterIndex = chapterIndex;
+      ComicNavParams.cover = this.detail.cover;
       NavPathUtils.push(ROUTE_COMIC);
       return;
     }

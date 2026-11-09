@@ -70,6 +70,9 @@ export class AppState {
   /** 批量多选模式（书架页长按进入）：主 TabBar 随之隐藏（barHeight 0/56，参考阅读页底栏模式） */
   @Trace isBatchMode: boolean = false;
 
+  /** 批量多选当前勾选 id（书架页单源维护，碰一碰/隔空手势分享所选用） */
+  @Trace batchSelectedIds: string[] = [];
+
   /** 全局悬浮播控球隐藏标记：播放器/听书页经 CommonNav onShown 声明，Index 据此显隐球体。 */
   @Trace hidePlaybackBall: boolean = false;
 

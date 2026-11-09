@@ -45,6 +45,8 @@ import { FqFlipTurnController } from '../../reader/FqFlipTurn';
 import { FqComicCanvas } from '../../reader/FqComicCanvas';
 import { fqComicSettingsBus } from '../../core/FqComicSettingsBus';
 import { FqVolumeKeyPaging } from '../../utils/FqVolumeKeyPaging';
+import { FqShareKit } from '../../utils/share/FqShareKit';
+import { FqContinueKit } from '../../utils/continue/FqContinueKit';
 
 /** 漫画正文底色（纯黑）。 */
 const FQ_COMIC_BG: string = '#000000';
@@ -216,6 +218,26 @@ export struct ComicPage {
           label: 'cache',
           action: (): void => {
             this.openCacheSheet();
+          },
+        },
+      },
+      // 分享：直达链接拉起系统分享面板（目标端按 id 拉目录图片、跟随本机进度）
+      {
+        content: {
+          icon: $r('sys.symbol.share'),
+          label: '分享',
+          action: (): void => {
+            FqShareKit.shareComic();
+          },
+        },
+      },
+      // 应用流转：拉起系统设备选择面板（接续到其他设备续读）
+      {
+        content: {
+          icon: $r('sys.symbol.superdevice'),
+          label: '流转',
+          action: (): void => {
+            FqContinueKit.startInAppContinuation();
           },
         },
       },
