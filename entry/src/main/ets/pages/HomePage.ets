@@ -16,8 +16,10 @@
 import { FqBackend, fqErrorMessage } from '../core/FqBackend';
 import { FqHomeFeed, FqHomeRowDataSource, FqHomeSource, FQ_SOURCE_SEARCH, FQ_SOURCE_SEARCH_PAGED } from '../core/FqHomeFeed';
 import { FqHomeCache } from '../core/FqHomeCache';
+import { fqDetailCacheGet, fqDetailCacheInit } from '../core/FqDetailCache';
 import { FqCategoryGroup, FqCategoryLevel1, FQ_CHANNEL_TREES } from '../core/FqCategoryStore';
-import { FqMediaItem } from '../model/FqModels';
+import { FqMediaItem, fqKindToTab, FqBookDetail } from '../model/FqModels';
+import { BusinessError } from '@kit.BasicServicesKit';
 import { FqMediaCard } from '../view/FqMediaCard';
 import { FqSpotlight } from '../view/FqSpotlight';
 import { CommonSearch, CommonLoading, RefreshOverlay } from '../view/CommonCom';
@@ -104,9 +106,12 @@ export struct HomePage {
   private loadToken: number = 0;
   /** 各频道流实例缓存（含翻页游标）；切回频道直接复用，不重新加载。 */
   private channelFeeds: (FqHomeFeed | null)[] = [null, null, null, null, null, null];
+  /** 已尝试过高清封面升级的焦点条目（kind:id），会话内不重复请求。 */
+  private spotlightCoverTried: Set<string> = new Set<string>();
 
   aboutToAppear(): void {
     FqHomeCache.init(getContext(this));
+    fqDetailCacheInit(getContext(this));
     const saved: number = FqHomeCache.savedChannelIndex();
     if (saved >= 0 && saved < FQ_CHANNELS.length) {
       this.channelIndex = saved;
@@ -683,9 +688,59 @@ export struct HomePage {
   private applyFeed(): void {
     const items: FqMediaItem[] = this.feed.items();
     this.spotlightItems = items.slice(0, 3);
+    this.upgradeSpotlightCovers();
     this.rowSource.setItems(items);
     this.itemCount = this.feed.totalCount();
     this.hasMore = this.feed.hasMore;
+  }
+
+  /** 今日焦点封面高清化：feed 封面仅 240/400px，/api/detail 回 1080px 大图
+   *  （detail_page_thumb_url，实测书/漫/漫剧一致）；先查详情页磁盘缓存，
+   *  miss 再后台拉详情，成功替换焦点条目封面（失败/为空保持原封面）。
+   *  仅焦点前 3 条、每 kind:id 会话内只试一次，不影响推荐流。 */
+  private upgradeSpotlightCovers(): void {
+    for (const item of this.spotlightItems) {
+      const key: string = `${item.kind}:${item.id}`;
+      if (this.spotlightCoverTried.has(key)) {
+        continue;
+      }
+      this.spotlightCoverTried.add(key);
+      const cached = fqDetailCacheGet(item.kind, item.id);
+      if (cached !== null && cached.detail.cover.length > 0) {
+        this.swapSpotlightCover(item, cached.detail.cover);
+        continue;
+      }
+      FqBackend.get().bookDetail(item.id, fqKindToTab(item.kind))
+        .then((detail: FqBookDetail): void => {
+          if (detail.cover.length > 0) {
+            this.swapSpotlightCover(item, detail.cover);
+          }
+        })
+        .catch((_error: BusinessError): void => {
+          // 拉取失败保持原封面
+        });
+    }
+  }
+
+  /** 替换焦点条目封面（在榜条目重建数组触发刷新；封面相同则不动）。 */
+  private swapSpotlightCover(target: FqMediaItem, cover: string): void {
+    let changed: boolean = false;
+    const next: FqMediaItem[] = [];
+    for (const item of this.spotlightItems) {
+      if (item.kind === target.kind && item.id === target.id) {
+        if (item.cover !== cover) {
+          changed = true;
+          next.push(item.withCover(cover));
+        } else {
+          next.push(item);
+        }
+      } else {
+        next.push(item);
+      }
+    }
+    if (changed) {
+      this.spotlightItems = next;
+    }
   }
 
   /** 首屏 0 条且仍有游标时自动补拉一页。 */

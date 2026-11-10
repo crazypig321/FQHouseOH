@@ -1,6 +1,8 @@
 /**
  * 今日焦点轮播（对齐 fqapp HomeSpotlight 简化版）：
  * 头部标题行 + 大图 Swiper（渐变叠层 + 标题/作者/行动药丸）+ 底部页码行。
+ * 封面满卡 Cover 裁切、顶部锚定（默认居中裁切会切掉海报上部人脸）；
+ * 封面源用 HomePage 焦点升级的 /api/detail 1080px 高清图（feed 仅 240/400px）。
  */
 
 import { FqBackend } from '../core/FqBackend';
@@ -14,6 +16,31 @@ const FQ_SPOTLIGHT_ACTIONS: Record<string, string> = {
   'audio': '开始听书',
   'manga': '翻开漫画',
 };
+
+/** 满卡封面：Cover 裁切顶部锚定（宽定高按实测宽高比，超高部分底部溢出由卡面裁掉；
+ *  横图 minHeight 兜底满高，Cover 居中裁两侧）。 */
+@ComponentV2
+struct FqSpotlightCover {
+  @Param url: string = '';
+  /** 宽高比（w/h）：0.75（3:4 海报）兜底，加载完成按真实值修正。 */
+  @Local aspect: number = 0.75;
+
+  build() {
+    Image(this.url)
+      .width('100%')
+      .aspectRatio(this.aspect)
+      .constraintSize({ minHeight: '100%' })
+      .objectFit(ImageFit.Cover)
+      .autoResize(true)
+      .interpolation(ImageInterpolation.High)
+      .draggable(false)
+      .onComplete((result: ImageLoadResult): void => {
+        if (result.width > 0 && result.height > 0) {
+          this.aspect = result.width / result.height;
+        }
+      })
+  }
+}
 
 @ComponentV2
 export struct FqSpotlight {
@@ -60,12 +87,7 @@ export struct FqSpotlight {
       Swiper(this.swiperController) {
         ForEach(this.items, (item: FqMediaItem) => {
           Stack({ alignContent: Alignment.TopStart }) {
-            Image(FqBackend.get().resourceUrl(item.cover))
-              .width('100%')
-              .height('100%')
-              .objectFit(ImageFit.Cover)
-              .autoResize(true)
-              .draggable(false)
+            FqSpotlightCover({ url: FqBackend.get().resourceUrl(item.cover) })
             Column()
               .width('100%')
               .height('100%')

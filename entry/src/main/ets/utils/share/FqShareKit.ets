@@ -94,10 +94,23 @@ const FQ_SHARE_MAX_BOOKS: number = 300;
 const FQ_SHARE_MAX_LOCAL_BOOKS: number = 10;
 /** 书单链接编码后长度上限（want 分发有体积阈值，超限分享服务拉起失败，超出截断）。 */
 const FQ_SHARE_SHELF_LINK_MAX: number = 16000;
-/** 分享缩略图短边压缩目标（px）。 */
-const FQ_SHARE_THUMB_SIZE: number = 128;
-/** 分享缩略图体积上限（SDK 约束 32KB 内，超限弃用缩略图退默认图标）。 */
+/** 分享缩略图体积上限（系统分享硬限制 32KB 内，超限降档，全档超限弃用退默认图标）。 */
 const FQ_SHARE_THUMB_MAX_BYTES: number = 30 * 1024;
+/** 缩略图压缩档：最长边 px / 编码格式 / 质量。WebP 同画质体积约小 30%，优先 WebP
+ *  抬高分辨率与质量；超预算先降质量、再降分辨率（分辨率对观感影响大于压缩噪点）。 */
+interface FqThumbRung {
+  maxSide: number;
+  format: string;
+  quality: number;
+}
+const FQ_SHARE_THUMB_RUNGS: FqThumbRung[] = [
+  { maxSide: 448, format: 'image/webp', quality: 80 },
+  { maxSide: 384, format: 'image/webp', quality: 70 },
+  { maxSide: 384, format: 'image/jpeg', quality: 78 },
+  { maxSide: 384, format: 'image/jpeg', quality: 60 },
+  { maxSide: 320, format: 'image/jpeg', quality: 56 },
+  { maxSide: 256, format: 'image/jpeg', quality: 50 },
+];
 
 /** 栈顶分享构建结果：分享记录集 + 首链接封面（面板 / 碰一碰预览缩略图用）。 */
 class FqTopShareResult {
@@ -422,7 +435,9 @@ export class FqShareKit {
     });
   }
 
-  /** 下载封面并压缩为分享缩略图（短边 128px JPEG、32KB 内；失败/无封面返回 null）。 */
+  /** 下载封面并压缩为分享缩略图：WebP 优先（同画质体积小约 30%），最长边最高 448px，
+   *  32KB 系统硬限内取最优档（超预算先降质量、再降分辨率）；失败/无封面/全档超限返回 null。
+   *  （旧版一刀切 128px 是分享预览模糊的根因；系统分享缩略图硬上限 32KB，已查证官方 FAQ） */
   private static async fetchThumbnail(coverUrl: string): Promise<Uint8Array | null> {
     if (coverUrl.length === 0 || !coverUrl.startsWith('http')) {
       return null;
@@ -443,25 +458,43 @@ export class FqShareKit {
         return null;
       }
       const source: image.ImageSource = image.createImageSource(raw);
-      const pixel: image.PixelMap = await source.createPixelMap();
-      const info: image.ImageInfo = await pixel.getImageInfo();
-      const maxSide: number = Math.max(info.size.width, info.size.height);
-      if (maxSide > FQ_SHARE_THUMB_SIZE) {
-        const scale: number = FQ_SHARE_THUMB_SIZE / maxSide;
-        await pixel.scale(scale, scale);
-      }
-      const packer: image.ImagePacker = image.createImagePacker();
-      const packed: ArrayBuffer = await packer.packToData(pixel, {
-        format: 'image/jpeg',
-        quality: 65,
-      });
-      packer.release();
-      pixel.release();
-      source.release();
-      if (packed.byteLength === 0 || packed.byteLength >= FQ_SHARE_THUMB_MAX_BYTES) {
+      try {
+        const info: image.ImageInfo = await source.getImageInfo();
+        const originWidth: number = info.size.width;
+        const originHeight: number = info.size.height;
+        if (originWidth <= 0 || originHeight <= 0) {
+          return null;
+        }
+        const maxSide: number = Math.max(originWidth, originHeight);
+        for (const rung of FQ_SHARE_THUMB_RUNGS) {
+          // 等比解码到目标档（源图更小则保持原始尺寸，不放大）
+          const scale: number = Math.min(1, rung.maxSide / maxSide);
+          const targetWidth: number = Math.max(1, Math.round(originWidth * scale));
+          const targetHeight: number = Math.max(1, Math.round(originHeight * scale));
+          const pixel: image.PixelMap = await source.createPixelMap({
+            desiredSize: { width: targetWidth, height: targetHeight },
+          });
+          const packer: image.ImagePacker = image.createImagePacker();
+          let packed: ArrayBuffer | null = null;
+          try {
+            packed = await packer.packToData(pixel, {
+              format: rung.format,
+              quality: rung.quality,
+            });
+          } catch (_error) {
+            packed = null; // 该格式不支持等，降档继续
+          } finally {
+            packer.release();
+            pixel.release();
+          }
+          if (packed !== null && packed.byteLength > 0 && packed.byteLength < FQ_SHARE_THUMB_MAX_BYTES) {
+            return new Uint8Array(packed);
+          }
+        }
         return null;
+      } finally {
+        source.release();
       }
-      return new Uint8Array(packed);
     } catch (error) {
       hilog.warn(DOMAIN, 'FqShare', 'thumbnail fetch failed: %{public}s', `${error}`);
       return null;

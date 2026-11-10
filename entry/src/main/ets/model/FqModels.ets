@@ -101,6 +101,13 @@ export class FqMediaItem {
     this.source = source;
     this.creationStatus = creationStatus;
   }
+
+  /** 换封面（今日焦点 1080px 高清封面升级等）：其余字段原样拷贝。 */
+  withCover(cover: string): FqMediaItem {
+    return new FqMediaItem(this.id, this.title, cover, this.author, this.badge, this.ep,
+      this.kind, this.score, this.intro, this.seriesId, this.episodeId,
+      this.followerCount, this.tag, this.source, this.creationStatus);
+  }
 }
 
 /**
