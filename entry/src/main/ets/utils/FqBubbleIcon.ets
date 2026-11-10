@@ -15,7 +15,7 @@ const FQ_BUBBLE_MAX: number = 99;
 export function fqBubbleIconPath(value: number): string {
   const n: number = Math.trunc(value);
   if (n > FQ_BUBBLE_MAX) {
-    return `bubble_99plus.svg`;
+    return `${FQ_BUBBLE_DIR}/bubble_99plus.svg`;
   }
   const clamped: number = n < 1 ? 1 : n;
   const pad: string = clamped < 10 ? '0' : '';
