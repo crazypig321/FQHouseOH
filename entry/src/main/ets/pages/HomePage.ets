@@ -710,14 +710,15 @@ export struct HomePage {
         this.swapSpotlightCover(item, cached.detail.cover);
         continue;
       }
-      FqBackend.get().bookDetail(item.id, fqKindToTab(item.kind))
+      FqBackend.get().start(getContext(this))
+        .then((): Promise<FqBookDetail> => FqBackend.get().bookDetail(item.id, fqKindToTab(item.kind)))
         .then((detail: FqBookDetail): void => {
           if (detail.cover.length > 0) {
             this.swapSpotlightCover(item, detail.cover);
           }
         })
         .catch((_error: BusinessError): void => {
-          // 拉取失败保持原封面
+          // 后端未起 / 拉取失败保持原封面
         });
     }
   }
