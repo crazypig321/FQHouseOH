@@ -1,6 +1,7 @@
 /**
  * WebDAV 备份与恢复页（备份与恢复-WebDAV，写法对齐 musicfreeOH WebDavSettingPage）：
- * - 服务器配置卡：服务器地址 / 备份路径 / 用户名 / 密码（输入即保存）；
+ * - 服务器配置卡：服务器地址 / 备份路径 / 用户名 / 密码（输入即保存），
+ *   小标题右侧连通性状态点（OPTIONS 探测：绿已连通 / 红未连通 / 灰检测中，配置改动自动重测）；
  * - 操作卡：备份到 WebDAV（独立时间戳文件）/ 从 WebDAV 恢复（远端列表弹窗选择后合并恢复）/
  *   退出时自动备份开关 / 备份保留数量（超限自动删除最老备份）；
  * - 备份内容复用本机备份（FqLibraryBackup 白名单 JSON），恢复为合并语义（只补缺失，可重复恢复）；
@@ -63,6 +64,23 @@ export struct WebdavPage {
   /** 就地结果/错误消息。 */
   @Local message: string = '';
   @Local messageIsError: boolean = false;
+  /** 服务器连通性：null 检测中，true 已连通（绿点），false 未连通（红点）。 */
+  @Local connOk: boolean | null = null;
+  /** 连通性检测防抖定时器 id（-1 未挂起）。 */
+  private connCheckTimer: number = -1;
+  /** 连通性检测轮次：丢弃过期探测结果。 */
+  private connCheckSeq: number = 0;
+
+  aboutToAppear(): void {
+    this.runConnCheck();
+  }
+
+  aboutToDisappear(): void {
+    if (this.connCheckTimer >= 0) {
+      clearTimeout(this.connCheckTimer);
+      this.connCheckTimer = -1;
+    }
+  }
 
   build() {
     CommonNav({
@@ -71,7 +89,7 @@ export struct WebdavPage {
     }) {
       List({ space: 12, scroller: this.scroller }) {
         ListItem() {
-          this.SectionHeader('服务器配置')
+          this.SectionHeader('服务器配置', true)
         }
         ListItem() {
           FqWebDavCard() {
@@ -79,6 +97,7 @@ export struct WebdavPage {
               (value: string): void => {
                 this.url = value;
                 FqWebDavConfigStore.setUrl(value);
+                this.scheduleConnCheck();
               })
             this.RowDivider()
             this.ConfigRow('备份路径', this.path, '可选，如 /backups', false,
@@ -91,18 +110,20 @@ export struct WebdavPage {
               (value: string): void => {
                 this.username = value;
                 FqWebDavConfigStore.setUsername(value);
+                this.scheduleConnCheck();
               })
             this.RowDivider()
             this.ConfigRow('密码', this.password, '可选', true,
               (value: string): void => {
                 this.password = value;
                 FqWebDavConfigStore.setPassword(value);
+                this.scheduleConnCheck();
               })
           }
         }
 
         ListItem() {
-          this.SectionHeader('操作')
+          this.SectionHeader('操作', false)
         }
         ListItem() {
           FqWebDavCard() {
@@ -155,7 +176,7 @@ export struct WebdavPage {
         }
 
         ListItem() {
-          this.SectionHeader('说明')
+          this.SectionHeader('说明', false)
         }
         ListItem() {
           FqWebDavCard() {
@@ -189,6 +210,33 @@ export struct WebdavPage {
       .width('100%')
       .height('100%')
     }
+  }
+
+  /** 连通性检测防抖：配置改动后 600ms 重新探测。 */
+  private scheduleConnCheck(): void {
+    if (this.connCheckTimer >= 0) {
+      clearTimeout(this.connCheckTimer);
+    }
+    this.connCheckTimer = setTimeout((): void => {
+      this.connCheckTimer = -1;
+      this.runConnCheck();
+    }, 600);
+  }
+
+  /** 探测服务器连通性（未配置视为未连通）；过期轮次结果丢弃。 */
+  private async runConnCheck(): Promise<void> {
+    this.connCheckSeq += 1;
+    const seq: number = this.connCheckSeq;
+    if (!FqWebDav.isConfigured()) {
+      this.connOk = false;
+      return;
+    }
+    this.connOk = null;
+    const ok: boolean = await FqWebDav.isReachable();
+    if (seq !== this.connCheckSeq) {
+      return;
+    }
+    this.connOk = ok;
   }
 
   /** 备份到 WebDAV。 */
@@ -308,7 +356,7 @@ export struct WebdavPage {
   }
 
   @Builder
-  private SectionHeader(title: string) {
+  private SectionHeader(title: string, showConn: boolean) {
     Row({ space: 8 }) {
       Column()
         .width(3.5)
@@ -319,6 +367,32 @@ export struct WebdavPage {
         .fontSize(16)
         .fontWeight(FontWeight.Bold)
         .fontColor($r('sys.color.font_primary'))
+      Blank()
+      if (showConn) {
+        // 连通性状态点：绿 = WebDAV 可达，红 = 未连通/未配置，灰 = 检测中
+        Row({ space: 5 }) {
+          if (this.connOk === null) {
+            Circle({ width: 7, height: 7 })
+              .fill($r('sys.color.font_tertiary'))
+            Text('检测中')
+              .fontSize(11.5)
+              .fontColor($r('sys.color.font_tertiary'))
+          } else if (this.connOk) {
+            Circle({ width: 7, height: 7 })
+              .fill('#FF10B981')
+            Text('已连通')
+              .fontSize(11.5)
+              .fontColor('#FF10B981')
+          } else {
+            Circle({ width: 7, height: 7 })
+              .fill('#FFF43F5E')
+            Text('未连通')
+              .fontSize(11.5)
+              .fontColor('#FFF43F5E')
+          }
+        }
+        .alignItems(VerticalAlign.Center)
+      }
     }
     .width('100%')
   }

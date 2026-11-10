@@ -285,8 +285,9 @@ export class FqWebDav {
     }
   }
 
-  /** 服务器连通性探测（OPTIONS）：拿到 HTTP 响应且认证通过（非 401/403）视为可达。 */
-  private static async isReachable(): Promise<boolean> {
+  /** 服务器连通性探测（OPTIONS）：拿到 HTTP 响应且认证通过（非 401/403）视为可达；
+   *  退出自动备份与 WebDAV 页连通性状态点共用。 */
+  static async isReachable(): Promise<boolean> {
     const resp: FqWebDavResponse | null =
       await FqWebDav.request(FqWebDav.serverUrl(), 'OPTIONS', FqWebDav.authHeaders(), null, 8000);
     if (resp === null) {
