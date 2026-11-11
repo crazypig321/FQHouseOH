@@ -44,7 +44,8 @@ struct Index {
   /** 当前包版本号（更新日志 sheet 默认展开版本）。 */
   @Local appVersionName: string = ''
   /** 主 Tab 绑定下标（HdsTabs index 参数）：冷启动取「启动默认展示页」设置；
-   *  切页签后必须同步为当前页签，防止返回主页时 index 绑定值重放回跳启动页。 */
+   *  之后仅在 onChange（切换动画完成后）同步为落定页签——提前/同帧赋值都会让 index 参数
+   *  瞬时重放、吃掉 changeIndex 的切换动画；保持同步是为防返回主页时 index 重放回跳启动页。 */
   @Local mainTabIndex: number = 0
 
   /** 监听 tabbar的显示和消失 */
@@ -72,7 +73,6 @@ struct Index {
     this.mainTabIndex = FqAppSettingsStore.getStartupTabIndex();
     appState.currTabsIndex = this.mainTabIndex;
     appState.switchMainTab = (index: number): void => {
-      this.mainTabIndex = index;
       if (this.isPcLayout) {
         this.sideTabsController.changeIndex(index);
       } else {
@@ -178,6 +178,9 @@ struct Index {
           })
           .onSelected((index: number) => {
             appState.currTabsIndex = index
+          })
+          // 切换动画完成后才同步 index 绑定值，避免参数瞬时重放吃掉动画
+          .onChange((index: number) => {
             this.mainTabIndex = index
           })
         }
@@ -230,7 +233,6 @@ struct Index {
       return true;
     }
     if (appState.currTabsIndex !== 0) {
-      this.mainTabIndex = 0;
       if (this.isPcLayout) {
         this.sideTabsController.changeIndex(0);
       } else {
