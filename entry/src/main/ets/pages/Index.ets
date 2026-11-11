@@ -43,8 +43,9 @@ struct Index {
   @Local showChangelogSheet: boolean = false
   /** 当前包版本号（更新日志 sheet 默认展开版本）。 */
   @Local appVersionName: string = ''
-  /** 启动默认展示页（设置 → 外观；冷启动初始化 HdsTabs/PC Tabs，默认 0 首页）。 */
-  @Local startupTabIndex: number = 0
+  /** 主 Tab 绑定下标（HdsTabs index 参数）：冷启动取「启动默认展示页」设置；
+   *  切页签后必须同步为当前页签，防止返回主页时 index 绑定值重放回跳启动页。 */
+  @Local mainTabIndex: number = 0
 
   /** 监听 tabbar的显示和消失 */
   @Monitor('appStateUse.isBatchMode')
@@ -68,9 +69,10 @@ struct Index {
 
   aboutToAppear(): void {
     // 启动默认展示页（设置 → 外观「启动默认展示页」）：冷启动直接落在所选主 Tab
-    this.startupTabIndex = FqAppSettingsStore.getStartupTabIndex();
-    appState.currTabsIndex = this.startupTabIndex;
+    this.mainTabIndex = FqAppSettingsStore.getStartupTabIndex();
+    appState.currTabsIndex = this.mainTabIndex;
     appState.switchMainTab = (index: number): void => {
+      this.mainTabIndex = index;
       if (this.isPcLayout) {
         this.sideTabsController.changeIndex(index);
       } else {
@@ -152,10 +154,10 @@ struct Index {
     Stack() {
       if (this.isPcLayout) {
         // PC 侧边栏布局：PcTitleBar + PcSideBar + 内容区 Navigation
-        PcMainLayout({ tabsController: this.sideTabsController, initialTabIndex: this.startupTabIndex })
+        PcMainLayout({ tabsController: this.sideTabsController, initialTabIndex: this.mainTabIndex })
       } else {
         HdsNavigation(appState.pageInfos) {
-          HdsTabs({ controller: this.tabsController, index: this.startupTabIndex }) {
+          HdsTabs({ controller: this.tabsController, index: this.mainTabIndex }) {
             MainTabPagesBuilder()
           }
           .barOverlap(true)
@@ -176,6 +178,7 @@ struct Index {
           })
           .onSelected((index: number) => {
             appState.currTabsIndex = index
+            this.mainTabIndex = index
           })
         }
         .titleMode(HdsNavigationTitleMode.MINI)
@@ -227,6 +230,7 @@ struct Index {
       return true;
     }
     if (appState.currTabsIndex !== 0) {
+      this.mainTabIndex = 0;
       if (this.isPcLayout) {
         this.sideTabsController.changeIndex(0);
       } else {

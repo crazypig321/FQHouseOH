@@ -18,6 +18,12 @@ export struct PcMainLayout {
   @Param tabsController: TabsController = new TabsController();
   /** 启动默认展示页（Index 冷启动传入；Tabs 初始 index，仅首次构建生效） */
   @Param initialTabIndex: number = 0;
+  /** Tabs index 绑定值：初始取启动默认展示页，切页签后同步，防内容区重建时回跳启动页 */
+  @Local pcTabIndex: number = 0;
+
+  aboutToAppear(): void {
+    this.pcTabIndex = this.initialTabIndex;
+  }
 
   @Builder
   pageMap(name: string) {
@@ -50,7 +56,7 @@ export struct PcMainLayout {
 
         // 内容区：二级页面（搜索/详情/阅读等）仅覆盖内容区，侧边栏保持可见
         HdsNavigation(appState.pageInfos) {
-          Tabs({ controller: this.tabsController, index: this.initialTabIndex }) {
+          Tabs({ controller: this.tabsController, index: this.pcTabIndex }) {
             MainTabPagesBuilder()
           }
           .barHeight(0)
@@ -59,6 +65,7 @@ export struct PcMainLayout {
           // PC 侧边栏切换瞬切：500ms 横滑会与路由渐隐转场叠加，产生"左滑"观感（手机端 Tabs 不受影响）
           .animationDuration(0)
           .onChange((index: number): void => {
+            this.pcTabIndex = index;
             appState.currTabsIndex = index;
           })
         }
