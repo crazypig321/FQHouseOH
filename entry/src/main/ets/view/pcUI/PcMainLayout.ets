@@ -16,6 +16,8 @@ import { NavPathUtils } from '../../utils/NavPathUtils';
 export struct PcMainLayout {
   /** 主页面 Tabs 控制器（Index 持有：返回手势/主 Tab 切换用） */
   @Param tabsController: TabsController = new TabsController();
+  /** 启动默认展示页（Index 冷启动传入；Tabs 初始 index，仅首次构建生效） */
+  @Param initialTabIndex: number = 0;
 
   @Builder
   pageMap(name: string) {
@@ -48,7 +50,7 @@ export struct PcMainLayout {
 
         // 内容区：二级页面（搜索/详情/阅读等）仅覆盖内容区，侧边栏保持可见
         HdsNavigation(appState.pageInfos) {
-          Tabs({ controller: this.tabsController }) {
+          Tabs({ controller: this.tabsController, index: this.initialTabIndex }) {
             MainTabPagesBuilder()
           }
           .barHeight(0)

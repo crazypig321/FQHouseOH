@@ -43,6 +43,8 @@ struct Index {
   @Local showChangelogSheet: boolean = false
   /** 当前包版本号（更新日志 sheet 默认展开版本）。 */
   @Local appVersionName: string = ''
+  /** 启动默认展示页（设置 → 外观；冷启动初始化 HdsTabs/PC Tabs，默认 0 首页）。 */
+  @Local startupTabIndex: number = 0
 
   /** 监听 tabbar的显示和消失 */
   @Monitor('appStateUse.isBatchMode')
@@ -65,6 +67,9 @@ struct Index {
   }
 
   aboutToAppear(): void {
+    // 启动默认展示页（设置 → 外观「启动默认展示页」）：冷启动直接落在所选主 Tab
+    this.startupTabIndex = FqAppSettingsStore.getStartupTabIndex();
+    appState.currTabsIndex = this.startupTabIndex;
     appState.switchMainTab = (index: number): void => {
       if (this.isPcLayout) {
         this.sideTabsController.changeIndex(index);
@@ -147,10 +152,10 @@ struct Index {
     Stack() {
       if (this.isPcLayout) {
         // PC 侧边栏布局：PcTitleBar + PcSideBar + 内容区 Navigation
-        PcMainLayout({ tabsController: this.sideTabsController })
+        PcMainLayout({ tabsController: this.sideTabsController, initialTabIndex: this.startupTabIndex })
       } else {
         HdsNavigation(appState.pageInfos) {
-          HdsTabs({ controller: this.tabsController }) {
+          HdsTabs({ controller: this.tabsController, index: this.startupTabIndex }) {
             MainTabPagesBuilder()
           }
           .barOverlap(true)
@@ -191,10 +196,14 @@ struct Index {
     }
     .width('100%')
     .height('100%')
-    .bindSheet(this.showChangelogSheet, this.ChangelogSheetBuilder(),
-      FqSheetOptions((): void => {
-        this.showChangelogSheet = false
-      }, 440))
+    .bindSheet(this.showChangelogSheet, this.ChangelogSheetBuilder(), this.changelogSheetOptions())
+  }
+
+  /** 更新日志 sheet 的 bindSheet 参数（抽成方法，避免 @Entry build 根节点校验误报）。 */
+  private changelogSheetOptions(): SheetOptions {
+    return FqSheetOptions((): void => {
+      this.showChangelogSheet = false
+    }, 440);
   }
 
   /** 启动自动弹出的更新日志 sheet（与关于页同款，默认展开当前版本）。 */

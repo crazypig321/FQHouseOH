@@ -1,6 +1,7 @@
 /**
  * 应用设置页（主 Tab 第四页 + 我的-应用设置入口共用，@Param isTab 区分）：
  * - 外观：深色模式（跟随系统/浅色/深色，FqMenu 档位直选，即时生效）；
+ *   启动默认展示页（首页/书架/我的/设置，FqMenu 直选，下次冷启动生效）；
  * - 播放：开启后台播放开关（开=支持后台播放，关=无法后台播放）；
  * - 数据：缓存与管理入口、备份与恢复入口、清除所有数据（确认弹窗提示重启，清全部 KV/缓存/设置后 restartApp）；
  * - 服务：本地接口入口（状态/自测、地址与局域网共享、可用端点，ApiServicePage）+ 运行日志入口；
@@ -25,6 +26,7 @@ import { FqUpdateChecker } from '../core/FqUpdateChecker';
 import { DialogManager } from '../utils/DialogUtils';
 import { FqSmartReach } from '../utils/FqSmartReach';
 import { FqColorUtils } from '../utils/FqColorUtils';
+import { MENU_CONFIG } from '../model/FqTabsModels';
 import { appState } from '../entryability/AppState';
 
 const FQ_HOME_TOP_INSET: number = 56;
@@ -32,6 +34,7 @@ const FQ_HOME_TOP_INSET: number = 56;
 const FQ_SETTINGS_BOTTOM_INSET: number = 84;
 const FQ_THEME_ANCHOR_ID: string = 'settings_theme_anchor';
 const FQ_THEME_COLOR_ANCHOR_ID: string = 'settings_theme_color_anchor';
+const FQ_STARTUP_TAB_ANCHOR_ID: string = 'settings_startup_tab_anchor';
 /** 行内分割线左右避让：左侧行 padding 14 + 图标块 34 + 间距 12，右侧对称一致。 */
 const FQ_ROW_DIVIDER_INSET: number = 60;
 /** 深色模式档位文案（下标即档位值）。 */
@@ -65,11 +68,13 @@ export struct SettingsPage {
   @Local themeMode: number = FQ_THEME_FOLLOW;
   @Local backgroundAudio: boolean = true;
   @Local pipVideo: boolean = false;
+  @Local startupTab: number = 0;
 
   aboutToAppear(): void {
     this.themeMode = FqAppSettingsStore.getThemeMode();
     this.backgroundAudio = FqAppSettingsStore.isBackgroundAudio();
     this.pipVideo = FqAppSettingsStore.isPipVideoEnabled();
+    this.startupTab = FqAppSettingsStore.getStartupTabIndex();
     // 进入设置页静默检查更新（会话内节流，与关于页共用）：
     // 发现新版本时「关于」条目显示红点，无新版本时清空红点
     FqUpdateChecker.checkLatestSilently();
@@ -93,6 +98,8 @@ export struct SettingsPage {
             this.ThemeColorRow()
             this.RowDivider()
             this.SmartReachRow()
+            this.RowDivider()
+            this.StartupTabRow()
           }
 
           this.SectionHeader('阅读与播放')
@@ -159,6 +166,29 @@ export struct SettingsPage {
       .width('100%')
       .height('100%')
     }
+  }
+
+  /** 启动默认展示页菜单：首页/书架/我的/设置 四选项（主 Tab 同名），选中打勾，下次冷启动生效。 */
+  private openStartupTabMenu(): void {
+    const items: FqMenuItem[] = [];
+    for (let index: number = 0; index < MENU_CONFIG.length; index++) {
+      const item: FqMenuItem = new FqMenuItem();
+      item.label = MENU_CONFIG[index].label;
+      if (index === this.startupTab) {
+        item.endIcon = $r('sys.symbol.checkmark');
+      }
+      const picked: number = index;
+      item.onAction = (): void => {
+        this.applyStartupTab(picked);
+      };
+      items.push(item);
+    }
+    FqMenu.open(this.getUIContext(), FQ_STARTUP_TAB_ANCHOR_ID, items);
+  }
+
+  private applyStartupTab(index: number): void {
+    this.startupTab = index;
+    FqAppSettingsStore.setStartupTabIndex(index);
   }
 
   private openThemeMenu(): void {
@@ -490,6 +520,48 @@ export struct SettingsPage {
     }
     .padding({ left: 14, right: 14, top: 11, bottom: 11 })
     .width('100%')
+  }
+
+  /** 启动默认展示页行（锚点 FqMenu 四选项：首页/书架/我的/设置；选中项下次冷启动生效）。 */
+  @Builder
+  private StartupTabRow() {
+    Row({ space: 12 }) {
+      Stack() {
+        SymbolGlyph($r('sys.symbol.house_fill_1'))
+          .fontSize(17)
+          .fontColor(['#FF22C55E'])
+      }
+      .width(34)
+      .height(34)
+      .borderRadius(10)
+      .backgroundColor(FqColorUtils.withOpacity('#FF22C55E', 0.12))
+
+      Column({ space: 3 }) {
+        Text('启动默认展示页')
+          .fontSize(14.5)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('sys.color.font_primary'))
+        Text('冷启动默认打开的页面，选择后下次启动生效')
+          .fontSize(11.5)
+          .fontColor($r('sys.color.font_secondary'))
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+
+      Text(this.startupTab >= 0 && this.startupTab < MENU_CONFIG.length
+        ? MENU_CONFIG[this.startupTab].label : '')
+        .fontSize(12.5)
+        .fontColor($r('sys.color.font_secondary'))
+      SymbolGlyph($r('sys.symbol.chevron_right'))
+        .fontSize(13)
+        .fontColor([$r('sys.color.font_tertiary')])
+    }
+    .id(FQ_STARTUP_TAB_ANCHOR_ID)
+    .padding({ left: 14, right: 14, top: 11, bottom: 11 })
+    .width('100%')
+    .onClick((): void => {
+      this.openStartupTabMenu();
+    })
   }
 
   /** 点击书籍直接进入阅读行（Toggle：开=点小说/漫画跳过详情页从进度直接开读）。 */

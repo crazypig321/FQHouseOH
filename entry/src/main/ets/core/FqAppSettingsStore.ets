@@ -19,6 +19,8 @@
  *   开=经代理下载更新包，关=直连）；
  * - changelogShownVersion：更新日志已展示到的版本号（空 = 尚未记录，首次安装）；
  *   Index 冷启动比对当前版本号，不同则自动弹出更新日志 sheet；
+ * - startupTabIndex：启动默认展示页（主 Tab 下标 0-3 = 首页/书架/我的/设置，默认 0 首页）；
+ *   Index 冷启动按此初始化 HdsTabs/PC Tabs 与 appState.currTabsIndex；
  * - chapterCacheLimitMb：章节自动缓存大小上限（MB，默认 80，1-102400 即 1MB-100GB；
  *   章节缓存页右上角调节，仅约束阅读自动缓存，整本下载 pin 在预算外不受限）；
  * - dramaAutoCacheAhead：剧集边看边往后缓存集数（对齐 fqapp DramaCachePreferences：
@@ -42,6 +44,7 @@ const FQ_SETTINGS_KEY_PIP_VIDEO: string = 'pipVideo';
 const FQ_SETTINGS_KEY_DIRECT_READ: string = 'directRead';
 const FQ_SETTINGS_KEY_UPDATE_PROXY: string = 'updateProxyDownload';
 const FQ_SETTINGS_KEY_CHANGELOG_SHOWN: string = 'changelogShownVersion';
+const FQ_SETTINGS_KEY_STARTUP_TAB: string = 'startupTabIndex';
 const FQ_SETTINGS_KEY_TTS_PERSON: string = 'ttsPerson';
 const FQ_SETTINGS_KEY_TTS_RATE: string = 'ttsRate';
 const FQ_SETTINGS_KEY_SMART_REACH: string = 'smartReach';
@@ -92,6 +95,8 @@ export const FQ_THEME_FOLLOW: number = 0;
 export const FQ_THEME_LIGHT: number = 1;
 /** 深色模式档位：深色。 */
 export const FQ_THEME_DARK: number = 2;
+/** 启动默认展示页 Tab 下标上限（主 Tab 共 4 页：首页/书架/我的/设置）。 */
+export const FQ_STARTUP_TAB_MAX_INDEX: number = 3;
 
 export class FqAppSettingsStore {
   private static pref: preferences.Preferences | null = null;
@@ -106,6 +111,8 @@ export class FqAppSettingsStore {
   private static directRead: boolean = false;
   private static updateProxyDownload: boolean = false;
   private static changelogShownVersion: string = '';
+  /** 启动默认展示页（主 Tab 下标 0-3；Index 冷启动初始化 Tab 用）。 */
+  private static startupTabIndex: number = 0;
   /** 离线朗读音色（textToSpeech person；0 默认女声聆小珊）。 */
   private static ttsPerson: number = 0;
   /** 离线朗读语速（0.5 ~ 2）。 */
@@ -181,6 +188,11 @@ export class FqAppSettingsStore {
       const rawShown: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_CHANGELOG_SHOWN, '');
       if (typeof rawShown === 'string') {
         FqAppSettingsStore.changelogShownVersion = rawShown;
+      }
+      const rawStartupTab: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_STARTUP_TAB, 0);
+      if (typeof rawStartupTab === 'number' && rawStartupTab >= 0
+        && rawStartupTab <= FQ_STARTUP_TAB_MAX_INDEX) {
+        FqAppSettingsStore.startupTabIndex = Math.round(rawStartupTab);
       }
       const rawTtsPerson: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_TTS_PERSON, 0);
       if (typeof rawTtsPerson === 'number' && rawTtsPerson >= 0) {
@@ -479,6 +491,31 @@ export class FqAppSettingsStore {
     }
     try {
       pref.putSync(FQ_SETTINGS_KEY_CHANGELOG_SHOWN, version);
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
+  }
+
+  /** 启动默认展示页（主 Tab 下标 0-3 = 首页/书架/我的/设置；Index 冷启动初始化 Tab 用）。 */
+  public static getStartupTabIndex(): number {
+    return FqAppSettingsStore.startupTabIndex;
+  }
+
+  /** 设置启动默认展示页（范围外静默忽略）。 */
+  public static setStartupTabIndex(index: number): void {
+    if (!Number.isFinite(index) || index < 0 || index > FQ_STARTUP_TAB_MAX_INDEX) {
+      return;
+    }
+    FqAppSettingsStore.startupTabIndex = Math.round(index);
+    const pref: preferences.Preferences | null = FqAppSettingsStore.pref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.putSync(FQ_SETTINGS_KEY_STARTUP_TAB, FqAppSettingsStore.startupTabIndex);
       pref.flush().catch((_error: BusinessError): void => {
         // 落盘失败不阻断
       });
