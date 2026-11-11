@@ -41,6 +41,8 @@ pub fn match_rest_path(path: &str, query: &Params) -> Option<RouteMatch> {
         "audio" => match_audio(tail, query),
         "authors" => match_authors(tail, query),
         "manga" => match_manga(tail, query),
+        // 红果弹幕源（方案 A：播放仍走番茄，仅弹幕映射红果）。
+        "hongguo" => match_hongguo(tail, query),
         "videos" => match_videos(tail, query),
         "series" => match_series(tail, query),
         "recommend" => match_recommend(tail, query),
@@ -288,6 +290,27 @@ fn match_shuqi(parts: &[&str], q: &Params) -> Option<RouteMatch> {
         "book" => "shuqi_book",
         "toc" => "shuqi_toc",
         "chapter" => "shuqi_chapter",
+        _ => return None,
+    };
+    Some(RouteMatch {
+        api,
+        params: q.clone(),
+    })
+}
+
+/// 红果弹幕源：`/api/v1/hongguo/{map|danmaku}`。
+///
+/// `map` 做番茄剧 → 红果剧的标题映射（搜索 + 网页详情），
+/// `danmaku` 用映射结果里的红果 series_id/vid 拉弹幕。
+/// 参数全部走 query —— 红果 id 是纯数字，做成路径参数只会和
+/// 番茄的 `series`/`videos` 语义混淆。
+fn match_hongguo(parts: &[&str], q: &Params) -> Option<RouteMatch> {
+    if parts.is_empty() {
+        return None;
+    }
+    let api = match parts[0] {
+        "map" => "hongguo_map",
+        "danmaku" => "hongguo_danmaku",
         _ => return None,
     };
     Some(RouteMatch {

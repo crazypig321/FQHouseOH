@@ -17,6 +17,7 @@ pub mod content_util;
 pub mod dhcontent;
 pub mod full;
 pub mod home;
+pub mod hongguo;
 pub mod manga;
 pub mod reader_video;
 pub mod router;
@@ -190,5 +191,6 @@ pub mod server {
         video::register(s);
         reader_video::register(s);
         manga::register(s);
+        hongguo::register(s);
     }
 }

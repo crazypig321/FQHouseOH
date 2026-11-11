@@ -58,7 +58,9 @@
  *   已看按集 itemId 持久化（FqWatchedStore），实际播放过（position > 0）才标记，
  *   跳集观看绝不误标中间集；续播进度（集 + 位置）暂停/切集/周期 5s/退出保存，
  *   再次进入自动续播上次看到的集与位置（播完则该集从头）。
- * - 弹幕（全屏展示）：/api/v1/videos/{vid}/danmaku 按 cursor 续拉，
+ * - 弹幕（全屏展示）：番茄源 /api/v1/videos/{vid}/danmaku 按 cursor 续拉，
+ *   红果源 /api/v1/hongguo/*（map 映射 + danmaku，方案 A：播放流不动，仅弹幕源
+ *   切换；未映射/连续失败自动回退番茄源）；
  *   切集整池作废、seek 按目标时间重取；FqDanmakuView 车道避让右→左飞行，
  *   全屏控制条「弹幕」开关（官方 Toast 文案）。
  * - 弹幕样式可调（fqapp danmaku_config / playlet_danmaku_settings）：播放设置
@@ -90,7 +92,7 @@ import { FqPlayerSettingsSheet } from '../../view/player/FqPlayerSettingsSheet';
 import { FqPlayerSettingsPanel } from '../../view/player/FqPlayerSettingsPanel';
 import { FqDanmakuSettingsPanel } from '../../view/player/FqDanmakuSettingsPanel';
 import { fqPushBookOrDetail, PlayerNavParams, ListenVideoNavParams, ROUTE_LISTEN_VIDEO, ROUTE_CACHED_DRAMAS, DetailNavParams, ROUTE_DETAIL } from '../../model/FqNavModels';
-import { FqBookCommentPage, FqChapter, FqCommentReplyPage, FqDanmaku, FqDanmakuPage, FqEpisodeCommentPage, FqEpisodeSource, FqEpisodeVariant, FqSeriesRelateBook, FqRelatedSeries, fqKindToTab, FqCacheTaskView } from '../../model/FqModels';
+import { FqBookCommentPage, FqChapter, FqCommentReplyPage, FqDanmaku, FqDanmakuPage, FqEpisodeCommentPage, FqEpisodeSource, FqEpisodeVariant, FqHongguoMap, FqSeriesRelateBook, FqRelatedSeries, fqKindToTab, FqCacheTaskView } from '../../model/FqModels';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { fqAudioSession } from '../../core/FqAudioSession';
 import { FqVideoMedia } from '../../core/FqVideoMedia';
@@ -189,6 +191,9 @@ const FQ_DARK_TRACK: string = '#33FFFFFF';
 const FQ_DARK_TERTIARY_TEXT: string = '#99FFFFFF';
 /** 离线缓存 sheet/侧边栏分页条粒度（与选集面板 FqStoryPanel 一致 30/段）。 */
 const FQ_CACHE_PAGE_SIZE: number = 30;
+
+/** 红果弹幕源连续失败上限（达到后整场回退番茄源，避免每次请求都白等超时）。 */
+const FQ_HONGGUO_MAX_FAILS: number = 2;
 /** 预热下一集提前量（秒；fqapp player_page_preload _warmLead = 30s）。 */
 const FQ_WARM_LEAD_SEC: number = 30;
 /** PC 右侧详情侧边栏宽（对齐 fqapp 桌面停靠目录 304 一档，取本项目圆整）。 */
@@ -377,6 +382,12 @@ export struct PlayerPage {
   private centerHideTimer: number = 0;
   /** 弹幕加载令牌（切集/seek 后旧请求作废）。 */
   private danmakuLoadToken: number = 0;
+  /** 红果弹幕源映射（null = 未映射/不可用，弹幕走番茄源；方案 A：播放流不动）。 */
+  private hongguoMap: FqHongguoMap | null = null;
+  /** 红果映射请求令牌（离页/重进作废）。 */
+  private hongguoMapToken: number = 0;
+  /** 红果弹幕连续失败计数（达到上限整场弃用红果源，回退番茄）。 */
+  private hongguoFailCount: number = 0;
   /** 当前集已实际播放（position > 0；切集重置，已看标记 guard）。 */
   private hasDisplayed: boolean = false;
   /** 用户选定的清晰度档名（跨集记忆；空 = 跟默认最高档）。 */
@@ -544,6 +555,8 @@ export struct PlayerPage {
     this.danmakuSizeTier = FqAppSettingsStore.getDanmakuSizeTier();
     this.danmakuBgTransparent = FqAppSettingsStore.isDanmakuBgTransparent();
     this.applyDanmakuCfg();
+    // 红果弹幕源映射：异步发起，不阻塞起播；到达/失败均不影响播放流（方案 A）
+    this.tryLoadHongguoMap();
     // 实际播放 guard：position 走表（非加载期）才视为看过（对齐 fqapp 首帧不标）
     this.player.stream.position.listen((pos: number): void => {
       if (pos > 0 && !this.loading) {
@@ -652,6 +665,8 @@ export struct PlayerPage {
     this.markCurrentWatched();
     this.saveCurrentProgress();
     this.loadToken += 1;
+    // 作废红果弹幕源映射请求（迟到的映射结果不再整池换源）
+    this.hongguoMapToken += 1;
     this.dropWarmSource();
     this.cancelFsHide();
     this.cancelCenterHide();
@@ -4712,45 +4727,109 @@ export struct PlayerPage {
     }
   }
 
-  /** 取弹幕一页：按 id 去重合并、保持 offsetMs 升序；失败静默降级不影响播放。 */
+  /** 当前集对应的红果 vid（映射成功且下标在 vids 范围内；否则空串走番茄源）。 */
+  private hongguoVidForIndex(): string {
+    const map: FqHongguoMap | null = this.hongguoMap;
+    if (map === null) {
+      return '';
+    }
+    return this.index >= 0 && this.index < map.vids.length ? map.vids[this.index] : '';
+  }
+
+  /** 尝试映射红果弹幕源（进页异步发起，不阻塞起播；失败静默保持番茄源）。 */
+  private async tryLoadHongguoMap(): Promise<void> {
+    const token: number = ++this.hongguoMapToken;
+    const seriesId: string = PlayerNavParams.contentId;
+    if (seriesId.length === 0 || this.title.length === 0) {
+      return;
+    }
+    try {
+      const map: FqHongguoMap = await FqBackend.get().hongguoMap(seriesId, this.title);
+      if (token !== this.hongguoMapToken) {
+        return;
+      }
+      this.hongguoMap = map.matched ? map : null;
+      this.hongguoFailCount = 0;
+      if (map.matched) {
+        // 映射到达：弹幕整池换源重取（此前已按番茄源取过首批）
+        this.resetDanmaku();
+      }
+    } catch (error) {
+      // 映射失败静默降级：保持番茄弹幕源
+      if (token === this.hongguoMapToken) {
+        this.hongguoMap = null;
+      }
+    }
+  }
+
+  /** 取弹幕一页：红果源优先（映射成功），失败/未映射回退番茄源；按 id 去重合并、offsetMs 升序。 */
   private async fetchDanmaku(startMs: number): Promise<void> {
     const episode: FqChapter | undefined = this.episodes[this.index];
     if (episode === undefined || episode.itemId.length === 0) {
       return;
     }
     const token: number = ++this.danmakuLoadToken;
+    const durationSec: number = Math.floor(this.player.state.duration);
+    const map: FqHongguoMap | null = this.hongguoMap;
+    const hongguoVid: string = this.hongguoVidForIndex();
+    if (map !== null && hongguoVid.length > 0 && this.hongguoFailCount < FQ_HONGGUO_MAX_FAILS
+      && durationSec > 0) {
+      try {
+        const page: FqDanmakuPage = await FqBackend.get().hongguoDanmaku(
+          map.hongguoSeriesId, hongguoVid, startMs, durationSec);
+        if (token !== this.danmakuLoadToken) {
+          return;
+        }
+        this.hongguoFailCount = 0;
+        this.applyDanmakuPage(page, startMs);
+        return;
+      } catch (error) {
+        if (token !== this.danmakuLoadToken) {
+          return;
+        }
+        // 红果源本次失败：计入失败数并回退番茄源（连续失败整场弃用红果）；
+        // cursor 是源内不透明串，换源前清空避免串源
+        this.hongguoFailCount += 1;
+        this.danmakuCursor = '';
+      }
+    }
     try {
       const page: FqDanmakuPage = await FqBackend.get().videoDanmaku(
         episode.itemId, PlayerNavParams.contentId,
-        startMs, Math.floor(this.player.state.duration), this.danmakuCursor);
+        startMs, durationSec, this.danmakuCursor);
       if (token !== this.danmakuLoadToken) {
         return;
       }
-      this.danmakuCursor = page.cursor;
-      this.danmakuHasMore = page.hasMore;
-      this.danmakuLoadedToMs = page.nextQueryMs > startMs ? page.nextQueryMs : startMs + 5000;
-      const seen: Set<string> = new Set<string>();
-      const merged: FqDanmaku[] = [];
-      for (const item of this.danmakuItems) {
-        if (!seen.has(item.id)) {
-          seen.add(item.id);
-          merged.push(item);
-        }
-      }
-      for (const item of page.items) {
-        if (!seen.has(item.id)) {
-          seen.add(item.id);
-          merged.push(item);
-        }
-      }
-      merged.sort((a: FqDanmaku, b: FqDanmaku): number => a.offsetMs - b.offsetMs);
-      this.danmakuItems = merged;
+      this.applyDanmakuPage(page, startMs);
     } catch (error) {
       // 弹幕拉取失败静默降级：不影响播放
       if (token === this.danmakuLoadToken) {
         this.danmakuHasMore = false;
       }
     }
+  }
+
+  /** 合并一页弹幕入池：按 id 去重、保持 offsetMs 升序，推进 cursor/已加载右界。 */
+  private applyDanmakuPage(page: FqDanmakuPage, startMs: number): void {
+    this.danmakuCursor = page.cursor;
+    this.danmakuHasMore = page.hasMore;
+    this.danmakuLoadedToMs = page.nextQueryMs > startMs ? page.nextQueryMs : startMs + 5000;
+    const seen: Set<string> = new Set<string>();
+    const merged: FqDanmaku[] = [];
+    for (const item of this.danmakuItems) {
+      if (!seen.has(item.id)) {
+        seen.add(item.id);
+        merged.push(item);
+      }
+    }
+    for (const item of page.items) {
+      if (!seen.has(item.id)) {
+        seen.add(item.id);
+        merged.push(item);
+      }
+    }
+    merged.sort((a: FqDanmaku, b: FqDanmaku): number => a.offsetMs - b.offsetMs);
+    this.danmakuItems = merged;
   }
 
   /** 弹幕开关（官方 Toast 文案：弹幕已开启/已关闭）。 */

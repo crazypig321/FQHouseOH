@@ -16,7 +16,8 @@ import { FqDeployer } from './FqDeployer';
 import { FqKeyStore } from './FqKeyStore';
 import {   fqParseAuthorProfile, fqParseBookComments, fqParseBookDetail, fqParseChapterCommentPage, fqParseChapterIdeaCounts, fqParseChapterIdeaMeta, fqParseChapterSummaries,
   fqParseCommentReplies,
-  fqParseDanmaku, fqParseDirectory, fqParseEpisodeComments, fqParseEpisodeSource, fqParseHomepage, fqParseParagraphCommentPage, fqParseRankBoard, fqParseRankCatalog,
+  fqParseDanmaku, fqParseDirectory, fqParseEpisodeComments, fqParseEpisodeSource, fqParseHomepage,
+  fqParseHongguoMap, fqParseParagraphCommentPage, fqParseRankBoard, fqParseRankCatalog,
   fqParseSearchTabs, fqParseSeriesFeed, fqParseSeriesRelateBook, fqParseRelatedSeries, fqLegacyChapterText, fqNormalizeChapterWithIdx, fqParseNovelChapter,
   fqParseHotSearch,
   fqIsValidMediaId, fqParseMediaIdResult,
@@ -45,6 +46,7 @@ import {
   FqEpisodeSource,
   FqEpisodeVariant,
   FqHomePage,
+  FqHongguoMap,
   FqHotSearchEntry,
   FqMediaItem,
   FqRankBoard,
@@ -526,7 +528,36 @@ export class FqBackend {
   }
 
   /**
-    * 短剧剧评一页（/api/v1/series/{id}/comments，官方 gx1/m.java:168-181：
+   * 红果弹幕源映射（/api/v1/hongguo/map）：番茄剧名 → 红果剧
+   * （hongguo_series_id + vids 按集对位）。matched=false 为未匹配，
+   * 播放页保持番茄弹幕源；请求异常由调用方静默回退。
+   */
+  public async hongguoMap(seriesId: string, title: string): Promise<FqHongguoMap> {
+    const query: string = `series_id=${encodeURIComponent(seriesId)}`
+      + `&title=${encodeURIComponent(title)}`;
+    const payload: Record<string, Object> =
+      await this.getJson('/api/v1/hongguo/map', query, FQ_SHORT_TIMEOUT_MS);
+    return fqParseHongguoMap(payload);
+  }
+
+  /**
+   * 红果弹幕一页（/api/v1/hongguo/danmaku，响应结构与番茄弹幕同构，
+   * fqParseDanmaku 直接解析）：seriesId/vid 为 hongguoMap 映射出的红果 id，
+   * 时间单位与番茄弹幕一致（start 毫秒 / duration 秒）。
+   */
+  public async hongguoDanmaku(seriesId: string, vid: string, startOffsetMs: number,
+    itemDurationSec: number): Promise<FqDanmakuPage> {
+    const query: string = `series_id=${encodeURIComponent(seriesId)}`
+      + `&vid=${encodeURIComponent(vid)}`
+      + `&start_offset_time=${startOffsetMs < 0 ? 0 : startOffsetMs}`
+      + `&playlet_item_duration=${itemDurationSec < 0 ? 0 : itemDurationSec}`;
+    const payload: Record<string, Object> =
+      await this.getJson('/api/v1/hongguo/danmaku', query, FQ_SHORT_TIMEOUT_MS);
+    return fqParseDanmaku(payload);
+  }
+
+  /**
+   * 短剧剧评一页（/api/v1/series/{id}/comments，官方 gx1/m.java:168-181：
     * 播放页评论区即整部剧的评论列表）：sort=1 官方「全部」排序，
     * cursor 续拉（不透明串）；响应与弹幕列表同形（data_list + common_list_info）；
     * 详情页预览传 timeoutMs=FQ_SHORT_TIMEOUT_MS，面板翻页保持默认。

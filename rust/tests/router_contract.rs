@@ -289,9 +289,46 @@ fn rest_paths_match_the_go_route_table() {
             "book_detail_legacy",
             vec![("book_id", "123")],
         ),
+        // hongguo danmaku source (FQHouseOH addition, params via query)
+        (
+            "/api/v1/hongguo/map",
+            vec![
+                ("series_id", "7123456789012345678"),
+                ("title", "宴律"),
+            ],
+            "hongguo_map",
+            vec![
+                ("series_id", "7123456789012345678"),
+                ("title", "宴律"),
+            ],
+        ),
+        (
+            "/api/v1/hongguo/danmaku",
+            vec![
+                ("series_id", "7503745441910017049"),
+                ("vid", "7503780574541122622"),
+                ("start_offset_time", "30000"),
+                ("playlet_item_duration", "120"),
+            ],
+            "hongguo_danmaku",
+            vec![("vid", "7503780574541122622")],
+        ),
+        (
+            "/api/v1/hongguo/unknown",
+            vec![],
+            "__no_match__",
+            vec![],
+        ),
     ];
 
     for (path, pre_query, want_api, want_params) in cases {
+        if want_api == "__no_match__" {
+            assert!(
+                match_rest_path(path, &pairs(&pre_query)).is_none(),
+                "path {path:?}: expected no match"
+            );
+            continue;
+        }
         let m = match_rest_path(path, &pairs(&pre_query))
             .unwrap_or_else(|| panic!("path {path:?}: expected a match"));
         assert_eq!(m.api, want_api, "path {path:?}");

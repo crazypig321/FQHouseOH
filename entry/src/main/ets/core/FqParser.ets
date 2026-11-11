@@ -36,6 +36,7 @@ import {
   FqEpisodeSource,
   FqEpisodeVariant,
   FqHomePage,
+  FqHongguoMap,
   FqMediaItem,
   FqRankBoard,
   FqRankCatalog,
@@ -1907,6 +1908,28 @@ export function fqParseDanmaku(payload: Record<string, Object>): FqDanmakuPage {
     fqStr(info, 'cursor'),
     fqAsInt(extra['next_query_danmaku_list_time'], 0),
   );
+}
+
+/**
+ * 解析 /api/v1/hongguo/map 载荷（后端红果弹幕源映射）：
+ * matched + hongguo_series_id + title + vids[]；
+ * matched=true 但缺 series id 或 vids 为空视为未匹配（调用方保持番茄源）。
+ */
+export function fqParseHongguoMap(payload: Record<string, Object>): FqHongguoMap {
+  const hongguoSeriesId: string = fqStr(payload, 'hongguo_series_id');
+  const title: string = fqStr(payload, 'title');
+  const vids: string[] = [];
+  const rawList: Object[] | null = fqAsArray(payload['vids']);
+  if (rawList !== null) {
+    for (const entry of rawList) {
+      if (typeof entry === 'string' && entry.length > 0) {
+        vids.push(entry);
+      }
+    }
+  }
+  const matched: boolean = payload['matched'] === true
+    && hongguoSeriesId.length > 0 && vids.length > 0;
+  return new FqHongguoMap(matched, hongguoSeriesId, title, vids);
 }
 
 /**

@@ -3,6 +3,7 @@
  * 上游章评/段评/回复正文把表情编码为 `[微笑]`-style 括号 token
  * （官方客户端 `\[[A-Z一-龥]+\]` 匹配，emoji_config.json 共 53 个 token，
  * 图片为官方 drawable-xxhdpi webp，已随包拷入 resources/base/media/）。
+ * 另含红果短剧弹幕面板独有 4 token（爽/鼓掌/没看够/送花，emoji_hg_50..53.webp）。
  * - fqCommentEmojiSegments：正文切段（普通文本段 + 表情图段，未知 token 保持原文）；
  * - FqCommentEmojiText：富文本渲染组件（无 token 时退化为纯 Text，排版不变）；
  * 表情尺寸随字号 1.4 倍（官方 sp(16)*1.4 比例）。
@@ -66,6 +67,11 @@ const FQ_COMMENT_EMOJI_ASSETS: Record<string, Resource> = {
   '[雀食神作]': $r('app.media.emoji_51'),
   '[已种草]': $r('app.media.emoji_52'),
   '[书架加一]': $r('app.media.emoji_53'),
+  // 红果短剧弹幕独有 token（官方 dr 表情集 50-53 槽，CDN png 已转 webp 随包）。
+  '[爽]': $r('app.media.emoji_hg_50'),
+  '[鼓掌]': $r('app.media.emoji_hg_51'),
+  '[没看够]': $r('app.media.emoji_hg_52'),
+  '[送花]': $r('app.media.emoji_hg_53'),
 };
 
 /** 正文切段：普通文本段（emoji 为 null）与官方表情段（plain 为 token 原文）。 */

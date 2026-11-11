@@ -437,6 +437,25 @@ export class FqDanmakuPage {
 }
 
 /**
+ * 红果弹幕源映射结果（/api/v1/hongguo/map，后端番茄剧名 → 红果剧）：
+ * matched=false（未匹配/vids 空）时播放页保持番茄弹幕源。
+ * vids 与番茄剧集目录按下标对位（同一部剧，集序一致）。
+ */
+export class FqHongguoMap {
+  readonly matched: boolean;
+  readonly hongguoSeriesId: string;
+  readonly title: string;
+  readonly vids: string[];
+
+  constructor(matched: boolean, hongguoSeriesId: string, title: string, vids: string[]) {
+    this.matched = matched;
+    this.hongguoSeriesId = hongguoSeriesId;
+    this.title = title;
+    this.vids = vids;
+  }
+}
+
+/**
  * 短剧关联原著（/api/v1/series/{id} 的 data.video_relate_book.book_info，
  * 官方 SaasBookInfo 子集：book_id/book_name/thumb_url）。剧无原著关联为 null。
  */
