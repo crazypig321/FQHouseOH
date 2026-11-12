@@ -49,13 +49,17 @@ export class FqDramaDownloadTask implements FqCacheTaskView {
   public readonly index: number;
   /** 边看边往后缓存自动排进来的集（滚动清理只删这类，手动下载不动）。 */
   public readonly auto: boolean;
+  /** 入队时快照的清晰度偏好（空 = 后端默认最高档；下载跟播放同档，fqapp 同语义）。 */
+  public readonly quality: string;
+  /** 取流返回的实际下载档名（完成时写入缓存记录；上游不带档位时为空）。 */
+  public servedQuality: string = '';
   @Trace public status: DramaDownloadStatus = DramaDownloadStatus.Waiting;
   @Trace public receivedBytes: number = 0;
   @Trace public totalBytes: number = 0;
   @Trace public errorText: string = '';
 
   constructor(seriesId: string, itemId: string, title: string, seriesTitle: string,
-    cover: string, kind: string, index: number, auto: boolean) {
+    cover: string, kind: string, index: number, auto: boolean, quality: string) {
     this.seriesId = seriesId;
     this.itemId = itemId;
     this.title = title;
@@ -64,6 +68,7 @@ export class FqDramaDownloadTask implements FqCacheTaskView {
     this.kind = kind;
     this.index = index;
     this.auto = auto;
+    this.quality = quality;
   }
 }
 
@@ -80,9 +85,10 @@ export class FqDramaDownloader {
     this.context = context;
   }
 
-  /** 入队一集下载：已完整缓存/已在队列则跳过；auto = 边看边往后缓存自动排的集。 */
+  /** 入队一集下载：已完整缓存/已在队列则跳过；auto = 边看边往后缓存自动排的集；
+   *  quality = 入队时的清晰度偏好（空 = 后端默认最高档，与默认播放同档）。 */
   public enqueue(seriesId: string, itemId: string, title: string, seriesTitle: string,
-    cover: string, kind: string, index: number, auto: boolean): void {
+    cover: string, kind: string, index: number, auto: boolean, quality: string): void {
     if (itemId.length === 0 || FqDramaCacheStore.has(itemId)) {
       hilog.info(0x0001, TAG, `enqueue skip (cached/empty): ${itemId}`);
       return;
@@ -98,9 +104,9 @@ export class FqDramaDownloader {
       }
       return;
     }
-    hilog.info(0x0001, TAG, `enqueue: ${itemId} index=${index} auto=${auto}`);
+    hilog.info(0x0001, TAG, `enqueue: ${itemId} index=${index} auto=${auto} quality=${quality}`);
     this.taskList.push(new FqDramaDownloadTask(seriesId, itemId, title, seriesTitle,
-      cover, kind, index, auto));
+      cover, kind, index, auto, quality));
     this.pump();
   }
 
@@ -246,7 +252,9 @@ export class FqDramaDownloader {
         task.status = DramaDownloadStatus.Completed;
         return;
       }
-      const source = await FqBackend.get().episodeSource(task.itemId, fqKindToTab(task.kind));
+      const source = await FqBackend.get().episodeSource(task.itemId, fqKindToTab(task.kind),
+        task.quality);
+      task.servedQuality = source.quality;
       if (task.status !== DramaDownloadStatus.Downloading) {
         return;
       }
@@ -383,7 +391,7 @@ export class FqDramaDownloader {
       task.status = DramaDownloadStatus.Completed;
       FqDramaCacheStore.addEpisode(new FqCachedEpisode(task.seriesId, task.itemId,
         task.title, task.seriesTitle, task.cover, task.kind, task.index, bytes, Date.now(),
-        task.auto));
+        task.auto, task.servedQuality));
       this.pump();
     } catch (error) {
       if (!fqIsPaused(task.status)) {

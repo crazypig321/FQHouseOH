@@ -103,7 +103,7 @@ import {
   FQ_DANMAKU_LINE_SPACE_FACTORS,
 } from '../../core/FqAppSettingsStore';
 import { FqWatchedStore, FqWatchedProgress } from '../../core/FqWatchedStore';
-import { FqDramaCacheStore } from '../../core/FqDramaCacheStore';
+import { FqDramaCacheStore, FqCachedEpisode } from '../../core/FqDramaCacheStore';
 import { fqDramaDownloader, FqDramaDownloader, FqDramaDownloadTask, DramaDownloadStatus } from '../../core/FqDramaDownloader';
 import { FqReadStatsStore } from '../../core/FqReadStatsStore';
 import { NavPathUtils } from '../../utils/NavPathUtils';
@@ -1957,7 +1957,8 @@ export struct PlayerPage {
       const episode: FqChapter | undefined = this.episodes[i];
       if (episode !== undefined && itemIds.includes(episode.itemId)) {
         this.dl.enqueue(PlayerNavParams.contentId, episode.itemId, episode.title,
-          this.title, PlayerNavParams.cover, PlayerNavParams.kind, i + 1, false);
+          this.title, PlayerNavParams.cover, PlayerNavParams.kind, i + 1, false,
+          this.qualityPreference);
       }
     }
     this.cacheSelectedIds = new Set<string>();
@@ -3964,6 +3965,13 @@ export struct PlayerPage {
       if (FqDramaCacheStore.has(episode.itemId)) {
         this.resolveCover();
         playUrl = FqDramaCacheStore.filePath(episode.itemId);
+        // 缓存文件是下载时的那一档，清晰度菜单只回显该档名
+        // （本地文件无法换档，与 fqapp 离线回放 toSource 单档语义一致）
+        const cachedEpisode: FqCachedEpisode | null = FqDramaCacheStore.episodeOf(episode.itemId);
+        if (cachedEpisode !== null && cachedEpisode.variantName.length > 0) {
+          this.qualityVariants = [new FqEpisodeVariant(cachedEpisode.variantName, playUrl, '', 0)];
+          this.qualityIndex = 0;
+        }
       } else {
         await FqBackend.get().start(getContext(this));
         this.resolveCover();
@@ -4125,7 +4133,8 @@ export struct PlayerPage {
       const episode: FqChapter | undefined = this.episodes[i];
       if (episode !== undefined) {
         this.dl.enqueue(PlayerNavParams.contentId, episode.itemId, episode.title,
-          this.title, PlayerNavParams.cover, PlayerNavParams.kind, i + 1, true);
+          this.title, PlayerNavParams.cover, PlayerNavParams.kind, i + 1, true,
+          this.qualityPreference);
         enqueued++;
       }
     }
