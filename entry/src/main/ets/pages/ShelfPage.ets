@@ -52,6 +52,10 @@ const SHELF_PREF_FILTER_GROUP: string = 'filter_group';
 const SHELF_FILTER_ANCHOR_ID: string = 'shelf_filter_anchor';
 /** 分组管理 sheet 内分组行菜单锚点 id 前缀。 */
 const SHELF_GROUP_ROW_ANCHOR_PREFIX: string = 'shelf_group_row_';
+/** 分组标签行长按菜单锚点 id 前缀（区别于管理 sheet 行锚点，避免重复 id）。 */
+const SHELF_GROUP_TAG_ANCHOR_PREFIX: string = 'shelf_group_tag_';
+/** 分组标签行高度（标题栏避让与滚动补偿共用）。 */
+const SHELF_GROUP_TAGS_HEIGHT: number = 36;
 
 /** 书架/浏览历史统一展示行（勾选态由 batchSelected 实时派生，不随行快照，避免批量操作整表重载闪烁）。 */
 class ShelfRow {
@@ -149,6 +153,8 @@ export struct ShelfPage {
   @Local groupSheetMode: string = 'manage';
   /** 分组 sheet 展示的分组快照（store 变化时刷新）。 */
   @Local sheetGroups: FqShelfGroup[] = [];
+  /** 筛选 pill 右侧可用区域实测宽度（vp，onAreaChange 捕获，用于长分组名省略号截断）。 */
+  @Local filterAreaWidth: number = 0;
   /** store 版本总线（监听 shelf/browse 数据变化实时刷新列表）。 */
   @Local storeBus: FqStoreBus = fqStoreBus;
   /** 全局状态引用（监听批量多选被外部退出，如 Index 返回手势）。 */
@@ -156,6 +162,8 @@ export struct ShelfPage {
   private scroller: Scroller = new Scroller();
   private dataSource: ShelfDataSource = new ShelfDataSource();
   private layoutPref: preferences.Preferences | null = null;
+  /** 上一帧分组标签行是否可见（出现/消失翻转检测，驱动滚动补偿）。 */
+  private tagsVisibleBefore: boolean = false;
   /** 已尝试封面匹配的本地书（会话内去重，避免重复搜索）。 */
   private coverMatchTried: Set<string> = new Set<string>();
 
@@ -164,9 +172,21 @@ export struct ShelfPage {
     'storeBus.readerProgressVersion', 'storeBus.shelfGroupVersion')
   onStoreDataChange(): void {
     this.refreshData();
-    if (this.groupSheetVisible) {
-      this.sheetGroups = FqShelfGroupStore.all().slice();
+    // 分组快照常驻刷新：标签行与管理/归组 sheet 共用
+    this.sheetGroups = FqShelfGroupStore.all().slice();
+    this.compensateTagRowChange();
+  }
+
+  /** 分组标签行从无到有（首个分组创建）时顶部避让突增，滚动补偿避免标签行压住列表内容；
+   * 消失（末组删除）时 ArkUI 自动把滚动位置钳回新上限，无需补偿。 */
+  private compensateTagRowChange(): void {
+    const tagsNow: boolean = this.groupTagsVisible();
+    if (tagsNow && !this.tagsVisibleBefore
+      && this.currentTab === 0
+      && this.scroller.currentOffset().yOffset < 0) {
+      this.scroller.scrollBy(0, -SHELF_GROUP_TAGS_HEIGHT);
     }
+    this.tagsVisibleBefore = tagsNow;
   }
 
   /** 多选模式被外部退出（Index 返回手势）时清空勾选。 */
@@ -208,6 +228,8 @@ export struct ShelfPage {
     } catch (error) {
       this.layoutPref = null;
     }
+    this.sheetGroups = FqShelfGroupStore.all().slice();
+    this.tagsVisibleBefore = this.groupTagsVisible();
     this.refreshData();
     this.matchUncoveredLocalBooks();
   }
@@ -226,7 +248,7 @@ export struct ShelfPage {
           builder: (): void => {
             this.TitleExtraBuilder();
           },
-          height: this.showSearchBox ? 110 : 40
+          height: this.titleExtraHeight()
         }),
       embedded: true,
       isHideBackButton: true,
@@ -389,9 +411,20 @@ export struct ShelfPage {
     }
   }
 
-  /** 列表顶部避让：标题栏 56 + 胶囊 54（+ 搜索行 56）。 */
+  /** 分组标签行是否可见：书架 tab 且存在分组。 */
+  private groupTagsVisible(): boolean {
+    return this.currentTab === 0 && this.sheetGroups.length > 0;
+  }
+
+  /** 列表顶部避让：标题栏 56 + 胶囊 54（+ 分组标签行）（+ 搜索行 56）。 */
   private listTopInset(): number {
-    return appState.topRect + 110 + (this.showSearchBox ? 56 : 0);
+    return appState.topRect + 110 + (this.groupTagsVisible() ? SHELF_GROUP_TAGS_HEIGHT : 0)
+      + (this.showSearchBox ? 56 : 0);
+  }
+
+  /** 标题栏扩展区高度：胶囊 40 + 分组标签行 + 搜索行 70。 */
+  private titleExtraHeight(): number {
+    return 40 + (this.groupTagsVisible() ? SHELF_GROUP_TAGS_HEIGHT : 0) + (this.showSearchBox ? 70 : 0);
   }
 
   /** 重新读取 store 并重建懒加载数据。 */
@@ -491,10 +524,10 @@ export struct ShelfPage {
     return '';
   }
 
-  /** 筛选是否生效（任一维度非「全部」）。 */
+  /** 筛选是否生效（状态/来源任一非「全部」；分组选择由标签行表达，不计入筛选 pill）。 */
   private hasActiveFilter(): boolean {
     return this.currentTab === 0
-      && (this.filterStatus !== 0 || this.filterSource !== 0 || this.filterGroupId.length > 0);
+      && (this.filterStatus !== 0 || this.filterSource !== 0);
   }
 
   /** 书架行是否通过当前组合筛选（状态/来源/分组 AND）。 */
@@ -519,7 +552,7 @@ export struct ShelfPage {
     return true;
   }
 
-  /** 筛选 pill 标签：默认「筛选」，生效时组合各维度（如「未看完 · 本地 · 分组名」）。 */
+  /** 筛选 pill 标签：默认「筛选」，生效时组合状态/来源维度（分组选择由分组标签行表达，不进 pill 文案）。 */
   private filterPillLabel(): string {
     if (!this.hasActiveFilter()) {
       return '筛选';
@@ -537,11 +570,15 @@ export struct ShelfPage {
     if (this.filterSource === 2) {
       parts.push('在线');
     }
-    if (this.filterGroupId.length > 0) {
-      const group: FqShelfGroup | null = FqShelfGroupStore.groupById(this.filterGroupId);
-      parts.push(group !== null ? group.name : '分组');
+    return parts.length > 0 ? parts.join(' · ') : '筛选';
+  }
+
+  /** 筛选 pill 文案最大宽度（vp）：实测区域宽 - 箭头/间距/内边距占用；未测量前给保守小值。 */
+  private filterLabelMaxWidth(): number {
+    if (this.filterAreaWidth <= 0) {
+      return 60;
     }
-    return parts.join(' · ');
+    return Math.max(this.filterAreaWidth - 34, 40);
   }
 
   /** 筛选偏好持久化。 */
@@ -560,7 +597,7 @@ export struct ShelfPage {
     }
   }
 
-  /** 筛选菜单：状态/来源/分组三级联 + 管理分组。 */
+  /** 筛选菜单：状态/来源级联 + 清除筛选（分组选择走胶囊下方的分组标签行）。 */
   private openFilterMenu(): void {
     const items: Array<FqMenuItem> = [];
 
@@ -582,27 +619,35 @@ export struct ShelfPage {
       });
     items.push(sourceItem);
 
-    const groupItem = new FqMenuItem();
-    groupItem.label = this.filterGroupId.length === 0 ? '分组'
-      : `分组 · ${this.filterPillGroupName()}`;
-    groupItem.subItems = this.buildFilterGroupSubItems();
-    items.push(groupItem);
-
-    const manageItem = new FqMenuItem();
-    manageItem.icon = $r('sys.symbol.list_bullet');
-    manageItem.label = '管理分组';
-    manageItem.onAction = (): void => {
+    const clearItem = new FqMenuItem();
+    clearItem.icon = $r('sys.symbol.xmark');
+    clearItem.label = '清除筛选';
+    clearItem.onAction = (): void => {
       FqMenu.dismiss();
-      this.openManageSheet();
+      this.clearAllFilters();
     };
-    items.push(manageItem);
+    items.push(clearItem);
 
     FqMenu.open(this.getUIContext(), SHELF_FILTER_ANCHOR_ID, items);
   }
 
-  private filterPillGroupName(): string {
-    const group: FqShelfGroup | null = FqShelfGroupStore.groupById(this.filterGroupId);
-    return group !== null ? group.name : '';
+  /** 清除全部筛选：状态/来源还原默认值（含持久化）；分组选择由标签行表达，不受影响。 */
+  private clearAllFilters(): void {
+    let changed: boolean = false;
+    if (this.filterStatus !== 0) {
+      this.filterStatus = 0;
+      this.persistFilterPref(SHELF_PREF_FILTER_STATUS, 0);
+      changed = true;
+    }
+    if (this.filterSource !== 0) {
+      this.filterSource = 0;
+      this.persistFilterPref(SHELF_PREF_FILTER_SOURCE, 0);
+      changed = true;
+    }
+    if (changed) {
+      this.rebuildRows();
+      this.showToast('已清除筛选');
+    }
   }
 
   /** 状态/来源二级菜单（当前项打勾）。 */
@@ -619,37 +664,6 @@ export struct ShelfPage {
       };
       subItems.push(sub);
     }
-    return subItems;
-  }
-
-  /** 分组二级菜单：全部 + 各分组（当前项打勾）+ 新建分组。 */
-  private buildFilterGroupSubItems(): Array<FqMenuItem> {
-    const subItems: Array<FqMenuItem> = [];
-    const allSub = new FqMenuItem();
-    allSub.label = '全部';
-    allSub.endIcon = this.filterGroupId.length === 0 ? $r('sys.symbol.checkmark') : '';
-    allSub.onAction = (): void => {
-      FqMenu.dismiss();
-      this.setFilterGroupId('');
-    };
-    subItems.push(allSub);
-    for (const group of FqShelfGroupStore.all()) {
-      const sub = new FqMenuItem();
-      sub.label = group.name;
-      sub.endIcon = this.filterGroupId === group.id ? $r('sys.symbol.checkmark') : '';
-      sub.onAction = (): void => {
-        FqMenu.dismiss();
-        this.setFilterGroupId(group.id);
-      };
-      subItems.push(sub);
-    }
-    const newSub = new FqMenuItem();
-    newSub.label = '新建分组';
-    newSub.onAction = (): void => {
-      FqMenu.dismiss();
-      this.promptCreateGroup();
-    };
-    subItems.push(newSub);
     return subItems;
   }
 
@@ -753,8 +767,8 @@ export struct ShelfPage {
     return count;
   }
 
-  /** 分组行菜单：重命名 / 删除（仅管理 sheet）。 */
-  private openGroupManageMenu(group: FqShelfGroup): void {
+  /** 分组菜单：重命名 / 删除（管理 sheet 行点击、分组标签长按共用）。 */
+  private openGroupManageMenu(group: FqShelfGroup, anchorId: string): void {
     const items: Array<FqMenuItem> = [];
     const renameItem = new FqMenuItem();
     renameItem.label = '重命名';
@@ -777,7 +791,7 @@ export struct ShelfPage {
         });
     };
     items.push(deleteItem);
-    FqMenu.open(this.getUIContext(), SHELF_GROUP_ROW_ANCHOR_PREFIX + group.id, items);
+    FqMenu.open(this.getUIContext(), anchorId, items);
   }
 
   private promptRenameGroup(id: string, name: string): void {
@@ -867,7 +881,7 @@ export struct ShelfPage {
               if (this.groupSheetMode === 'assign') {
                 this.assignSelectedTo(group.id, group.name);
               } else {
-                this.openGroupManageMenu(group);
+                this.openGroupManageMenu(group, SHELF_GROUP_ROW_ANCHOR_PREFIX + group.id);
               }
             })
           }
@@ -1022,6 +1036,14 @@ export struct ShelfPage {
       items.push(sortItem);
     }
 
+    // 分组操作（仅书架 tab）：新建分组 / 管理分组
+    if (this.currentTab === 0) {
+      const groupOpItem = new FqMenuItem();
+      groupOpItem.label = '分组操作';
+      groupOpItem.subItems = this.buildGroupOpSubItems();
+      items.push(groupOpItem);
+    }
+
     const offlineItem = new FqMenuItem();
     offlineItem.icon = $r('sys.symbol.download');
     offlineItem.label = '离线缓存';
@@ -1053,6 +1075,26 @@ export struct ShelfPage {
     items.push(clearItem);
 
     FqMenu.open(this.getUIContext(), SHELF_MORE_ANCHOR_ID, items);
+  }
+
+  /** 分组操作二级菜单：新建分组 + 管理分组。 */
+  private buildGroupOpSubItems(): Array<FqMenuItem> {
+    const subItems: Array<FqMenuItem> = [];
+    const createSub = new FqMenuItem();
+    createSub.label = '新建分组';
+    createSub.onAction = (): void => {
+      FqMenu.dismiss();
+      this.promptCreateGroup();
+    };
+    subItems.push(createSub);
+    const manageSub = new FqMenuItem();
+    manageSub.label = '管理分组';
+    manageSub.onAction = (): void => {
+      FqMenu.dismiss();
+      this.openManageSheet();
+    };
+    subItems.push(manageSub);
+    return subItems;
   }
 
   /** 切换预览方式（两 tab 共享，持久化）。 */
@@ -1423,7 +1465,8 @@ export struct ShelfPage {
   @Builder
   private TitleExtraBuilder() {
     Column() {
-      Row({ space: 8 }) {
+      // 左滑块（书架/浏览历史胶囊）+ 右筛选 pill：分居两侧
+      Row({ space: 10 }) {
         Stack({ alignContent: Alignment.Start }) {
           Row()
             .width('50%')
@@ -1465,29 +1508,110 @@ export struct ShelfPage {
         .margin({ top: 4, bottom: 10 })
         .attributeModifier(stackImmersiveModifier)
 
-        // 筛选 pill（仅书架 tab）：状态/来源/分组组合筛选入口
+        // 筛选 pill（仅书架 tab）：状态/来源/分组组合筛选入口。
+        // 文案按实测区域宽度封顶走省略号截断，防止长分组名把箭头图标挤出容器。
         if (this.currentTab === 0) {
-          Row({ space: 3 }) {
-            Text(this.filterPillLabel())
-              .fontSize(12)
-              .fontWeight(FontWeight.Medium)
-              .fontColor(this.hasActiveFilter() ? appState.accentColor : $r('sys.color.font_secondary'))
-              .maxLines(1)
-            SymbolGlyph($r('sys.symbol.chevron_down'))
-              .fontSize(10)
-              .fontColor([this.hasActiveFilter() ? appState.accentColor : $r('sys.color.icon_tertiary')])
+          Row() {
+            Row({ space: 3 }) {
+              Text(this.filterPillLabel())
+                .fontSize(12)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(this.hasActiveFilter() ? appState.accentColor : $r('sys.color.font_secondary'))
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .constraintSize({ maxWidth: this.filterLabelMaxWidth() })
+              SymbolGlyph($r('sys.symbol.chevron_down'))
+                .fontSize(10)
+                .fontColor([this.hasActiveFilter() ? appState.accentColor : $r('sys.color.icon_tertiary')])
+            }
+            .constraintSize({ maxWidth: '100%' })
+            .height(30)
+            .padding({ left: 10, right: 9 })
+            .borderRadius(15)
+            .backgroundColor($r('sys.color.comp_background_tertiary'))
+            .margin({ top: 4, bottom: 10 })
+            .attributeModifier(rowImmersiveModifier)
+            .id(SHELF_FILTER_ANCHOR_ID)
+            .onClick(() => {
+              this.openFilterMenu();
+            })
           }
-          .height(30)
-          .padding({ left: 10, right: 9 })
-          .borderRadius(15)
-          .backgroundColor($r('sys.color.comp_background_tertiary'))
-          .margin({ top: 4, bottom: 10 })
-          .attributeModifier(rowImmersiveModifier)
-          .id(SHELF_FILTER_ANCHOR_ID)
-          .onClick(() => {
-            this.openFilterMenu();
+          .layoutWeight(1)
+          .justifyContent(FlexAlign.End)
+          .onAreaChange((_old: Area, newArea: Area): void => {
+            if (typeof newArea.width === 'number') {
+              this.filterAreaWidth = newArea.width;
+            }
           })
         }
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16 })
+
+      // 分组标签行（书架 tab 且有分组）：横向滑动，「全部」+ 各分组；
+      // 点击切换分组筛选，长按分组标签呼出重命名/删除菜单。
+      // 标签 UI 直接内联（@Builder 值传参不随 filterGroupId 变化重渲染，会选中不变色）
+      if (this.groupTagsVisible()) {
+        List({ space: 22 }) {
+          ListItem() {
+            Column() {
+              Text('全部')
+                .fontSize(15)
+                .fontWeight(this.filterGroupId.length === 0 ? FontWeight.Bold : FontWeight.Normal)
+                .fontColor(this.filterGroupId.length === 0 ? appState.accentColor : $r('sys.color.font_secondary'))
+              Row()
+                .width(14)
+                .height(3)
+                .borderRadius(1.5)
+                .backgroundColor(appState.accentColor)
+                .margin({ top: 3 })
+                .visibility(this.filterGroupId.length === 0 ? Visibility.Visible : Visibility.Hidden)
+            }
+            .justifyContent(FlexAlign.Center)
+            .height(36)
+            .id(SHELF_GROUP_TAG_ANCHOR_PREFIX + 'all')
+            .onClick(() => {
+              this.setFilterGroupId('');
+            })
+          }
+          ForEach(this.sheetGroups, (group: FqShelfGroup) => {
+            ListItem() {
+              Column() {
+                Text(group.name)
+                  .fontSize(15)
+                  .fontWeight(this.filterGroupId === group.id ? FontWeight.Bold : FontWeight.Normal)
+                  .fontColor(this.filterGroupId === group.id ? appState.accentColor : $r('sys.color.font_secondary'))
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .constraintSize({ maxWidth: 140 })
+                // 选中项底部主题色小横条（未选中占位隐藏，避免行高跳动）
+                Row()
+                  .width(14)
+                  .height(3)
+                  .borderRadius(1.5)
+                  .backgroundColor(appState.accentColor)
+                  .margin({ top: 3 })
+                  .visibility(this.filterGroupId === group.id ? Visibility.Visible : Visibility.Hidden)
+              }
+              .justifyContent(FlexAlign.Center)
+              .height(36)
+              .id(SHELF_GROUP_TAG_ANCHOR_PREFIX + group.id)
+              .onClick(() => {
+                this.setFilterGroupId(this.filterGroupId === group.id ? '' : group.id);
+              })
+              .gesture(LongPressGesture()
+                .onAction((): void => {
+                  this.openGroupManageMenu(group, SHELF_GROUP_TAG_ANCHOR_PREFIX + group.id);
+                }))
+            }
+          }, (group: FqShelfGroup): string => group.id)
+        }
+        .listDirection(Axis.Horizontal)
+        .width('100%')
+        .height(36)
+        .scrollBar(BarState.Off)
+        .alignListItem(ListItemAlign.Center)
+        .padding({ left: 16, right: 16 })
       }
 
       if (this.showSearchBox) {

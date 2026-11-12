@@ -237,7 +237,7 @@ export struct FqHomeRank {
         .objectFit(ImageFit.Cover)
         .autoResize(true)
         .draggable(false)
-        .shadow(ShadowStyle.OUTER_DEFAULT_MD)
+        //.shadow(ShadowStyle.OUTER_DEFAULT_MD)
     } else {
       Column() {
         SymbolGlyph($r('sys.symbol.book'))
