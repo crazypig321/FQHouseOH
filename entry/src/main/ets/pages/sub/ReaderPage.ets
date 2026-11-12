@@ -1238,89 +1238,36 @@ export struct ReaderPage {
   }
 
   /** 测量回调（UIContext.getMeasureUtils 包装，返回 px）。
-   * measureText 仅支持 HarmonyOS Sans（文档明确 fontFamily 只认该字体）：
-   * 自定义阅读字体（书宋等）下系统测量偏窄，满行会多切 1 字被渲染端
-   * maxLines(1) 裁掉（调大字号后“文字挤左/掉字”根因）。
-   * 自定义字体启用时按解析式测量（实测与两种自定义字体渲染步进一致）：
-   * 全角字符 1em、弯引号 “ ” 0.5em、其余半角片段走 OffscreenCanvas
-   * measureText（默认字体半角步进与自定义字体渲染高度一致：数字 ~0.55em，
-   * 远准于 UIContext 测量的 ~0.24em），按「全角恒 1em」自校准换单位。
+   * 真机实测（API 26）：measureText 传 fontFamily 对已注册的自定义字体
+   * （书宋/黑体/导入 fqc_ 族）返回的宽度与 Text 真实渲染宽度完全一致
+   * （文档「fontFamily 只支持 HarmonyOS Sans」的描述已过时）；不传
+   * fontFamily 测的是系统默认字体（与本机 'HarmonyOS Sans' 也不同）。
+   * 故：自定义字体直接带 fontFamily 精确测量——此前解析式合成测量
+   * （全角 1em/弯引号 0.5em/canvas 半角）对导入字体偏窄，行预算超支
+   * 后尾部字被 maxLines(1) 裁掉即「行尾吞字」；OffscreenCanvas 的
+   * measureText 会忽略 fontFamily（恒测默认字体）且单位为 vp，不可用。
    * 系统字体模式测量与渲染同源，维持原样。 */
   private measureFn(): FqMeasureFn {
     const customFont: boolean = this.readerFontFamily.length > 0;
-    const textDensity: number = this.cachedMetrics.textDensity;
     const utils = this.getUIContext().getMeasureUtils();
-    const measureSystem: (text: string, fontSizeFp: number, fontWeight: string) => number =
-      (text: string, fontSizeFp: number, fontWeight: string): number => {
+    if (!customFont) {
+      return (text: string, fontSizeFp: number, fontWeight: string): number => {
         return utils.measureText({
           textContent: text,
           fontSize: fontSizeFp,
           fontWeight: fontWeight,
         });
       };
-    if (!customFont) {
-      return measureSystem;
     }
-    const canvas: OffscreenCanvas = new OffscreenCanvas(64, 64);
-    const ctx: OffscreenCanvasRenderingContext2D = canvas.getContext('2d');
+    const family: string = this.readerFontFamily;
     return (text: string, fontSizeFp: number, fontWeight: string): number => {
-      const emPx: number = fontSizeFp * textDensity;
-      // 校准：默认字体全角恒 1em，canvas 读数单位与 px 的比值随取
-      ctx.font = `${emPx.toFixed(2)}px "HarmonyOS Sans"`;
-      const wHan: number = ctx.measureText('汉').width;
-      const canvasScale: number = wHan > 0 ? emPx / wHan : 0;
-      const measureHalf: (run: string) => number = (run: string): number => {
-        if (canvasScale > 0) {
-          return ctx.measureText(run).width * canvasScale;
-        }
-        return measureSystem(run, fontSizeFp, fontWeight);
-      };
-      let width: number = 0;
-      let halfRun: string = '';
-      for (let pos: number = 0; pos < text.length; pos++) {
-        const code: number = text.charCodeAt(pos);
-        if (code >= 0xd800 && code <= 0xdbff) {
-          // 代理对（扩展区汉字/emoji）按全角 1em
-          if (halfRun.length > 0) {
-            width += measureHalf(halfRun);
-            halfRun = '';
-          }
-          width += emPx;
-          pos += 1;
-          continue;
-        }
-        if (ReaderPage.isFullWidthCode(code)) {
-          if (halfRun.length > 0) {
-            width += measureHalf(halfRun);
-            halfRun = '';
-          }
-          width += ReaderPage.isHalfQuoteCode(code) ? emPx / 2 : emPx;
-        } else {
-          halfRun += text.charAt(pos);
-        }
-      }
-      if (halfRun.length > 0) {
-        width += measureHalf(halfRun);
-      }
-      return width;
+      return utils.measureText({
+        textContent: text,
+        fontSize: fontSizeFp,
+        fontWeight: fontWeight,
+        fontFamily: family,
+      });
     };
-  }
-
-  /** 全角码位判定（CJK/全角标点/全角空格/破折号/省略号/单弯引号等 → 1em 步进；
-   * 双弯引号 “ ” 除外 → 0.5em，见 isHalfQuoteCode）。 */
-  private static isFullWidthCode(code: number): boolean {
-    return code === 0x00b7                                   // ·（中文间隔号）
-      || (code >= 0x2014 && code <= 0x2026)                  // — ‘ ’ ‥ …
-      || (code >= 0x2e80 && code <= 0x9fff)                  // CJK 部首/注音/假名/汉字
-      || (code >= 0x3000 && code <= 0x303f)                  // 全角空格/CJK 标点/〇
-      || (code >= 0xf900 && code <= 0xfaff)                  // CJK 兼容表意
-      || (code >= 0xfe30 && code <= 0xfe4f)                  // CJK 兼容形式
-      || (code >= 0xff00 && code <= 0xff60);                 // 全角 ASCII 形式
-  }
-
-  /** 双弯引号（“ ”）：书宋/黑体实测渲染步进 0.5em。 */
-  private static isHalfQuoteCode(code: number): boolean {
-    return code === 0x201c || code === 0x201d;
   }
 
   /** 章节分页（同步，~百 ms 级；调用方保证 loading 遮罩或预载时机；counts 为已拉取的段评计数）。 */
@@ -2432,6 +2379,30 @@ export struct ReaderPage {
   // 字体 / 设置
   // ---------------------------------------------------------------------------
 
+  /** 字体就绪探针：区分注册字体与系统默认的宽度（弯引号/省略/半角/全角混排，
+   *  各字体步进差异明显；宽度恰与系统一致时无法区分，但此时回落测量=真实
+   *  宽度，等待超时亦无害）。 */
+  private static readonly FONT_READY_PROBE: string = '“”‘’…—0W8i汉啊吧嗯的';
+
+  /** 字体注册异步生效（实测 ~200-400ms）：未就绪时 measureText/Text 渲染均
+   *  静默回落系统字体；若在窗口内排版/翻页会用回落宽度定页界，字体就绪后
+   *  重排位置漂移（「切字体跳页」根因之一）。注册后轮询至 fontFamily 可
+   *  测量（与系统默认宽度出现差异）再继续，上限 600ms。 */
+  private async waitReaderFontUsable(familyName: string): Promise<void> {
+    const utils = this.getUIContext().getMeasureUtils();
+    const base: number = utils.measureText({
+      textContent: ReaderPage.FONT_READY_PROBE, fontSize: 18 });
+    const deadline: number = Date.now() + 600;
+    while (Date.now() < deadline) {
+      const withFam: number = utils.measureText({
+        textContent: ReaderPage.FONT_READY_PROBE, fontSize: 18, fontFamily: familyName });
+      if (Math.abs(withFam - base) > 0.5) {
+        return;
+      }
+      await new Promise<void>((resolve: (value: void) => void) => setTimeout(resolve, 50));
+    }
+  }
+
   /** 阅读字体准备：系统字体拷沙箱副本 + 注册为自定义字体族（幂等，独立于 Reader Kit）。
    *  副本完整性校验（大小与源一致）：拷贝中断/损坏时删除重拷，
    *  避免注册坏文件后渲染静默回退系统字体（书宋回退问题）。 */
@@ -2471,6 +2442,7 @@ export struct ReaderPage {
         familyName: option.name,
         familySrc: `file://${target}`,
       });
+      await this.waitReaderFontUsable(option.name);
       this.readerFontFamily = option.name;
     } catch (error) {
       hilog.warn(0x0001, 'ReaderPage', 'prepareReaderFont failed');
@@ -2504,6 +2476,7 @@ export struct ReaderPage {
       familyName: familyName,
       familySrc: `file://${path}`,
     });
+    await this.waitReaderFontUsable(familyName);
     this.readerFontFamily = familyName;
   }
 
