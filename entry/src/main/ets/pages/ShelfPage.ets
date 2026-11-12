@@ -778,7 +778,7 @@ export struct ShelfPage {
     this.groupSheetVisible = true;
   }
 
-  /** 进入分组排序模式（快照当前顺序，保存前不落盘）。 */
+  /** 进入分组排序模式（排序操作即时持久化）。 */
   private enterGroupSortMode(): void {
     if (this.sheetGroups.length < 2) {
       this.showToast('至少需要 2 个分组才能排序');
@@ -788,13 +788,13 @@ export struct ShelfPage {
     this.groupSortMode = true;
   }
 
-  /** 退出分组排序模式（不保存）。 */
+  /** 退出分组排序模式（排序已即时落盘，直接退出）。 */
   private exitGroupSortMode(): void {
     this.groupSortMode = false;
     this.sortGroups = [];
   }
 
-  /** 排序行上移/下移（越界忽略）。 */
+  /** 排序行上移/下移（越界忽略，即时落盘）。 */
   private moveSortGroup(index: number, delta: number): void {
     const target: number = index + delta;
     if (index < 0 || index >= this.sortGroups.length || target < 0 || target >= this.sortGroups.length) {
@@ -804,7 +804,7 @@ export struct ShelfPage {
     const tmp: FqShelfGroup = next[index];
     next[index] = next[target];
     next[target] = tmp;
-    this.sortGroups = next;
+    this.applySortGroups(next);
   }
 
   /** 排序行跳转：弹「跳转排序」弹窗，确认后移到目标位。 */
@@ -814,7 +814,7 @@ export struct ShelfPage {
     });
   }
 
-  /** 排序条目从 from 移到 to（0 基索引）。 */
+  /** 排序条目从 from 移到 to（0 基索引，即时落盘）。 */
   private moveSortGroupTo(from: number, to: number): void {
     if (from === to || from < 0 || from >= this.sortGroups.length
       || to < 0 || to >= this.sortGroups.length) {
@@ -823,19 +823,19 @@ export struct ShelfPage {
     const next: FqShelfGroup[] = this.sortGroups.slice();
     const item: FqShelfGroup = next.splice(from, 1)[0];
     next.splice(to, 0, item);
-    this.sortGroups = next;
+    this.applySortGroups(next);
     this.showToast(`已移动到第 ${to + 1} 位`);
   }
 
-  /** 保存分组排序（整体落盘后退出排序模式）。 */
-  private saveGroupSortOrder(): void {
+  /** 应用排序结果：同步排序/列表副本并立即落盘（排序即时持久化）。 */
+  private applySortGroups(next: FqShelfGroup[]): void {
+    this.sortGroups = next;
+    this.sheetGroups = next.slice();
     const ids: string[] = [];
-    for (const group of this.sortGroups) {
+    for (const group of next) {
       ids.push(group.id);
     }
     FqShelfGroupStore.reorder(ids);
-    this.exitGroupSortMode();
-    this.showToast('分组排序已保存');
   }
 
   /** 多选所选移入指定分组（关闭 sheet + 退出多选）。 */
@@ -914,21 +914,30 @@ export struct ShelfPage {
     });
   }
 
-  /** 分组 sheet（assign 归组 / manage 管理，共用单 bindSheet；manage 右上角新建 + 排序模式）。 */
+  /** 分组 sheet（assign 归组 / manage 管理，共用单 bindSheet）。
+   *  HDS 标题栏菜单为挂载期静态配置（结构变更不重应用，同 FqCacheSheet）：
+   *  按 mode 走 if/else 分支整树重建，右上角按钮组随模式正确挂载——
+   *  manage = 新建/排序/关闭，assign = 新建/移出分组/关闭。 */
   @Builder
   private GroupSheetBuilder() {
+    if (this.groupSheetMode === 'assign') {
+      this.GroupSheetHost()
+    } else {
+      this.GroupSheetHost()
+    }
+  }
+
+  /** CommonSheet 宿主（两分支同构：靠 if/else 分支互换强制整树重建）。 */
+  @Builder
+  private GroupSheetHost() {
     CommonSheet({
       sheetTitle: this.groupSheetMode === 'assign' ? '移入分组' : '分组管理',
-      showClose: true,
-      closeClick: (): void => {
-        this.exitGroupSortMode();
-        this.groupSheetVisible = false;
-      },
-      showAdd: this.groupSheetMode === 'manage' && !this.groupSortMode,
+      showAdd: true,
       addClick: (): void => {
         this.promptCreateGroup();
       },
-      showOrder: this.groupSheetMode === 'manage' && this.sheetGroups.length >= 2,
+      showOrder: this.groupSheetMode === 'manage',
+      orderActive: this.groupSortMode,
       orderClick: (): void => {
         if (this.groupSortMode) {
           this.exitGroupSortMode();
@@ -936,45 +945,19 @@ export struct ShelfPage {
           this.enterGroupSortMode();
         }
       },
+      showRemove: this.groupSheetMode === 'assign',
+      removeClick: (): void => {
+        this.removeSelectedFromGroup();
+      },
+      showClose: true,
+      closeClick: (): void => {
+        this.exitGroupSortMode();
+        this.groupSheetVisible = false;
+      },
     }) {
       Column() {
-        List() {
-          if (this.groupSheetMode === 'assign') {
-            ListItem() {
-              Row({ space: 8 }) {
-                SymbolGlyph($r('sys.symbol.plus'))
-                  .fontSize(15)
-                  .fontColor([appState.accentColor])
-                Text('新建分组')
-                  .fontSize(15)
-                  .fontWeight(FontWeight.Medium)
-                  .fontColor(appState.accentColor)
-              }
-              .width('100%')
-              .height(48)
-              .padding({ left: 20, right: 20 })
-              .onClick(() => {
-                this.promptCreateGroup();
-              })
-            }
-            ListItem() {
-              Row({ space: 8 }) {
-                SymbolGlyph($r('sys.symbol.xmark'))
-                  .fontSize(14)
-                  .fontColor([$r('sys.color.icon_secondary')])
-                Text('移出分组')
-                  .fontSize(15)
-                  .fontColor($r('sys.color.font_primary'))
-              }
-              .width('100%')
-              .height(48)
-              .padding({ left: 20, right: 20 })
-              .onClick(() => {
-                this.removeSelectedFromGroup();
-              })
-            }
-          }
 
+        List() {
           if (this.groupSheetMode === 'manage' && this.groupSortMode) {
             ForEach(this.sortGroups, (group: FqShelfGroup, index: number) => {
               ListItem() {
@@ -1052,7 +1035,7 @@ export struct ShelfPage {
 
             if (this.sheetGroups.length === 0) {
               ListItem() {
-                Text(this.groupSheetMode === 'assign' ? '还没有分组，先新建一个吧' : '还没有分组')
+                Text(this.groupSheetMode === 'assign' ? '还没有分组，点右上角 + 新建一个吧' : '还没有分组')
                   .fontSize(13)
                   .fontColor($r('sys.color.font_secondary'))
                   .width('100%')
@@ -1071,18 +1054,6 @@ export struct ShelfPage {
           startMargin: 20,
           endMargin: 20
         })
-
-        if (this.groupSheetMode === 'manage' && this.groupSortMode) {
-          Button('保存排序')
-            .width('100%')
-            .height(42)
-            .fontSize(15)
-            .backgroundColor(appState.accentColor)
-            .margin({ left: 20, right: 20, top: 12, bottom: 20 })
-            .onClick(() => {
-              this.saveGroupSortOrder();
-            })
-        }
       }
       .width('100%')
       .height('100%')

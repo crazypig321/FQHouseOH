@@ -15,7 +15,7 @@ import { appState } from '../../entryability/AppState';
 import { themeUtils } from '../../utils/ThemeUtils';
 import { CommonSearch } from '../CommonCom';
 import { CommonNav } from '../CommonNav';
-import { uiMaterial } from '@kit.ArkUI';
+import { SymbolGlyphModifier, uiMaterial } from '@kit.ArkUI';
 
 /** 通用 bindSheet 参数：拖拽条 + 关闭回调 + 可选高度（默认 600）；前景光感模糊可选关闭。 */
 export function FqSheetOptions(onClose: () => void, height?: SheetSize | Length,
@@ -74,10 +74,14 @@ export struct CommonSheet {
   @Param showBack: boolean = false;
   /** 标题栏右侧是否显示「恢复默认」按钮（关闭钮之前）。 */
   @Param showReset: boolean = false;
-  /** 标题栏右侧是否显示添加按钮（关闭钮之前）。 */
+  /** 标题栏右侧是否显示新建按钮（分组 sheet 新建分组，管理钮之前）。 */
   @Param showAdd: boolean = false;
-  /** 标题栏右侧是否显示排序模式按钮（进入/退出排序；关闭钮之前）。 */
+  /** 标题栏右侧是否显示排序编辑按钮（分组管理进入/退出排序模式）。 */
   @Param showOrder: boolean = false;
+  /** 排序模式激活（排序按钮主题色高亮）。 */
+  @Param orderActive: boolean = false;
+  /** 标题栏右侧是否显示移出分组按钮（关闭钮之前）。 */
+  @Param showRemove: boolean = false;
   /** 隐藏 HDS 标题栏（内容区自绘头部：返回/关闭等 HDS 标题栏放不下的控件）。 */
   @Param hideTitleBar: boolean = false;
   @Event searchToggle: () => void = (): void => {};
@@ -91,6 +95,7 @@ export struct CommonSheet {
   @Event resetClick: () => void = (): void => {};
   @Event addClick: () => void = (): void => {};
   @Event orderClick: () => void = (): void => {};
+  @Event removeClick: () => void = (): void => {};
   @BuilderParam content: () => void;
 
   build() {
@@ -191,6 +196,32 @@ export struct CommonSheet {
         },
       });
     }
+    if (this.showAdd) {
+      menus.push({
+        content: {
+          icon: $r('sys.symbol.plus'),
+          label: 'add',
+          action: (): void => {
+            this.addClick();
+          },
+        },
+      });
+    }
+    if (this.showOrder) {
+      menus.push({
+        content: {
+          // 排序模式激活时主题色高亮（SymbolGlyphModifier 携带 fontColor）
+          icon: this.orderActive
+            ? new SymbolGlyphModifier($r('sys.symbol.arrow_left_arrow_right'))
+              .fontColor([appState.accentColor])
+            : $r('sys.symbol.arrow_left_arrow_right'),
+          label: 'order',
+          action: (): void => {
+            this.orderClick();
+          },
+        },
+      });
+    }
     if (this.showManage) {
       menus.push({
         content: {
@@ -213,24 +244,13 @@ export struct CommonSheet {
         },
       });
     }
-    if (this.showAdd) {
+    if (this.showRemove) {
       menus.push({
         content: {
-          icon: $r('sys.symbol.plus'),
-          label: 'add',
+          icon: $r('sys.symbol.trash'),
+          label: 'remove',
           action: (): void => {
-            this.addClick();
-          },
-        },
-      });
-    }
-    if (this.showOrder) {
-      menus.push({
-        content: {
-          icon: $r('sys.symbol.arrow_left_arrow_right'),
-          label: 'order',
-          action: (): void => {
-            this.orderClick();
+            this.removeClick();
           },
         },
       });
