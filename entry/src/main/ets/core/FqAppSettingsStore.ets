@@ -28,7 +28,9 @@
  * - dramaAutoCacheAhead：剧集边看边往后缓存集数（对齐 fqapp DramaCachePreferences：
  *   默认 5，0 = 关，0-50；播放页缓存 sheet「边看边缓存」开关 + 3/5/10 档）；
  * - dramaAutoCacheWifiOnly：剧集自动缓存仅 Wi-Fi（默认开；计量网络不自动缓存，
- *   手动下载不受影响）。
+ *   手动下载不受影响）；
+ * - videoQualityPref：视频清晰度偏好档名（'' 跟随默认最高档 / 360P-4K 白名单；
+ *   播放页清晰度菜单切换即写入，下次进页沿用；白名单见 FQ_VIDEO_QUALITY_PREF_WHITELIST）。
  */
 
 import preferences from '@ohos.data.preferences';
@@ -62,6 +64,7 @@ const FQ_SETTINGS_KEY_DANMAKU_LINE_SPACE: string = 'danmakuLineSpaceTier';
 const FQ_SETTINGS_KEY_DANMAKU_SIZE: string = 'danmakuSizeTier';
 const FQ_SETTINGS_KEY_DANMAKU_BG_TRANSPARENT: string = 'danmakuBgTransparent';
 const FQ_SETTINGS_KEY_VIDEO_HWDEC: string = 'videoHwdec';
+const FQ_SETTINGS_KEY_VIDEO_QUALITY_PREF: string = 'videoQualityPref';
 
 /** 章节自动缓存大小上限默认值（MB）。 */
 export const FQ_CHAPTER_CACHE_LIMIT_DEFAULT_MB: number = 80;
@@ -91,6 +94,12 @@ export const FQ_DANMAKU_LINE_SPACE_LABELS: string[] = ['单行', '1/4屏', '1/2�
 export const FQ_DANMAKU_ALPHA_MIN_PERCENT: number = 20;
 /** 弹幕不透明度上限（%）。 */
 export const FQ_DANMAKU_ALPHA_MAX_PERCENT: number = 100;
+/**
+ * 视频清晰度偏好档名白名单（'' = 跟随默认最高可用档）。
+ * 与后端档名映射一致（短边像素映射 360P~4K）；decode 校验与 store 钳制共用。
+ */
+export const FQ_VIDEO_QUALITY_PREF_WHITELIST: string[] =
+  ['', '360P', '480P', '540P', '720P', '1080P', '2K', '4K'];
 
 /** 深色模式档位：跟随系统。 */
 export const FQ_THEME_FOLLOW: number = 0;
@@ -154,6 +163,8 @@ export class FqAppSettingsStore {
   private static danmakuBgTransparent: boolean = false;
   /** 视频解码方式（true 硬解 ohcodec / false 软解 FFmpeg；播放页即时切换）。 */
   private static videoHwdec: boolean = true;
+  /** 视频清晰度偏好档名（'' = 跟随默认最高可用档；白名单外值回退 ''）。 */
+  private static videoQualityPref: string = '';
 
   public static init(context: common.Context): void {
     if (FqAppSettingsStore.pref !== null) {
@@ -274,6 +285,11 @@ export class FqAppSettingsStore {
       const rawHwdec: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_VIDEO_HWDEC, true);
       if (typeof rawHwdec === 'boolean') {
         FqAppSettingsStore.videoHwdec = rawHwdec;
+      }
+      const rawQualityPref: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_VIDEO_QUALITY_PREF, '');
+      if (typeof rawQualityPref === 'string'
+        && FQ_VIDEO_QUALITY_PREF_WHITELIST.indexOf(rawQualityPref) >= 0) {
+        FqAppSettingsStore.videoQualityPref = rawQualityPref;
       }
     } catch (error) {
       // 损坏数据按默认值处理
@@ -741,6 +757,29 @@ export class FqAppSettingsStore {
     }
     try {
       pref.putSync(FQ_SETTINGS_KEY_VIDEO_HWDEC, enabled);
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
+  }
+
+  /** 视频清晰度偏好档名（'' = 跟随默认最高可用档；跨进页记忆）。 */
+  public static getVideoQualityPref(): string {
+    return FqAppSettingsStore.videoQualityPref;
+  }
+
+  public static setVideoQualityPref(quality: string): void {
+    // 白名单外值一律回退 ''（跟随默认），与备份 decode 校验口径一致。
+    FqAppSettingsStore.videoQualityPref =
+      FQ_VIDEO_QUALITY_PREF_WHITELIST.indexOf(quality) >= 0 ? quality : '';
+    const pref: preferences.Preferences | null = FqAppSettingsStore.pref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.putSync(FQ_SETTINGS_KEY_VIDEO_QUALITY_PREF, FqAppSettingsStore.videoQualityPref);
       pref.flush().catch((_error: BusinessError): void => {
         // 落盘失败不阻断
       });

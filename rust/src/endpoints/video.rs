@@ -130,8 +130,11 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
         };
 
         let variants = extract_stream_variants(ctx, &parsed, phoenix_parsed.as_ref()).await;
-        // 请求档命中：直接改用该档流（url + 内容密钥）；未命中保持最高档，
-        // 响应 quality 为空，客户端据此回显「默认」。
+        // 请求档命中：直接改用该档流（url + 内容密钥）。未请求档时默认档
+        // 升级为合并列表最高可用档（2K/4K 除外）并回显实际档名——客户端
+        // 清晰度按钮/菜单显示真实档位（此前 quality 恒空只能显示「清晰度」），
+        // 缓存按档分文件（与手动选同档共享缓存）；合并列表为空（老形状
+        // 上游不带档位）保持主解析选流，quality 为空。
         let mut served_quality = String::new();
         let mut cache_suffix = String::new();
         if let Some((url, key)) = quality_hit(&variants, &quality) {
@@ -139,6 +142,13 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
             content_key = key;
             served_quality = quality.clone();
             cache_suffix = quality.clone();
+        } else if quality.is_empty() {
+            if let Some((url, key, name)) = top_default_variant(&variants) {
+                video_url = url;
+                content_key = key;
+                served_quality = name.clone();
+                cache_suffix = name;
+            }
         }
 
         let source = json!({
@@ -184,9 +194,22 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
                         if let Some((q_url, q_key)) = quality_hit(&revariants, &quality) {
                             video_url = q_url;
                             content_key = q_key;
-                        } else if quality.is_empty() {
+                        } else if quality.is_empty() && cache_suffix.is_empty() {
+                            // 未升级的老形状（合并列表为空）：重取主解析流换边缘。
                             video_url = url;
                             content_key = key;
+                        } else if quality.is_empty() {
+                            // 默认档已升级为具名档：重取后同名档续试（换边缘
+                            // 换签名）；档消失则放弃，不降档污染分档缓存。
+                            match top_default_variant(&revariants) {
+                                Some((retry_url, retry_key, retry_name))
+                                    if retry_name == cache_suffix =>
+                                {
+                                    video_url = retry_url;
+                                    content_key = retry_key;
+                                }
+                                _ => break,
+                            }
                         } else {
                             break;
                         }
@@ -316,6 +339,29 @@ fn quality_hit(variants: &[Value], quality: &str) -> Option<(String, Vec<u8>)> {
     }
     let key = hex::decode(key_hex).ok()?;
     Some((url.to_string(), key))
+}
+
+/// 默认档（quality 为空）的自动选档：合并列表里最高的非 2K/4K 档，返回
+/// (url, 内容密钥, 档名)。短剧主解析选流只在 shortplay 模型列表里挑，最高
+/// 720P；1080P 只在 phoenix 的 fallback 列表里，默认档原先永远到不了。
+/// 自动档改为取合并列表最高可用档（对齐 fqapp 下载偏好「自动 · 优先高清」），
+/// 2K/4K 只保留给手动选择（4K VVC 软解耗电卡顿，不适合作自动默认）。
+/// 列表为空（老形状上游不带档位）返回 None，保持主解析选流。
+fn top_default_variant(variants: &[Value]) -> Option<(String, Vec<u8>, String)> {
+    let row = variants.iter().find(|row| {
+        !matches!(
+            row.get("name").and_then(Value::as_str).unwrap_or(""),
+            "2K" | "4K"
+        )
+    })?;
+    let name = row.get("name").and_then(Value::as_str)?.to_string();
+    let url = row.get("url").and_then(Value::as_str).unwrap_or("");
+    if url.is_empty() {
+        return None;
+    }
+    let key_hex = row.get("key_hex").and_then(Value::as_str).unwrap_or("");
+    let key = hex::decode(key_hex).ok()?;
+    Some((url.to_string(), key, name))
 }
 
 /// `quality` 参数白名单：仅字母数字、长度 <= 8（720P/1080P/2K/4K…），

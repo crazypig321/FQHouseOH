@@ -16,7 +16,8 @@ import { FqWatchedMergeOutcome, FqWatchedProgress, FqWatchedStore } from './FqWa
 import { FqReaderProgress, FqReaderSettings, FqReaderStore,
   fqDecodeReadRanges, fqEncodeReadRanges, fqNormalizeThemeFontColor } from './FqReaderStore';
 import { FqAppSettingsStore, FQ_DRAMA_AUTO_CACHE_AHEAD_MAX,
-  FQ_DANMAKU_ALPHA_MIN_PERCENT, FQ_DANMAKU_ALPHA_MAX_PERCENT } from './FqAppSettingsStore';
+  FQ_DANMAKU_ALPHA_MIN_PERCENT, FQ_DANMAKU_ALPHA_MAX_PERCENT,
+  FQ_VIDEO_QUALITY_PREF_WHITELIST } from './FqAppSettingsStore';
 import { fqAsArray, fqAsRecord, fqNum, fqStr } from './FqJson';
 
 const FQ_BACKUP_FORMAT: string = 'fqhouse.library-backup';
@@ -251,7 +252,8 @@ function fqBackupBaseName(path: string): string {
 }
 
 /** 备份内播放设置段：弹幕样式（不透明度/速度/行数/显示区域/字号/背景透明）+
- *  解码方式（硬解/软解）+ 边看边缓存（集数/仅 Wi-Fi）+ 画中画 + 朗读音色语速。 */
+ *  解码方式（硬解/软解）+ 清晰度偏好 + 边看边缓存（集数/仅 Wi-Fi）+ 画中画 +
+ *  朗读音色语速。 */
 export class FqBackupPlaybackSettings {
   readonly danmakuAlphaPercent: number;
   readonly danmakuSpeedTier: number;
@@ -260,6 +262,8 @@ export class FqBackupPlaybackSettings {
   readonly danmakuSizeTier: number;
   readonly danmakuBgTransparent: boolean;
   readonly videoHwdec: boolean;
+  /** 清晰度偏好档名（null = 旧备份缺省，恢复时跳过不重置本机）。 */
+  readonly videoQualityPref: string | null;
   readonly dramaAutoCacheAhead: number;
   readonly dramaAutoCacheWifiOnly: boolean;
   readonly pipVideo: boolean;
@@ -268,8 +272,8 @@ export class FqBackupPlaybackSettings {
 
   constructor(danmakuAlphaPercent: number, danmakuSpeedTier: number, danmakuLineCount: number,
     danmakuLineSpaceTier: number, danmakuSizeTier: number, danmakuBgTransparent: boolean,
-    videoHwdec: boolean, dramaAutoCacheAhead: number, dramaAutoCacheWifiOnly: boolean,
-    pipVideo: boolean, ttsPerson: number, ttsRate: number) {
+    videoHwdec: boolean, videoQualityPref: string | null, dramaAutoCacheAhead: number,
+    dramaAutoCacheWifiOnly: boolean, pipVideo: boolean, ttsPerson: number, ttsRate: number) {
     this.danmakuAlphaPercent = danmakuAlphaPercent;
     this.danmakuSpeedTier = danmakuSpeedTier;
     this.danmakuLineCount = danmakuLineCount;
@@ -277,6 +281,7 @@ export class FqBackupPlaybackSettings {
     this.danmakuSizeTier = danmakuSizeTier;
     this.danmakuBgTransparent = danmakuBgTransparent;
     this.videoHwdec = videoHwdec;
+    this.videoQualityPref = videoQualityPref;
     this.dramaAutoCacheAhead = dramaAutoCacheAhead;
     this.dramaAutoCacheWifiOnly = dramaAutoCacheWifiOnly;
     this.pipVideo = pipVideo;
@@ -526,6 +531,7 @@ export class FqLibraryBackup {
       FqAppSettingsStore.getDanmakuSizeTier(),
       FqAppSettingsStore.isDanmakuBgTransparent(),
       FqAppSettingsStore.isVideoHwdec(),
+      FqAppSettingsStore.getVideoQualityPref(),
       FqAppSettingsStore.getDramaAutoCacheAhead(),
       FqAppSettingsStore.isDramaAutoCacheWifiOnly(),
       FqAppSettingsStore.isPipVideoEnabled(),
@@ -690,6 +696,7 @@ export class FqLibraryBackup {
         playback['danmakuSizeTier'] = data.settings.playback.danmakuSizeTier;
         playback['danmakuBgTransparent'] = data.settings.playback.danmakuBgTransparent;
         playback['videoHwdec'] = data.settings.playback.videoHwdec;
+        playback['videoQualityPref'] = data.settings.playback.videoQualityPref ?? '';
         playback['dramaAutoCacheAhead'] = data.settings.playback.dramaAutoCacheAhead;
         playback['dramaAutoCacheWifiOnly'] = data.settings.playback.dramaAutoCacheWifiOnly;
         playback['pipVideo'] = data.settings.playback.pipVideo;
@@ -1054,9 +1061,19 @@ export class FqLibraryBackup {
         if (pbTtsRate < 0.5) {
           throw new Error('备份字段 ttsRate 无效');
         }
+        // 清晰度偏好（旧备份无此字段跳过，不重置本机；'' 是合法值 = 跟随最高档）
+        let pbQualityPref: string | null = null;
+        if (pbRec['videoQualityPref'] !== undefined) {
+          const pbQuality: string = fqBackupCheckText(pbRec, 'videoQualityPref');
+          if (FQ_VIDEO_QUALITY_PREF_WHITELIST.indexOf(pbQuality) < 0) {
+            throw new Error('备份字段 videoQualityPref 无效');
+          }
+          pbQualityPref = pbQuality;
+        }
         playback = new FqBackupPlaybackSettings(pbAlpha, pbSpeed, pbLines, pbSpace, pbSize,
           fqBackupCheckBool(pbRec, 'danmakuBgTransparent'),
           fqBackupCheckBool(pbRec, 'videoHwdec'),
+          pbQualityPref,
           fqBackupCheckInt(pbRec, 'dramaAutoCacheAhead', FQ_DRAMA_AUTO_CACHE_AHEAD_MAX),
           fqBackupCheckBool(pbRec, 'dramaAutoCacheWifiOnly'),
           fqBackupCheckBool(pbRec, 'pipVideo'),
@@ -1152,6 +1169,10 @@ export class FqLibraryBackup {
         FqAppSettingsStore.setDanmakuSizeTier(playback.danmakuSizeTier);
         FqAppSettingsStore.setDanmakuBgTransparent(playback.danmakuBgTransparent);
         FqAppSettingsStore.setVideoHwdec(playback.videoHwdec);
+        // 清晰度偏好（旧备份无此字段为 null，跳过不重置本机已有偏好）
+        if (playback.videoQualityPref !== null) {
+          FqAppSettingsStore.setVideoQualityPref(playback.videoQualityPref);
+        }
         FqAppSettingsStore.setDramaAutoCacheAhead(playback.dramaAutoCacheAhead);
         FqAppSettingsStore.setDramaAutoCacheWifiOnly(playback.dramaAutoCacheWifiOnly);
         FqAppSettingsStore.setPipVideoEnabled(playback.pipVideo);

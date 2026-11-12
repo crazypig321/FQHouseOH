@@ -258,6 +258,8 @@ async fn successful_download_keeps_the_local_source_contract() {
     let (status, body) = request_video(&server, "").await;
     assert_eq!(status, 200);
     assert_eq!(body["video_url"], "/src/episode.mp4");
+    // 老形状（上游不带档位）：保持主解析选流，quality 回显空串。
+    assert_eq!(body["quality"], "");
     assert_eq!(
         body["video_info"]["data"]["video_list"]["video_1"]["main_url"],
         "/src/episode.mp4"
@@ -360,4 +362,97 @@ async fn stream_variants_merge_bytevc2_tiers() {
         .collect();
     assert_eq!(names, ["1080P", "720P", "360P"], "{body}");
     assert!(body.to_string().contains(VVC_URL), "{body}");
+}
+
+/// 默认档升级：quality 未请求时自动选合并列表最高可用档（此处 1080P 只在
+/// fallback 列表里），回显实际档名、按档分缓存——此前默认档只走主解析
+/// 选流（最高 720P）、quality 恒空、缓存文件为裸 {video_id}。
+#[tokio::test]
+async fn default_quality_upgrades_to_the_top_merged_tier() {
+    let upstream = MockUpstream::start(|req| {
+        if req.path == "/1080.mp4" {
+            return MockReply {
+                status: 200,
+                headers: vec![],
+                body: b"top tier fixture".to_vec(),
+            };
+        }
+        if req.path == "/fallback" {
+            return MockReply::json(json!({"video_info": {"data": {
+                "key_seed": "AAAA",
+                "video_list": {
+                    "video_1": {"main_url": "https://example.invalid/1080.mp4",
+                        "vwidth": 1080, "vheight": 1920, "codec_type": "bytevc1", "spade_a": SPADE_A}
+                }
+            }}}));
+        }
+        MockReply::json(json!({"data": {"video_model": {
+            "key_seed": "AAAA",
+            "fallback_api": "https://example.invalid/fallback",
+            "video_list": {
+                "video_1": {"main_url": "https://example.invalid/360.mp4",
+                    "vwidth": 360, "vheight": 640, "codec_type": "bytevc1", "spade_a": SPADE_A},
+                "video_2": {"main_url": "https://example.invalid/720.mp4",
+                    "vwidth": 720, "vheight": 1280, "codec_type": "bytevc1", "spade_a": SPADE_A}
+            }
+        }}}))
+    })
+    .await;
+    let dir = TempDir::new("video-default-top");
+    let server = build_server(&dir, Some(upstream.origin.clone()), &[], &[], &pool_json(5)).await;
+    let (status, body) = request_video(&server, "").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["quality"], "1080P", "{body}");
+    assert_eq!(body["video_url"], "/src/episode_1080P.mp4", "{body}");
+    assert_eq!(
+        std::fs::read(dir.join("src/episode_1080P.mp4")).unwrap(),
+        b"top tier fixture"
+    );
+    let requests = upstream.requests();
+    assert!(requests.iter().any(|r| r.path == "/1080.mp4"));
+    assert!(requests.iter().all(|r| r.path != "/720.mp4"));
+}
+
+/// 默认档封顶 1080P：2K/4K 档只保留给手动选择（4K VVC 软解耗电卡顿），
+/// 自动档跳过它们取次高可用档。
+#[tokio::test]
+async fn default_quality_skips_2k_and_4k_tiers() {
+    let upstream = MockUpstream::start(|req| {
+        if req.path == "/1080.mp4" {
+            return MockReply {
+                status: 200,
+                headers: vec![],
+                body: b"capped fixture".to_vec(),
+            };
+        }
+        if req.path == "/fallback" {
+            return MockReply::json(json!({"video_info": {"data": {
+                "key_seed": "AAAA",
+                "video_list": {
+                    "video_1": {"main_url": "https://example.invalid/2160.mp4",
+                        "vwidth": 2160, "vheight": 3840, "codec_type": "bytevc1", "spade_a": SPADE_A},
+                    "video_2": {"main_url": "https://example.invalid/1080.mp4",
+                        "vwidth": 1080, "vheight": 1920, "codec_type": "bytevc1", "spade_a": SPADE_A}
+                }
+            }}}));
+        }
+        MockReply::json(json!({"data": {"video_model": {
+            "key_seed": "AAAA",
+            "fallback_api": "https://example.invalid/fallback",
+            "video_list": {
+                "video_1": {"main_url": "https://example.invalid/720.mp4",
+                    "vwidth": 720, "vheight": 1280, "codec_type": "bytevc1", "spade_a": SPADE_A}
+            }
+        }}}))
+    })
+    .await;
+    let dir = TempDir::new("video-default-cap");
+    let server = build_server(&dir, Some(upstream.origin.clone()), &[], &[], &pool_json(5)).await;
+    let (status, body) = request_video(&server, "").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["quality"], "1080P", "{body}");
+    assert_eq!(body["video_url"], "/src/episode_1080P.mp4", "{body}");
+    let requests = upstream.requests();
+    assert!(requests.iter().any(|r| r.path == "/1080.mp4"));
+    assert!(requests.iter().all(|r| r.path != "/2160.mp4"));
 }

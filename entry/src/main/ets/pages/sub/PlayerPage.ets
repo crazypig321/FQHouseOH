@@ -390,7 +390,7 @@ export struct PlayerPage {
   private hongguoFailCount: number = 0;
   /** 当前集已实际播放（position > 0；切集重置，已看标记 guard）。 */
   private hasDisplayed: boolean = false;
-  /** 用户选定的清晰度档名（跨集记忆；空 = 跟默认最高档）。 */
+  /** 用户选定的清晰度档名（跨集/跨进页记忆，经 FqAppSettingsStore 持久化；空 = 跟默认最高档）。 */
   private qualityPreference: string = '';
   /** 预热的下一集流（fqapp _WarmEpisode；null = 无预热；单 mpv 实例，预热=取流先行）。 */
   private warmSource: FqEpisodeSource | null = null;
@@ -558,6 +558,8 @@ export struct PlayerPage {
     this.danmakuSizeTier = FqAppSettingsStore.getDanmakuSizeTier();
     this.danmakuBgTransparent = FqAppSettingsStore.isDanmakuBgTransparent();
     this.applyDanmakuCfg();
+    // 清晰度偏好：跨进页持久化记忆（fqapp download_preference；空 = 跟默认最高档）
+    this.qualityPreference = FqAppSettingsStore.getVideoQualityPref();
     // 红果弹幕源映射：异步发起，不阻塞起播；到达/失败均不影响播放流（方案 A）
     this.tryLoadHongguoMap();
     // 实际播放 guard：position 走表（非加载期）才视为看过（对齐 fqapp 首帧不标）
@@ -3538,7 +3540,8 @@ export struct PlayerPage {
 
   /**
    * 切换清晰度档：后端按档重新取流下载解密（loopback /src/ 明文供 mpv），
-   * 原位置续播；档名跨集记忆（后续集上游仍有该档则沿用）。
+   * 原位置续播；档名跨集/跨进页记忆（后续集上游仍有该档则沿用，偏好经
+   * FqAppSettingsStore 持久化，下次进页直接沿用）。
    * 下载模式 variant url 为上游密文流，mpv 无法直连，必须走重取流链路。
    */
   private switchQuality(index: number): void {
@@ -3549,6 +3552,7 @@ export struct PlayerPage {
       ? this.qualityVariants[index].name : '';
     const position: number = this.player.state.position;
     this.qualityPreference = name;
+    FqAppSettingsStore.setVideoQualityPref(name);
     if (position > 0) {
       this.pendingResumeSec = position;
     }
