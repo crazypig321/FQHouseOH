@@ -240,7 +240,7 @@ export struct PlayerPage {
    * onReady = XComponent surface 挂载回调：离线缓存秒开时 open 可能先于
    * surface 创建执行（aboutToAppear 同步链路零 await），mpv 无 wid 起播
    * 后补挂 surface 概率性黑屏有声音——未就绪时暂存 Media，此回调补播。 */
-  private player: Player = new Player(new PlayerConfig({
+  @Local player: Player = new Player(new PlayerConfig({
     onReady: (): void => this.onPlayerSurfaceReady(),
     hwdec: FqAppSettingsStore.isVideoHwdec(),
   }));
@@ -514,6 +514,10 @@ export struct PlayerPage {
   private pipSystemSwitch: boolean = true;
   /** onHidden 延迟解除武装令牌（++ 使正在等待的延迟判定作废：onShown/离页取消）。 */
   private pipHideToken: number = 0;
+  /** 已同步给画中画控制器的视频内容宽（px；与 pipContentH 一起决定小窗比例）。 */
+  private pipContentW: number = 0;
+  /** 已同步给画中画控制器的视频内容高（px）。 */
+  private pipContentH: number = 0;
 
   aboutToAppear(): void {
     this.title = PlayerNavParams.title;
@@ -2296,6 +2300,8 @@ export struct PlayerPage {
         return;
       }
       this.pipController = controller;
+      // 控制器就位即同步当前片源尺寸（视频先于控制器就绪的补推；后续变化走 @Monitor）
+      this.syncPipContentSize();
       controller.on('stateChange', (state: PiPWindow.PiPState, reason: string): void => {
         this.onPipStateChange(state, reason);
       });
@@ -2321,6 +2327,32 @@ export struct PlayerPage {
       // 创建失败静默降级：不影响正常播放（画中画为可选能力）
       this.pipCreating = false;
     });
+  }
+
+  /** 视频尺寸就绪/变化（起播、切集、换清晰度）即同步画中画小窗比例（@Trace 深层路径监听）。 */
+  @Monitor('player.state.videoParams.dw', 'player.state.videoParams.dh')
+  onPipVideoSizeChange(): void {
+    this.syncPipContentSize();
+  }
+
+  /** 向画中画控制器同步视频内容尺寸（updateContentSize：小窗比例跟随片源比例，消除黑边）。 */
+  private syncPipContentSize(): void {
+    const controller: PiPWindow.PiPController | null = this.pipController;
+    if (controller === null) {
+      return;
+    }
+    const dw: number = this.player.state.videoParams.dw;
+    const dh: number = this.player.state.videoParams.dh;
+    if (dw <= 0 || dh <= 0 || (dw === this.pipContentW && dh === this.pipContentH)) {
+      return;
+    }
+    try {
+      controller.updateContentSize(dw, dh);
+      this.pipContentW = dw;
+      this.pipContentH = dh;
+    } catch (error) {
+      // 控制器未创建/已销毁（401）时忽略
+    }
   }
 
   /**
@@ -2377,6 +2409,8 @@ export struct PlayerPage {
   private onPipStateChange(state: PiPWindow.PiPState, reason: string): void {
     if (state === PiPWindow.PiPState.STARTED) {
       this.pipStarted = true;
+      // 小窗拉起兜底再同步一次比例（防起播前后尺寸竞态导致小窗黑边）
+      this.syncPipContentSize();
       return;
     }
     if (state === PiPWindow.PiPState.STOPPED) {
