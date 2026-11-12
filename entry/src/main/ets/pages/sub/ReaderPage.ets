@@ -70,6 +70,7 @@ import { drawing } from '@kit.ArkGraphics2D';
 import { FqMeasureFn, FqPaginationEngine, fqPageIndexForPosition } from '../../reader/FqPagination';
 import { FqColorUtils } from '../../utils/FqColorUtils';
 import { FqVolumeKeyPaging } from '../../utils/FqVolumeKeyPaging';
+import { fqBubbleIcon } from '../../utils/FqBubbleIcon';
 
 /** 眉页「第N章」前缀匹配（N 支持数字与中文数字，量词：章节回卷集话篇）。 */
 const FQ_HEADER_PREFIX_RE: RegExp = new RegExp('^第[0-9零一二三四五六七八九十百千万]+[章节回卷集话篇]');
@@ -910,7 +911,7 @@ export struct ReaderPage {
               Text() {
                 Span(item.layout.paragraphs[item.paraIndex])
                 if (this.verticalBubbleCount(item) > 0) {
-                  ImageSpan($r('app.media.ellipsis_message'))
+                  ImageSpan(fqBubbleIcon(this.verticalBubbleCount(item)))
                     .width(this.cachedMetrics.bubbleIconFp)
                     .height(this.cachedMetrics.bubbleIconFp)
                     .supportSvg2(true)
@@ -920,10 +921,10 @@ export struct ReaderPage {
                     .onClick(() => {
                       this.openParaSheet(item.paraIndex);
                     })
-                  Span(` ${this.verticalBubbleCount(item)}`)
+                /*  Span(` ${this.verticalBubbleCount(item)}`)
                     .fontSize(this.cachedMetrics.bubbleTextFp)
                     .fontColor($r('sys.color.icon_tertiary'))
-                    .fontFamily(this.readerFontFamily)
+                    .fontFamily(this.readerFontFamily)*/
                 }
               }
               .fontSize(item.paraIndex === 0 ? this.cachedMetrics.titleFontFp
