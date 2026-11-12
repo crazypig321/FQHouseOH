@@ -21,6 +21,8 @@ export class FqStoreBus {
   @Trace watchedVersion: number = 0;
   /** 阅读进度版本（FqReaderStore.saveProgress 整书百分比变化 +1；驱动书架角标实时刷新）。 */
   @Trace readerProgressVersion: number = 0;
+  /** 书架分组数据版本（FqShelfGroupStore 每次变更 +1）。 */
+  @Trace shelfGroupVersion: number = 0;
 }
 
 export const fqStoreBus: FqStoreBus = new FqStoreBus();

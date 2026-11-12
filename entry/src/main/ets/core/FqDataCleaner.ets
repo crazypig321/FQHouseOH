@@ -35,6 +35,7 @@ const FQ_PREF_NAMES: string[] = [
   'fq_watched',
   'fq_read_stats',
   'fq_shelf',
+  'fq_shelf_groups',
   'fq_reader',
   'fq_app_settings',
   'fq_home_cache',

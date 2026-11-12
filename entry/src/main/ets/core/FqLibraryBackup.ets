@@ -10,6 +10,7 @@
 import { bundleManager } from '@kit.AbilityKit';
 import { buffer } from '@kit.ArkTS';
 import { FqShelfItem, FqShelfStore } from './FqShelfStore';
+import { FqShelfGroup, FqShelfGroupStore } from './FqShelfGroupStore';
 import { FqBrowseItem, FqBrowseStore } from './FqBrowseStore';
 import { FqListenRecord, FqAudioHistory } from './FqAudioHistory';
 import { FqWatchedMergeOutcome, FqWatchedProgress, FqWatchedStore } from './FqWatchedStore';
@@ -28,6 +29,8 @@ export const FQ_BACKUP_MAX_BYTES: number = 16 * 1024 * 1024;
 const FQ_BACKUP_MAX_RECORDS: number = 10000;
 const FQ_BACKUP_MAX_EPISODES: number = 100000;
 const FQ_BACKUP_MAX_THEMES: number = 50;
+/** 备份内书架分组数量上限（与 FqShelfGroupStore 分组上限一致）。 */
+const FQ_BACKUP_MAX_GROUPS: number = 50;
 const FQ_BACKUP_MAX_TIME: number = 8640000000000000;
 const FQ_BACKUP_MAX_TEXT: number = 8192;
 const FQ_BACKUP_KINDS: string[] = ['book', 'audio', 'manga', 'video', 'manju'];
@@ -345,6 +348,17 @@ export class FqBackupAppSettings {
   }
 }
 
+/** 备份内书架分组段：分组名 + 组内作品 id（采集时排除 local_ 与不在书架的书）。 */
+export class FqBackupShelfGroup {
+  readonly name: string;
+  readonly books: string[];
+
+  constructor(name: string, books: string[]) {
+    this.name = name;
+    this.books = books;
+  }
+}
+
 /** 采集/解析完成并通过校验的备份数据。 */
 export class FqLibraryBackupData {
   readonly createdAt: number;
@@ -357,11 +371,13 @@ export class FqLibraryBackupData {
   readonly excludedLocalRecords: number;
   /** 应用设置段（v1 备份无此段时为 null，恢复时跳过）。 */
   readonly settings: FqBackupAppSettings | null;
+  /** 书架分组段（旧备份无此段时为 null，恢复时跳过）。 */
+  readonly groups: FqBackupShelfGroup[] | null;
 
   constructor(createdAt: number, appVersion: string, shelf: FqShelfItem[],
     browse: FqBrowseItem[], listen: FqListenRecord[], watched: FqBackupWatched[],
     reader: FqBackupReaderProgress[], excludedLocalRecords: number,
-    settings: FqBackupAppSettings | null) {
+    settings: FqBackupAppSettings | null, groups: FqBackupShelfGroup[] | null = null) {
     this.createdAt = createdAt;
     this.appVersion = appVersion;
     this.shelf = shelf;
@@ -371,6 +387,7 @@ export class FqLibraryBackupData {
     this.reader = reader;
     this.excludedLocalRecords = excludedLocalRecords;
     this.settings = settings;
+    this.groups = groups;
   }
 
   /** 已看集总数（预览统计用）。 */
@@ -395,10 +412,13 @@ export class FqLibraryBackupRestoreResult {
   readonly settingsApplied: boolean;
   /** 播放设置段是否已随恢复应用（备份无播放段时为 false）。 */
   readonly playbackApplied: boolean;
+  /** 书架分组段是否已随恢复应用（旧备份无分组段时为 false）。 */
+  readonly groupsApplied: boolean;
 
   constructor(shelfAdded: number, browseAdded: number, listenAdded: number,
     readerAdded: number, episodesAdded: number, progressAdded: number,
-    settingsApplied: boolean, playbackApplied: boolean = false) {
+    settingsApplied: boolean, playbackApplied: boolean = false,
+    groupsApplied: boolean = false) {
     this.shelfAdded = shelfAdded;
     this.browseAdded = browseAdded;
     this.listenAdded = listenAdded;
@@ -407,6 +427,7 @@ export class FqLibraryBackupRestoreResult {
     this.progressAdded = progressAdded;
     this.settingsApplied = settingsApplied;
     this.playbackApplied = playbackApplied;
+    this.groupsApplied = groupsApplied;
   }
 }
 
@@ -555,8 +576,23 @@ export class FqLibraryBackup {
       playback,
       FqAppSettingsStore.getStartupTabIndex(),
       FqAppSettingsStore.getHomeStyle());
+    // 书架分组段：分组 + 组内作品（仅书架内可移植书；local_ 与不在书架的书排除）
+    const shelfIdSet: Set<string> = new Set<string>();
+    for (const item of shelf) {
+      shelfIdSet.add(item.id);
+    }
+    const groups: FqBackupShelfGroup[] = [];
+    for (const group of FqShelfGroupStore.all()) {
+      const books: string[] = [];
+      for (const bookId of FqShelfGroupStore.booksOf(group.id)) {
+        if (shelfIdSet.has(bookId)) {
+          books.push(bookId);
+        }
+      }
+      groups.push(new FqBackupShelfGroup(group.name, books));
+    }
     return new FqLibraryBackupData(Date.now(), FqLibraryBackup.appVersion(),
-      shelf, browse, listen, watched, reader, excluded, settings);
+      shelf, browse, listen, watched, reader, excluded, settings, groups);
   }
 
   /** 序列化为备份 JSON 文本（体积超限抛错）。 */
@@ -642,6 +678,21 @@ export class FqLibraryBackup {
       reader.push(rec);
     }
     root['reader'] = reader;
+    // 书架分组段（旧备份无此段）
+    if (data.groups !== null) {
+      const groups: Object[] = [];
+      for (const group of data.groups) {
+        const rec: Record<string, Object> = {};
+        rec['name'] = group.name;
+        const books: Object[] = [];
+        for (const bookId of group.books) {
+          books.push(bookId);
+        }
+        rec['books'] = books;
+        groups.push(rec);
+      }
+      root['groups'] = groups;
+    }
     if (data.settings !== null) {
       const settings: Record<string, Object> = {};
       settings['themeMode'] = data.settings.themeMode;
@@ -873,6 +924,42 @@ export class FqLibraryBackup {
     let excluded: number = 0;
     if (root['excludedLocalRecords'] !== undefined) {
       excluded = fqBackupCheckInt(root, 'excludedLocalRecords', 2147483647);
+    }
+    // 书架分组段（旧备份无此段：null，恢复时跳过；存在则全量白名单校验）
+    let groups: FqBackupShelfGroup[] | null = null;
+    const groupsRaw: Object | undefined = root['groups'];
+    if (groupsRaw !== undefined) {
+      const groupsList: Object[] | null = fqAsArray(groupsRaw);
+      if (groupsList === null || groupsList.length > FQ_BACKUP_MAX_GROUPS) {
+        throw new Error('备份书架分组段格式无效');
+      }
+      groups = [];
+      const groupNames: Set<string> = new Set<string>();
+      for (const groupValue of groupsList) {
+        const groupRec: Record<string, Object> | null = fqAsRecord(groupValue);
+        if (groupRec === null) {
+          throw new Error('备份书架分组段格式无效');
+        }
+        const name: string = fqBackupCheckText(groupRec, 'name');
+        if (name.trim().length === 0 || name.length > 30 || groupNames.has(name)) {
+          throw new Error('备份分组名称无效或重复');
+        }
+        groupNames.add(name);
+        const books: string[] = [];
+        const bookIds: Set<string> = new Set<string>();
+        for (const bookValue of fqBackupCheckList(groupRec['books'])) {
+          if (typeof bookValue !== 'string') {
+            throw new Error('备份分组内作品记录无效');
+          }
+          fqBackupCheckId(bookValue);
+          if (bookIds.has(bookValue)) {
+            throw new Error('备份分组内有重复作品');
+          }
+          bookIds.add(bookValue);
+          books.push(bookValue);
+        }
+        groups.push(new FqBackupShelfGroup(name, books));
+      }
     }
     // 应用设置段：v1 备份无此段（settings 为 null，恢复时跳过）；v2 起必有且全量校验。
     let settings: FqBackupAppSettings | null = null;
@@ -1107,7 +1194,7 @@ export class FqLibraryBackup {
         homeStyle);
     }
     return new FqLibraryBackupData(createdAt, appVersion, shelf, browse, listen,
-      watched, reader, excluded, settings);
+      watched, reader, excluded, settings, groups);
   }
 
   /** 合并恢复到本机（只补缺失，绝不覆盖本机已有记录）。 */
@@ -1140,6 +1227,35 @@ export class FqLibraryBackup {
           FqReaderStore.saveReadChapters(entry.bookId, chapters);
         }
         readerAdded++;
+      }
+    }
+    // 书架分组段（旧备份无此段跳过）：同名分组映射到本机分组（缺失则新建），
+    // 组内作品仅补未分组的书（assignIfUnassigned，不覆盖本机已有归属）。
+    let groupsApplied: boolean = false;
+    if (data.groups !== null) {
+      groupsApplied = true;
+      const shelfIds: Set<string> = new Set<string>();
+      for (const item of FqShelfStore.all()) {
+        shelfIds.add(item.id);
+      }
+      for (const group of data.groups) {
+        let local: FqShelfGroup | null = FqShelfGroupStore.groupByName(group.name);
+        if (local === null) {
+          local = FqShelfGroupStore.addGroup(group.name);
+        }
+        if (local === null) {
+          // 名称非法或分组数达上限：跳过该组，不阻断整份恢复
+          continue;
+        }
+        const books: string[] = [];
+        for (const bookId of group.books) {
+          if (shelfIds.has(bookId)) {
+            books.push(bookId);
+          }
+        }
+        if (books.length > 0) {
+          FqShelfGroupStore.assignIfUnassigned(books, local.id);
+        }
       }
     }
     // 应用设置段：深浅模式/主题色/后台播放 + 阅读偏好即时应用（v1 备份无此段跳过）。
@@ -1217,7 +1333,7 @@ export class FqLibraryBackup {
       settingsApplied = true;
     }
     return new FqLibraryBackupRestoreResult(shelfAdded, browseAdded, listenAdded,
-      readerAdded, episodesAdded, progressAdded, settingsApplied, playbackApplied);
+      readerAdded, episodesAdded, progressAdded, settingsApplied, playbackApplied, groupsApplied);
   }
 
   /** 当前应用版本号（备份元信息；获取失败返回空串）。 */

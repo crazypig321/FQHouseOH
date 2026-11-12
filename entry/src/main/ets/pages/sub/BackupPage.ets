@@ -175,7 +175,7 @@ export struct BackupPage {
                 .fontWeight(FontWeight.Medium)
                 .fontColor($r('sys.color.font_primary'))
                 .width('100%')
-              Text(`包含书架收藏、浏览记录、收听进度、阅读进度、已看剧集（含续播进度）与外观、阅读设置，` +
+              Text(`包含书架收藏（含自定义分组）、浏览记录、收听进度、阅读进度、已看剧集（含续播进度）与外观、阅读设置，` +
                 '以及播放设置（弹幕样式、清晰度偏好、解码方式、边看边缓存、画中画、朗读音色语速）。\n\n' +
                 '不含本地 TXT 书籍、下载缓存、阅读时长统计与搜索历史，这些需要另行保留。\n\n' +
                 `导出的备份保存在 ${FQ_BACKUP_DIR_TEXT} 目录，可跨设备传输；` +
@@ -206,7 +206,7 @@ export struct BackupPage {
       return;
     }
     DialogManager.ShowConfirm('导出备份',
-      `备份将保存到 ${FQ_BACKUP_DIR_TEXT} 目录，包含书架收藏、浏览记录、收听进度、` +
+      `备份将保存到 ${FQ_BACKUP_DIR_TEXT} 目录，包含书架收藏（含自定义分组）、浏览记录、收听进度、` +
       '阅读进度、已看剧集与外观、阅读、播放设置。将文件传到新设备，在本页选择导入即可恢复。',
       '导出', (): void => {
         this.runExport();
@@ -303,6 +303,9 @@ export struct BackupPage {
       }
       if (result.playbackApplied) {
         summary += '\n播放设置（弹幕/解码/缓存等）已同步。';
+      }
+      if (result.groupsApplied) {
+        summary += '\n书架分组已同步（仅补未分组的书）。';
       }
       this.message = summary;
     } catch (error) {
@@ -413,6 +416,9 @@ export struct BackupPage {
         this.StatCell(`${data.episodeCount()}`, '已看剧集')
         if (data.settings !== null && data.settings.readerCustomThemes.length > 0) {
           this.StatCell(`${data.settings.readerCustomThemes.length}`, '自定义主题')
+        }
+        if (data.groups !== null && data.groups.length > 0) {
+          this.StatCell(`${data.groups.length}`, '书架分组')
         }
       }
       .width('100%')

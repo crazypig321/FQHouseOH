@@ -9,8 +9,10 @@
 import { ROUTE_READER2, ROUTE_CACHE_MANAGE, ROUTE_DETAIL, DetailNavParams, fqPushBookOrDetail, ReaderNavParams } from '../model/FqNavModels';
 import { CommonNav, titleBarOf } from '../view/CommonNav';
 import { CommonSearch, CommonBlur } from '../view/CommonCom';
+import { CommonSheet, FqSheetOptions } from '../view/sheet/CommonSheet';
 import { FqMenu, FqMenuItem } from '../view/CommonMenu';
 import { FqShelfStore, FqShelfItem } from '../core/FqShelfStore';
+import { FqShelfGroupStore, FqShelfGroup } from '../core/FqShelfGroupStore';
 import { FqBrowseStore } from '../core/FqBrowseStore';
 import { FqReaderStore } from '../core/FqReaderStore';
 import { FqWatchedProgress, FqWatchedStore } from '../core/FqWatchedStore';
@@ -40,6 +42,16 @@ const SHELF_PREF_NAME: string = 'fq_shelf_prefs';
 const SHELF_PREF_LAYOUT: string = 'layout';
 /** 书架排序偏好（0..7，见 sortMode）。 */
 const SHELF_PREF_SORT: string = 'sort';
+/** 书架筛选偏好：状态（0=全部 1=未看完 2=已看完）。 */
+const SHELF_PREF_FILTER_STATUS: string = 'filter_status';
+/** 书架筛选偏好：来源（0=全部 1=本地 2=在线）。 */
+const SHELF_PREF_FILTER_SOURCE: string = 'filter_source';
+/** 书架筛选偏好：分组（''=全部，其余分组 id）。 */
+const SHELF_PREF_FILTER_GROUP: string = 'filter_group';
+/** 书架筛选 pill 锚点 id。 */
+const SHELF_FILTER_ANCHOR_ID: string = 'shelf_filter_anchor';
+/** 分组管理 sheet 内分组行菜单锚点 id 前缀。 */
+const SHELF_GROUP_ROW_ANCHOR_PREFIX: string = 'shelf_group_row_';
 
 /** 书架/浏览历史统一展示行（勾选态由 batchSelected 实时派生，不随行快照，避免批量操作整表重载闪烁）。 */
 class ShelfRow {
@@ -125,6 +137,18 @@ export struct ShelfPage {
   @Local todayMinutesNum: number = 0;
   @Local importing: boolean = false;
   @Local visibleCount: number = 0;
+  /** 书架筛选：状态（0=全部 1=未看完 2=已看完，持久化，仅书架 tab）。 */
+  @Local filterStatus: number = 0;
+  /** 书架筛选：来源（0=全部 1=本地 2=在线，持久化，仅书架 tab）。 */
+  @Local filterSource: number = 0;
+  /** 书架筛选：分组（''=全部，其余分组 id，持久化，仅书架 tab）。 */
+  @Local filterGroupId: string = '';
+  /** 分组 sheet 是否可见（assign=多选归组 / manage=分组管理）。 */
+  @Local groupSheetVisible: boolean = false;
+  /** 分组 sheet 模式：'assign' 归组 / 'manage' 管理。 */
+  @Local groupSheetMode: string = 'manage';
+  /** 分组 sheet 展示的分组快照（store 变化时刷新）。 */
+  @Local sheetGroups: FqShelfGroup[] = [];
   /** store 版本总线（监听 shelf/browse 数据变化实时刷新列表）。 */
   @Local storeBus: FqStoreBus = fqStoreBus;
   /** 全局状态引用（监听批量多选被外部退出，如 Index 返回手势）。 */
@@ -135,11 +159,14 @@ export struct ShelfPage {
   /** 已尝试封面匹配的本地书（会话内去重，避免重复搜索）。 */
   private coverMatchTried: Set<string> = new Set<string>();
 
-  /** 书架/浏览历史/已看剧集/阅读进度数据变化（详情页收藏、阅读记录、看剧/阅读进度、批量移除等）实时刷新列表。 */
+  /** 书架/浏览历史/已看剧集/阅读进度/分组数据变化（详情页收藏、阅读记录、看剧/阅读进度、批量移除、归组等）实时刷新列表。 */
   @Monitor('storeBus.shelfVersion', 'storeBus.browseVersion', 'storeBus.watchedVersion',
-    'storeBus.readerProgressVersion')
+    'storeBus.readerProgressVersion', 'storeBus.shelfGroupVersion')
   onStoreDataChange(): void {
     this.refreshData();
+    if (this.groupSheetVisible) {
+      this.sheetGroups = FqShelfGroupStore.all().slice();
+    }
   }
 
   /** 多选模式被外部退出（Index 返回手势）时清空勾选。 */
@@ -164,6 +191,19 @@ export struct ShelfPage {
       const rawSort: preferences.ValueType = this.layoutPref.getSync(SHELF_PREF_SORT, 6);
       if (typeof rawSort === 'number' && rawSort >= 0 && rawSort <= 7) {
         this.sortMode = rawSort;
+      }
+      const rawStatus: preferences.ValueType = this.layoutPref.getSync(SHELF_PREF_FILTER_STATUS, 0);
+      if (typeof rawStatus === 'number' && rawStatus >= 0 && rawStatus <= 2) {
+        this.filterStatus = rawStatus;
+      }
+      const rawSource: preferences.ValueType = this.layoutPref.getSync(SHELF_PREF_FILTER_SOURCE, 0);
+      if (typeof rawSource === 'number' && rawSource >= 0 && rawSource <= 2) {
+        this.filterSource = rawSource;
+      }
+      const rawGroup: preferences.ValueType = this.layoutPref.getSync(SHELF_PREF_FILTER_GROUP, '');
+      if (typeof rawGroup === 'string' && rawGroup.length > 0
+        && FqShelfGroupStore.groupById(rawGroup) !== null) {
+        this.filterGroupId = rawGroup;
       }
     } catch (error) {
       this.layoutPref = null;
@@ -284,6 +324,20 @@ export struct ShelfPage {
                   .onClick(() => {
                     this.shareBatchSelected();
                   })
+                // 批量归组：所选作品移入自定义分组（仅书架 tab）
+                if (this.currentTab === 0) {
+                  Button('分组')
+                    .layoutWeight(1)
+                    .height(36)
+                    .fontSize(14)
+                    .fontWeight(FontWeight.Medium)
+                    .borderRadius(10)
+                    .backgroundColor($r('sys.color.comp_background_tertiary'))
+                    .fontColor($r('sys.color.font_primary'))
+                    .onClick(() => {
+                      this.openAssignSheet();
+                    })
+                }
                 Button(this.currentTab === 0 ? '移出书架' : '删除')
                   .layoutWeight(1)
                   .height(36)
@@ -327,6 +381,11 @@ export struct ShelfPage {
       }
       .width('100%')
       .height('100%')
+      // 分组 sheet：assign=多选归组 / manage=分组管理（共用单 bindSheet）
+      .bindSheet(this.groupSheetVisible, this.GroupSheetBuilder(),
+        FqSheetOptions((): void => {
+          this.groupSheetVisible = false;
+        }, 480))
     }
   }
 
@@ -355,9 +414,12 @@ export struct ShelfPage {
       let addedIndex: number = 0;
       for (const entry of FqShelfStore.all()) {
         if (keyword.length === 0 || entry.title.includes(keyword)) {
-          entries.push(new ShelfSortEntry(new ShelfRow(entry.id, entry.kind, entry.title, entry.cover,
-            FqLocalBookStore.isLocalBookId(entry.id) ? '本地书籍' : fqKindLabel(entry.kind),
-            this.entryPercent(entry.id, entry.kind)), addedIndex, visitedAtMap.get(entry.id) ?? 0));
+          const percent: number = this.entryPercent(entry.id, entry.kind);
+          if (this.rowMatchesFilter(entry.id, percent)) {
+            entries.push(new ShelfSortEntry(new ShelfRow(entry.id, entry.kind, entry.title, entry.cover,
+              FqLocalBookStore.isLocalBookId(entry.id) ? '本地书籍' : fqKindLabel(entry.kind),
+              percent), addedIndex, visitedAtMap.get(entry.id) ?? 0));
+          }
         }
         addedIndex++;
       }
@@ -429,9 +491,413 @@ export struct ShelfPage {
     return '';
   }
 
+  /** 筛选是否生效（任一维度非「全部」）。 */
+  private hasActiveFilter(): boolean {
+    return this.currentTab === 0
+      && (this.filterStatus !== 0 || this.filterSource !== 0 || this.filterGroupId.length > 0);
+  }
+
+  /** 书架行是否通过当前组合筛选（状态/来源/分组 AND）。 */
+  private rowMatchesFilter(id: string, percent: number): boolean {
+    // 已看完 = 进度 ≥ 100；未看完 = 除已看完外全部（含无进度）
+    if (this.filterStatus === 2 && percent < 100) {
+      return false;
+    }
+    if (this.filterStatus === 1 && percent >= 100) {
+      return false;
+    }
+    const isLocal: boolean = FqLocalBookStore.isLocalBookId(id);
+    if (this.filterSource === 1 && !isLocal) {
+      return false;
+    }
+    if (this.filterSource === 2 && isLocal) {
+      return false;
+    }
+    if (this.filterGroupId.length > 0 && FqShelfGroupStore.groupOf(id) !== this.filterGroupId) {
+      return false;
+    }
+    return true;
+  }
+
+  /** 筛选 pill 标签：默认「筛选」，生效时组合各维度（如「未看完 · 本地 · 分组名」）。 */
+  private filterPillLabel(): string {
+    if (!this.hasActiveFilter()) {
+      return '筛选';
+    }
+    const parts: string[] = [];
+    if (this.filterStatus === 1) {
+      parts.push('未看完');
+    }
+    if (this.filterStatus === 2) {
+      parts.push('已看完');
+    }
+    if (this.filterSource === 1) {
+      parts.push('本地');
+    }
+    if (this.filterSource === 2) {
+      parts.push('在线');
+    }
+    if (this.filterGroupId.length > 0) {
+      const group: FqShelfGroup | null = FqShelfGroupStore.groupById(this.filterGroupId);
+      parts.push(group !== null ? group.name : '分组');
+    }
+    return parts.join(' · ');
+  }
+
+  /** 筛选偏好持久化。 */
+  private persistFilterPref(key: string, value: number | string): void {
+    const pref: preferences.Preferences | null = this.layoutPref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.putSync(key, value);
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
+  }
+
+  /** 筛选菜单：状态/来源/分组三级联 + 管理分组。 */
+  private openFilterMenu(): void {
+    const items: Array<FqMenuItem> = [];
+
+    const statusLabels: string[] = ['全部', '未看完', '已看完'];
+    const statusItem = new FqMenuItem();
+    statusItem.label = this.filterStatus === 0 ? '状态' : `状态 · ${statusLabels[this.filterStatus]}`;
+    statusItem.subItems = this.buildFilterEnumSubItems(statusLabels, this.filterStatus,
+      (mode: number): void => {
+        this.setFilterStatus(mode);
+      });
+    items.push(statusItem);
+
+    const sourceLabels: string[] = ['全部', '本地', '在线'];
+    const sourceItem = new FqMenuItem();
+    sourceItem.label = this.filterSource === 0 ? '来源' : `来源 · ${sourceLabels[this.filterSource]}`;
+    sourceItem.subItems = this.buildFilterEnumSubItems(sourceLabels, this.filterSource,
+      (mode: number): void => {
+        this.setFilterSource(mode);
+      });
+    items.push(sourceItem);
+
+    const groupItem = new FqMenuItem();
+    groupItem.label = this.filterGroupId.length === 0 ? '分组'
+      : `分组 · ${this.filterPillGroupName()}`;
+    groupItem.subItems = this.buildFilterGroupSubItems();
+    items.push(groupItem);
+
+    const manageItem = new FqMenuItem();
+    manageItem.icon = $r('sys.symbol.list_bullet');
+    manageItem.label = '管理分组';
+    manageItem.onAction = (): void => {
+      FqMenu.dismiss();
+      this.openManageSheet();
+    };
+    items.push(manageItem);
+
+    FqMenu.open(this.getUIContext(), SHELF_FILTER_ANCHOR_ID, items);
+  }
+
+  private filterPillGroupName(): string {
+    const group: FqShelfGroup | null = FqShelfGroupStore.groupById(this.filterGroupId);
+    return group !== null ? group.name : '';
+  }
+
+  /** 状态/来源二级菜单（当前项打勾）。 */
+  private buildFilterEnumSubItems(labels: string[], current: number,
+    onPick: (mode: number) => void): Array<FqMenuItem> {
+    const subItems: Array<FqMenuItem> = [];
+    for (let mode: number = 0; mode < labels.length; mode++) {
+      const sub = new FqMenuItem();
+      sub.label = labels[mode];
+      sub.endIcon = current === mode ? $r('sys.symbol.checkmark') : '';
+      sub.onAction = (): void => {
+        FqMenu.dismiss();
+        onPick(mode);
+      };
+      subItems.push(sub);
+    }
+    return subItems;
+  }
+
+  /** 分组二级菜单：全部 + 各分组（当前项打勾）+ 新建分组。 */
+  private buildFilterGroupSubItems(): Array<FqMenuItem> {
+    const subItems: Array<FqMenuItem> = [];
+    const allSub = new FqMenuItem();
+    allSub.label = '全部';
+    allSub.endIcon = this.filterGroupId.length === 0 ? $r('sys.symbol.checkmark') : '';
+    allSub.onAction = (): void => {
+      FqMenu.dismiss();
+      this.setFilterGroupId('');
+    };
+    subItems.push(allSub);
+    for (const group of FqShelfGroupStore.all()) {
+      const sub = new FqMenuItem();
+      sub.label = group.name;
+      sub.endIcon = this.filterGroupId === group.id ? $r('sys.symbol.checkmark') : '';
+      sub.onAction = (): void => {
+        FqMenu.dismiss();
+        this.setFilterGroupId(group.id);
+      };
+      subItems.push(sub);
+    }
+    const newSub = new FqMenuItem();
+    newSub.label = '新建分组';
+    newSub.onAction = (): void => {
+      FqMenu.dismiss();
+      this.promptCreateGroup();
+    };
+    subItems.push(newSub);
+    return subItems;
+  }
+
+  private setFilterStatus(mode: number): void {
+    if (this.filterStatus === mode) {
+      return;
+    }
+    this.filterStatus = mode;
+    this.persistFilterPref(SHELF_PREF_FILTER_STATUS, mode);
+    this.rebuildRows();
+  }
+
+  private setFilterSource(mode: number): void {
+    if (this.filterSource === mode) {
+      return;
+    }
+    this.filterSource = mode;
+    this.persistFilterPref(SHELF_PREF_FILTER_SOURCE, mode);
+    this.rebuildRows();
+  }
+
+  private setFilterGroupId(groupId: string): void {
+    if (this.filterGroupId === groupId) {
+      return;
+    }
+    this.filterGroupId = groupId;
+    this.persistFilterPref(SHELF_PREF_FILTER_GROUP, groupId);
+    this.rebuildRows();
+  }
+
+  /** 新建分组（筛选菜单 / sheet 内共用）。 */
+  private promptCreateGroup(): void {
+    DialogManager.InputShelfGroupName('新建分组', '', (name: string): void => {
+      const group: FqShelfGroup | null = FqShelfGroupStore.addGroup(name);
+      if (group === null) {
+        this.showToast('创建失败：名称重复或已达 50 组上限');
+        return;
+      }
+      if (this.groupSheetVisible && this.groupSheetMode === 'assign') {
+        this.assignSelectedTo(group.id, group.name);
+        return;
+      }
+      this.showToast(`已创建分组「${group.name}」`);
+    });
+  }
+
+  /** 打开分组管理 sheet。 */
+  private openManageSheet(): void {
+    this.groupSheetMode = 'manage';
+    this.sheetGroups = FqShelfGroupStore.all().slice();
+    this.groupSheetVisible = true;
+  }
+
+  /** 打开多选归组 sheet。 */
+  private openAssignSheet(): void {
+    if (appState.batchSelectedIds.length === 0) {
+      this.showToast('请先选择条目');
+      return;
+    }
+    this.groupSheetMode = 'assign';
+    this.sheetGroups = FqShelfGroupStore.all().slice();
+    this.groupSheetVisible = true;
+  }
+
+  /** 多选所选移入指定分组（关闭 sheet + 退出多选）。 */
+  private assignSelectedTo(groupId: string, groupName: string): void {
+    const ids: string[] = appState.batchSelectedIds.slice();
+    if (ids.length === 0) {
+      this.groupSheetVisible = false;
+      return;
+    }
+    const changed: number = FqShelfGroupStore.assign(ids, groupId);
+    this.groupSheetVisible = false;
+    this.exitBatchMode();
+    this.showToast(changed > 0 ? `已将 ${changed} 本移入「${groupName}」` : '所选作品已在分组中');
+    this.refreshData();
+  }
+
+  /** 多选所选移出分组。 */
+  private removeSelectedFromGroup(): void {
+    const ids: string[] = appState.batchSelectedIds.slice();
+    if (ids.length === 0) {
+      this.groupSheetVisible = false;
+      return;
+    }
+    const changed: number = FqShelfGroupStore.assign(ids, '');
+    this.groupSheetVisible = false;
+    this.exitBatchMode();
+    this.showToast(changed > 0 ? `已将 ${changed} 本移出分组` : '所选作品均未分组');
+    this.refreshData();
+  }
+
+  /** 分组内仍在书架的书数（展示计数用）。 */
+  private groupShelfCount(groupId: string): number {
+    let count: number = 0;
+    for (const entry of FqShelfStore.all()) {
+      if (FqShelfGroupStore.groupOf(entry.id) === groupId) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /** 分组行菜单：重命名 / 删除（仅管理 sheet）。 */
+  private openGroupManageMenu(group: FqShelfGroup): void {
+    const items: Array<FqMenuItem> = [];
+    const renameItem = new FqMenuItem();
+    renameItem.label = '重命名';
+    renameItem.onAction = (): void => {
+      FqMenu.dismiss();
+      this.promptRenameGroup(group.id, group.name);
+    };
+    items.push(renameItem);
+    const deleteItem = new FqMenuItem();
+    deleteItem.label = '删除分组';
+    deleteItem.onAction = (): void => {
+      FqMenu.dismiss();
+      DialogManager.ShowConfirm('删除分组', `删除「${group.name}」后，组内作品将回到未分组。`, '删除',
+        (): void => {
+          FqShelfGroupStore.removeGroup(group.id);
+          if (this.filterGroupId === group.id) {
+            this.setFilterGroupId('');
+          }
+          this.showToast('已删除分组');
+        });
+    };
+    items.push(deleteItem);
+    FqMenu.open(this.getUIContext(), SHELF_GROUP_ROW_ANCHOR_PREFIX + group.id, items);
+  }
+
+  private promptRenameGroup(id: string, name: string): void {
+    DialogManager.InputShelfGroupName('重命名分组', name, (next: string): void => {
+      if (!FqShelfGroupStore.renameGroup(id, next)) {
+        this.showToast('重命名失败：名称重复或超出长度限制');
+        return;
+      }
+      this.showToast('已重命名');
+    });
+  }
+
+  /** 分组 sheet（assign 归组 / manage 管理，共用单 bindSheet）。 */
+  @Builder
+  private GroupSheetBuilder() {
+    CommonSheet({
+      sheetTitle: this.groupSheetMode === 'assign' ? '移入分组' : '分组管理',
+      showClose: true,
+      closeClick: (): void => {
+        this.groupSheetVisible = false;
+      },
+    }) {
+      List() {
+        ListItem() {
+          Row({ space: 8 }) {
+            SymbolGlyph($r('sys.symbol.plus'))
+              .fontSize(15)
+              .fontColor([appState.accentColor])
+            Text('新建分组')
+              .fontSize(15)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(appState.accentColor)
+          }
+          .width('100%')
+          .height(48)
+          .padding({ left: 20, right: 20 })
+          .onClick(() => {
+            this.promptCreateGroup();
+          })
+        }
+
+        if (this.groupSheetMode === 'assign') {
+          ListItem() {
+            Row({ space: 8 }) {
+              SymbolGlyph($r('sys.symbol.xmark'))
+                .fontSize(14)
+                .fontColor([$r('sys.color.icon_secondary')])
+              Text('移出分组')
+                .fontSize(15)
+                .fontColor($r('sys.color.font_primary'))
+            }
+            .width('100%')
+            .height(48)
+            .padding({ left: 20, right: 20 })
+            .onClick(() => {
+              this.removeSelectedFromGroup();
+            })
+          }
+        }
+
+        ForEach(this.sheetGroups, (group: FqShelfGroup) => {
+          ListItem() {
+            Row() {
+              Column({ space: 2 }) {
+                Text(group.name)
+                  .fontSize(15)
+                  .fontColor($r('sys.color.font_primary'))
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                Text(`${this.groupShelfCount(group.id)} 本`)
+                  .fontSize(12)
+                  .fontColor($r('sys.color.font_secondary'))
+              }
+              .layoutWeight(1)
+              .alignItems(HorizontalAlign.Start)
+              if (this.groupSheetMode === 'manage') {
+                SymbolGlyph($r('sys.symbol.chevron_right'))
+                  .fontSize(12)
+                  .fontColor([$r('sys.color.icon_tertiary')])
+              }
+            }
+            .width('100%')
+            .constraintSize({ minHeight: 52 })
+            .padding({ top: 6, bottom: 6, left: 20, right: 20 })
+            .id(SHELF_GROUP_ROW_ANCHOR_PREFIX + group.id)
+            .onClick(() => {
+              if (this.groupSheetMode === 'assign') {
+                this.assignSelectedTo(group.id, group.name);
+              } else {
+                this.openGroupManageMenu(group);
+              }
+            })
+          }
+        }, (group: FqShelfGroup): string => group.id)
+
+        if (this.sheetGroups.length === 0) {
+          ListItem() {
+            Text(this.groupSheetMode === 'assign' ? '还没有分组，先新建一个吧' : '还没有分组')
+              .fontSize(13)
+              .fontColor($r('sys.color.font_secondary'))
+              .width('100%')
+              .textAlign(TextAlign.Center)
+              .padding({ top: 24, bottom: 24 })
+          }
+        }
+      }
+      .width('100%')
+      .height('100%')
+      .scrollBar(BarState.Off)
+      .divider({
+        strokeWidth: 0.6,
+        color: $r('sys.color.comp_divider'),
+        startMargin: 20,
+        endMargin: 20
+      })
+    }
+  }
+
   /** titleBar 菜单按钮：添加（导入本地书籍）+ 搜索 + 更多。 */
-  private titleMenus(): Array<HdsNavigationMenuItemOptions> {
-    const add: HdsNavigationMenuItemOptions = {
+  private titleMenus(): Array<HdsNavigationMenuItemOptions> {    const add: HdsNavigationMenuItemOptions = {
       content: {
         icon: $r('sys.symbol.plus'),
         label: '添加',
@@ -744,6 +1210,7 @@ export struct ShelfPage {
           }
           FqLocalBookStore.deleteBooks(ids);
           FqShelfStore.removeByIds(ids);
+          FqShelfGroupStore.removeAssignments(ids);
         } else {
           FqBrowseStore.clear();
         }
@@ -915,6 +1382,7 @@ export struct ShelfPage {
         if (isShelf) {
           FqLocalBookStore.deleteBooks(ids);
           FqShelfStore.removeByIds(ids);
+          FqShelfGroupStore.removeAssignments(ids);
           this.showToast(`已移出 ${count} 本`);
         } else {
           FqBrowseStore.removeByIds(ids);
@@ -951,50 +1419,76 @@ export struct ShelfPage {
     fqPushBookOrDetail(row.id, row.kind, row.title, row.cover);
   }
 
-  /** 标题栏下方扩展区：「书架/浏览历史」胶囊滑块 + 可展开搜索框。 */
+  /** 标题栏下方扩展区：「书架/浏览历史」胶囊滑块 + 筛选 pill + 可展开搜索框。 */
   @Builder
   private TitleExtraBuilder() {
     Column() {
-      Stack({ alignContent: Alignment.Start }) {
-        Row()
-          .width('50%')
-          .height(26)
-          .borderRadius(13)
-          // 位移必须用绝对值：81 = 滑轨内宽 162 的一半
-          .offset({ x: this.currentTab === 1 ? 81 : 0 })
-          .attributeModifier(rowImmersiveModifier)
+      Row({ space: 8 }) {
+        Stack({ alignContent: Alignment.Start }) {
+          Row()
+            .width('50%')
+            .height(26)
+            .borderRadius(13)
+            // 位移必须用绝对值：81 = 滑轨内宽 162 的一半
+            .offset({ x: this.currentTab === 1 ? 81 : 0 })
+            .attributeModifier(rowImmersiveModifier)
 
-        Row() {
-          Text('书架')
-            .fontSize(12)
-            .fontWeight(this.currentTab === 0 ? FontWeight.Bold : FontWeight.Normal)
-            .fontColor(this.currentTab === 0 ? appState.accentColor : $r('sys.color.font_tertiary'))
-            .height(26)
-            .layoutWeight(1)
-            .textAlign(TextAlign.Center)
-            .onClick(() => {
-              this.switchTab(0);
-            })
-          Text('浏览历史')
-            .fontSize(12)
-            .fontWeight(this.currentTab === 1 ? FontWeight.Bold : FontWeight.Normal)
-            .fontColor(this.currentTab === 1 ? appState.accentColor : $r('sys.color.font_tertiary'))
-            .height(26)
-            .layoutWeight(1)
-            .textAlign(TextAlign.Center)
-            .onClick(() => {
-              this.switchTab(1);
-            })
+          Row() {
+            Text('书架')
+              .fontSize(12)
+              .fontWeight(this.currentTab === 0 ? FontWeight.Bold : FontWeight.Normal)
+              .fontColor(this.currentTab === 0 ? appState.accentColor : $r('sys.color.font_tertiary'))
+              .height(26)
+              .layoutWeight(1)
+              .textAlign(TextAlign.Center)
+              .onClick(() => {
+                this.switchTab(0);
+              })
+            Text('浏览历史')
+              .fontSize(12)
+              .fontWeight(this.currentTab === 1 ? FontWeight.Bold : FontWeight.Normal)
+              .fontColor(this.currentTab === 1 ? appState.accentColor : $r('sys.color.font_tertiary'))
+              .height(26)
+              .layoutWeight(1)
+              .textAlign(TextAlign.Center)
+              .onClick(() => {
+                this.switchTab(1);
+              })
+          }
+          .width('100%')
         }
-        .width('100%')
+        .width(168)
+        .height(30)
+        .borderRadius(15)
+        .backgroundColor($r('sys.color.comp_background_tertiary'))
+        .padding(3)
+        .margin({ top: 4, bottom: 10 })
+        .attributeModifier(stackImmersiveModifier)
+
+        // 筛选 pill（仅书架 tab）：状态/来源/分组组合筛选入口
+        if (this.currentTab === 0) {
+          Row({ space: 3 }) {
+            Text(this.filterPillLabel())
+              .fontSize(12)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(this.hasActiveFilter() ? appState.accentColor : $r('sys.color.font_secondary'))
+              .maxLines(1)
+            SymbolGlyph($r('sys.symbol.chevron_down'))
+              .fontSize(10)
+              .fontColor([this.hasActiveFilter() ? appState.accentColor : $r('sys.color.icon_tertiary')])
+          }
+          .height(30)
+          .padding({ left: 10, right: 9 })
+          .borderRadius(15)
+          .backgroundColor($r('sys.color.comp_background_tertiary'))
+          .margin({ top: 4, bottom: 10 })
+          .attributeModifier(rowImmersiveModifier)
+          .id(SHELF_FILTER_ANCHOR_ID)
+          .onClick(() => {
+            this.openFilterMenu();
+          })
+        }
       }
-      .width(168)
-      .height(30)
-      .borderRadius(15)
-      .backgroundColor($r('sys.color.comp_background_tertiary'))
-      .padding(3)
-      .margin({ top: 4, bottom: 10 })
-      .attributeModifier(stackImmersiveModifier)
 
       if (this.showSearchBox) {
         this.SearchBar()
@@ -1134,6 +1628,9 @@ export struct ShelfPage {
       return '未找到相关内容';
     }
     if (this.currentTab === 0) {
+      if (this.hasActiveFilter()) {
+        return '当前筛选无匹配作品';
+      }
       return '书架还是空的';
     }
     return '暂无浏览记录';
@@ -1144,6 +1641,9 @@ export struct ShelfPage {
       return '换个关键词试试';
     }
     if (this.currentTab === 0) {
+      if (this.hasActiveFilter()) {
+        return '调整筛选条件或恢复「全部」后再试';
+      }
       return '去首页发现好故事，加入书架吧';
     }
     return '看过的作品会出现在这里';

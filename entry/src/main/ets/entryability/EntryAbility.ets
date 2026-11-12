@@ -23,6 +23,7 @@ import { FqBackend } from '../core/FqBackend';
 import { fqAudioSession } from '../core/FqAudioSession';
 import { FqAvArbiter } from '../core/FqAvArbiter';
 import { FqShelfStore } from '../core/FqShelfStore';
+import { FqShelfGroupStore } from '../core/FqShelfGroupStore';
 import { FqBrowseStore } from '../core/FqBrowseStore';
 import { FqAudioHistory } from '../core/FqAudioHistory';
 import { FqWatchedStore } from '../core/FqWatchedStore';
@@ -62,6 +63,7 @@ export default class EntryAbility extends UIAbility {
     // 书架/浏览/听书/已看/阅读进度：启动即初始化（备份导出需枚举全量数据，
     // 此前仅子页面各自 init，直达备份页导出会因未初始化而漏采）
     FqShelfStore.init(this.context);
+    FqShelfGroupStore.init(this.context);
     FqBrowseStore.init(this.context);
     FqAudioHistory.init(this.context);
     FqWatchedStore.init(this.context);

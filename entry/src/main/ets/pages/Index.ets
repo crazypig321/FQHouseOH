@@ -18,6 +18,7 @@ import { ComicSettingsDialogContent } from '../view/dialog/ComicSettingsDialogCo
 import { WebDavBackupListDialogContent } from '../view/dialog/WebDavBackupListDialogContent';
 import { WebDavBackupCountDialogContent } from '../view/dialog/WebDavBackupCountDialogContent';
 import { ChapterCacheLimitDialogContent } from '../view/dialog/ChapterCacheLimitDialogContent';
+import { GroupNameDialogContent } from '../view/dialog/GroupNameDialogContent';
 import { HomeCategoryDialogContent } from '../view/dialog/HomeCategoryDialogContent';
 import { FqPlaybackBall } from '../view/FqPlaybackBall';
 import { FqSheetOptions } from '../view/sheet/CommonSheet';
@@ -484,6 +485,8 @@ struct Index {
       WebDavBackupCountDialogContent()
     } else if (key === '章节缓存限制') {
       ChapterCacheLimitDialogContent()
+    } else if (key === '分组命名') {
+      GroupNameDialogContent()
     }
   }
 }
