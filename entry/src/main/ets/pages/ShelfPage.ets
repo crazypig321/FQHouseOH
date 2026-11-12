@@ -153,6 +153,10 @@ export struct ShelfPage {
   @Local groupSheetMode: string = 'manage';
   /** 分组 sheet 展示的分组快照（store 变化时刷新）。 */
   @Local sheetGroups: FqShelfGroup[] = [];
+  /** 分组管理 sheet 是否处于排序模式（保存前不影响 store）。 */
+  @Local groupSortMode: boolean = false;
+  /** 排序模式编辑中的分组快照（进入排序时从 store 快照，保存时整体落盘）。 */
+  @Local sortGroups: FqShelfGroup[] = [];
   /** 筛选 pill 右侧可用区域实测宽度（vp，onAreaChange 捕获，用于长分组名省略号截断）。 */
   @Local filterAreaWidth: number = 0;
   /** store 版本总线（监听 shelf/browse 数据变化实时刷新列表）。 */
@@ -406,6 +410,7 @@ export struct ShelfPage {
       // 分组 sheet：assign=多选归组 / manage=分组管理（共用单 bindSheet）
       .bindSheet(this.groupSheetVisible, this.GroupSheetBuilder(),
         FqSheetOptions((): void => {
+          this.exitGroupSortMode();
           this.groupSheetVisible = false;
         }, 480))
     }
@@ -712,6 +717,7 @@ export struct ShelfPage {
 
   /** 打开分组管理 sheet。 */
   private openManageSheet(): void {
+    this.exitGroupSortMode();
     this.groupSheetMode = 'manage';
     this.sheetGroups = FqShelfGroupStore.all().slice();
     this.groupSheetVisible = true;
@@ -723,9 +729,70 @@ export struct ShelfPage {
       this.showToast('请先选择条目');
       return;
     }
+    this.exitGroupSortMode();
     this.groupSheetMode = 'assign';
     this.sheetGroups = FqShelfGroupStore.all().slice();
     this.groupSheetVisible = true;
+  }
+
+  /** 进入分组排序模式（快照当前顺序，保存前不落盘）。 */
+  private enterGroupSortMode(): void {
+    if (this.sheetGroups.length < 2) {
+      this.showToast('至少需要 2 个分组才能排序');
+      return;
+    }
+    this.sortGroups = this.sheetGroups.slice();
+    this.groupSortMode = true;
+  }
+
+  /** 退出分组排序模式（不保存）。 */
+  private exitGroupSortMode(): void {
+    this.groupSortMode = false;
+    this.sortGroups = [];
+  }
+
+  /** 排序行上移/下移（越界忽略）。 */
+  private moveSortGroup(index: number, delta: number): void {
+    const target: number = index + delta;
+    if (index < 0 || index >= this.sortGroups.length || target < 0 || target >= this.sortGroups.length) {
+      return;
+    }
+    const next: FqShelfGroup[] = this.sortGroups.slice();
+    const tmp: FqShelfGroup = next[index];
+    next[index] = next[target];
+    next[target] = tmp;
+    this.sortGroups = next;
+  }
+
+  /** 排序行跳转：弹「跳转排序」弹窗，确认后移到目标位。 */
+  private openSortGroupJump(index: number): void {
+    DialogManager.InputSortJump(index, this.sortGroups.length, (target: number): void => {
+      this.moveSortGroupTo(index, target);
+    });
+  }
+
+  /** 排序条目从 from 移到 to（0 基索引）。 */
+  private moveSortGroupTo(from: number, to: number): void {
+    if (from === to || from < 0 || from >= this.sortGroups.length
+      || to < 0 || to >= this.sortGroups.length) {
+      return;
+    }
+    const next: FqShelfGroup[] = this.sortGroups.slice();
+    const item: FqShelfGroup = next.splice(from, 1)[0];
+    next.splice(to, 0, item);
+    this.sortGroups = next;
+    this.showToast(`已移动到第 ${to + 1} 位`);
+  }
+
+  /** 保存分组排序（整体落盘后退出排序模式）。 */
+  private saveGroupSortOrder(): void {
+    const ids: string[] = [];
+    for (const group of this.sortGroups) {
+      ids.push(group.id);
+    }
+    FqShelfGroupStore.reorder(ids);
+    this.exitGroupSortMode();
+    this.showToast('分组排序已保存');
   }
 
   /** 多选所选移入指定分组（关闭 sheet + 退出多选）。 */
@@ -804,109 +871,178 @@ export struct ShelfPage {
     });
   }
 
-  /** 分组 sheet（assign 归组 / manage 管理，共用单 bindSheet）。 */
+  /** 分组 sheet（assign 归组 / manage 管理，共用单 bindSheet；manage 右上角新建 + 排序模式）。 */
   @Builder
   private GroupSheetBuilder() {
     CommonSheet({
       sheetTitle: this.groupSheetMode === 'assign' ? '移入分组' : '分组管理',
       showClose: true,
       closeClick: (): void => {
+        this.exitGroupSortMode();
         this.groupSheetVisible = false;
       },
+      showAdd: this.groupSheetMode === 'manage' && !this.groupSortMode,
+      addClick: (): void => {
+        this.promptCreateGroup();
+      },
+      showOrder: this.groupSheetMode === 'manage' && this.sheetGroups.length >= 2,
+      orderClick: (): void => {
+        if (this.groupSortMode) {
+          this.exitGroupSortMode();
+        } else {
+          this.enterGroupSortMode();
+        }
+      },
     }) {
-      List() {
-        ListItem() {
-          Row({ space: 8 }) {
-            SymbolGlyph($r('sys.symbol.plus'))
-              .fontSize(15)
-              .fontColor([appState.accentColor])
-            Text('新建分组')
-              .fontSize(15)
-              .fontWeight(FontWeight.Medium)
-              .fontColor(appState.accentColor)
-          }
-          .width('100%')
-          .height(48)
-          .padding({ left: 20, right: 20 })
-          .onClick(() => {
-            this.promptCreateGroup();
-          })
-        }
-
-        if (this.groupSheetMode === 'assign') {
-          ListItem() {
-            Row({ space: 8 }) {
-              SymbolGlyph($r('sys.symbol.xmark'))
-                .fontSize(14)
-                .fontColor([$r('sys.color.icon_secondary')])
-              Text('移出分组')
-                .fontSize(15)
-                .fontColor($r('sys.color.font_primary'))
+      Column() {
+        List() {
+          if (this.groupSheetMode === 'assign') {
+            ListItem() {
+              Row({ space: 8 }) {
+                SymbolGlyph($r('sys.symbol.plus'))
+                  .fontSize(15)
+                  .fontColor([appState.accentColor])
+                Text('新建分组')
+                  .fontSize(15)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(appState.accentColor)
+              }
+              .width('100%')
+              .height(48)
+              .padding({ left: 20, right: 20 })
+              .onClick(() => {
+                this.promptCreateGroup();
+              })
             }
-            .width('100%')
-            .height(48)
-            .padding({ left: 20, right: 20 })
-            .onClick(() => {
-              this.removeSelectedFromGroup();
-            })
-          }
-        }
-
-        ForEach(this.sheetGroups, (group: FqShelfGroup) => {
-          ListItem() {
-            Row() {
-              Column({ space: 2 }) {
-                Text(group.name)
+            ListItem() {
+              Row({ space: 8 }) {
+                SymbolGlyph($r('sys.symbol.xmark'))
+                  .fontSize(14)
+                  .fontColor([$r('sys.color.icon_secondary')])
+                Text('移出分组')
                   .fontSize(15)
                   .fontColor($r('sys.color.font_primary'))
-                  .maxLines(1)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-                Text(`${this.groupShelfCount(group.id)} 本`)
-                  .fontSize(12)
-                  .fontColor($r('sys.color.font_secondary'))
               }
-              .layoutWeight(1)
-              .alignItems(HorizontalAlign.Start)
-              if (this.groupSheetMode === 'manage') {
-                SymbolGlyph($r('sys.symbol.chevron_right'))
-                  .fontSize(12)
-                  .fontColor([$r('sys.color.icon_tertiary')])
+              .width('100%')
+              .height(48)
+              .padding({ left: 20, right: 20 })
+              .onClick(() => {
+                this.removeSelectedFromGroup();
+              })
+            }
+          }
+
+          if (this.groupSheetMode === 'manage' && this.groupSortMode) {
+            ForEach(this.sortGroups, (group: FqShelfGroup, index: number) => {
+              ListItem() {
+                Row({ space: 12 }) {
+                  Text((index + 1).toString())
+                    .fontSize(13)
+                    .fontColor($r('sys.color.font_tertiary'))
+                    .width(20)
+                    .textAlign(TextAlign.Center)
+                  Text(group.name)
+                    .fontSize(15)
+                    .fontColor($r('sys.color.font_primary'))
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    .layoutWeight(1)
+                  SymbolGlyph($r('sys.symbol.chevron_up'))
+                    .fontSize(14)
+                    .fontColor([$r('sys.color.icon_secondary')])
+                    .onClick(() => {
+                      this.moveSortGroup(index, -1);
+                    })
+                  SymbolGlyph($r('sys.symbol.chevron_down'))
+                    .fontSize(14)
+                    .fontColor([$r('sys.color.icon_secondary')])
+                    .onClick(() => {
+                      this.moveSortGroup(index, 1);
+                    })
+                  SymbolGlyph($r('sys.symbol.arrow_left_arrow_right'))
+                    .fontSize(14)
+                    .fontColor([$r('sys.color.icon_secondary')])
+                    .onClick(() => {
+                      this.openSortGroupJump(index);
+                    })
+                }
+                .width('100%')
+                .height(52)
+                .padding({ left: 20, right: 20 })
+              }
+            }, (group: FqShelfGroup, index: number): string => group.id + '_' + index.toString())
+          } else {
+            ForEach(this.sheetGroups, (group: FqShelfGroup) => {
+              ListItem() {
+                Row() {
+                  Column({ space: 2 }) {
+                    Text(group.name)
+                      .fontSize(15)
+                      .fontColor($r('sys.color.font_primary'))
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    Text(`${this.groupShelfCount(group.id)} 本`)
+                      .fontSize(12)
+                      .fontColor($r('sys.color.font_secondary'))
+                  }
+                  .layoutWeight(1)
+                  .alignItems(HorizontalAlign.Start)
+                  if (this.groupSheetMode === 'manage') {
+                    SymbolGlyph($r('sys.symbol.chevron_right'))
+                      .fontSize(12)
+                      .fontColor([$r('sys.color.icon_tertiary')])
+                  }
+                }
+                .width('100%')
+                .constraintSize({ minHeight: 52 })
+                .padding({ top: 6, bottom: 6, left: 20, right: 20 })
+                .id(SHELF_GROUP_ROW_ANCHOR_PREFIX + group.id)
+                .onClick(() => {
+                  if (this.groupSheetMode === 'assign') {
+                    this.assignSelectedTo(group.id, group.name);
+                  } else {
+                    this.openGroupManageMenu(group, SHELF_GROUP_ROW_ANCHOR_PREFIX + group.id);
+                  }
+                })
+              }
+            }, (group: FqShelfGroup): string => group.id)
+
+            if (this.sheetGroups.length === 0) {
+              ListItem() {
+                Text(this.groupSheetMode === 'assign' ? '还没有分组，先新建一个吧' : '还没有分组')
+                  .fontSize(13)
+                  .fontColor($r('sys.color.font_secondary'))
+                  .width('100%')
+                  .textAlign(TextAlign.Center)
+                  .padding({ top: 24, bottom: 24 })
               }
             }
-            .width('100%')
-            .constraintSize({ minHeight: 52 })
-            .padding({ top: 6, bottom: 6, left: 20, right: 20 })
-            .id(SHELF_GROUP_ROW_ANCHOR_PREFIX + group.id)
-            .onClick(() => {
-              if (this.groupSheetMode === 'assign') {
-                this.assignSelectedTo(group.id, group.name);
-              } else {
-                this.openGroupManageMenu(group, SHELF_GROUP_ROW_ANCHOR_PREFIX + group.id);
-              }
-            })
           }
-        }, (group: FqShelfGroup): string => group.id)
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .scrollBar(BarState.Off)
+        .divider({
+          strokeWidth: 0.6,
+          color: $r('sys.color.comp_divider'),
+          startMargin: 20,
+          endMargin: 20
+        })
 
-        if (this.sheetGroups.length === 0) {
-          ListItem() {
-            Text(this.groupSheetMode === 'assign' ? '还没有分组，先新建一个吧' : '还没有分组')
-              .fontSize(13)
-              .fontColor($r('sys.color.font_secondary'))
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .padding({ top: 24, bottom: 24 })
-          }
+        if (this.groupSheetMode === 'manage' && this.groupSortMode) {
+          Button('保存排序')
+            .width('100%')
+            .height(42)
+            .fontSize(15)
+            .backgroundColor(appState.accentColor)
+            .margin({ left: 20, right: 20, top: 12, bottom: 20 })
+            .onClick(() => {
+              this.saveGroupSortOrder();
+            })
         }
       }
       .width('100%')
       .height('100%')
-      .scrollBar(BarState.Off)
-      .divider({
-        strokeWidth: 0.6,
-        color: $r('sys.color.comp_divider'),
-        startMargin: 20,
-        endMargin: 20
-      })
     }
   }
 

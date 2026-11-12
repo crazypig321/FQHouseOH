@@ -42,6 +42,14 @@ export class DialogManager {
   /** 分组名确认回调（校验通过后触发，回传 trim 后的名称；取消/关闭不触发）。 */
   private static shelfGroupNameConfirm: ((name: string) => void) | null = null;
 
+  // ===== 跳转排序弹窗参数（打开前由调用方赋值，弹窗关闭后自动清空） =====
+  /** 「跳转排序」目标序号（打开前赋初值，弹窗内编辑）。 */
+  public static sortJumpValue: string = '';
+  /** 「跳转排序」允许的最大序号（打开前由调用方赋值）。 */
+  public static sortJumpMax: number = 0;
+  /** 「跳转排序」确认回调（target 为 0 基索引；取消/关闭不触发）。 */
+  private static sortJumpConfirm: ((target: number) => void) | null = null;
+
   // ===== 自定义颜色弹窗参数（打开前由调用方赋值，弹窗关闭后自动清空） =====
   /** 自定义颜色弹窗：取色器起始色。 */
   public static customColorInitial: string = '#FF7A3D';
@@ -191,6 +199,14 @@ export class DialogManager {
     DialogManager.shelfGroupNameValue = initial;
     DialogManager.shelfGroupNameConfirm = onConfirm;
     DialogManager.OpenDialog('分组命名');
+  }
+
+  /** 跳转排序弹窗：index 当前行下标（预填序号 = index+1），max 条目总数，onConfirm 确认后回传目标（0 基）。 */
+  public static InputSortJump(index: number, max: number, onConfirm: (target: number) => void): void {
+    DialogManager.sortJumpValue = (index + 1).toString();
+    DialogManager.sortJumpMax = max;
+    DialogManager.sortJumpConfirm = onConfirm;
+    DialogManager.OpenDialog('跳转排序');
   }
 
   /** 自定义颜色弹窗（HSB 取色器 + 确认/取消）：initial 取色器起始色，onConfirm 确认后回传所选色（取消/关闭不触发）。 */
@@ -422,6 +438,9 @@ export class DialogManager {
     if (key === '分组命名') {
       return DialogManager.shelfGroupNameTitle;
     }
+    if (key === '跳转排序') {
+      return '跳转排序';
+    }
     return '';
   }
 
@@ -429,7 +448,7 @@ export class DialogManager {
   public static DialogButtons(key: string): Array<ButtonOptions> {
     if (key === '通用确认' || key === '自定义颜色' ||
       key === '选择WebDAV备份' || key === '备份保留数量' || key === '自定义主题编辑' ||
-      key === '章节缓存限制' || key === '分组命名') {
+      key === '章节缓存限制' || key === '分组命名' || key === '跳转排序') {
       // 通用确认弹窗支持自定义取消文案与取消回调（分享进度「保持我的进度」等二选一场景）
       let cancelLabel: string = '取消';
       let cancelAction: (() => void) | null = null;
@@ -460,6 +479,8 @@ export class DialogManager {
         confirmLabel = '保存';
       } else if (key === '分组命名') {
         confirmLabel = '保存';
+      } else if (key === '跳转排序') {
+        confirmLabel = '确定';
       }
       const confirm: ButtonOptions = {
         value: confirmLabel,
@@ -544,6 +565,17 @@ export class DialogManager {
         cb(name);
       }
     }
+    if (key === '跳转排序') {
+      const target: number = parseInt(DialogManager.sortJumpValue, 10);
+      if (Number.isNaN(target) || target < 1 || target > DialogManager.sortJumpMax) {
+        DialogManager.Toast(`请输入 1-${DialogManager.sortJumpMax.toString()} 之间的序号`);
+        return;
+      }
+      const cb: ((target: number) => void) | null = DialogManager.sortJumpConfirm;
+      if (cb !== null) {
+        cb(target - 1);
+      }
+    }
   }
 
   /** 弹窗消失清理（宿主 onWillDisappear 调用）：清标识、触发一次性关闭回调。 */
@@ -589,6 +621,12 @@ export class DialogManager {
       DialogManager.shelfGroupNameTitle = '新建分组';
       DialogManager.shelfGroupNameValue = '';
       DialogManager.shelfGroupNameConfirm = null;
+    }
+    // 跳转排序弹窗参数一次性，关闭后清理
+    if (key === '跳转排序') {
+      DialogManager.sortJumpValue = '';
+      DialogManager.sortJumpMax = 0;
+      DialogManager.sortJumpConfirm = null;
     }
     // 首页分类弹窗参数一次性，关闭后清理
     if (key === '首页分类') {

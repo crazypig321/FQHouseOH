@@ -19,6 +19,7 @@ import { WebDavBackupListDialogContent } from '../view/dialog/WebDavBackupListDi
 import { WebDavBackupCountDialogContent } from '../view/dialog/WebDavBackupCountDialogContent';
 import { ChapterCacheLimitDialogContent } from '../view/dialog/ChapterCacheLimitDialogContent';
 import { GroupNameDialogContent } from '../view/dialog/GroupNameDialogContent';
+import { SortJumpDialogContent } from '../view/dialog/SortJumpDialogContent';
 import { HomeCategoryDialogContent } from '../view/dialog/HomeCategoryDialogContent';
 import { FqPlaybackBall } from '../view/FqPlaybackBall';
 import { FqSheetOptions } from '../view/sheet/CommonSheet';
@@ -487,6 +488,8 @@ struct Index {
       ChapterCacheLimitDialogContent()
     } else if (key === '分组命名') {
       GroupNameDialogContent()
+    } else if (key === '跳转排序') {
+      SortJumpDialogContent()
     }
   }
 }

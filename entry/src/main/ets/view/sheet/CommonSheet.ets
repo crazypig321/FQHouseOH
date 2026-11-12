@@ -74,6 +74,10 @@ export struct CommonSheet {
   @Param showBack: boolean = false;
   /** 标题栏右侧是否显示「恢复默认」按钮（关闭钮之前）。 */
   @Param showReset: boolean = false;
+  /** 标题栏右侧是否显示添加按钮（关闭钮之前）。 */
+  @Param showAdd: boolean = false;
+  /** 标题栏右侧是否显示排序模式按钮（进入/退出排序；关闭钮之前）。 */
+  @Param showOrder: boolean = false;
   /** 隐藏 HDS 标题栏（内容区自绘头部：返回/关闭等 HDS 标题栏放不下的控件）。 */
   @Param hideTitleBar: boolean = false;
   @Event searchToggle: () => void = (): void => {};
@@ -85,6 +89,8 @@ export struct CommonSheet {
   @Event manageClick: () => void = (): void => {};
   @Event backClick: () => void = (): void => {};
   @Event resetClick: () => void = (): void => {};
+  @Event addClick: () => void = (): void => {};
+  @Event orderClick: () => void = (): void => {};
   @BuilderParam content: () => void;
 
   build() {
@@ -203,6 +209,28 @@ export struct CommonSheet {
           label: 'reset',
           action: (): void => {
             this.resetClick();
+          },
+        },
+      });
+    }
+    if (this.showAdd) {
+      menus.push({
+        content: {
+          icon: $r('sys.symbol.plus'),
+          label: 'add',
+          action: (): void => {
+            this.addClick();
+          },
+        },
+      });
+    }
+    if (this.showOrder) {
+      menus.push({
+        content: {
+          icon: $r('sys.symbol.arrow_left_arrow_right'),
+          label: 'order',
+          action: (): void => {
+            this.orderClick();
           },
         },
       });
