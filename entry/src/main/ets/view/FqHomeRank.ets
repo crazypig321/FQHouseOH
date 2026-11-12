@@ -219,9 +219,9 @@ export struct FqHomeRank {
     .indicator(false)
     .duration(320)
     .cachedCount(1)
-    .onSelected((index: number): void => {
+    .onAnimationStart((index: number, targetIndex: number, extraInfo: SwiperAnimationEvent)=>{
       this.getUIContext().animateTo({ duration: 250, curve: Curve.Smooth }, (): void => {
-        this.current = index;
+        this.current = targetIndex;
       });
     })
   }
