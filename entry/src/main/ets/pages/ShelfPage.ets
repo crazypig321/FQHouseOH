@@ -1612,6 +1612,12 @@ export struct ShelfPage {
         .scrollBar(BarState.Off)
         .alignListItem(ListItemAlign.Center)
         .padding({ left: 16, right: 16 })
+        .onAppear(()=>{
+          this.scroller.scrollTo({
+            yOffset: -this.listTopInset(),
+            xOffset: 0
+          })
+        })
       }
 
       if (this.showSearchBox) {

@@ -27,6 +27,8 @@ import { FqColorUtils } from '../utils/FqColorUtils';
 /** 卡片封面固定尺寸（3:4 比例上下留裕）。 */
 const FQ_RANK_COVER_WIDTH: number = 106;
 const FQ_RANK_COVER_HEIGHT: number = 148;
+/** 底部指示点最多渲染数（超出走以当前页为锚的滑动窗口，防止溢出屏幕）。 */
+const FQ_RANK_MAX_DOTS: number = 7;
 
 @ComponentV2
 export struct FqHomeRank {
@@ -262,14 +264,14 @@ export struct FqHomeRank {
         .fontColor($r('sys.color.font_secondary'))
       Blank()
       Row({ space: 5 }) {
-        ForEach(this.entries, (entry: FqRankEntry, index: number) => {
+        ForEach(this.dotIndices(), (index: number) => {
           Column()
             .width(index === this.current ? 16 : 4)
             .height(4)
             .borderRadius(2)
             .backgroundColor(index === this.current ? appState.accentColor
               : $r('sys.color.comp_divider'))
-        }, (entry: FqRankEntry, index: number): string => `${entry.id}:${index}`)
+        }, (index: number): string => `${index}`)
       }
       .alignItems(VerticalAlign.Center)
       Text(this.pageLabel())
@@ -417,6 +419,31 @@ export struct FqHomeRank {
     }
     const shown: number = Math.min(total, Math.max(0, this.current) + 1);
     return `${this.pad2(shown)} / ${this.pad2(total)}`;
+  }
+
+  /** 指示点下标窗口：总数不超上限全量展示；超限以当前页为锚滑动（靠前/靠尾时对齐边缘），
+   *  防止条目过多的榜单把点列撑出屏幕。 */
+  private dotIndices(): number[] {
+    const total: number = this.entries.length;
+    if (total <= FQ_RANK_MAX_DOTS) {
+      const all: number[] = [];
+      for (let i: number = 0; i < total; i++) {
+        all.push(i);
+      }
+      return all;
+    }
+    let start: number = this.current - Math.floor(FQ_RANK_MAX_DOTS / 2);
+    if (start < 0) {
+      start = 0;
+    }
+    if (start + FQ_RANK_MAX_DOTS > total) {
+      start = total - FQ_RANK_MAX_DOTS;
+    }
+    const window: number[] = [];
+    for (let i: number = 0; i < FQ_RANK_MAX_DOTS; i++) {
+      window.push(start + i);
+    }
+    return window;
   }
 
   private pad2(value: number): string {
