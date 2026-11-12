@@ -293,6 +293,8 @@ export class FqBackupAppSettings {
   readonly backgroundAudio: boolean;
   /** 启动默认展示页（主 Tab 下标 0-3；旧备份缺省 -1，恢复时跳过不重置本机）。 */
   readonly startupTabIndex: number;
+  /** 首页样式（0 今日焦点 / 1 排行榜 / 2 共存；旧备份缺省 -1，恢复时跳过不重置本机）。 */
+  readonly homeStyle: number;
   readonly readerFontSize: number;
   readonly readerLineHeight: number;
   readonly readerThemeIndex: number;
@@ -316,12 +318,14 @@ export class FqBackupAppSettings {
     readerVolumeKeyPaging: boolean,
     readerCustomThemes: FqBackupCustomTheme[], readerCustomThemeId: string,
     playback: FqBackupPlaybackSettings | null = null,
-    startupTabIndex: number = -1) {
+    startupTabIndex: number = -1,
+    homeStyle: number = -1) {
     this.themeMode = themeMode;
     this.themeColor = themeColor;
     this.themeCustomColor = themeCustomColor;
     this.backgroundAudio = backgroundAudio;
     this.startupTabIndex = startupTabIndex;
+    this.homeStyle = homeStyle;
     this.readerFontSize = readerFontSize;
     this.readerLineHeight = readerLineHeight;
     this.readerThemeIndex = readerThemeIndex;
@@ -543,7 +547,8 @@ export class FqLibraryBackup {
       customThemes,
       readerSettings.customThemeId,
       playback,
-      FqAppSettingsStore.getStartupTabIndex());
+      FqAppSettingsStore.getStartupTabIndex(),
+      FqAppSettingsStore.getHomeStyle());
     return new FqLibraryBackupData(Date.now(), FqLibraryBackup.appVersion(),
       shelf, browse, listen, watched, reader, excluded, settings);
   }
@@ -638,6 +643,7 @@ export class FqLibraryBackup {
       settings['themeCustomColor'] = data.settings.themeCustomColor;
       settings['backgroundAudio'] = data.settings.backgroundAudio;
       settings['startupTabIndex'] = data.settings.startupTabIndex;
+      settings['homeStyle'] = data.settings.homeStyle;
       settings['readerFontSize'] = data.settings.readerFontSize;
       settings['readerLineHeight'] = data.settings.readerLineHeight;
       settings['readerThemeIndex'] = data.settings.readerThemeIndex;
@@ -881,6 +887,9 @@ export class FqLibraryBackup {
       // 启动默认展示页（旧备份缺省 -1：恢复时跳过，不重置本机设置）
       const startupTabIndex: number = settingsRec['startupTabIndex'] === undefined ? -1
         : fqBackupCheckRange(settingsRec, 'startupTabIndex', 0, 3);
+      // 首页样式（旧备份缺省 -1：恢复时跳过，不重置本机设置）
+      const homeStyle: number = settingsRec['homeStyle'] === undefined ? -1
+        : fqBackupCheckRange(settingsRec, 'homeStyle', 0, 2);
       const readerFontSize: number = fqBackupCheckInt(settingsRec, 'readerFontSize', 32);
       if (readerFontSize < 12) {
         throw new Error('备份字段 readerFontSize 无效');
@@ -1077,7 +1086,8 @@ export class FqLibraryBackup {
         customThemes,
         customThemeId,
         playback,
-        startupTabIndex);
+        startupTabIndex,
+        homeStyle);
     }
     return new FqLibraryBackupData(createdAt, appVersion, shelf, browse, listen,
       watched, reader, excluded, settings);
@@ -1127,6 +1137,10 @@ export class FqLibraryBackup {
       // 启动默认展示页（旧备份无此字段跳过，不重置本机已有设置）
       if (settings.startupTabIndex >= 0) {
         FqAppSettingsStore.setStartupTabIndex(settings.startupTabIndex);
+      }
+      // 首页样式（旧备份无此字段跳过，不重置本机已有设置）
+      if (settings.homeStyle >= 0) {
+        FqAppSettingsStore.setHomeStyle(settings.homeStyle);
       }
       // 播放设置段（旧备份无此段跳过；弹幕样式/解码方式/边看边缓存/画中画/朗读音色语速）
       if (settings.playback !== null) {

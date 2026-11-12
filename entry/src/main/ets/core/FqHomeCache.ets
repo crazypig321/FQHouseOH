@@ -13,7 +13,7 @@ import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { FqMediaItem } from '../model/FqModels';
+import { FqMediaItem, FqRankCatalog, FqRankCategory, FqRankEntry, FqRankTab } from '../model/FqModels';
 import { fqAsArray, fqAsRecord, fqNum, fqParseObject, fqStr } from './FqJson';
 import { fqParseMediaTag } from './FqParser';
 
@@ -198,5 +198,201 @@ export class FqHomeCache {
         fqParseMediaTag(fqAsRecord(rec['tag']))));
     }
     return items;
+  }
+
+  // -------------------------------------------------------------------------
+  // 首页排行榜持久化（files/home_feed_cache/rank_catalog.json + rank_<board>.json）
+  // -------------------------------------------------------------------------
+
+  private static rankCatalogPath(): string {
+    return `${FqHomeCache.filesDir}/${FQ_FEED_DIR}/rank_catalog.json`;
+  }
+
+  private static rankBoardPath(rankId: string, algo: number, categoryId: number): string {
+    const safe: string = rankId.replace(/[^0-9A-Za-z_-]/g, '_');
+    return `${FqHomeCache.filesDir}/${FQ_FEED_DIR}/rank_${safe}_a${algo}_c${categoryId}.json`;
+  }
+
+  /** 缓存文件整体写入（失败静默，下次成功覆盖）。 */
+  private static writeCacheFile(path: string, text: string): void {
+    if (FqHomeCache.filesDir.length === 0) {
+      return;
+    }
+    let file: fs.File | null = null;
+    try {
+      fs.mkdirSync(`${FqHomeCache.filesDir}/${FQ_FEED_DIR}`, true);
+    } catch (error) {
+      // 已存在
+    }
+    try {
+      file = fs.openSync(path, fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+      fs.writeSync(file.fd, text);
+      fs.closeSync(file);
+    } catch (error) {
+      const err = error as BusinessError;
+      hilog.warn(0x0001, TAG, `writeCacheFile failed: ${path} code=${err.code}`);
+      if (file !== null) {
+        try {
+          fs.closeSync(file);
+        } catch (closeError) {
+          // 忽略
+        }
+      }
+    }
+  }
+
+  /** 保存排行榜目录（tabs + categories；冷启动 chips/换榜直接可交互）。 */
+  public static saveRankCatalog(catalog: FqRankCatalog): void {
+    if (catalog.isEmpty) {
+      return;
+    }
+    const tabs: Record<string, Object>[] = [];
+    for (const tab of catalog.tabs) {
+      tabs.push({ 'name': tab.name, 'algo': tab.algo });
+    }
+    const cats: Record<string, Object>[] = [];
+    for (const category of catalog.categories) {
+      cats.push({ 'name': category.name, 'id': category.id });
+    }
+    const payload: Record<string, Object> = {
+      'rankId': catalog.rankId,
+      'tabs': tabs,
+      'categories': cats,
+    };
+    FqHomeCache.writeCacheFile(FqHomeCache.rankCatalogPath(), JSON.stringify(payload));
+  }
+
+  /** 读取排行榜目录；无缓存/损坏返回 null。 */
+  public static loadRankCatalog(): FqRankCatalog | null {
+    if (FqHomeCache.filesDir.length === 0) {
+      return null;
+    }
+    let text: string = '';
+    try {
+      text = fs.readTextSync(FqHomeCache.rankCatalogPath());
+    } catch (error) {
+      return null;
+    }
+    const payload: Record<string, Object> | null = fqParseObject(text);
+    if (payload === null) {
+      return null;
+    }
+    const rankId: string = fqStr(payload, 'rankId');
+    const rawTabs: Object[] | null = fqAsArray(payload['tabs']);
+    if (rankId.length === 0 || rawTabs === null || rawTabs.length === 0) {
+      return null;
+    }
+    const tabs: FqRankTab[] = [];
+    for (const rawTab of rawTabs) {
+      const rec: Record<string, Object> | null = fqAsRecord(rawTab);
+      if (rec === null) {
+        continue;
+      }
+      const name: string = fqStr(rec, 'name');
+      const algo: number = Math.trunc(fqNum(rec, 'algo'));
+      if (name.length === 0 || algo < 0) {
+        continue;
+      }
+      tabs.push(new FqRankTab(name, algo));
+    }
+    if (tabs.length === 0) {
+      return null;
+    }
+    const categories: FqRankCategory[] = [];
+    const rawCats: Object[] | null = fqAsArray(payload['categories']);
+    if (rawCats !== null) {
+      for (const rawCat of rawCats) {
+        const rec: Record<string, Object> | null = fqAsRecord(rawCat);
+        if (rec === null) {
+          continue;
+        }
+        const name: string = fqStr(rec, 'name');
+        const id: number = Math.trunc(fqNum(rec, 'id'));
+        if (name.length === 0 || id < 0) {
+          continue;
+        }
+        categories.push(new FqRankCategory(name, id));
+      }
+    }
+    return new FqRankCatalog(rankId, tabs, categories);
+  }
+
+  /** 保存某榜单首页内容（截断上限）。 */
+  public static saveRankBoard(rankId: string, algo: number, categoryId: number,
+    entries: FqRankEntry[]): void {
+    if (entries.length === 0) {
+      return;
+    }
+    const recs: Record<string, Object>[] = [];
+    const count: number = Math.min(entries.length, FQ_FEED_MAX_ITEMS);
+    for (let i: number = 0; i < count; i++) {
+      const entry: FqRankEntry = entries[i];
+      recs.push({
+        'position': entry.position,
+        'id': entry.id,
+        'title': entry.title,
+        'cover': entry.cover,
+        'author': entry.author,
+        'abstractText': entry.abstractText,
+        'category': entry.category,
+        'creationStatus': entry.creationStatus,
+        'wordNumber': entry.wordNumber,
+        'readCount': entry.readCount,
+        'score': entry.score,
+        'kind': entry.kind,
+        'seriesId': entry.seriesId,
+      });
+    }
+    const payload: Record<string, Object> = { 'entries': recs };
+    FqHomeCache.writeCacheFile(FqHomeCache.rankBoardPath(rankId, algo, categoryId),
+      JSON.stringify(payload));
+  }
+
+  /** 读取某榜单持久化内容；无缓存/损坏返回空数组。 */
+  public static loadRankBoard(rankId: string, algo: number, categoryId: number): FqRankEntry[] {
+    if (FqHomeCache.filesDir.length === 0) {
+      return [];
+    }
+    let text: string = '';
+    try {
+      text = fs.readTextSync(FqHomeCache.rankBoardPath(rankId, algo, categoryId));
+    } catch (error) {
+      return [];
+    }
+    const payload: Record<string, Object> | null = fqParseObject(text);
+    if (payload === null) {
+      return [];
+    }
+    const rawEntries: Object[] | null = fqAsArray(payload['entries']);
+    if (rawEntries === null) {
+      return [];
+    }
+    const entries: FqRankEntry[] = [];
+    for (const rawEntry of rawEntries) {
+      const rec: Record<string, Object> | null = fqAsRecord(rawEntry);
+      if (rec === null) {
+        continue;
+      }
+      const id: string = fqStr(rec, 'id');
+      if (id.length === 0) {
+        continue;
+      }
+      entries.push(new FqRankEntry(
+        Math.trunc(fqNum(rec, 'position')),
+        id,
+        fqStr(rec, 'title'),
+        fqStr(rec, 'cover'),
+        fqStr(rec, 'author'),
+        fqStr(rec, 'abstractText'),
+        fqStr(rec, 'category'),
+        Math.trunc(fqNum(rec, 'creationStatus')),
+        Math.trunc(fqNum(rec, 'wordNumber')),
+        Math.trunc(fqNum(rec, 'readCount')),
+        Math.trunc(fqNum(rec, 'score')),
+        fqStr(rec, 'kind'),
+        fqStr(rec, 'seriesId'),
+      ));
+    }
+    return entries;
   }
 }

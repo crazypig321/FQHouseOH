@@ -22,6 +22,8 @@ import { FqMediaItem, fqKindToTab, FqBookDetail } from '../model/FqModels';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { FqMediaCard } from '../view/FqMediaCard';
 import { FqSpotlight } from '../view/FqSpotlight';
+import { FqHomeRank } from '../view/FqHomeRank';
+import { FQ_HOME_STYLE_RANK, FQ_HOME_STYLE_BOTH } from '../core/FqAppSettingsStore';
 import { CommonSearch, CommonLoading, RefreshOverlay } from '../view/CommonCom';
 import { DialogManager } from '../utils/DialogUtils';
 import { fqPushBookOrDetail, ROUTE_SEARCH, FqTitleBarOptions } from '../model/FqNavModels';
@@ -134,7 +136,7 @@ export struct HomePage {
         builder: (): void => {
           this.SearchBar();
         },
-        height: 105
+        height: 97
       }, (): void => {
         this.startRefresh();
       }, true, undefined, undefined, this.titleSubTitle(), (): void => {
@@ -159,14 +161,21 @@ export struct HomePage {
           } else if (this.itemCount === 0) {
             this.FeedLoading()
           } else {
-            ListItem() {
-              FqSpotlight({
-                items: this.spotlightItems,
-                onOpen: (item: FqMediaItem): void => {
-                  this.openDetail(item);
-                },
-              })
-                .margin({ top: 8 })
+            if (appState.homeStyle !== FQ_HOME_STYLE_RANK) {
+              ListItem() {
+                FqSpotlight({
+                  items: this.spotlightItems,
+                  onOpen: (item: FqMediaItem): void => {
+                    this.openDetail(item);
+                  },
+                })
+              }
+            }
+            if (appState.homeStyle >= FQ_HOME_STYLE_RANK) {
+              ListItem() {
+                FqHomeRank({ channelLabel: FQ_CHANNELS[this.channelIndex].label })
+                  .margin({ top: appState.homeStyle === FQ_HOME_STYLE_BOTH ? 18 : 0 })
+              }
             }
             ListItem() {
               Row({ space: 8 }) {

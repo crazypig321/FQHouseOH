@@ -17,6 +17,10 @@ import {
   FQ_THEME_DARK,
   FQ_THEME_FOLLOW,
   FQ_THEME_LIGHT,
+  FQ_HOME_STYLE_SPOTLIGHT,
+  FQ_HOME_STYLE_RANK,
+  FQ_HOME_STYLE_BOTH,
+  FQ_HOME_STYLE_MAX,
   FqAppSettingsStore,
 } from '../core/FqAppSettingsStore';
 import { FqReaderStore } from '../core/FqReaderStore';
@@ -35,10 +39,13 @@ const FQ_SETTINGS_BOTTOM_INSET: number = 84;
 const FQ_THEME_ANCHOR_ID: string = 'settings_theme_anchor';
 const FQ_THEME_COLOR_ANCHOR_ID: string = 'settings_theme_color_anchor';
 const FQ_STARTUP_TAB_ANCHOR_ID: string = 'settings_startup_tab_anchor';
+const FQ_HOME_STYLE_ANCHOR_ID: string = 'settings_home_style_anchor';
 /** 行内分割线左右避让：左侧行 padding 14 + 图标块 34 + 间距 12，右侧对称一致。 */
 const FQ_ROW_DIVIDER_INSET: number = 60;
 /** 深色模式档位文案（下标即档位值）。 */
 const FQ_THEME_LABELS: string[] = ['跟随系统', '浅色', '深色'];
+/** 首页样式档位文案（下标即档位值）。 */
+const FQ_HOME_STYLE_LABELS: string[] = ['今日焦点', '排行榜', '今日焦点和排行榜共存'];
 
 @Builder
 function fqSettingsEmptyContent() {
@@ -69,12 +76,14 @@ export struct SettingsPage {
   @Local backgroundAudio: boolean = true;
   @Local pipVideo: boolean = false;
   @Local startupTab: number = 0;
+  @Local homeStyle: number = FQ_HOME_STYLE_SPOTLIGHT;
 
   aboutToAppear(): void {
     this.themeMode = FqAppSettingsStore.getThemeMode();
     this.backgroundAudio = FqAppSettingsStore.isBackgroundAudio();
     this.pipVideo = FqAppSettingsStore.isPipVideoEnabled();
     this.startupTab = FqAppSettingsStore.getStartupTabIndex();
+    this.homeStyle = FqAppSettingsStore.getHomeStyle();
     // 进入设置页静默检查更新（会话内节流，与关于页共用）：
     // 发现新版本时「关于」条目显示红点，无新版本时清空红点
     FqUpdateChecker.checkLatestSilently();
@@ -100,6 +109,8 @@ export struct SettingsPage {
             this.SmartReachRow()
             this.RowDivider()
             this.StartupTabRow()
+            this.RowDivider()
+            this.HomeStyleRow()
           }
 
           this.SectionHeader('阅读与播放')
@@ -189,6 +200,33 @@ export struct SettingsPage {
   private applyStartupTab(index: number): void {
     this.startupTab = index;
     FqAppSettingsStore.setStartupTabIndex(index);
+  }
+
+  /** 首页样式菜单：今日焦点/排行榜/共存 三选项（当前档尾勾，点击即时切换）。 */
+  private openHomeStyleMenu(): void {
+    const items: FqMenuItem[] = [];
+    const styles: number[] = [FQ_HOME_STYLE_SPOTLIGHT, FQ_HOME_STYLE_RANK, FQ_HOME_STYLE_BOTH];
+    for (const style of styles) {
+      const item: FqMenuItem = new FqMenuItem();
+      item.label = FQ_HOME_STYLE_LABELS[style];
+      if (style === this.homeStyle) {
+        item.endIcon = $r('sys.symbol.checkmark');
+      }
+      const picked: number = style;
+      item.onAction = (): void => {
+        this.applyHomeStyle(picked);
+      };
+      items.push(item);
+    }
+    FqMenu.open(this.getUIContext(), FQ_HOME_STYLE_ANCHOR_ID, items);
+  }
+
+  private applyHomeStyle(style: number): void {
+    if (style < 0 || style > FQ_HOME_STYLE_MAX) {
+      return;
+    }
+    this.homeStyle = style;
+    FqAppSettingsStore.setHomeStyle(style);
   }
 
   private openThemeMenu(): void {
@@ -561,6 +599,48 @@ export struct SettingsPage {
     .width('100%')
     .onClick((): void => {
       this.openStartupTabMenu();
+    })
+  }
+
+  /** 首页样式行（锚点 FqMenu 三选项：今日焦点/排行榜/共存；首页顶部区块即时切换）。 */
+  @Builder
+  private HomeStyleRow() {
+    Row({ space: 12 }) {
+      Stack() {
+        SymbolGlyph($r('sys.symbol.house'))
+          .fontSize(17)
+          .fontColor(['#FF0EA5E9'])
+      }
+      .width(34)
+      .height(34)
+      .borderRadius(10)
+      .backgroundColor(FqColorUtils.withOpacity('#FF0EA5E9', 0.12))
+
+      Column({ space: 3 }) {
+        Text('首页样式')
+          .fontSize(14.5)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('sys.color.font_primary'))
+        Text('首页顶部展示今日焦点还是排行榜立体书架，即时生效')
+          .fontSize(11.5)
+          .fontColor($r('sys.color.font_secondary'))
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+
+      Text(this.homeStyle >= 0 && this.homeStyle < FQ_HOME_STYLE_LABELS.length
+        ? FQ_HOME_STYLE_LABELS[this.homeStyle] : '')
+        .fontSize(12.5)
+        .fontColor($r('sys.color.font_secondary'))
+      SymbolGlyph($r('sys.symbol.chevron_right'))
+        .fontSize(13)
+        .fontColor([$r('sys.color.font_tertiary')])
+    }
+    .id(FQ_HOME_STYLE_ANCHOR_ID)
+    .padding({ left: 14, right: 14, top: 11, bottom: 11 })
+    .width('100%')
+    .onClick((): void => {
+      this.openHomeStyleMenu();
     })
   }
 

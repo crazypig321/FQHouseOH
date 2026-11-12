@@ -94,6 +94,10 @@ export class AppState {
    *  持久化于 FqAppSettingsStore，开关写入统一走 FqAppSettingsStore.setDirectRead）。 */
   @Trace directReadEnabled: boolean = false;
 
+  /** 首页样式（0 今日焦点 / 1 排行榜立体书架 / 2 两者共存；首页顶部内容据此响应式切换；
+   *  持久化于 FqAppSettingsStore，写入统一走 FqAppSettingsStore.setHomeStyle）。 */
+  @Trace homeStyle: number = 0;
+
   /** 静默检查更新发现的 GitHub 新版本号（空 = 暂无更新；设置页「关于」红点与关于页新版本标签共用）。 */
   @Trace latestVersion: string = '';
 

@@ -725,6 +725,11 @@ export function fqEmptyRankCatalog(): FqRankCatalog {
   return new FqRankCatalog('', [], []);
 }
 
+/** 空条目占位（首页排行榜书架信息行默认值用）。 */
+export function fqEmptyRankEntry(): FqRankEntry {
+  return new FqRankEntry(0, '', '', '', '', '', '', -1, 0, 0, 0, 'book', '');
+}
+
 // ---------------------------------------------------------------------------
 // 书评（fqapp lib/models/book_comment.dart）
 // ---------------------------------------------------------------------------

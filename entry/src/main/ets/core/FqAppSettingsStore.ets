@@ -21,6 +21,8 @@
  *   Index 冷启动比对当前版本号，不同则自动弹出更新日志 sheet；
  * - startupTabIndex：启动默认展示页（主 Tab 下标 0-3 = 首页/书架/我的/设置，默认 0 首页）；
  *   Index 冷启动按此初始化 HdsTabs/PC Tabs 与 appState.currTabsIndex；
+ * - homeStyle：首页样式（0 今日焦点 / 1 排行榜立体书架 / 2 两者共存，默认 0 今日焦点）；
+ *   首页按 appState.homeStyle 响应式切换顶部内容；
  * - chapterCacheLimitMb：章节自动缓存大小上限（MB，默认 80，1-102400 即 1MB-100GB；
  *   章节缓存页右上角调节，仅约束阅读自动缓存，整本下载 pin 在预算外不受限）；
  * - dramaAutoCacheAhead：剧集边看边往后缓存集数（对齐 fqapp DramaCachePreferences：
@@ -45,6 +47,7 @@ const FQ_SETTINGS_KEY_DIRECT_READ: string = 'directRead';
 const FQ_SETTINGS_KEY_UPDATE_PROXY: string = 'updateProxyDownload';
 const FQ_SETTINGS_KEY_CHANGELOG_SHOWN: string = 'changelogShownVersion';
 const FQ_SETTINGS_KEY_STARTUP_TAB: string = 'startupTabIndex';
+const FQ_SETTINGS_KEY_HOME_STYLE: string = 'homeStyle';
 const FQ_SETTINGS_KEY_TTS_PERSON: string = 'ttsPerson';
 const FQ_SETTINGS_KEY_TTS_RATE: string = 'ttsRate';
 const FQ_SETTINGS_KEY_SMART_REACH: string = 'smartReach';
@@ -97,6 +100,14 @@ export const FQ_THEME_LIGHT: number = 1;
 export const FQ_THEME_DARK: number = 2;
 /** 启动默认展示页 Tab 下标上限（主 Tab 共 4 页：首页/书架/我的/设置）。 */
 export const FQ_STARTUP_TAB_MAX_INDEX: number = 3;
+/** 首页样式：今日焦点（默认）。 */
+export const FQ_HOME_STYLE_SPOTLIGHT: number = 0;
+/** 首页样式：排行榜立体书架。 */
+export const FQ_HOME_STYLE_RANK: number = 1;
+/** 首页样式：今日焦点和排行榜共存。 */
+export const FQ_HOME_STYLE_BOTH: number = 2;
+/** 首页样式档位上限。 */
+export const FQ_HOME_STYLE_MAX: number = 2;
 
 export class FqAppSettingsStore {
   private static pref: preferences.Preferences | null = null;
@@ -113,6 +124,8 @@ export class FqAppSettingsStore {
   private static changelogShownVersion: string = '';
   /** 启动默认展示页（主 Tab 下标 0-3；Index 冷启动初始化 Tab 用）。 */
   private static startupTabIndex: number = 0;
+  /** 首页样式（0 今日焦点 / 1 排行榜 / 2 共存；appState.homeStyle 响应式联动）。 */
+  private static homeStyle: number = FQ_HOME_STYLE_SPOTLIGHT;
   /** 离线朗读音色（textToSpeech person；0 默认女声聆小珊）。 */
   private static ttsPerson: number = 0;
   /** 离线朗读语速（0.5 ~ 2）。 */
@@ -194,6 +207,12 @@ export class FqAppSettingsStore {
         && rawStartupTab <= FQ_STARTUP_TAB_MAX_INDEX) {
         FqAppSettingsStore.startupTabIndex = Math.round(rawStartupTab);
       }
+      const rawHomeStyle: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_HOME_STYLE,
+        FQ_HOME_STYLE_SPOTLIGHT);
+      if (typeof rawHomeStyle === 'number' && rawHomeStyle >= FQ_HOME_STYLE_SPOTLIGHT
+        && rawHomeStyle <= FQ_HOME_STYLE_MAX) {
+        FqAppSettingsStore.homeStyle = Math.round(rawHomeStyle);
+      }
       const rawTtsPerson: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_TTS_PERSON, 0);
       if (typeof rawTtsPerson === 'number' && rawTtsPerson >= 0) {
         FqAppSettingsStore.ttsPerson = rawTtsPerson;
@@ -263,6 +282,7 @@ export class FqAppSettingsStore {
     FqAppSettingsStore.applyThemeColor();
     appState.directReadEnabled = FqAppSettingsStore.directRead;
     appState.smartReachEnabled = FqAppSettingsStore.smartReach;
+    appState.homeStyle = FqAppSettingsStore.homeStyle;
   }
 
   /** 当前深色模式档位（0 跟随系统 / 1 浅色 / 2 深色）。 */
@@ -516,6 +536,33 @@ export class FqAppSettingsStore {
     }
     try {
       pref.putSync(FQ_SETTINGS_KEY_STARTUP_TAB, FqAppSettingsStore.startupTabIndex);
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
+  }
+
+  /** 首页样式（0 今日焦点 / 1 排行榜 / 2 两者共存；首页顶部内容据此切换）。 */
+  public static getHomeStyle(): number {
+    return FqAppSettingsStore.homeStyle;
+  }
+
+  /** 设置首页样式（范围外静默忽略；appState.homeStyle 即时联动刷新首页）。 */
+  public static setHomeStyle(style: number): void {
+    if (!Number.isFinite(style) || style < FQ_HOME_STYLE_SPOTLIGHT
+      || style > FQ_HOME_STYLE_MAX) {
+      return;
+    }
+    FqAppSettingsStore.homeStyle = Math.round(style);
+    appState.homeStyle = FqAppSettingsStore.homeStyle;
+    const pref: preferences.Preferences | null = FqAppSettingsStore.pref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.putSync(FQ_SETTINGS_KEY_HOME_STYLE, FqAppSettingsStore.homeStyle);
       pref.flush().catch((_error: BusinessError): void => {
         // 落盘失败不阻断
       });
