@@ -1374,7 +1374,7 @@ export struct ReaderPage {
   /** 配置变化重排：保持当前页首位置（字号/行距/字体/窗口尺寸变化）。 */
   private relayoutKeepPosition(): void {
     const layout: FqChapterLayout | null = this.curLayout;
-    hilog.info(0x0001, 'FqM', `relayout triggered curLayout!=null=${layout !== null}`);
+    hilog.info(0x0001, 'FqM', `relayout triggered family=${this.readerFontFamily} font=${this.effFontSize()} lh=${this.effLineHeight()} curLayout!=null=${layout !== null}`);
     if (layout === null || layout.pages.length === 0) {
       return;
     }

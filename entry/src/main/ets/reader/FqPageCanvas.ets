@@ -90,7 +90,7 @@ export struct FqPageCanvas {
               .textAlign(TextAlign.Start)
               .maxLines(this.lineHasBubble(frag, lineIdx) ? 2 : 1)
               .width('100%')
-            }, (line: string, lineIdx: number): string => `${lineIdx}_${line.length}_${line}`)
+            }, (line: string, lineIdx: number): string => `${lineIdx}_${line.length}_${line}_${this.lineStretchText(frag, lineIdx)}_${this.fontFamily}`)
             // 引擎判定末行放不下气泡：图标独立成行（行高与装页记账同为一行行高，零分歧）
             if (frag.showBubble && frag.bubbleOwnRow && this.bubbleCount(frag) > 0) {
               Text() {
@@ -114,7 +114,7 @@ export struct FqPageCanvas {
           .borderRadius(this.paraHighlighted(frag) ? 6 : 0)
           .backgroundColor(this.paraHighlighted(frag) ? this.highlightColor : 'transparent')
         }, (frag: FqPageFragment): string =>
-          `f_${frag.paraIndex}_${frag.startChar}_${frag.endChar}_${frag.showBubble ? 1 : 0}_${frag.bubbleOwnRow ? 1 : 0}_${this.bubbleCount(frag)}_${frag.lines.length}_${frag.text.length}_${this.metrics.fontSizeFp}_${this.metrics.contentWidthPx}_${this.metrics.textDensity}`)
+          `f_${frag.paraIndex}_${frag.startChar}_${frag.endChar}_${frag.showBubble ? 1 : 0}_${frag.bubbleOwnRow ? 1 : 0}_${this.bubbleCount(frag)}_${frag.lines.length}_${frag.text.length}_${this.metrics.fontSizeFp}_${this.metrics.contentWidthPx}_${this.metrics.textDensity}_${this.fontFamily}`)
       }
     }
     .padding({
