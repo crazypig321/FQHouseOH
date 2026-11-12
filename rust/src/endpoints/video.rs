@@ -106,59 +106,8 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
         // 客户端选定的清晰度档（如 720P）：命中 variants 档时该档优先选流，
         // 下载缓存按档分文件；未传或未命中按最高可用档（原行为不变）。
         let quality = sanitize_quality(&params.get_str("quality"));
-        // 短剧 stream 仍以 shortplay 模型选流，但清晰度列表要合并两条接口：
-        // 顶档（1080p）只出现在 phoenix 模型的 `fallback_api` 列表里，而两条
-        // 接口的编码分布并不相同——shortplay 各档是 h265，phoenix 的低档是
-        // bytevc2/VVC（实测 2026-10-12 同一集对拍）。二选一必然少档：只信
-        // shortplay 会丢 1080P，只信 phoenix 会缺低档的 h265 档。
-        // 两个请求互不依赖，并发发出，不额外占用一个往返。
-        let (parsed, phoenix_parsed, resolved) = if stream_mode {
-            // Resolve the primary source while quality metadata is loading.
-            // A primary failure cancels the auxiliary work, but auxiliary
-            // failure remains non-fatal and successful tiers are never cut off.
-            let primary = async {
-                let parsed = ParsedVideoResponse::parse(
-                    &fetch_shortplay_video_model(ctx, &video_id).await?,
-                )?;
-                let resolved = resolve_video_source(ctx, &parsed).await;
-                if resolved == VideoSourceResolution::CodecRejected {
-                    return Err(ApiError::Internal("该视频暂不支持播放".to_string()));
-                }
-                Ok((parsed, resolved))
-            };
-            let auxiliary = async {
-                let response = fetch_phoenix_video_model(ctx, &video_id)
-                    .await
-                    .and_then(|raw| ParsedVideoResponse::parse(&raw));
-                Ok::<_, ApiError>(response)
-            };
-            let ((parsed, resolved), phoenix) = tokio::try_join!(primary, auxiliary)?;
-            // 凤凰那条失败原先被 `.ok()` 静默吃掉，而 1080P 只可能来自它那条
-            // 列表（短剧专用接口自带列表与其 `fallback_api` 都只到 720P）——
-            // 失败即面板少一档且毫无痕迹。**HTTP 成功不等于业务成功**：实测
-            // 2026-10-14 三集全部回火山错误封包
-            // `{BaseResp, Code:110001, Message:未知异常}`（无 `data`），上游只给
-            // 通用码、不给原因，所以这里把外壳与剧集 id 一起留在核心日志里。
-            // Note: 为什么静默会丢一整档、以及日志里刻意不记什么 —
-            // 见 .agents/notes/implemented/bug-fix/2026-10-14-phoenix-reject-silent-quality-loss.md
-            match &phoenix {
-                Ok(body) if body.root.get("data").is_some_and(Value::is_object) => {}
-                Ok(body) => log::warn!(
-                    "video {video_id}: phoenix body unusable (quality tiers lost): {}",
-                    body_envelope(&body.root)
-                ),
-                Err(error) => log::warn!(
-                    "video {video_id}: phoenix request failed (quality tiers lost): {}",
-                    error.message()
-                ),
-            }
-            (parsed, phoenix.ok(), resolved)
-        } else {
-            let parsed =
-                ParsedVideoResponse::parse(&fetch_phoenix_video_model(ctx, &video_id).await?)?;
-            let resolved = resolve_video_source(ctx, &parsed).await;
-            (parsed, None, resolved)
-        };
+        // 主解析统一走 shortplay 模型（与原版 fqapp 对齐，见 fetch_and_resolve）。
+        let (parsed, phoenix_parsed, resolved) = fetch_and_resolve(ctx, &video_id).await?;
 
         // 官方 `wp3/o1.java:301-347` 的 `isSupportShowLandIcon` 按服务端
         // `vertical` 决定竖屏剧集是否给「全屏观看」（竖屏不给）。该字段随
@@ -185,22 +134,11 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
         // 响应 quality 为空，客户端据此回显「默认」。
         let mut served_quality = String::new();
         let mut cache_suffix = String::new();
-        if !quality.is_empty() {
-            let hit = variants
-                .iter()
-                .find(|row| row.get("name").and_then(Value::as_str) == Some(quality.as_str()));
-            if let Some(row) = hit {
-                let url = row.get("url").and_then(Value::as_str).unwrap_or("");
-                let key_hex = row.get("key_hex").and_then(Value::as_str).unwrap_or("");
-                if !url.is_empty() {
-                    if let Ok(decoded) = hex::decode(key_hex) {
-                        video_url = url.to_string();
-                        content_key = decoded;
-                        served_quality = quality.clone();
-                        cache_suffix = quality;
-                    }
-                }
-            }
+        if let Some((url, key)) = quality_hit(&variants, &quality) {
+            video_url = url;
+            content_key = key;
+            served_quality = quality.clone();
+            cache_suffix = quality.clone();
         }
 
         let source = json!({
@@ -227,41 +165,157 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
             format!("{video_id}_{cache_suffix}")
         };
 
-        match download_and_save(
-            ctx,
-            &cache_id,
-            &video_url,
-            &content_key,
-            DownloadKind::Video,
-        )
-        .await
-        {
-            Ok(local_path) => {
-                let main_url = local_path.clone();
-                Ok(json!({
-                    "video_url": local_path,
-                    "video_id": video_id,
-                    "quality": served_quality,
-                    "vertical": vertical,
-                    "variants": source["variants"].clone(),
-                    "video_info": {
-                        "data": {
-                            "video_list": {
-                                "video_1": { "main_url": main_url },
+        // 非流式代下载的容错链：首轮用已选好的候选；失败后重取一次新流再试。
+        // 设备端实测（rust.log 2026-11-12）：shortplay 解析出的直链也会按
+        // 设备网络被调度到拒绝服务的 CDN 边缘（v13-reading-video 域对设备
+        // 403，同一集对 PC 却 200），而不同次取流拿到的边缘域名不同（同集
+        // 先后给过 v3 / v5-jx / v95 / v13）——重取即换边缘，等价于原版
+        // fqapp Dart 下载器的 stale-url 重取（403 时重新取流一次）。
+        // 不降档、不混档：重取后仍只下请求档（或同最高档）。
+        for attempt in 1..=2u8 {
+            if attempt > 1 {
+                match fetch_and_resolve(ctx, &video_id).await {
+                    Ok((reparsed, rephoenix, VideoSourceResolution::Found(url, key))) => {
+                        // 请求档在重取的 variants 里重新命中（档与密钥都可能
+                        // 随取流变化）；命中不了且确实请求过档，则宁可放弃
+                        // 重试也不用别的档污染 {video_id}_{quality} 缓存。
+                        let revariants =
+                            extract_stream_variants(ctx, &reparsed, rephoenix.as_ref()).await;
+                        if let Some((q_url, q_key)) = quality_hit(&revariants, &quality) {
+                            video_url = q_url;
+                            content_key = q_key;
+                        } else if quality.is_empty() {
+                            video_url = url;
+                            content_key = key;
+                        } else {
+                            break;
+                        }
+                    }
+                    _ => break,
+                }
+            }
+            match download_and_save(
+                ctx,
+                &cache_id,
+                &video_url,
+                &content_key,
+                DownloadKind::Video,
+            )
+            .await
+            {
+                Ok(local_path) => {
+                    let main_url = local_path.clone();
+                    return Ok(json!({
+                        "video_url": local_path,
+                        "video_id": video_id,
+                        "quality": served_quality,
+                        "vertical": vertical,
+                        "variants": source["variants"].clone(),
+                        "video_info": {
+                            "data": {
+                                "video_list": {
+                                    "video_1": { "main_url": main_url },
+                                },
                             },
                         },
-                    },
-                }))
-            }
-            // 下载失败旧版回退上游 URL——但那是 CENC 密文流，客户端解不了
-            // 只能黑屏半天后 eof 跳集（离线下载器还会把密文缓存成坏文件）。
-            // 显式报错让客户端立刻出重试卡（含离线缓存兜底）。
-            Err(err) => {
-                log::warn!("video {video_id}: download failed: {err}");
-                Err(ApiError::Internal("视频下载失败，请稍后重试".to_string()))
+                    }));
+                }
+                // 下载失败旧版回退上游 URL——但那是 CENC 密文流，客户端解不了
+                // 只能黑屏半天后 eof 跳集（离线下载器还会把密文缓存成坏文件）。
+                // 重取一轮新流后仍失败才显式报错，让客户端立刻出重试卡（含
+                // 离线缓存兜底）。
+                Err(err) => {
+                    // 失败日志带上 host + path（不带 query，避免签名参数刷进
+                    // 日志）：403 排查时不同轮解析出的 CDN 路径不同，只看错误
+                    // 码分不清是哪条 URL 被拒。
+                    let target = url::Url::parse(&video_url)
+                        .map(|u| format!("{}{}", u.host_str().unwrap_or("?"), u.path()))
+                        .unwrap_or_else(|_| "?".to_string());
+                    log::warn!(
+                        "video {video_id}: download attempt {attempt} failed ({target}): {err}"
+                    );
+                }
             }
         }
+        Err(ApiError::Internal("视频下载失败，请稍后重试".to_string()))
     })
+}
+
+/// shortplay 主解析 + phoenix 辅助补档，两请求并发（互不依赖）。
+///
+/// 主解析统一走 shortplay 模型（与原版 fqapp 对齐：Dart 侧恒带 mode=stream，
+/// 从不用 phoenix 作主解析）。非流式（后端代下载）原先只解析 phoenix 模型，
+/// 而 phoenix 返回的直链有相当概率落在 qznovelvod.com 火山 CDN（带 n80
+/// 签名参数），边缘直接回 "no permission" 403；shortplay 解析出的直链恒为
+/// fqnovelvod.com 域、实测同集对拍 403 vs 200（2026-11-12，设备 rust.log
+/// 连日 403 簇同源）。两个模式仅收尾不同：stream 返回直链，非流式代下载。
+///
+/// 短剧 stream 仍以 shortplay 模型选流，但清晰度列表要合并两条接口：
+/// 顶档（1080p）只出现在 phoenix 模型的 `fallback_api` 列表里，而两条
+/// 接口的编码分布并不相同——shortplay 各档是 h265，phoenix 的低档是
+/// bytevc2/VVC（实测 2026-10-12 同一集对拍）。二选一必然少档：只信
+/// shortplay 会丢 1080P，只信 phoenix 会缺低档的 h265 档。
+/// 两个请求互不依赖，并发发出，不额外占用一个往返。
+async fn fetch_and_resolve(
+    ctx: &Ctx,
+    video_id: &str,
+) -> ApiResult<(ParsedVideoResponse, Option<ParsedVideoResponse>, VideoSourceResolution)> {
+    // Resolve the primary source while quality metadata is loading.
+    // A primary failure cancels the auxiliary work, but auxiliary
+    // failure remains non-fatal and successful tiers are never cut off.
+    let primary = async {
+        let parsed =
+            ParsedVideoResponse::parse(&fetch_shortplay_video_model(ctx, video_id).await?)?;
+        let resolved = resolve_video_source(ctx, &parsed).await;
+        if resolved == VideoSourceResolution::CodecRejected {
+            return Err(ApiError::Internal("该视频暂不支持播放".to_string()));
+        }
+        Ok((parsed, resolved))
+    };
+    let auxiliary = async {
+        let response = fetch_phoenix_video_model(ctx, video_id)
+            .await
+            .and_then(|raw| ParsedVideoResponse::parse(&raw));
+        Ok::<_, ApiError>(response)
+    };
+    let ((parsed, resolved), phoenix) = tokio::try_join!(primary, auxiliary)?;
+    // 凤凰那条失败原先被 `.ok()` 静默吃掉，而 1080P 只可能来自它那条
+    // 列表（短剧专用接口自带列表与其 `fallback_api` 都只到 720P）——
+    // 失败即面板少一档且毫无痕迹。**HTTP 成功不等于业务成功**：实测
+    // 2026-10-14 三集全部回火山错误封包
+    // `{BaseResp, Code:110001, Message:未知异常}`（无 `data`），上游只给
+    // 通用码、不给原因，所以这里把外壳与剧集 id 一起留在核心日志里。
+    // Note: 为什么静默会丢一整档、以及日志里刻意不记什么 —
+    // 见 .agents/notes/implemented/bug-fix/2026-10-14-phoenix-reject-silent-quality-loss.md
+    match &phoenix {
+        Ok(body) if body.root.get("data").is_some_and(Value::is_object) => {}
+        Ok(body) => log::warn!(
+            "video {video_id}: phoenix body unusable (quality tiers lost): {}",
+            body_envelope(&body.root)
+        ),
+        Err(error) => log::warn!(
+            "video {video_id}: phoenix request failed (quality tiers lost): {}",
+            error.message()
+        ),
+    }
+    Ok((parsed, phoenix.ok(), resolved))
+}
+
+/// 请求档命中：返回该档 (url, 内容密钥)；未请求或未命中返回 None。
+fn quality_hit(variants: &[Value], quality: &str) -> Option<(String, Vec<u8>)> {
+    if quality.is_empty() {
+        return None;
+    }
+    let row = variants
+        .iter()
+        .find(|row| row.get("name").and_then(Value::as_str) == Some(quality))?;
+    let url = row.get("url").and_then(Value::as_str).unwrap_or("");
+    let key_hex = row.get("key_hex").and_then(Value::as_str).unwrap_or("");
+    if url.is_empty() {
+        return None;
+    }
+    let key = hex::decode(key_hex).ok()?;
+    Some((url.to_string(), key))
 }
 
 /// `quality` 参数白名单：仅字母数字、长度 <= 8（720P/1080P/2K/4K…），
