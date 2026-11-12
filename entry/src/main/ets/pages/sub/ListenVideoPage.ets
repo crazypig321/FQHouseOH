@@ -159,6 +159,10 @@ export struct ListenVideoPage {
         this.hasDisplayed = true;
       }
     });
+    // 幂等装配：aboutToAppear 异常重入时先清旧定时器，避免旧 interval 泄漏后无法 clearInterval
+    if (this.tickTimer !== 0) {
+      clearInterval(this.tickTimer);
+    }
     this.tickTimer = setInterval((): void => {
       this.progressTickFn();
     }, 1000);
@@ -173,6 +177,11 @@ export struct ListenVideoPage {
       }
       this.player.play();
       this.syncMediaState(true);
+    };
+    // 被仲裁让路（听书/其他视频页接管会话）时暂停播放，防叠栈双声道
+    this.media.onYield = (): void => {
+      this.player.pause();
+      this.saveCurrentProgress();
     };
     this.media.onPause = (): void => {
       this.player.pause();
@@ -232,7 +241,7 @@ export struct ListenVideoPage {
     // 退出回传：听到的集 + 位置（播放页 onShown 消费后按此续看）
     ListenVideoNavParams.resultIndex = this.index;
     ListenVideoNavParams.resultPositionSec = this.player.state.position;
-    this.media.release();
+    this.media.dispose();
     this.player.destroy();
   }
 

@@ -32,6 +32,7 @@ import { FqBackend, fqErrorMessage } from './FqBackend';
 import { FqAudioCacheStore } from './FqAudioCacheStore';
 import { FqChapterCacheStore } from './FqChapterCacheStore';
 import { FqLocalBookStore } from './FqLocalBookStore';
+import { FqAvArbiter } from './FqAvArbiter';
 import { FqChapter } from '../model/FqModels';
 import { FqNormalizedChapter } from '../reader/ReaderTypes';
 import {
@@ -258,6 +259,11 @@ export class FqAudioSession {
     FqAudioHistory.init(context);
     FqChapterCacheStore.init(context);
     FqLocalBookStore.init(context);
+    // 进程级 AVSession 槽位仲裁：注册听书让路（视频显式接管时 close）与活跃探针
+    const self: FqAudioSession = this;
+    FqAvArbiter.registerListen(
+      (): void => self.close(),
+      (): boolean => self.hasSession);
   }
 
   /** 当前章节（无目录时 null）。 */
@@ -292,6 +298,10 @@ export class FqAudioSession {
     if (this.hasSession && this.bookId === bookId) {
       return;
     }
+    // 进程级单会话仲裁：叠栈在视频/听视频页之上打开听书时，底层视频页不释放会话
+    // 会永久占住进程唯一 AVSession 槽位（create 永远报 session is existed）。
+    // 先让路全部视频类持有者（暂停 + 释放会话/长时任务），再建听书会话。
+    FqAvArbiter.yieldAllVideoExcept(null);
     this.generation += 1;
     const gen: number = this.generation;
     // 本地导入书：无在线音源/装饰数据，强制走离线朗读（TTS 正文按导入偏移切片）
@@ -2262,8 +2272,11 @@ export class FqAudioSession {
       .then((session: avSession.AVSession): void => {
         this.avCreating = false;
         if (epoch !== this.avEpoch) {
-          // teardown 已作废本次创建：立即销毁防泄漏
-          session.destroy().catch((): void => {
+          // teardown 已作废本次创建：立即销毁防泄漏（先 deactivate 再 destroy）
+          session.deactivate().catch((error: BusinessError): void => {
+            hilog.warn(0x0001, TAG, `AVSession deactivate failed (stale): ${error.message}`);
+          }).then((): Promise<void> => session.destroy()).catch((error: BusinessError): void => {
+            hilog.warn(0x0001, TAG, `AVSession destroy failed (stale): ${error.message}`);
           });
           return;
         }
@@ -2325,8 +2338,10 @@ export class FqAudioSession {
     this.bgPlayModeApplied = undefined;
     if (session !== null) {
       // deactivate 失败也必须 destroy：泄漏会永久阻塞本应用后续 create（session is existed）
-      session.deactivate().catch((): void => {
-      }).then((): Promise<void> => session.destroy()).catch((): void => {
+      session.deactivate().catch((error: BusinessError): void => {
+        hilog.warn(0x0001, TAG, `AVSession deactivate failed: ${error.message}`);
+      }).then((): Promise<void> => session.destroy()).catch((error: BusinessError): void => {
+        hilog.warn(0x0001, TAG, `AVSession destroy failed: ${error.message}`);
       });
     }
     this.coverPixel = null;

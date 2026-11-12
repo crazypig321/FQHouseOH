@@ -468,6 +468,9 @@ export struct PlayerPage {
   private danmakuLoadedToMs: number = 0;
   /** 弹幕进度心跳定时器（0 无任务）。 */
   private danmakuTimer: number = 0;
+  /** 页面已销毁（aboutToDisappear 置位）：泄漏的心跳定时器回调据此彻底失能，
+   *  防止销毁后仍在周期调 syncPlayback 隐式复活出无主 AVSession 占住槽位。 */
+  private pageGone: boolean = false;
   /** 听视频页返回待消费（onShown 时按听到的集/位置续看）。 */
   private listenReturnPending: boolean = false;
   /** 听视频返回切集标记：听视频页已持久化最新（集,位置），loadEpisode 跳过旧集续播回写与新集 0 位置覆盖。 */
@@ -564,7 +567,14 @@ export struct PlayerPage {
       }
     });
     // 弹幕进度心跳：接近已加载右界时按 cursor 续拉；同时周期保存续播进度
+    // 幂等装配：aboutToAppear 异常重入时先清旧定时器，避免旧 interval 泄漏后无法 clearInterval
+    if (this.danmakuTimer !== 0) {
+      clearInterval(this.danmakuTimer);
+    }
     this.danmakuTimer = setInterval((): void => {
+      if (this.pageGone) {
+        return;
+      }
       this.danmakuTick();
       this.progressSaveTick();
       this.mediaTick();
@@ -581,6 +591,11 @@ export struct PlayerPage {
       }
       this.player.play();
       this.syncMediaState(true);
+    };
+    // 被仲裁让路（听书/其他视频页接管会话）时暂停播放，防叠栈双声道
+    this.media.onYield = (): void => {
+      this.player.pause();
+      this.saveCurrentProgress();
     };
     this.media.onPause = (): void => {
       this.player.pause();
@@ -655,6 +670,8 @@ export struct PlayerPage {
   }
 
   aboutToDisappear(): void {
+    // 立即失能心跳定时器回调（防泄漏 interval 在销毁后继续驱动 AVSession 复活）
+    this.pageGone = true;
     // 复位 PC 左侧主导航显隐（离页交还主导航）
     appState.hidePcSideNav = false;
     const bgHandlerIdx: number = appState.backgroundPauseHandlers.indexOf(this.backgroundPause);
@@ -706,7 +723,7 @@ export struct PlayerPage {
       // 恢复失败交由系统窗口销毁兜底
     });
     this.teardownPip();
-    this.media.release();
+    this.media.dispose();
     this.player.destroy();
   }
 
@@ -2427,6 +2444,8 @@ export struct PlayerPage {
       this.mediaDurationSynced = duration;
       this.pushMediaMetadata();
     }
+    // 封面拉取失败自动退避重试（成功后幂等），后台胶囊/播控中心不再永久缺封面
+    this.media.ensureCoverLoaded(this.coverUrl);
     this.media.syncPlayback(false, this.player.state.playing, this.player.state.speed,
       this.player.state.position);
     // 播放中累计视听统计（每 15s 落一次按书+全局）
@@ -3905,6 +3924,7 @@ export struct PlayerPage {
       this.qualityIndex = -1;
       // 离线缓存命中：直接播本地文件，跳过在线取流（无网也可看已缓存集）
       if (FqDramaCacheStore.has(episode.itemId)) {
+        this.resolveCover();
         playUrl = FqDramaCacheStore.filePath(episode.itemId);
       } else {
         await FqBackend.get().start(getContext(this));

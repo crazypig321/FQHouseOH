@@ -16,6 +16,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { FqAppSettingsStore } from './FqAppSettingsStore';
 import { FqMediaBgTask } from './FqMediaBgTask';
+import { FqAvArbiter, FqAvVideoHolder } from './FqAvArbiter';
 
 const TAG: string = 'FqVideoMedia';
 
@@ -30,6 +31,8 @@ export class FqVideoMedia {
   /** 快进/快退（播控中心 video 模板 ±15s 按钮；sec 为秒，未带时长时默认 15）。 */
   onFastForward: (sec: number) => void = (_sec: number): void => {};
   onRewind: (sec: number) => void = (_sec: number): void => {};
+  /** 被仲裁让路回调（其他持有者接管时暂停播放，防叠栈双声道；页面注入）。 */
+  onYield: () => void = (): void => {};
 
   private readonly sessionTag: string;
   private context: common.UIAbilityContext | null = null;
@@ -54,6 +57,16 @@ export class FqVideoMedia {
   private lastMeta: avSession.AVMetadata | null = null;
   /** 封面拉取进行中（单飞：失败后下轮 updateMetadata 才重试）。 */
   private coverLoading: boolean = false;
+  /** 仲裁注册项（init 注册；dispose 注销；null 未注册）。 */
+  private arbiterHolder: FqAvVideoHolder | null = null;
+  /** 已销毁（页面 aboutToDisappear 后永久置位）：一切会话/后台/封面/同步操作全部禁用，
+   *  防止泄漏的心跳定时器或迟到异步回调在页面销毁后"复活"出无主会话永久占住槽位。 */
+  private disposed: boolean = false;
+  /** 已让路释放（openListenMode / 仲裁让路后置位）：隐式心跳不得复活会话，
+   *  仅显式接管（返回续播/切集起播）清除本标志重建。 */
+  private released: boolean = false;
+  /** 封面拉取失败退避重试时间戳（毫秒；之前失败不重试导致胶囊永远无封面）。 */
+  private coverRetryAt: number = 0;
 
   constructor(sessionTag: string) {
     this.sessionTag = sessionTag;
@@ -61,18 +74,40 @@ export class FqVideoMedia {
 
   public init(context: common.UIAbilityContext): void {
     this.context = context;
+    if (this.arbiterHolder === null) {
+      const self: FqVideoMedia = this;
+      this.arbiterHolder = new FqAvVideoHolder(
+        (): void => {
+          self.onYield();
+          self.release();
+        },
+        (): boolean => self.sessionValue !== null);
+      FqAvArbiter.registerVideo(this.arbiterHolder);
+    }
   }
 
   /** 起播时确保 AVSession（sessionType：'video' 视频页 / 'audio' 听视频页）。
    * 显式开启后台播放模式：video 会话默认 DISABLE_BACKGROUND_PLAY，不设则退后台无实况窗胶囊。
-   * 让路页旧会话销毁为异步：创建报 session is existed 时 600ms 有界重试自愈。 */
-  public ensureSession(sessionType: string): void {
-    if (this.sessionValue !== null || this.sessionCreating || this.context === null) {
+   * 让路页旧会话销毁为异步：创建报 session is existed 时 600ms 有界重试自愈。
+   * implicit=false 显式接管（起播/返回续播）：先让路听书与其他视频页（顶层意图优先）；
+   * implicit=true 隐式重建（1s tick）：听书或其他视频页持有时跳过（埋页不回抢）。 */
+  public ensureSession(sessionType: string, implicit: boolean = false): void {
+    if (this.disposed || this.sessionValue !== null || this.sessionCreating || this.context === null) {
       return;
     }
     // 设置开关：后台播放/画中画均关闭时不创建 AVSession（无胶囊/播控中心通知）
     if (!this.bgAllowed()) {
       return;
+    }
+    if (implicit) {
+      // 已让路释放的实例不得由心跳隐式复活（上次释放后会话已交出，复活即产生无主僵尸会话）
+      if (this.released || FqAvArbiter.isListenActive() || FqAvArbiter.videoHeldByOther(this.arbiterHolder)) {
+        return;
+      }
+    } else {
+      this.released = false;
+      FqAvArbiter.yieldListen();
+      FqAvArbiter.yieldAllVideoExcept(this.arbiterHolder);
     }
     if (this.ensureRetryTimer !== 0) {
       clearTimeout(this.ensureRetryTimer);
@@ -86,8 +121,12 @@ export class FqVideoMedia {
       .then((session: avSession.AVSession): void => {
         this.sessionCreating = false;
         if (epoch !== this.sessionEpoch) {
-          // teardown 已作废本次创建：立即销毁防泄漏
-          session.destroy().catch((): void => {
+          // teardown 已作废本次创建：立即销毁防泄漏（先 deactivate 再 destroy）
+          hilog.info(0x0001, TAG, `AVSession stale create discarded: ${this.sessionTag}`);
+          session.deactivate().catch((error: BusinessError): void => {
+            hilog.warn(0x0001, TAG, `AVSession deactivate failed (stale): ${error.message}`);
+          }).then((): Promise<void> => session.destroy()).catch((error: BusinessError): void => {
+            hilog.warn(0x0001, TAG, `AVSession destroy failed (stale): ${error.message}`);
           });
           return;
         }
@@ -126,6 +165,8 @@ export class FqVideoMedia {
         session.activate().catch((error: BusinessError): void => {
           hilog.warn(0x0001, TAG, `AVSession activate failed: ${error.message}`);
         });
+        hilog.info(0x0001, TAG,
+          `AVSession created: ${this.sessionTag} ${sessionType}${implicit ? ' implicit' : ''}`);
       })
       .catch((error: BusinessError): void => {
         this.sessionCreating = false;
@@ -146,7 +187,7 @@ export class FqVideoMedia {
         this.ensureRetryCount += 1;
         this.ensureRetryTimer = setTimeout((): void => {
           this.ensureRetryTimer = 0;
-          this.ensureSession(sessionType);
+          this.ensureSession(sessionType, implicit);
         }, 600);
       });
   }
@@ -154,6 +195,9 @@ export class FqVideoMedia {
   /** 同步元数据（切集调用；封面像素未就绪时后台拉取后重发）。 */
   public updateMetadata(assetId: string, title: string, subtitle: string,
     durationSec: number, coverUrl: string): void {
+    if (this.disposed) {
+      return;
+    }
     const meta: avSession.AVMetadata = {
       assetId: assetId,
       title: title,
@@ -176,6 +220,9 @@ export class FqVideoMedia {
   /** 同步播放态（1s tick 或状态突变调用；内部 1s 节流，force 立即）。 */
   public syncPlayback(force: boolean, playing: boolean, speed: number,
     positionSec: number): void {
+    if (this.disposed) {
+      return;
+    }
     // 设置开关：后台播放/画中画均关闭时停长时任务 + 销毁 AVSession（无法后台播放）
     if (!this.bgAllowed()) {
       if (this.bgStarted) {
@@ -183,7 +230,7 @@ export class FqVideoMedia {
       }
       this.teardownSession();
     } else {
-      this.ensureSession(this.lastSessionType);
+      this.ensureSession(this.lastSessionType, true);
       this.syncBackgroundPlayMode();
     }
     const session: avSession.AVSession | null = this.sessionValue;
@@ -234,6 +281,9 @@ export class FqVideoMedia {
 
   /** 后台长时任务（audioPlayback：应用级引用计数共享，首个引用申请，release 释放）。 */
   public startBackground(): void {
+    if (this.disposed) {
+      return;
+    }
     // 设置开关：后台播放/画中画均关闭后不再申请长时任务（无法后台播放）
     if (!this.bgAllowed()) {
       return;
@@ -249,6 +299,7 @@ export class FqVideoMedia {
   private teardownSession(): void {
     this.sessionEpoch += 1;
     this.sessionCreating = false;
+    hilog.info(0x0001, TAG, `AVSession teardown: ${this.sessionTag}`);
     if (this.ensureRetryTimer !== 0) {
       clearTimeout(this.ensureRetryTimer);
       this.ensureRetryTimer = 0;
@@ -259,20 +310,53 @@ export class FqVideoMedia {
     this.bgPlayModeApplied = undefined;
     if (session !== null) {
       // deactivate 失败也必须 destroy：泄漏会永久阻塞本应用后续 create（session is existed）
-      session.deactivate().catch((): void => {
-      }).then((): Promise<void> => session.destroy()).catch((): void => {
+      session.deactivate().catch((error: BusinessError): void => {
+        hilog.warn(0x0001, TAG, `AVSession deactivate failed: ${error.message}`);
+      }).then((): Promise<void> => session.destroy()).catch((error: BusinessError): void => {
+        hilog.warn(0x0001, TAG, `AVSession destroy failed: ${error.message}`);
       });
     }
     this.coverPixel = null;
     this.coverPixelUrl = '';
   }
 
-  /** 释放（离页/让路）：停后台任务 + AVSession deactivate/destroy。 */
+  /** 释放（离页/让路）：停后台任务 + AVSession deactivate/destroy（保持仲裁注册，
+   * 埋页仍可被后续接管者让路/在持有者消失后由 tick 隐式重建）。 */
   public release(): void {
+    this.released = true;
+    hilog.info(0x0001, TAG, `AVSession release: ${this.sessionTag}`);
     this.stopBackground();
     this.teardownSession();
     this.lastMeta = null;
     this.coverLoading = false;
+  }
+
+  /** 销毁（页面 aboutToDisappear）：注销仲裁注册 + 释放；此后实例永久禁用。 */
+  public dispose(): void {
+    if (this.disposed) {
+      return;
+    }
+    this.disposed = true;
+    hilog.info(0x0001, TAG, `AVSession dispose: ${this.sessionTag}`);
+    if (this.arbiterHolder !== null) {
+      FqAvArbiter.unregisterVideo(this.arbiterHolder);
+      this.arbiterHolder = null;
+    }
+    this.release();
+  }
+
+  /** 封面拉取失败退避重试（页面 1s 心跳调用；成功后幂等、失败 5s 退避）。 */
+  public ensureCoverLoaded(coverUrl: string): void {
+    if (this.disposed || this.sessionValue === null || coverUrl.length === 0 || this.coverLoading) {
+      return;
+    }
+    if (this.coverPixel !== null && this.coverPixelUrl === coverUrl) {
+      return;
+    }
+    if (Date.now() < this.coverRetryAt) {
+      return;
+    }
+    this.loadCoverPixel(coverUrl);
   }
 
   /** 拉取封面 → PixelMap（AVSession mediaImage；就绪后重发元数据）。 */
@@ -297,6 +381,7 @@ export class FqVideoMedia {
         this.coverPixel = pixel;
         this.coverPixelUrl = url;
         this.coverLoading = false;
+        this.coverRetryAt = 0;
         const meta: avSession.AVMetadata | null = this.lastMeta;
         const session: avSession.AVSession | null = this.sessionValue;
         if (meta !== null && session !== null) {
@@ -305,8 +390,11 @@ export class FqVideoMedia {
           });
         }
       })
-      .catch((): void => {
+      .catch((error: BusinessError): void => {
         this.coverLoading = false;
+        // 退避 5s 后由页面心跳重试（此前失败即永久无封面）
+        this.coverRetryAt = Date.now() + 5000;
+        hilog.warn(0x0001, TAG, `cover fetch failed: ${error.message}`);
         client.destroy();
       });
   }

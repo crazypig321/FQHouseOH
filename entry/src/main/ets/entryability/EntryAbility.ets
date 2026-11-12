@@ -21,6 +21,7 @@ import { display, mediaquery, window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { FqBackend } from '../core/FqBackend';
 import { fqAudioSession } from '../core/FqAudioSession';
+import { FqAvArbiter } from '../core/FqAvArbiter';
 import { FqShelfStore } from '../core/FqShelfStore';
 import { FqBrowseStore } from '../core/FqBrowseStore';
 import { FqAudioHistory } from '../core/FqAudioHistory';
@@ -140,6 +141,9 @@ export default class EntryAbility extends UIAbility {
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onDestroy');
     // 退出时自动备份（WebDAV 开关开启 + 已配置 + 可达时执行，静默失败）
     FqWebDav.backupOnExit();
+    // 页面级视频/听视频 AVSession 兜底释放（Ability 销毁不触发页面 aboutToDisappear，
+    // 不释放会永久占住进程唯一 AVSession 槽位，进程未死时后续会话全部创建失败）
+    FqAvArbiter.yieldAllVideoExcept(null);
     fqAudioSession.close();
   }
 
