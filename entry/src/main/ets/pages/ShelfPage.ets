@@ -46,6 +46,10 @@ const SHELF_PREF_SORT: string = 'sort';
 const SHELF_PREF_FILTER_STATUS: string = 'filter_status';
 /** 书架筛选偏好：来源（0=全部 1=本地 2=在线）。 */
 const SHELF_PREF_FILTER_SOURCE: string = 'filter_source';
+/** 书架筛选偏好：类目（0=全部 1=小说 2=短剧 3=漫剧 4=漫画 5=听书）。 */
+const SHELF_PREF_FILTER_KIND: string = 'filter_kind';
+/** 类目筛选项文案（下标即 filterKind 值；小说 = 其余 kind 归小说，见 fqKindLabel）。 */
+const SHELF_FILTER_KIND_LABELS: string[] = ['全部', '小说', '短剧', '漫剧', '漫画', '听书'];
 /** 书架筛选偏好：分组（''=全部，其余分组 id）。 */
 const SHELF_PREF_FILTER_GROUP: string = 'filter_group';
 /** 书架筛选 pill 锚点 id。 */
@@ -145,6 +149,8 @@ export struct ShelfPage {
   @Local filterStatus: number = 0;
   /** 书架筛选：来源（0=全部 1=本地 2=在线，持久化，仅书架 tab）。 */
   @Local filterSource: number = 0;
+  /** 书架筛选：类目（0=全部 1=小说 2=短剧 3=漫剧 4=漫画 5=听书，持久化，仅书架 tab）。 */
+  @Local filterKind: number = 0;
   /** 书架筛选：分组（''=全部，其余分组 id，持久化，仅书架 tab）。 */
   @Local filterGroupId: string = '';
   /** 分组 sheet 是否可见（assign=多选归组 / manage=分组管理）。 */
@@ -223,6 +229,10 @@ export struct ShelfPage {
       const rawSource: preferences.ValueType = this.layoutPref.getSync(SHELF_PREF_FILTER_SOURCE, 0);
       if (typeof rawSource === 'number' && rawSource >= 0 && rawSource <= 2) {
         this.filterSource = rawSource;
+      }
+      const rawKind: preferences.ValueType = this.layoutPref.getSync(SHELF_PREF_FILTER_KIND, 0);
+      if (typeof rawKind === 'number' && rawKind >= 0 && rawKind <= 5) {
+        this.filterKind = rawKind;
       }
       const rawGroup: preferences.ValueType = this.layoutPref.getSync(SHELF_PREF_FILTER_GROUP, '');
       if (typeof rawGroup === 'string' && rawGroup.length > 0
@@ -330,7 +340,8 @@ export struct ShelfPage {
                 Button(this.allSelected() ? '取消全选' : '全选')
                   .layoutWeight(1)
                   .height(36)
-                  .fontSize(14)
+                  .fontSize(13)
+                  .padding({ left: 8, right: 8 })
                   .fontWeight(FontWeight.Medium)
                   .borderRadius(10)
                   .backgroundColor($r('sys.color.comp_background_tertiary'))
@@ -342,7 +353,8 @@ export struct ShelfPage {
                 Button('分享')
                   .layoutWeight(1)
                   .height(36)
-                  .fontSize(14)
+                  .fontSize(13)
+                  .padding({ left: 8, right: 8 })
                   .fontWeight(FontWeight.Medium)
                   .borderRadius(10)
                   .backgroundColor($r('sys.color.comp_background_tertiary'))
@@ -355,7 +367,8 @@ export struct ShelfPage {
                   Button('分组')
                     .layoutWeight(1)
                     .height(36)
-                    .fontSize(14)
+                    .fontSize(13)
+                    .padding({ left: 8, right: 8 })
                     .fontWeight(FontWeight.Medium)
                     .borderRadius(10)
                     .backgroundColor($r('sys.color.comp_background_tertiary'))
@@ -367,7 +380,8 @@ export struct ShelfPage {
                 Button(this.currentTab === 0 ? '移出书架' : '删除')
                   .layoutWeight(1)
                   .height(36)
-                  .fontSize(14)
+                  .fontSize(13)
+                  .padding({ left: 8, right: 8 })
                   .fontWeight(FontWeight.Medium)
                   .borderRadius(10)
                   .backgroundColor($r('sys.color.comp_background_tertiary'))
@@ -453,7 +467,7 @@ export struct ShelfPage {
       for (const entry of FqShelfStore.all()) {
         if (keyword.length === 0 || entry.title.includes(keyword)) {
           const percent: number = this.entryPercent(entry.id, entry.kind);
-          if (this.rowMatchesFilter(entry.id, percent)) {
+          if (this.rowMatchesFilter(entry.id, entry.kind, percent)) {
             entries.push(new ShelfSortEntry(new ShelfRow(entry.id, entry.kind, entry.title, entry.cover,
               FqLocalBookStore.isLocalBookId(entry.id) ? '本地书籍' : fqKindLabel(entry.kind),
               percent), addedIndex, visitedAtMap.get(entry.id) ?? 0));
@@ -529,14 +543,18 @@ export struct ShelfPage {
     return '';
   }
 
-  /** 筛选是否生效（状态/来源任一非「全部」；分组选择由标签行表达，不计入筛选 pill）。 */
+  /** 筛选是否生效（类目/状态/来源任一非「全部」；分组选择由标签行表达，不计入筛选 pill）。 */
   private hasActiveFilter(): boolean {
     return this.currentTab === 0
-      && (this.filterStatus !== 0 || this.filterSource !== 0);
+      && (this.filterStatus !== 0 || this.filterSource !== 0 || this.filterKind !== 0);
   }
 
-  /** 书架行是否通过当前组合筛选（状态/来源/分组 AND）。 */
-  private rowMatchesFilter(id: string, percent: number): boolean {
+  /** 书架行是否通过当前组合筛选（类目/状态/来源/分组 AND）。 */
+  private rowMatchesFilter(id: string, kind: string, percent: number): boolean {
+    // 类目：小说 = 其余 kind 归小说（fqKindLabel 同映射）
+    if (this.filterKind !== 0 && fqKindLabel(kind) !== SHELF_FILTER_KIND_LABELS[this.filterKind]) {
+      return false;
+    }
     // 已看完 = 进度 ≥ 100；未看完 = 除已看完外全部（含无进度）
     if (this.filterStatus === 2 && percent < 100) {
       return false;
@@ -557,12 +575,15 @@ export struct ShelfPage {
     return true;
   }
 
-  /** 筛选 pill 标签：默认「筛选」，生效时组合状态/来源维度（分组选择由分组标签行表达，不进 pill 文案）。 */
+  /** 筛选 pill 标签：默认「筛选」，生效时组合类目/状态/来源维度（分组选择由分组标签行表达，不进 pill 文案）。 */
   private filterPillLabel(): string {
     if (!this.hasActiveFilter()) {
       return '筛选';
     }
     const parts: string[] = [];
+    if (this.filterKind !== 0) {
+      parts.push(SHELF_FILTER_KIND_LABELS[this.filterKind]);
+    }
     if (this.filterStatus === 1) {
       parts.push('未看完');
     }
@@ -602,9 +623,17 @@ export struct ShelfPage {
     }
   }
 
-  /** 筛选菜单：状态/来源级联 + 清除筛选（分组选择走胶囊下方的分组标签行）。 */
+  /** 筛选菜单：类目/状态/来源级联 + 清除筛选（分组选择走胶囊下方的分组标签行）。 */
   private openFilterMenu(): void {
     const items: Array<FqMenuItem> = [];
+
+    const kindItem = new FqMenuItem();
+    kindItem.label = this.filterKind === 0 ? '类目' : `类目 · ${SHELF_FILTER_KIND_LABELS[this.filterKind]}`;
+    kindItem.subItems = this.buildFilterEnumSubItems(SHELF_FILTER_KIND_LABELS, this.filterKind,
+      (mode: number): void => {
+        this.setFilterKind(mode);
+      });
+    items.push(kindItem);
 
     const statusLabels: string[] = ['全部', '未看完', '已看完'];
     const statusItem = new FqMenuItem();
@@ -636,9 +665,14 @@ export struct ShelfPage {
     FqMenu.open(this.getUIContext(), SHELF_FILTER_ANCHOR_ID, items);
   }
 
-  /** 清除全部筛选：状态/来源还原默认值（含持久化）；分组选择由标签行表达，不受影响。 */
+  /** 清除全部筛选：类目/状态/来源还原默认值（含持久化）；分组选择由标签行表达，不受影响。 */
   private clearAllFilters(): void {
     let changed: boolean = false;
+    if (this.filterKind !== 0) {
+      this.filterKind = 0;
+      this.persistFilterPref(SHELF_PREF_FILTER_KIND, 0);
+      changed = true;
+    }
     if (this.filterStatus !== 0) {
       this.filterStatus = 0;
       this.persistFilterPref(SHELF_PREF_FILTER_STATUS, 0);
@@ -678,6 +712,15 @@ export struct ShelfPage {
     }
     this.filterStatus = mode;
     this.persistFilterPref(SHELF_PREF_FILTER_STATUS, mode);
+    this.rebuildRows();
+  }
+
+  private setFilterKind(mode: number): void {
+    if (this.filterKind === mode) {
+      return;
+    }
+    this.filterKind = mode;
+    this.persistFilterPref(SHELF_PREF_FILTER_KIND, mode);
     this.rebuildRows();
   }
 
