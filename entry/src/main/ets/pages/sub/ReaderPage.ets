@@ -64,6 +64,7 @@ import {
   FqReaderPageData,
 } from '../../reader/ReaderTypes';
 import { FqPageCanvas } from '../../reader/FqPageCanvas';
+import { FqDialogueSegment, fqDialogueRanges, fqDialogueSegments } from '../../reader/FqDialogue';
 import { FqReaderFlip } from '../../reader/FqReaderFlip';
 import { FqFlipTurnController } from '../../reader/FqFlipTurn';
 import { drawing } from '@kit.ArkGraphics2D';
@@ -267,6 +268,8 @@ export struct ReaderPage {
   @Local flipIndex: number = 0;
   @Local fontIndex: number = 0;
   @Local showParagraphComment: boolean = true;
+  /** 对话高亮色（空 = 关闭；#RRGGBB / #AARRGGBB，引号内文本底色）。 */
+  @Local dialogueHighlightColor: string = '';
   /** 音量键翻页开关（AppState 全局共享：设置页/小说阅读/漫画阅读三处开关实时同步）。 */
   @Computed
   get volumeKeyPaging(): boolean {
@@ -444,6 +447,7 @@ export struct ReaderPage {
     this.flipIndex = settings.flipIndex;
     this.fontIndex = settings.fontIndex;
     this.showParagraphComment = settings.showParagraphComment;
+    this.dialogueHighlightColor = settings.dialogueHighlightColor;
     this.customThemes = settings.customThemes;
     this.customThemeId = settings.customThemeId;
     this.customFonts = settings.customFonts;
@@ -711,6 +715,8 @@ export struct ReaderPage {
       fontColor: this.effFontColor(),
       pageBgColor: this.pageBg(),
       commentCounts: this.layoutForSlot(slot)?.commentCounts ?? [],
+      paragraphs: this.layoutForSlot(slot)?.paragraphs ?? [],
+      dialogueHighlightColor: this.dialogueHighlightColor,
       fontFamily: this.readerFontFamily,
       highlightParaIndex: this.slotHighlightPara(slot),
       highlightColor: this.theme().night ? FqColorUtils.withOpacity(appState.accentColor, 0.2) : FqColorUtils.withOpacity(appState.accentColor, 0.1),
@@ -909,7 +915,18 @@ export struct ReaderPage {
           ListItem() {
             Column() {
               Text() {
-                Span(item.layout.paragraphs[item.paraIndex])
+                if (this.dialogueHighlightColor.length > 0 && item.paraIndex > 0) {
+                  ForEach(this.verticalSegments(item), (seg: FqDialogueSegment) => {
+                    if (seg.dialogue) {
+                      Span(seg.text)
+                        .textBackgroundStyle({ color: this.dialogueHighlightColor, radius: 4 })
+                    } else {
+                      Span(seg.text)
+                    }
+                  }, (seg: FqDialogueSegment): string => `${seg.dialogue ? 1 : 0}_${seg.text}`)
+                } else {
+                  Span(item.layout.paragraphs[item.paraIndex])
+                }
                 if (this.verticalBubbleCount(item) > 0) {
                   ImageSpan(fqBubbleIcon(this.verticalBubbleCount(item)))
                     .width(this.cachedMetrics.bubbleIconFp)
@@ -952,7 +969,7 @@ export struct ReaderPage {
             .borderRadius(this.verticalParaHighlighted(item) ? 6 : 0)
           }
         }, (item: FqVerticalTextItem): string =>
-          `${item.chapterIndex}_${item.paraIndex}_${this.effFontSize()}_${this.effLineHeight()}_${this.effFontIndex()}_${this.effCustomFontId()}`)
+          `${item.chapterIndex}_${item.paraIndex}_${this.effFontSize()}_${this.effLineHeight()}_${this.effFontIndex()}_${this.effCustomFontId()}_${this.dialogueHighlightColor}`)
       }
       .width('100%')
       .layoutWeight(1)
@@ -1004,6 +1021,15 @@ export struct ReaderPage {
       return item.layout.commentCounts[item.paraIndex];
     }
     return 0;
+  }
+
+  /** 上下滚动段落按对话区间分段（整段 offset 0；无引号返回单个普通段保证可渲染）。 */
+  private verticalSegments(item: FqVerticalTextItem): FqDialogueSegment[] {
+    if (item.paraIndex < 0 || item.paraIndex >= item.layout.paragraphs.length) {
+      return [];
+    }
+    const paragraph: string = item.layout.paragraphs[item.paraIndex];
+    return fqDialogueSegments(paragraph, 0, fqDialogueRanges(paragraph));
   }
 
   /** 上下滚动跟读段落高亮（仅当前章生效，邻章不串高亮）。 */
@@ -2667,6 +2693,10 @@ export struct ReaderPage {
         this.changeShowParagraphComment(on);
         fqReaderSettingsBus.showParagraphComment = this.showParagraphComment;
       },
+      changeDialogueHighlightColor: (color: string): void => {
+        this.changeDialogueHighlightColor(color);
+        fqReaderSettingsBus.dialogueHighlightColor = this.dialogueHighlightColor;
+      },
       pickCustomTheme: (): void => {
         this.addCustomTheme();
       },
@@ -2935,6 +2965,12 @@ export struct ReaderPage {
     }
     this.showParagraphComment = on;
     this.applySettingChange(true);
+  }
+
+  /** 对话高亮选色（空 = 关闭）：纯视觉设置不重排，非法值由 store 规范化回退关闭。 */
+  private changeDialogueHighlightColor(color: string): void {
+    FqReaderStore.saveDialogueHighlightColor(color);
+    this.dialogueHighlightColor = FqReaderStore.getSettings().dialogueHighlightColor;
   }
 
   private applySettingChange(needRelayout: boolean): void {

@@ -15,7 +15,7 @@ import { FqBrowseItem, FqBrowseStore } from './FqBrowseStore';
 import { FqListenRecord, FqAudioHistory } from './FqAudioHistory';
 import { FqWatchedMergeOutcome, FqWatchedProgress, FqWatchedStore } from './FqWatchedStore';
 import { FqReaderProgress, FqReaderSettings, FqReaderStore,
-  fqDecodeReadRanges, fqEncodeReadRanges, fqNormalizeThemeFontColor } from './FqReaderStore';
+fqDecodeReadRanges, fqEncodeReadRanges, fqNormalizeThemeFontColor, fqNormalizeDialogueColor } from './FqReaderStore';
 import { FqAppSettingsStore, FQ_DRAMA_AUTO_CACHE_AHEAD_MAX,
   FQ_DANMAKU_ALPHA_MIN_PERCENT, FQ_DANMAKU_ALPHA_MAX_PERCENT,
   FQ_VIDEO_QUALITY_PREF_WHITELIST } from './FqAppSettingsStore';
@@ -316,6 +316,10 @@ export class FqBackupAppSettings {
   readonly readerCustomThemes: FqBackupCustomTheme[];
   /** 当前选中的自定义主题 id（旧备份缺省为空串）。 */
   readonly readerCustomThemeId: string;
+  /** 对话高亮色（旧备份缺省为 null，恢复时跳过不重置本机）。 */
+  readonly readerDialogueHighlightColor: string | null;
+  /** 自定义对话高亮色板（旧备份缺省为 null，恢复时跳过不重置本机）。 */
+  readonly readerCustomDialogueColors: string[] | null;
   /** 播放设置段（旧备份无此段时为 null，恢复时跳过播放设置）。 */
   readonly playback: FqBackupPlaybackSettings | null;
 
@@ -327,7 +331,9 @@ export class FqBackupAppSettings {
     readerCustomThemes: FqBackupCustomTheme[], readerCustomThemeId: string,
     playback: FqBackupPlaybackSettings | null = null,
     startupTabIndex: number = -1,
-    homeStyle: number = -1) {
+    homeStyle: number = -1,
+    readerDialogueHighlightColor: string | null = null,
+    readerCustomDialogueColors: string[] | null = null) {
     this.themeMode = themeMode;
     this.themeColor = themeColor;
     this.themeCustomColor = themeCustomColor;
@@ -344,6 +350,8 @@ export class FqBackupAppSettings {
     this.readerVolumeKeyPaging = readerVolumeKeyPaging;
     this.readerCustomThemes = readerCustomThemes;
     this.readerCustomThemeId = readerCustomThemeId;
+    this.readerDialogueHighlightColor = readerDialogueHighlightColor;
+    this.readerCustomDialogueColors = readerCustomDialogueColors;
     this.playback = playback;
   }
 }
@@ -575,7 +583,9 @@ export class FqLibraryBackup {
       readerSettings.customThemeId,
       playback,
       FqAppSettingsStore.getStartupTabIndex(),
-      FqAppSettingsStore.getHomeStyle());
+      FqAppSettingsStore.getHomeStyle(),
+      readerSettings.dialogueHighlightColor,
+      readerSettings.customDialogueColors);
     // 书架分组段：分组 + 组内作品（仅书架内可移植书；local_ 与不在书架的书排除）
     const shelfIdSet: Set<string> = new Set<string>();
     for (const item of shelf) {
@@ -738,6 +748,12 @@ export class FqLibraryBackup {
       }
       settings['readerCustomThemes'] = customThemes;
       settings['readerCustomThemeId'] = data.settings.readerCustomThemeId;
+      // 对话高亮色（空串 = 关闭；旧备份无此字段）
+      settings['readerDialogueHighlightColor'] = data.settings.readerDialogueHighlightColor ?? '';
+      // 自定义对话高亮色板（旧备份无此字段跳过）
+      if (data.settings.readerCustomDialogueColors !== null) {
+        settings['readerCustomDialogueColors'] = data.settings.readerCustomDialogueColors;
+      }
       if (data.settings.playback !== null) {
         const playback: Record<string, Object> = {};
         playback['danmakuAlphaPercent'] = data.settings.playback.danmakuAlphaPercent;
@@ -1130,6 +1146,33 @@ export class FqLibraryBackup {
       if (customThemeId.length > 0 && !FQ_BACKUP_ID_PATTERN.test(customThemeId)) {
         throw new Error('备份字段 readerCustomThemeId 无效');
       }
+      // 对话高亮色（旧备份无此字段：null，恢复时跳过不重置本机；'' = 关闭高亮）
+      let readerDialogueHighlightColor: string | null = null;
+      if (settingsRec['readerDialogueHighlightColor'] !== undefined) {
+        const dialogueColorRaw: string = fqStr(settingsRec, 'readerDialogueHighlightColor');
+        if (dialogueColorRaw.length > 0 && fqNormalizeDialogueColor(dialogueColorRaw).length === 0) {
+          throw new Error('备份字段 readerDialogueHighlightColor 无效');
+        }
+        readerDialogueHighlightColor = dialogueColorRaw;
+      }
+      // 自定义对话高亮色板（旧备份无此字段：null，恢复时跳过；逐条校验规范化去重）
+      let readerCustomDialogueColors: string[] | null = null;
+      const dialogueColorsRaw: Object | undefined = settingsRec['readerCustomDialogueColors'];
+      if (dialogueColorsRaw !== undefined) {
+        const dialogueColorsArray: Object[] | null = fqAsArray(dialogueColorsRaw);
+        if (dialogueColorsArray === null) {
+          throw new Error('备份字段 readerCustomDialogueColors 无效');
+        }
+        readerCustomDialogueColors = [];
+        for (const item of dialogueColorsArray) {
+          if (typeof item !== 'string' || (item.length > 0 && fqNormalizeDialogueColor(item).length === 0)) {
+            throw new Error('备份字段 readerCustomDialogueColors 无效');
+          }
+          if (item.length > 0 && readerCustomDialogueColors.indexOf(item) < 0) {
+            readerCustomDialogueColors.push(item);
+          }
+        }
+      }
       // 播放设置段（旧备份无此段：null，恢复时跳过播放设置；存在则全量白名单校验）
       let playback: FqBackupPlaybackSettings | null = null;
       const playbackRaw: Object | undefined = settingsRec['playback'];
@@ -1191,7 +1234,9 @@ export class FqLibraryBackup {
         customThemeId,
         playback,
         startupTabIndex,
-        homeStyle);
+        homeStyle,
+        readerDialogueHighlightColor,
+        readerCustomDialogueColors);
     }
     return new FqLibraryBackupData(createdAt, appVersion, shelf, browse, listen,
       watched, reader, excluded, settings, groups);
@@ -1301,6 +1346,14 @@ export class FqLibraryBackup {
         settings.readerShowParagraphComment);
       FqReaderStore.saveComicFlip(settings.readerComicFlipIndex);
       FqReaderStore.saveVolumeKeyPaging(settings.readerVolumeKeyPaging);
+      // 对话高亮色（旧备份无此字段跳过，不重置本机已有设置）
+      if (settings.readerDialogueHighlightColor !== null) {
+        FqReaderStore.saveDialogueHighlightColor(settings.readerDialogueHighlightColor);
+      }
+      // 自定义对话高亮色板（旧备份无此字段跳过，不重置本机已有色板）
+      if (settings.readerCustomDialogueColors !== null) {
+        FqReaderStore.restoreCustomDialogueColors(settings.readerCustomDialogueColors);
+      }
       // 自定义阅读主题：先写回内嵌背景图文件（本机已有同名文件保留现状），
       // 再按模式校验重建条目（无内嵌数据的旧备份仍走沙箱文件存在性校验）
       for (const theme of settings.readerCustomThemes) {

@@ -369,6 +369,7 @@ struct Index {
         flipIndex: fqReaderSettingsBus.flipIndex,
         fontIndex: fqReaderSettingsBus.fontIndex,
         showParagraphComment: fqReaderSettingsBus.showParagraphComment,
+        dialogueHighlightColor: fqReaderSettingsBus.dialogueHighlightColor,
         volumeKeyPaging: appState.volumeKeyPaging,
         customThemes: fqReaderSettingsBus.customThemes,
         customThemeId: fqReaderSettingsBus.customThemeId,
@@ -410,6 +411,12 @@ struct Index {
           const handler: FqReaderSettingsHandler | null = fqReaderSettingsBus.handler;
           if (handler !== null) {
             handler.changeShowParagraphComment(on);
+          }
+        },
+        dialogueHighlightColorChange: (color: string): void => {
+          const handler: FqReaderSettingsHandler | null = fqReaderSettingsBus.handler;
+          if (handler !== null) {
+            handler.changeDialogueHighlightColor(color);
           }
         },
         volumeKeyPagingChange: (on: boolean): void => {

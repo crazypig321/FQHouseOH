@@ -13,6 +13,8 @@ export class FqReaderSettingsBus {
   @Trace flipIndex: number = 0;
   @Trace fontIndex: number = 0;
   @Trace showParagraphComment: boolean = true;
+  /** 对话高亮色（空 = 关闭；#RRGGBB / #AARRGGBB）。 */
+  @Trace dialogueHighlightColor: string = '';
   /** 自定义阅读主题列表（镜像阅读页，数组整体替换驱动刷新）。 */
   @Trace customThemes: FqCustomReaderTheme[] = [];
   /** 当前选中的自定义主题 id（themeIndex=3 时生效）。 */
@@ -34,6 +36,8 @@ export interface FqReaderSettingsHandler {
   changeFont: (index: number) => void;
   changeFlip: (index: number) => void;
   changeShowParagraphComment: (on: boolean) => void;
+  /** 对话高亮选色（空串 = 关闭高亮）。 */
+  changeDialogueHighlightColor: (color: string) => void;
   /** 图库选图新增自定义主题并选中。 */
   pickCustomTheme: () => void;
   /** 选中指定自定义主题（themeIndex 切到 3）。 */

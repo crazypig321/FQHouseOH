@@ -621,7 +621,7 @@ export struct SettingsPage {
           .fontSize(14.5)
           .fontWeight(FontWeight.Medium)
           .fontColor($r('sys.color.font_primary'))
-        Text('首页顶部展示今日焦点还是排行榜立体书架，即时生效')
+        Text('首页顶部展示今日焦点还是排行榜卡片，即时生效')
           .fontSize(11.5)
           .fontColor($r('sys.color.font_secondary'))
       }

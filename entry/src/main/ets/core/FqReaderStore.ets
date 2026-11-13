@@ -60,6 +60,10 @@ export class FqReaderSettings {
   customThemes: FqCustomReaderTheme[] = [];
   /** 当前选中的自定义主题 id（themeIndex=4 时生效；空 = 无选中）。 */
   customThemeId: string = '';
+  /** 对话高亮色（空 = 关闭高亮；#RRGGBB / #AARRGGBB）。 */
+  dialogueHighlightColor: string = '';
+  /** 自定义对话高亮色板（取色器新增色，新色在前；阅读设置「高亮对话」行共用）。 */
+  customDialogueColors: string[] = [];
   /** 自定义字色板（取色器新增字色，新色在前；阅读主题编辑弹窗字色列表共用）。 */
   customFontColors: string[] = [];
   /** 自定义阅读字体列表（Download/包名/fonts/ 下的字体文件；fontIndex=3 生效）。 */
@@ -140,6 +144,15 @@ export function fqNormalizeThemeFontColor(value: string): string {
   }
   if (/^#[0-9A-Fa-f]{8}$/.test(text)) {
     return `#${text.substring(3)}`;
+  }
+  return '';
+}
+
+/** 对话高亮色规范化：#RRGGBB / #AARRGGBB 均可（含透明度供底色浓度），非法返回空串。 */
+export function fqNormalizeDialogueColor(value: string): string {
+  const text: string = value.trim();
+  if (/^#[0-9A-Fa-f]{6}$/.test(text) || /^#[0-9A-Fa-f]{8}$/.test(text)) {
+    return text;
   }
   return '';
 }
@@ -343,6 +356,35 @@ export class FqReaderStore {
       if (typeof customFontId === 'string') {
         FqReaderStore.settings.customFontId = customFontId;
       }
+      // 对话高亮色（旧配置无此字段保持默认关闭；非法值回退关闭）
+      const dialogueHighlightColor: Object | undefined = rec['dialogueHighlightColor'];
+      if (typeof dialogueHighlightColor === 'string') {
+        FqReaderStore.settings.dialogueHighlightColor = fqNormalizeDialogueColor(dialogueHighlightColor);
+      }
+      // 自定义对话高亮色板（JSON 数组，逐条规范化，坏值/重复跳过）
+      const customDialogueColorsRaw: Object | undefined = rec['customDialogueColors'];
+      if (typeof customDialogueColorsRaw === 'string' && customDialogueColorsRaw.length > 0) {
+        try {
+          const parsedDialogueColors: Object | null = JSON.parse(customDialogueColorsRaw);
+          const dialogueColorArray: Object[] | null = fqAsArray(parsedDialogueColors);
+          if (dialogueColorArray !== null) {
+            const dialogueColors: string[] = [];
+            for (const item of dialogueColorArray) {
+              if (typeof item !== 'string') {
+                continue;
+              }
+              const normalized: string = fqNormalizeDialogueColor(item);
+              if (normalized.length === 0 || dialogueColors.indexOf(normalized) >= 0) {
+                continue;
+              }
+              dialogueColors.push(normalized);
+            }
+            FqReaderStore.settings.customDialogueColors = dialogueColors;
+          }
+        } catch (error) {
+          // 列表损坏按空处理
+        }
+      }
       // fontIndex=3（自定义字体）但列表为空或 id 未命中时回退系统字体
       if (FqReaderStore.settings.fontIndex === 3
         && FqReaderStore.fontById(FqReaderStore.settings.customFontId) === null) {
@@ -372,6 +414,74 @@ export class FqReaderStore {
   /** 漫画翻页方式单独保存（不动小说设置）。 */
   public static saveComicFlip(comicFlipIndex: number): void {
     FqReaderStore.settings.comicFlipIndex = Math.min(2, Math.max(0, Math.trunc(comicFlipIndex)));
+    FqReaderStore.persistSettings();
+  }
+
+  /** 对话高亮色单独保存（空 = 关闭；纯视觉设置不触发重排，非法值回退关闭）。 */
+  public static saveDialogueHighlightColor(color: string): void {
+    const normalized: string = fqNormalizeDialogueColor(color);
+    if (normalized === FqReaderStore.settings.dialogueHighlightColor) {
+      return;
+    }
+    FqReaderStore.settings.dialogueHighlightColor = normalized;
+    FqReaderStore.persistSettings();
+  }
+
+  /** 取自定义对话高亮色板（新色在前）。 */
+  public static getCustomDialogueColors(): string[] {
+    return FqReaderStore.settings.customDialogueColors;
+  }
+
+  /** 新增自定义对话高亮色：规范化去重后插到最前（已存在则提前），落盘。 */
+  public static addCustomDialogueColor(color: string): void {
+    const normalized: string = fqNormalizeDialogueColor(color);
+    if (normalized.length === 0) {
+      return;
+    }
+    const next: string[] = [normalized];
+    for (const item of FqReaderStore.settings.customDialogueColors) {
+      if (item !== normalized) {
+        next.push(item);
+      }
+    }
+    FqReaderStore.settings.customDialogueColors = next;
+    FqReaderStore.persistSettings();
+  }
+
+  /** 删除自定义对话高亮色（色板移除，落盘）；不在色板返回 false。 */
+  public static removeCustomDialogueColor(color: string): boolean {
+    const normalized: string = fqNormalizeDialogueColor(color);
+    if (normalized.length === 0) {
+      return false;
+    }
+    const next: string[] = [];
+    let found: boolean = false;
+    for (const item of FqReaderStore.settings.customDialogueColors) {
+      if (item === normalized) {
+        found = true;
+      } else {
+        next.push(item);
+      }
+    }
+    if (!found) {
+      return false;
+    }
+    FqReaderStore.settings.customDialogueColors = next;
+    FqReaderStore.persistSettings();
+    return true;
+  }
+
+  /** 恢复自定义对话高亮色板（备份恢复整表替换：逐条规范化去重，坏值跳过）。 */
+  public static restoreCustomDialogueColors(colors: string[]): void {
+    const next: string[] = [];
+    for (const color of colors) {
+      const normalized: string = fqNormalizeDialogueColor(color);
+      if (normalized.length === 0 || next.indexOf(normalized) >= 0) {
+        continue;
+      }
+      next.push(normalized);
+    }
+    FqReaderStore.settings.customDialogueColors = next;
     FqReaderStore.persistSettings();
   }
 
@@ -1045,6 +1155,8 @@ export class FqReaderStore {
     rec['fontIndex'] = FqReaderStore.settings.fontIndex;
     rec['showParagraphComment'] = FqReaderStore.settings.showParagraphComment;
     rec['volumeKeyPaging'] = FqReaderStore.settings.volumeKeyPaging;
+    rec['dialogueHighlightColor'] = FqReaderStore.settings.dialogueHighlightColor;
+    rec['customDialogueColors'] = JSON.stringify(FqReaderStore.settings.customDialogueColors);
     const themes: Record<string, Object>[] = [];
     for (const item of FqReaderStore.settings.customThemes) {
       const themeRec: Record<string, Object> = {};

@@ -7,10 +7,11 @@
  * 配色跟随系统深浅色（弹窗卡片为系统色），阅读主题常量集中于此导出供宿主页共用。
  */
 import { FQ_FONT_OPTIONS, FqFontOption } from '../../core/FqOnlineParser';
-import { FqCustomReaderFont, FqCustomReaderTheme, fqCustomThemeUseDark } from '../../core/FqReaderStore';
+import { FqCustomReaderFont, FqCustomReaderTheme, FqReaderStore, fqCustomThemeUseDark } from '../../core/FqReaderStore';
 import { FqAppSettingsStore, FQ_THEME_DARK, FQ_THEME_LIGHT } from '../../core/FqAppSettingsStore';
 import { appState } from '../../entryability/AppState';
 import { themeUtils } from '../../utils/ThemeUtils';
+import { DialogManager } from '../../utils/DialogUtils';
 import { SettingChip } from '../CommonCom';
 
 /** 阅读主题：themeColor 仅支持 6 位色值（无透明度）。 */
@@ -31,6 +32,10 @@ export const FQ_READER_THEMES: FqReaderTheme[] = [
 
 /** 翻页模式标签（下标与 flipIndex 对应）。 */
 export const FQ_READER_FLIP_LABELS: string[] = ['仿真', '横滑', '上下'];
+
+/** 对话高亮预设底色（半透明标记色，跨深浅主题可读；标签与色值一一对应）。 */
+const FQ_DIALOGUE_COLORS: string[] = ['#4DFFD54F', '#4D81C784', '#4D64B5F6', '#4D4DD0E1', '#4DF06292', '#4DBA68C8'];
+const FQ_DIALOGUE_COLOR_LABELS: string[] = ['黄色', '绿色', '蓝色', '青色', '粉色', '紫色'];
 
 /** 生效阅读主题（-1 跟随系统：深色→夜间，浅色→纸白；4 自定义主题：字色随系统；供弹窗宿主计算跟随色卡预览）。 */
 export function fqEffectiveReaderTheme(themeIndex: number, systemDark: boolean): FqReaderTheme {
@@ -57,6 +62,8 @@ export struct ReaderSettingsDialogContent {
   @Param fontIndex: number = 0;
   /** 段评显示开关（关闭后不显示段评气泡与计数）。 */
   @Param showParagraphComment: boolean = true;
+  /** 对话高亮色（空 = 关闭；#RRGGBB / #AARRGGBB）。 */
+  @Param dialogueHighlightColor: string = '';
   /** 音量键翻页开关（分页模式音量上/下 = 上/下一页，优先于调节音量）。 */
   @Param volumeKeyPaging: boolean = false;
   /** 自定义阅读主题列表（数组整体替换，经 @Monitor 同步数据源）。 */
@@ -77,6 +84,8 @@ export struct ReaderSettingsDialogContent {
   @Event fontChange: (index: number) => void = (_index: number): void => {};
   @Event flipChange: (index: number) => void = (_index: number): void => {};
   @Event showParagraphCommentChange: (on: boolean) => void = (_on: boolean): void => {};
+  /** 对话高亮选色（空串 = 关闭高亮）。 */
+  @Event dialogueHighlightColorChange: (color: string) => void = (_color: string): void => {};
   @Event volumeKeyPagingChange: (on: boolean) => void = (_on: boolean): void => {};
   /** 图库选图新增自定义主题。 */
   @Event addCustomThemeChange: () => void = (): void => {};
@@ -95,6 +104,12 @@ export struct ReaderSettingsDialogContent {
   private themeScroller: Scroller = new Scroller();
   /** 字体列表滚动控制器（打开/选中变化时滚到选中项）。 */
   private fontScroller: Scroller = new Scroller();
+  /** 自定义对话高亮色板（持久化于 FqReaderStore，弹窗打开时读入）。 */
+  @Local customColors: string[] = [];
+
+  aboutToAppear(): void {
+    this.customColors = FqReaderStore.getCustomDialogueColors();
+  }
 
   /** 选中项变化：主题列表滚到选中项（已在可视区时 AUTO 不动）。 */
   @Monitor('themeIndex', 'customThemeId')
@@ -256,6 +271,24 @@ export struct ReaderSettingsDialogContent {
       .alignItems(VerticalAlign.Center)
 
       Row({ space: 12 }) {
+        Text('音量键翻页')
+          .fontSize(14)
+          .fontColor(themeUtils.textColor)
+        Text(this.volumeKeyPaging ? '音量上/下键代替翻页' : '音量键保持调节系统音量')
+          .fontSize(12)
+          .fontColor(themeUtils.terTextColor)
+          .layoutWeight(1)
+        Toggle({ type: ToggleType.Switch, isOn: this.volumeKeyPaging })
+          .selectedColor(appState.accentColor)
+          .switchPointColor(Color.White)
+          .onChange((isOn: boolean): void => {
+            this.volumeKeyPagingChange(isOn);
+          })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      Row({ space: 12 }) {
         Text('段评')
           .fontSize(14)
           .fontColor(themeUtils.textColor)
@@ -275,19 +308,111 @@ export struct ReaderSettingsDialogContent {
       .alignItems(VerticalAlign.Center)
 
       Row({ space: 12 }) {
-        Text('音量键翻页')
+        Text('高亮对话')
           .fontSize(14)
           .fontColor(themeUtils.textColor)
-        Text(this.volumeKeyPaging ? '音量上/下键代替翻页' : '音量键保持调节系统音量')
-          .fontSize(12)
-          .fontColor(themeUtils.terTextColor)
-          .layoutWeight(1)
-        Toggle({ type: ToggleType.Switch, isOn: this.volumeKeyPaging })
-          .selectedColor(appState.accentColor)
-          .switchPointColor(Color.White)
-          .onChange((isOn: boolean): void => {
-            this.volumeKeyPagingChange(isOn);
+        Column({ space: 3 }) {
+          Column() {
+            SymbolGlyph($r('sys.symbol.plus'))
+              .fontSize(14)
+              .fontColor([themeUtils.terTextColor])
+          }
+          .width(24)
+          .height(24)
+          .borderRadius(12)
+          .backgroundColor($r('app.color.reader_chip_bg'))
+          .border({
+            width: 1,
+            color: themeUtils.terTextColor,
+            style: BorderStyle.Dashed,
           })
+          .justifyContent(FlexAlign.Center)
+          Text('添加')
+            .fontSize(9)
+            .fontColor(themeUtils.textColor)
+            .opacity(0.6)
+        }
+        .alignItems(HorizontalAlign.Center)
+        .onClick((): void => {
+          this.openDialogueColorPicker();
+        })
+        Column({ space: 3 }) {
+          Column()
+            .width(24)
+            .height(24)
+            .borderRadius(12)
+            .backgroundColor($r('app.color.reader_chip_bg'))
+            .border({
+              width: this.dialogueHighlightColor.length === 0 ? 2 : 1,
+              color: this.dialogueHighlightColor.length === 0 ? appState.accentColor : themeUtils.terTextColor,
+            })
+          Text('无')
+            .fontSize(9)
+            .fontColor(themeUtils.textColor)
+            .opacity(this.dialogueHighlightColor.length === 0 ? 1 : 0.6)
+        }
+        .alignItems(HorizontalAlign.Center)
+        .onClick((): void => {
+          this.dialogueHighlightColorChange('');
+        })
+        List({ space: 8 }) {
+          ForEach(FQ_DIALOGUE_COLORS, (color: string, index: number) => {
+            ListItem() {
+              Column({ space: 3 }) {
+                Column()
+                  .width(24)
+                  .height(24)
+                  .borderRadius(12)
+                  .backgroundColor(color)
+                  .border({
+                    width: this.dialogueHighlightColor === color ? 2 : 1,
+                    color: this.dialogueHighlightColor === color ? appState.accentColor : themeUtils.terTextColor,
+                  })
+                Text(FQ_DIALOGUE_COLOR_LABELS[index])
+                  .fontSize(9)
+                  .fontColor(themeUtils.textColor)
+                  .opacity(this.dialogueHighlightColor === color ? 1 : 0.6)
+              }
+              .alignItems(HorizontalAlign.Center)
+              .onClick((): void => {
+                this.dialogueHighlightColorChange(color);
+              })
+            }
+          }, (color: string): string => color)
+          ForEach(this.customColors, (color: string) => {
+            ListItem() {
+              Column({ space: 3 }) {
+                Column()
+                  .width(24)
+                  .height(24)
+                  .borderRadius(12)
+                  .backgroundColor(color)
+                  .border({
+                    width: this.dialogueHighlightColor === color ? 2 : 1,
+                    color: this.dialogueHighlightColor === color ? appState.accentColor : themeUtils.terTextColor,
+                  })
+                Text('自定义')
+                  .fontSize(9)
+                  .fontColor(themeUtils.textColor)
+                  .opacity(this.dialogueHighlightColor === color ? 1 : 0.6)
+              }
+              .alignItems(HorizontalAlign.Center)
+              .onClick((): void => {
+                this.dialogueHighlightColorChange(color);
+              })
+              .gesture(LongPressGesture()
+                .onAction((): void => {
+                  this.confirmRemoveDialogueColor(color);
+                }))
+            }
+          }, (color: string): string => `cd_${color}`)
+        }
+        .listDirection(Axis.Horizontal)
+        .layoutWeight(1)
+        .height(44)
+        .scrollBar(BarState.Off)
+        .edgeEffect(EdgeEffect.Spring)
+        .alignListItem(ListItemAlign.Center)
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
@@ -302,6 +427,35 @@ export struct ReaderSettingsDialogContent {
       return `c_${option.custom.id}_${option.custom.name}_${option.custom.lightBgPath}_${option.custom.darkBgPath}_${option.custom.lightBgColor}_${option.custom.darkBgColor}`;
     }
     return `p_${option.presetIndex}`;
+  }
+
+  /** 对话高亮自定义选色：取色器初始值为当前色（无当前色给预设黄），确认入板并选中。 */
+  private openDialogueColorPicker(): void {
+    DialogManager.ShowCustomColorPicker(
+      this.dialogueHighlightColor.length > 0 ? this.dialogueHighlightColor : FQ_DIALOGUE_COLORS[0],
+      (hex: string): void => {
+        this.addPickedDialogueColor(hex);
+      });
+  }
+
+  /** 取色确认：与预设同色不进色板；新色入板置顶（持久保留）并选中。 */
+  private addPickedDialogueColor(hex: string): void {
+    if (FQ_DIALOGUE_COLORS.indexOf(hex) < 0) {
+      FqReaderStore.addCustomDialogueColor(hex);
+      this.customColors = FqReaderStore.getCustomDialogueColors();
+    }
+    this.dialogueHighlightColorChange(hex);
+  }
+
+  /** 长按自定义对话色卡：确认后从色板移除（不自动消失）；移除的是当前色则恢复为「无」。 */
+  private confirmRemoveDialogueColor(color: string): void {
+    DialogManager.ShowConfirm('移除自定义颜色', '从色卡中移除该颜色', '移除', (): void => {
+      FqReaderStore.removeCustomDialogueColor(color);
+      this.customColors = FqReaderStore.getCustomDialogueColors();
+      if (this.dialogueHighlightColor === color) {
+        this.dialogueHighlightColorChange('');
+      }
+    });
   }
 
   /** 主题列表滚到当前选中项（-1..3 预设档按档位定位；4 按选中 id 定位自定义主题；未命中不动）。 */

@@ -1,4 +1,5 @@
 import { FqPageFragment, FqReaderLayoutMetrics, FqReaderPageData } from './ReaderTypes';
+import { FqDialogueSegment, fqDialogueRanges, fqDialogueSegments } from './FqDialogue';
 import { drawing } from '@kit.ArkGraphics2D';
 import { fqBubbleIcon } from '../utils/FqBubbleIcon';
 
@@ -20,9 +21,32 @@ export struct FqPageCanvas {
   @Param highlightColor: ResourceColor = Color.Transparent;
   /** 气泡命中段评（paraIndex）：行内气泡可点部分（计数 Span）触发。 */
   @Event onBubbleTap: (paraIndex: number) => void
+  /** 段落文本（对话高亮区间检测用；行/片段为段落的连续子串）。 */
+  @Param paragraphs: string[] = [];
+  /** 对话高亮色（空 = 关闭；#RRGGBB / #AARRGGBB，应用于引号内文本底色）。 */
+  @Param dialogueHighlightColor: string = '';
 
   private paraHighlighted(frag: FqPageFragment): boolean {
     return this.highlightParaIndex >= 0 && frag.paraIndex === this.highlightParaIndex;
+  }
+
+  /** 行在段内的起始字符（含缩进前缀；行是段落连续子串，前序行长求和 + 片段起始）。 */
+  private lineBaseOffset(frag: FqPageFragment, lineIdx: number): number {
+    let offset: number = frag.startChar;
+    for (let i: number = 0; i < lineIdx; i++) {
+      offset += frag.lines[i].length;
+    }
+    return offset;
+  }
+
+  /** 行文本按对话区间分段（高亮关闭或无段落数据时回退单个普通段）。 */
+  private lineSegments(frag: FqPageFragment, line: string, lineIdx: number): FqDialogueSegment[] {
+    if (this.dialogueHighlightColor.length === 0 || frag.isTitle
+      || frag.paraIndex >= this.paragraphs.length) {
+      return [new FqDialogueSegment(line, false)];
+    }
+    const paragraph: string = this.paragraphs[frag.paraIndex];
+    return fqDialogueSegments(line, this.lineBaseOffset(frag, lineIdx), fqDialogueRanges(paragraph));
   }
 
   private bubbleCount(frag: FqPageFragment): number {
@@ -60,7 +84,18 @@ export struct FqPageCanvas {
           Column() {
             ForEach(frag.lines, (line: string, lineIdx: number) => {
               Text() {
-                Span(line)
+                if (this.dialogueHighlightColor.length > 0 && !frag.isTitle) {
+                  ForEach(this.lineSegments(frag, line, lineIdx), (seg: FqDialogueSegment) => {
+                    if (seg.dialogue) {
+                      Span(seg.text)
+                        .textBackgroundStyle({ color: this.dialogueHighlightColor, radius: 4 })
+                    } else {
+                      Span(seg.text)
+                    }
+                  }, (seg: FqDialogueSegment): string => `${seg.dialogue ? 1 : 0}_${seg.text}`)
+                } else {
+                  Span(line)
+                }
                 if (this.lineHasBubble(frag, lineIdx)) {
                   ImageSpan(fqBubbleIcon(this.bubbleCount(frag)))
                     .width(this.metrics.bubbleIconFp)
@@ -90,7 +125,7 @@ export struct FqPageCanvas {
               .textAlign(TextAlign.Start)
               .maxLines(this.lineHasBubble(frag, lineIdx) ? 2 : 1)
               .width('100%')
-            }, (line: string, lineIdx: number): string => `${lineIdx}_${line.length}_${line}_${this.lineStretchText(frag, lineIdx)}_${this.fontFamily}`)
+            }, (line: string, lineIdx: number): string => `${lineIdx}_${line.length}_${line}_${this.lineStretchText(frag, lineIdx)}_${this.fontFamily}_${this.dialogueHighlightColor}`)
             // 引擎判定末行放不下气泡：图标独立成行（行高与装页记账同为一行行高，零分歧）
             if (frag.showBubble && frag.bubbleOwnRow && this.bubbleCount(frag) > 0) {
               Text() {
