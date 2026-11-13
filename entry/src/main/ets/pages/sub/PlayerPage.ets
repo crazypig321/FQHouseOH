@@ -171,6 +171,8 @@ const FQ_EPISODE_SWIPE_RUBBER: number = 3;
 const FQ_AUTO_CACHE_DELAY_MS: number = 2000;
 /** 边看边往后缓存诊断日志 tag。 */
 const FQ_AUTO_CACHE_LOG_TAG: string = 'FqAutoCache';
+/** 画中画诊断日志 tag。 */
+const FQ_PIP_LOG_TAG: string = 'FqPip';
 
 /** 横滑快进/快退：滑过一整屏宽度走过的秒数。 */
 const FQ_SEEK_FULL_SWIPE_SEC: number = 90;
@@ -763,15 +765,16 @@ export struct PlayerPage {
     }) {
       Row() {
         Stack() {
-        // 视频区（contain；mpv 内部保持比例留黑边；全屏时撑满，面板展开时几何不变）
+        // 视频区（contain；面板展开时几何不变）
         Stack() {
-          // 非全屏：surface 只取画面 contain 矩形（区域内居中），mpv 填满 surface 即画面居中；
-          // 全屏：surface 撑满区域（沉浸黑边语义不变）
+          // surface 只取画面 contain 矩形（区域内居中），mpv 填满 surface 即画面居中，黑边交给容器背景；
+          // 全屏同样取 contain 矩形不撑满：PiP 小窗比例取自退后台瞬间 surface 布局尺寸，
+          // 全屏撑满会让小窗比例变成屏幕比例（横屏片源左右黑边、竖屏片源上下黑边）
           Stack() {
             PlayerSurface({ player: this.player, ignoreSafeArea: false })
           }
-          .width(this.fullScreen ? '100%' : this.videoRectWidth())
-          .height(this.fullScreen ? '100%' : this.videoRectHeight())
+          .width(this.videoRectWidth())
+          .height(this.videoRectHeight())
 
           if (this.errorMsg.length === 0 && this.loading) {
             this.LoadingOverlay()
@@ -2336,15 +2339,17 @@ export struct PlayerPage {
     this.syncPipContentSize();
   }
 
-  /** 向画中画控制器同步视频内容尺寸（updateContentSize：小窗比例跟随片源比例，消除黑边）。 */
-  private syncPipContentSize(): void {
+  /** 向画中画控制器同步视频内容尺寸（updateContentSize：小窗比例跟随片源比例，消除黑边）。
+   *  force=true 时跳过等值守卫强制重推：小窗拉起（STARTED）时启动前的 updateContentSize
+   *  未必已生效（窗口尚不存在），须在窗口存活期间重推一次让比例实时校正。 */
+  private syncPipContentSize(force: boolean = false): void {
     const controller: PiPWindow.PiPController | null = this.pipController;
     if (controller === null) {
       return;
     }
-    const dw: number = this.player.state.videoParams.dw;
-    const dh: number = this.player.state.videoParams.dh;
-    if (dw <= 0 || dh <= 0 || (dw === this.pipContentW && dh === this.pipContentH)) {
+    const dw: number = Math.round(this.player.state.videoParams.dw);
+    const dh: number = Math.round(this.player.state.videoParams.dh);
+    if (dw <= 0 || dh <= 0 || (!force && dw === this.pipContentW && dh === this.pipContentH)) {
       return;
     }
     try {
@@ -2352,8 +2357,26 @@ export struct PlayerPage {
       this.pipContentW = dw;
       this.pipContentH = dh;
     } catch (error) {
-      // 控制器未创建/已销毁（401）时忽略
+      // 控制器未创建/已销毁（401）时忽略；留日志便于定位小窗比例异常
+      hilog.warn(0x0001, FQ_PIP_LOG_TAG,
+        `updateContentSize failed: dw=${dw}, dh=${dh}, err=${JSON.stringify(error)}`);
     }
+  }
+
+  /** 画中画小窗诊断：拉起后记录窗口实际尺寸与片源尺寸，用于定位竖屏片源比例异常。 */
+  private logPipWindowSize(): void {
+    const controller: PiPWindow.PiPController | null = this.pipController;
+    if (controller === null) {
+      return;
+    }
+    const dw: number = this.player.state.videoParams.dw;
+    const dh: number = this.player.state.videoParams.dh;
+    controller.getPiPWindowInfo().then((info: PiPWindow.PiPWindowInfo): void => {
+      hilog.info(0x0001, FQ_PIP_LOG_TAG,
+        `pip window: ${info.size.width}x${info.size.height}, scale=${info.size.scale}, video: ${dw}x${dh}`);
+    }).catch((): void => {
+      // 窗口信息查询失败不影响播放
+    });
   }
 
   /**
@@ -2410,8 +2433,10 @@ export struct PlayerPage {
   private onPipStateChange(state: PiPWindow.PiPState, reason: string): void {
     if (state === PiPWindow.PiPState.STARTED) {
       this.pipStarted = true;
-      // 小窗拉起兜底再同步一次比例（防起播前后尺寸竞态导致小窗黑边）
-      this.syncPipContentSize();
+      // 小窗拉起兜底再同步一次比例：启动前的 updateContentSize 未必生效，
+      // 窗口存活期间强制重推让比例实时校正（横屏默认比例碰巧正确、竖屏会黑边）
+      this.syncPipContentSize(true);
+      this.logPipWindowSize();
       return;
     }
     if (state === PiPWindow.PiPState.STOPPED) {
