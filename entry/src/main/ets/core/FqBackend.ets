@@ -594,6 +594,80 @@ export class FqBackend {
   }
 
   /**
+   * 红果原生内容源（/api/v1/hongguo/native/*，Go 核心 libduanju_core.so
+   * 透传，设计文档 docs/go-hongguo-integration.md）：响应为 Go data
+   * 原样 JSON，解析模型随 UI 接入另行定义；瞬时错误（429/5xx/超时）
+   * 经 getJsonRetryable 静默重试。首次调用触发 Go 核心懒加载
+   * （dlopen + initialize），稍慢属预期。
+   */
+  public hongguoNativeBoards(): Promise<Record<string, Object>> {
+    return this.getJsonRetryable('/api/v1/hongguo/native/boards', '');
+  }
+
+  /** 红果分类页/频道流：source 传 'hongguo'，category 见 categories 端点。 */
+  public hongguoNativeCatalog(source: string, category: string, page: number = 1,
+    query: string = '', force: boolean = false): Promise<Record<string, Object>> {
+    const q: string = `source=${encodeURIComponent(source)}`
+      + `&category=${encodeURIComponent(category)}`
+      + `&page=${page < 1 ? 1 : page}`
+      + (query.length > 0 ? `&query=${encodeURIComponent(query)}` : '')
+      + (force ? '&force=1' : '');
+    return this.getJsonRetryable('/api/v1/hongguo/native/catalog', q);
+  }
+
+  /** 红果分类目录。 */
+  public hongguoNativeCategories(source: string,
+    force: boolean = false): Promise<Record<string, Object>> {
+    const q: string = `source=${encodeURIComponent(source)}` + (force ? '&force=1' : '');
+    return this.getJsonRetryable('/api/v1/hongguo/native/categories', q);
+  }
+
+  /** 红果榜单内容：board 取 boards 端点返回的榜单 id，page 1 起。 */
+  public hongguoNativeRankings(board: string, page: number = 1,
+    force: boolean = false): Promise<Record<string, Object>> {
+    const q: string = `board=${encodeURIComponent(board)}`
+      + `&page=${page < 1 ? 1 : page}`
+      + (force ? '&force=1' : '');
+    return this.getJsonRetryable('/api/v1/hongguo/native/rankings', q);
+  }
+
+  /** 红果推荐流：category 为推荐频道 genre；command='more' 翻页。 */
+  public hongguoNativeRecommendations(category: string, force: boolean = false,
+    command: string = ''): Promise<Record<string, Object>> {
+    const q: string = `category=${encodeURIComponent(category)}`
+      + (force ? '&force=1' : '')
+      + (command.length > 0 ? `&command=${encodeURIComponent(command)}` : '');
+    return this.getJsonRetryable('/api/v1/hongguo/native/recommendations', q);
+  }
+
+  /** 红果搜索联想。 */
+  public hongguoNativeSuggestions(query: string): Promise<Record<string, Object>> {
+    return this.getJsonRetryable('/api/v1/hongguo/native/suggestions',
+      `query=${encodeURIComponent(query)}`);
+  }
+
+  /** 红果剧详情/章节列表：dramaId 形如 'hongguo:<id>'。 */
+  public hongguoNativeDetail(dramaId: string,
+    title: string = ''): Promise<Record<string, Object>> {
+    const q: string = `drama_id=${encodeURIComponent(dramaId)}`
+      + (title.length > 0 ? `&title=${encodeURIComponent(title)}` : '');
+    return this.getJsonRetryable('/api/v1/hongguo/native/detail', q);
+  }
+
+  /** 红果取流（播放地址/清晰度）：chapterJson 为 detail 响应中章节对象的
+   * JSON 串（含取流所需的加密地址），index 为集序号。 */
+  public hongguoNativeMedia(dramaId: string, chapterJson: string, index: number,
+    quality: number = 0, title: string = '', force: boolean = false): Promise<Record<string, Object>> {
+    const q: string = `drama_id=${encodeURIComponent(dramaId)}`
+      + `&chapter=${encodeURIComponent(chapterJson)}`
+      + `&index=${index < 0 ? 0 : index}`
+      + `&quality=${quality < 0 ? 0 : quality}`
+      + (title.length > 0 ? `&title=${encodeURIComponent(title)}` : '')
+      + (force ? '&force=1' : '');
+    return this.getJsonRetryable('/api/v1/hongguo/native/media', q);
+  }
+
+  /**
    * 短剧剧评一页（/api/v1/series/{id}/comments，官方 gx1/m.java:168-181：
    * 播放页评论区即整部剧的评论列表）：sort 1=热门（官方「全部」SmartHot）、
    * 3=最新（TimeDesc，fqapp UgcSort），cursor 续拉（不透明串）；

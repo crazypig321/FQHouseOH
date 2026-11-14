@@ -39,6 +39,8 @@ tower-http = { version = "0.6", default-features = false, features = ["fs", "set
 http-body-util = "0.1"
 futures = "0.3"
 log = "0.4"
+# go_bridge：dlopen 红果 Go 核心（libduanju_core.so）所需的运行时动态加载
+libloading = "0.8"
 
 # The shipping app runs the core in-process on Android; `adb logcat` is the
 # only observability surface it has. Desktop/test builds keep log macros as

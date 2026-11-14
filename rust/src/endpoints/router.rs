@@ -308,9 +308,33 @@ fn match_hongguo(parts: &[&str], q: &Params) -> Option<RouteMatch> {
     if parts.is_empty() {
         return None;
     }
+    if parts[0] == "native" {
+        return match_hongguo_native(&parts[1..], q);
+    }
     let api = match parts[0] {
         "map" => "hongguo_map",
         "danmaku" => "hongguo_danmaku",
+        _ => return None,
+    };
+    Some(RouteMatch {
+        api,
+        params: q.clone(),
+    })
+}
+
+/// 红果原生内容源（Go 核心，endpoints/hongguo_native.rs）：
+/// `/api/v1/hongguo/native/{boards|catalog|categories|rankings|
+/// recommendations|suggestions|detail|media}`。
+fn match_hongguo_native(parts: &[&str], q: &Params) -> Option<RouteMatch> {
+    let api = match parts.first().copied()? {
+        "boards" => "hongguo_native_boards",
+        "catalog" => "hongguo_native_catalog",
+        "categories" => "hongguo_native_categories",
+        "rankings" => "hongguo_native_rankings",
+        "recommendations" => "hongguo_native_recommendations",
+        "suggestions" => "hongguo_native_suggestions",
+        "detail" => "hongguo_native_detail",
+        "media" => "hongguo_native_media",
         _ => return None,
     };
     Some(RouteMatch {

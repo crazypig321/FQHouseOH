@@ -2,6 +2,8 @@
 //!
 //! Mirrors the Go router's two error classes: a client error maps to HTTP 400
 //! with `{"success":false,"error":...}`, anything else to HTTP 500.
+//! The hongguo_native endpoints add gateway statuses for the bridged Go core
+//! (502 call failure, 503 core not loaded, 504 bridge timeout).
 
 use std::fmt;
 
@@ -9,6 +11,9 @@ use std::fmt;
 pub enum ApiError {
     BadRequest(String),
     Internal(String),
+    ServiceUnavailable(String),
+    Timeout(String),
+    BadGateway(String),
 }
 
 impl ApiError {
@@ -20,16 +25,35 @@ impl ApiError {
         ApiError::Internal(msg.into())
     }
 
+    pub fn service_unavailable(msg: impl Into<String>) -> Self {
+        ApiError::ServiceUnavailable(msg.into())
+    }
+
+    pub fn timeout(msg: impl Into<String>) -> Self {
+        ApiError::Timeout(msg.into())
+    }
+
+    pub fn bad_gateway(msg: impl Into<String>) -> Self {
+        ApiError::BadGateway(msg.into())
+    }
+
     pub fn status(&self) -> u16 {
         match self {
             ApiError::BadRequest(_) => 400,
             ApiError::Internal(_) => 500,
+            ApiError::ServiceUnavailable(_) => 503,
+            ApiError::Timeout(_) => 504,
+            ApiError::BadGateway(_) => 502,
         }
     }
 
     pub fn message(&self) -> &str {
         match self {
-            ApiError::BadRequest(m) | ApiError::Internal(m) => m,
+            ApiError::BadRequest(m)
+            | ApiError::Internal(m)
+            | ApiError::ServiceUnavailable(m)
+            | ApiError::Timeout(m)
+            | ApiError::BadGateway(m) => m,
         }
     }
 
@@ -37,9 +61,14 @@ impl ApiError {
     ///
     /// Client errors are deterministic (bad input) and must never be retried.
     /// Internal errors come from an upstream call or the parsing of its
-    /// response, so they can be transient upstream jitter.
+    /// response, so they can be transient upstream jitter. The gateway
+    /// statuses (hongguo_native) follow the same rule: the bridged core can
+    /// recover once loaded or once the upstream jitter passes.
     pub fn is_retryable(&self) -> bool {
-        matches!(self, ApiError::Internal(_))
+        matches!(
+            self,
+            ApiError::Internal(_) | ApiError::ServiceUnavailable(_) | ApiError::Timeout(_) | ApiError::BadGateway(_)
+        )
     }
 }
 

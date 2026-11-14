@@ -26,6 +26,7 @@ pub mod dispatch;
 pub mod endpoints;
 pub mod error;
 pub mod filter;
+pub mod go_bridge;
 pub mod json;
 pub mod server;
 pub mod sign;
