@@ -4,7 +4,7 @@
  * 二级页经 .navDestination 集中页表路由。
  */
 
-import { HdsAnimationMode, HdsNavigation, HdsNavigationTitleMode, HdsTabs, HdsTabsController } from '@kit.UIDesignKit';
+import { HdsAnimationMode, HdsNavigation, HdsNavigationTitleMode, HdsTabs, HdsTabsBackgroundStyle, HdsTabsController } from '@kit.UIDesignKit';
 import { CustomContentDialog } from '@kit.ArkUI';
 import { bundleManager, common } from '@kit.AbilityKit';
 import { AppState, appState } from '../entryability/AppState';
@@ -91,6 +91,12 @@ struct Index {
   @Computed
   get isPcLayout(): boolean {
     return useSidebarLayout(appState.WidthBp, appState.windowWidthVp, appState.displayWidthVp);
+  }
+
+  /** 底栏渐变遮罩：短剧页（沉浸视频流，物理下标 1）透明不遮画面，其余 Tab 用默认渐变。 */
+  @Computed
+  get tabGradientMask(): HdsTabsBackgroundStyle | undefined {
+    return appState.currTabsIndex === 1 ? { maskColor: Color.Transparent } : undefined;
   }
 
   aboutToAppear(): void {
@@ -203,9 +209,8 @@ struct Index {
               materialType: appState.materialType,
               materialLevel: appState.materialLevel
             },
-            gradientMask: {
-              maskColor: undefined
-            },
+            // 短剧页底栏渐变遮罩透明（@Computed：切到短剧 = 透明，其余 = 默认）
+            gradientMask: this.tabGradientMask,
             // 智感握姿：随设置开关 handedness 适配
             adaptToHandedness: appState.smartReachEnabled,
           })

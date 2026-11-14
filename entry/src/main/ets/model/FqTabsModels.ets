@@ -12,9 +12,13 @@ export interface MenuItem {
 }
 
 export function tabBarSymbolOf(item: MenuItem): TabBarSymbol {
+  // 短剧页（沉浸黑底、底栏渐变遮罩透明）未选中图标固定用深色模式的浅色，
+  // 其余 Tab 跟随系统深浅色
+  const normalColor: ResourceColor = appState.currTabsIndex === 1
+    ? '#E6FFFFFF' : $r('sys.color.icon_primary');
   const normal: SymbolGlyphModifier = new SymbolGlyphModifier(item.icon)
     .renderingStrategy(SymbolRenderingStrategy.SINGLE)
-    .fontColor([$r('sys.color.icon_primary')]);
+    .fontColor([normalColor]);
   const selected: SymbolGlyphModifier = new SymbolGlyphModifier(item.icon)
     .renderingStrategy(SymbolRenderingStrategy.SINGLE)
     .fontColor([appState.accentColor]);
@@ -27,7 +31,7 @@ export function tabBarSymbolOf(item: MenuItem): TabBarSymbol {
 
 export const MENU_CONFIG: MenuItem[] = [
   { icon: $r('sys.symbol.house_fill_1'), label: '首页' },
-  { icon: $r('sys.symbol.video_fill'), label: '短剧' },
+  { icon: $r('sys.symbol.template_fill'), label: '短剧' },
   { icon: $r('sys.symbol.bookshelf'), label: '书架' },
   { icon: $r('sys.symbol.person_fill'), label: '我的' },
   { icon: $r('sys.symbol.gearshape_fill'), label: '设置' },

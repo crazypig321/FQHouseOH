@@ -36,7 +36,12 @@ import { appState } from '../entryability/AppState';
 
 function tabBarOf(item: MenuItem): BottomTabBarStyle {
   const style: BottomTabBarStyle = new BottomTabBarStyle(tabBarSymbolOf(item), item.label);
-  style.labelStyle({ selectedColor: appState.accentColor });
+  // 短剧页未选中文字同样固定用深色模式的浅色（黑底上可见），其余跟随系统
+  if (appState.currTabsIndex === 1) {
+    style.labelStyle({ unselectedColor: '#99FFFFFF', selectedColor: appState.accentColor });
+  } else {
+    style.labelStyle({ selectedColor: appState.accentColor });
+  }
   return style;
 }
 
