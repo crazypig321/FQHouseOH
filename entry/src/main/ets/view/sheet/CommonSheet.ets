@@ -216,10 +216,10 @@ export struct CommonSheet {
     if (this.showOrder) {
       menus.push({
         content: {
-          // 排序模式激活时主题色高亮（SymbolGlyphModifier 携带 fontColor）
+          // 排序模式激活时主题色高亮（fontSize 显式 24 与 HDS 菜单图标一致，避免首帧 16fp 偏小）
           icon: this.orderActive
             ? new SymbolGlyphModifier($r('sys.symbol.arrow_left_arrow_right'))
-              .fontColor([appState.accentColor])
+              .fontColor([appState.accentColor]).fontSize(24)
             : $r('sys.symbol.arrow_left_arrow_right'),
           label: 'order',
           action: (): void => {
@@ -264,9 +264,9 @@ export struct CommonSheet {
     if (this.showCommentSort) {
       menus.push({
         content: {
-          // 评论排序：火焰=热门（选中主题色高亮，SymbolGlyphModifier 携带 fontColor）
+          // 评论排序：火焰=热门（选中主题色高亮；HDS 菜单图标默认 24vp，SymbolGlyph 不设 fontSize 会以 16fp 首帧渲染偏小）
           icon: this.commentSort === FQ_COMMENT_SORT_HOT
-            ? new SymbolGlyphModifier($r('sys.symbol.flame')).fontColor([appState.accentColor])
+            ? new SymbolGlyphModifier($r('sys.symbol.flame')).fontColor([appState.accentColor]).fontSize(24)
             : $r('sys.symbol.flame'),
           label: '热门',
           action: (): void => {
@@ -276,9 +276,9 @@ export struct CommonSheet {
       });
       menus.push({
         content: {
-          // 评论排序：时钟=最新（选中主题色高亮）
+          // 评论排序：时钟=最新（选中主题色高亮，fontSize 与火焰一致）
           icon: this.commentSort === FQ_COMMENT_SORT_LATEST
-            ? new SymbolGlyphModifier($r('sys.symbol.clock')).fontColor([appState.accentColor])
+            ? new SymbolGlyphModifier($r('sys.symbol.clock')).fontColor([appState.accentColor]).fontSize(24)
             : $r('sys.symbol.clock'),
           label: '最新',
           action: (): void => {
