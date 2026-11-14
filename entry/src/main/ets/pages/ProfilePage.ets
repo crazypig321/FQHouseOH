@@ -858,11 +858,13 @@ export struct ProfilePage {
             this.exitRecentEditMode();
           })
       }
+      .transition(TransitionEffect.OPACITY.combine(TransitionEffect.scale({ x: 0.9, y: 0.9 })))
     } else {
       Text('编辑')
         .fontSize(12.5)
         .fontWeight(FontWeight.Medium)
         .fontColor(appState.accentColor)
+        .transition(TransitionEffect.OPACITY)
         .onClick((): void => {
           this.enterRecentEditMode();
         })
@@ -879,6 +881,7 @@ export struct ProfilePage {
           .fontSize(22)
           .fontColor([this.isRecentSelected(item.id)
             ? appState.accentColor : $r('sys.color.icon_tertiary')])
+          .transition(TransitionEffect.OPACITY.combine(TransitionEffect.scale({ x: 0.6, y: 0.6 })))
       }
       this.EntryCover(item, 40, 54, (entry: FqStatsEntry): void => {
         this.handleRecentTap(entry);
@@ -959,14 +962,23 @@ export struct ProfilePage {
     this.recentSelectedIds = ids;
   }
 
+  /** 编辑模式切换过渡：勾选圈/操作按钮的出现消失与行布局位移走显示动画。 */
+  private animateEditToggle(action: () => void): void {
+    this.getUIContext().animateTo({ duration: 250, curve: Curve.EaseInOut }, action);
+  }
+
   private enterRecentEditMode(): void {
-    this.recentEditMode = true;
-    this.recentSelectedIds = [];
+    this.animateEditToggle((): void => {
+      this.recentEditMode = true;
+      this.recentSelectedIds = [];
+    });
   }
 
   private exitRecentEditMode(): void {
-    this.recentEditMode = false;
-    this.recentSelectedIds = [];
+    this.animateEditToggle((): void => {
+      this.recentEditMode = false;
+      this.recentSelectedIds = [];
+    });
   }
 
   /** 最近阅读编辑模式批量删除确认：清浏览记录 + 按书时长（书架与阅读进度不受影响）。 */
@@ -1090,6 +1102,7 @@ export struct ProfilePage {
           .fontSize(22)
           .fontColor([this.isRankSelected(item.id)
             ? appState.accentColor : $r('sys.color.icon_tertiary')])
+          .transition(TransitionEffect.OPACITY.combine(TransitionEffect.scale({ x: 0.6, y: 0.6 })))
       }
       Text(`${index + 1}`)
         .fontSize(index < 3 ? 15 : 13)
@@ -1190,13 +1203,17 @@ export struct ProfilePage {
   }
 
   private toggleRankEditMode(): void {
-    this.rankEditMode = !this.rankEditMode;
-    this.rankSelectedIds = [];
+    this.animateEditToggle((): void => {
+      this.rankEditMode = !this.rankEditMode;
+      this.rankSelectedIds = [];
+    });
   }
 
   private exitRankEditMode(): void {
-    this.rankEditMode = false;
-    this.rankSelectedIds = [];
+    this.animateEditToggle((): void => {
+      this.rankEditMode = false;
+      this.rankSelectedIds = [];
+    });
   }
 
   private closeRankSheet(): void {
