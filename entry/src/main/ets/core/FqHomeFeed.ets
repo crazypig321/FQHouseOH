@@ -115,6 +115,7 @@ export class FqHomeFeed {
   private seen: Set<string> = new Set<string>();
   private exhausted: boolean = false;
   private pendingErrorMessage: string = '';
+  private moreErrorMessage: string = '';
 
   constructor(sources: FqHomeSource[]) {
     this.sources = sources;
@@ -124,7 +125,7 @@ export class FqHomeFeed {
    * 触底 loadMore 拉各源首页、按 kind:id 去重后仅追加新条目（前缀不变），
    * 与 fqapp 首页持久化后续拉语义一致。 */
   public continueFrom(items: FqMediaItem[]): void {
-    this.merged = items;
+    this.merged = items.slice();
     const seen: Set<string> = new Set<string>();
     for (const item of items) {
       seen.add(`${item.kind}:${item.id}`);
@@ -132,11 +133,21 @@ export class FqHomeFeed {
     this.seen = seen;
     this.exhausted = false;
     this.pendingErrorMessage = '';
+    this.moreErrorMessage = '';
   }
 
-  /** 当前全量条目（前 3 项供焦点轮播，其余供网格）。 */
+  /** 最近一次翻页失败的用户可读错误（空 = 无失败）；失败页必须可见，不能被
+    * hasMore=false 谎称为「已显示全部」（fqapp loadMore catch 语义）。 */
+  public get moreError(): string {
+    return this.moreErrorMessage;
+  }
+
+  /** 当前全量条目（前 3 项供焦点轮播，其余供网格）。
+   *  必须返回副本：内部数组翻页时原地 push，调用方若持有同一引用，
+   *  @Local/@Trace 同引用再赋值不触发通知，ForEach/Swiper 不重渲染，
+   *  造成「数据已增长、界面永远停在第一页」的卡死。 */
   public items(): FqMediaItem[] {
-    return this.merged;
+    return this.merged.slice();
   }
 
   public totalCount(): number {
@@ -161,6 +172,7 @@ export class FqHomeFeed {
     this.seen.clear();
     this.exhausted = false;
     this.pendingErrorMessage = '';
+    this.moreErrorMessage = '';
 
     const groups: FqMediaItem[][] = [];
     const tasks: Promise<boolean>[] = [];
@@ -204,10 +216,19 @@ export class FqHomeFeed {
     for (const source of active) {
       tasks.push(this.loadSourceSafe(source, groups));
     }
-    await Promise.all(tasks);
+    const results: boolean[] = await Promise.all(tasks);
     const added: number = this.mergeGroups(groups);
     // fqapp `_applyFetched`：整页重复且各源均无游标时才收尾；
     // 兜底阶段已武装/游标仍在推进时继续等待下次触底。
+    // 翻页失败记录错误供频道尾部「点击重试」判断（fqapp：失败页不能
+    // 静默谎称已到底；hasMore=false 只是停掉自动重试循环）。
+    let failed: boolean = false;
+    for (const ok of results) {
+      if (!ok) {
+        failed = true;
+      }
+    }
+    this.moreErrorMessage = failed ? this.pendingErrorMessage : '';
     if (added === 0 && !this.hasMore) {
       this.exhausted = true;
     }

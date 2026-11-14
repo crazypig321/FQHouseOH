@@ -127,7 +127,9 @@ struct FqDramaPosterGrid {
       .padding({ top: this.topInset })
       .justifyContent(FlexAlign.Center)
       .alignItems(HorizontalAlign.Center)
-    } else if (this.grid.errorMsg.length > 0 && this.grid.items.length === 0) {
+    } else if (this.grid.errorMsg.length > 0) {
+      // 首屏或翻页失败都整页报错 + 重试（fqapp `_browseGrid`：state.error
+      // 直接换错误页，失败页不能静默谎称已到底）。
       Column({ space: 16 }) {
         Text(this.grid.errorMsg)
           .fontSize(14)
@@ -492,7 +494,7 @@ export struct DramaPage {
     }
   }
 
-  /** feed 翻页预取（邻卡触发；静默失败）。 */
+  /** feed 翻页预取（邻卡触发）。失败不静默：fqapp 翻页失败整页报错 + 点击重试。 */
   private async loadMoreFeed(): Promise<void> {
     if (this.loadMoreInFlight || !this.feed.hasMore) {
       return;
@@ -508,8 +510,14 @@ export struct DramaPage {
       if (items.length > this.feedItems.length) {
         this.feedItems = items;
       }
+      // 翻页失败可见（fqapp：state.error 换错误页，不能静默谎称已到底）。
+      if (this.feed.moreError.length > 0 && !this.feed.hasMore) {
+        this.feedErrorMsg = this.feed.moreError;
+      }
     } catch (error) {
-      // 翻页失败静默，下次触底重试
+      if (token === this.feedToken) {
+        this.feedErrorMsg = fqErrorMessage(error);
+      }
     } finally {
       this.loadMoreInFlight = false;
     }
@@ -569,8 +577,14 @@ export struct DramaPage {
       }
       grid.items = feed.items();
       grid.hasMore = feed.hasMore;
+      // 翻页失败可见（fqapp：失败页不能静默谎称已到底），整页错误 + 重试。
+      if (feed.moreError.length > 0 && !feed.hasMore) {
+        grid.errorMsg = feed.moreError;
+      }
     } catch (error) {
-      // 翻页失败静默，下次触底重试
+      if (token === grid.token) {
+        grid.errorMsg = fqErrorMessage(error);
+      }
     } finally {
       grid.moreInFlight = false;
     }
