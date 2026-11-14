@@ -20,7 +20,6 @@
  */
 
 import { window } from '@kit.ArkUI';
-import { connection } from '@kit.NetworkKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { CommonNav } from '../view/CommonNav';
 import { CommonLoading } from '../view/CommonCom';
@@ -31,7 +30,6 @@ import { FqBackend, fqErrorMessage } from '../core/FqBackend';
 import { FqWatchedStore, FqWatchedProgress, FqWatchHistoryRecord } from '../core/FqWatchedStore';
 import { FqShelfStore } from '../core/FqShelfStore';
 import { FqAppSettingsStore } from '../core/FqAppSettingsStore';
-import { fqDramaDownloader } from '../core/FqDramaDownloader';
 import { FqDramaCacheStore } from '../core/FqDramaCacheStore';
 import { fqAudioSession } from '../core/FqAudioSession';
 import { NavPathUtils } from '../utils/NavPathUtils';
@@ -54,9 +52,6 @@ const FQ_DRAMA_STRIP_HEIGHT: number = 38;
 
 /** 顶部悬浮层总高（搜索行 + 频道条）。 */
 const FQ_DRAMA_CHROME_HEIGHT: number = FQ_DRAMA_SEARCH_ROW_HEIGHT + FQ_DRAMA_STRIP_HEIGHT;
-
-/** 边看边缓存起播延时（播放页同款 fqapp _scheduleAutoCache）。 */
-const FQ_AUTO_CACHE_DELAY_MS: number = 2000;
 
 /** 边看边缓存日志标签（与播放页共用）。 */
 const FQ_AUTO_CACHE_LOG_TAG: string = 'FqAutoCache';
@@ -397,12 +392,6 @@ export struct DramaPage {
   @Local videoStarted: boolean = false;
   /** 异步加载令牌（activate/loadActiveEpisode 共用，切卡/切集/销毁作废旧请求）。 */
   private loadToken: number = 0;
-  /** 已排过自动缓存的集下标（同集只排一次；切卡重置）。 */
-  private autoCacheForIndex: number = -1;
-  /** 自动缓存延时定时器（0 无任务）。 */
-  private autoCacheTimer: number = 0;
-  /** 定时器对应的集下标（防同集重复排定时器）。 */
-  private autoCacheTimerIndex: number = -1;
   /** 进度条拖动预览（-1 未拖动）。 */
   @Local seekPreview: number = -1;
   /** 中央播放/暂停反馈图标显隐。 */
@@ -470,11 +459,6 @@ export struct DramaPage {
     if (this.feedbackTimer !== 0) {
       clearTimeout(this.feedbackTimer);
       this.feedbackTimer = 0;
-    }
-    if (this.autoCacheTimer !== 0) {
-      clearTimeout(this.autoCacheTimer);
-      this.autoCacheTimer = 0;
-      this.autoCacheTimerIndex = -1;
     }
     this.markCurrentWatched();
     this.saveCurrentProgress();
@@ -774,7 +758,6 @@ export struct DramaPage {
     this.activeContentId = item.id;
     this.activeEpisodes = [];
     this.activeEpisodeIndex = -1;
-    this.autoCacheForIndex = -1;
     this.hasDisplayed = false;
     this.videoStarted = false;
     this.seekPreview = -1;
@@ -937,131 +920,8 @@ export struct DramaPage {
       }
       // 后台拦截不置标记：回前台不自动恢复，用户手动续播
     }
-    // 边看边往后缓存：起播延时 2s 排后面 N 集（同集去重，切卡/切集作废旧定时器）
-    this.scheduleAutoCache();
-  }
-
-  /**
-   * 边看边往后缓存（播放页同款，fqapp _scheduleAutoCache）：这一集起播后
-   * 延时 2s 把后面 ahead 集排进离线下载队列（仅 Wi-Fi、只保留最近一段），
-   * 推荐流内嵌播放同样生效，断网也能接着看；同一集只排一次，
-   * 切卡/切集/离页（loadToken 变化）后旧定时器作废。
-   */
-  private scheduleAutoCache(): void {
-    if (FqAppSettingsStore.getDramaAutoCacheAhead() <= 0) {
-      return;
-    }
-    if (this.autoCacheForIndex === this.activeEpisodeIndex) {
-      return;
-    }
-    if (this.autoCacheTimer !== 0 && this.autoCacheTimerIndex === this.activeEpisodeIndex) {
-      return;
-    }
-    if (this.autoCacheTimer !== 0) {
-      clearTimeout(this.autoCacheTimer);
-    }
-    const token: number = this.loadToken;
-    const index: number = this.activeEpisodeIndex;
-    this.autoCacheTimerIndex = index;
-    this.autoCacheTimer = setTimeout((): void => {
-      this.autoCacheTimer = 0;
-      this.autoCacheTimerIndex = -1;
-      // 切卡/切集/离页后旧定时器作废（fqapp 用播放器实例判活，这里用加载令牌等价）
-      if (token !== this.loadToken) {
-        return;
-      }
-      this.autoCacheNext();
-    }, FQ_AUTO_CACHE_DELAY_MS);
-    hilog.info(0x0001, FQ_AUTO_CACHE_LOG_TAG,
-      `drama feed scheduled index=${index} token=${token} in ${FQ_AUTO_CACHE_DELAY_MS}ms`);
-  }
-
-  /**
-   * 排后面 ahead 集自动缓存（播放页同款范围：index+1 .. index+ahead）。
-   * 仅 Wi-Fi：测不出网络形态按「不是 Wi-Fi」处理；排上了才算这一集处理过。
-   */
-  private async autoCacheNext(): Promise<void> {
-    const item: FqMediaItem | undefined = this.feedItems[this.activeIndex];
-    const index: number = this.activeEpisodeIndex;
-    const token: number = this.loadToken;
-    const ahead: number = FqAppSettingsStore.getDramaAutoCacheAhead();
-    if (item === undefined || ahead <= 0) {
-      return;
-    }
-    const start: number = index + 1;
-    if (start <= 0 || start >= this.activeEpisodes.length) {
-      return;
-    }
-    if (FqAppSettingsStore.isDramaAutoCacheWifiOnly() && !(await this.isUnmeteredOnline())) {
-      hilog.info(0x0001, FQ_AUTO_CACHE_LOG_TAG, 'drama feed next skip: wifi-only gate blocked');
-      return;
-    }
-    // 网络探测等待期间切卡/切集/离页：不再入队
-    if (token !== this.loadToken) {
-      return;
-    }
-    const end: number = Math.min(start + ahead, this.activeEpisodes.length);
-    let enqueued: number = 0;
-    for (let i: number = start; i < end; i++) {
-      const episode: FqChapter | undefined = this.activeEpisodes[i];
-      if (episode !== undefined) {
-        fqDramaDownloader.enqueue(this.activeContentId, episode.itemId, episode.title,
-          item.title, item.cover, item.kind, i + 1, true,
-          FqAppSettingsStore.getVideoQualityPref());
-        enqueued++;
-      }
-    }
-    hilog.info(0x0001, FQ_AUTO_CACHE_LOG_TAG,
-      `drama feed enqueued ${enqueued} auto episodes (index=${index}, ahead=${ahead})`);
-    this.autoCacheForIndex = index;
-    this.trimAutoCache(ahead);
-  }
-
-  /**
-   * 当前默认网络是否 Wi-Fi / 以太网承载（播放页同款判据：按承载类型判定
-   * 而非系统 metered 标志；探测失败按计量网络处理，fail-closed）。
-   */
-  private async isUnmeteredOnline(): Promise<boolean> {
-    try {
-      const hasNet: boolean = await connection.hasDefaultNet();
-      if (!hasNet) {
-        return false;
-      }
-      const netHandle: connection.NetHandle = await connection.getDefaultNet();
-      const caps: connection.NetCapabilities = await connection.getNetCapabilities(netHandle);
-      let unmetered: boolean = false;
-      for (const bearer of caps.bearerTypes) {
-        if (bearer === connection.NetBearType.BEARER_WIFI
-          || bearer === connection.NetBearType.BEARER_ETHERNET) {
-          unmetered = true;
-        }
-      }
-      return unmetered;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  /**
-   * 跟着播放进度丢掉自动缓存的旧集（播放页同款 _trimAutoCache）：只删 auto
-   * 记录，用户手动下的集一律不动；只留当前集之前 2×ahead 以后的。
-   */
-  private trimAutoCache(ahead: number): void {
-    const cutoff: number = this.activeEpisodeIndex - ahead * 2;
-    if (cutoff <= 0) {
-      return;
-    }
-    const doomed: string[] = [];
-    for (const episode of FqDramaCacheStore.episodesOf(this.activeContentId)) {
-      if (episode.auto && episode.index - 1 < cutoff) {
-        doomed.push(episode.itemId);
-      }
-    }
-    for (const itemId of doomed) {
-      FqDramaCacheStore.removeEpisode(itemId);
-    }
-    hilog.info(0x0001, FQ_AUTO_CACHE_LOG_TAG,
-      `drama feed trim: cutoff=${cutoff}, removed=${doomed.length}`);
+    // 不排边看边缓存：推荐流停留短、跳集频繁，进播放页（观看全集）后再由
+    // 播放页排缓存，避免推荐流产生多余沙箱缓存
   }
 
   /** surface 挂载回调（PlayerConfig.onReady）：标记就绪并补播暂存媒体。 */
