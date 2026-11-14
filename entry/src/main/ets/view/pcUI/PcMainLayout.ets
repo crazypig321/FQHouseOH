@@ -47,6 +47,22 @@ export struct PcMainLayout {
     this.tabsController.changeIndex(physical);
   }
 
+  /** 「启用短剧页」变化：关闭时正处短剧页签则回首页，否则保持原页签逻辑位置重映射物理下标。 */
+  @Monitor('appStateUse.dramaPageEnabled')
+  onDramaPageEnabledChange(): void {
+    const style: number = appState.mineSettingsStyle;
+    const visible: number[] = fqVisibleTabIndexes(style);
+    let target: number = this.currentLogicalTab;
+    if (visible.indexOf(target) < 0) {
+      target = 0; // 短剧页签被隐藏 → 回首页
+    }
+    this.currentLogicalTab = target;
+    const physical: number = fqPhysicalIndexOf(target, style);
+    this.pcTabIndex = physical;
+    appState.currTabsIndex = physical;
+    this.tabsController.changeIndex(physical);
+  }
+
   @Builder
   pageMap(name: string) {
     PageMapBuilder(name)

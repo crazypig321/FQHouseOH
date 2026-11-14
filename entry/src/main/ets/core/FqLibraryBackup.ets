@@ -322,6 +322,8 @@ export class FqBackupAppSettings {
   readonly readerCustomDialogueColors: string[] | null;
   /** 我的、设置页面显示样式（旧备份缺省 -1，恢复时跳过不重置本机）。 */
   readonly mineSettingsStyle: number;
+  /** 启用短剧页开关（旧备份缺省 null，恢复时跳过不重置本机）。 */
+  readonly dramaPageEnabled: boolean | null;
   /** 播放设置段（旧备份无此段时为 null，恢复时跳过播放设置）。 */
   readonly playback: FqBackupPlaybackSettings | null;
 
@@ -336,7 +338,8 @@ export class FqBackupAppSettings {
     homeStyle: number = -1,
     readerDialogueHighlightColor: string | null = null,
     readerCustomDialogueColors: string[] | null = null,
-    mineSettingsStyle: number = -1) {
+    mineSettingsStyle: number = -1,
+    dramaPageEnabled: boolean | null = null) {
     this.themeMode = themeMode;
     this.themeColor = themeColor;
     this.themeCustomColor = themeCustomColor;
@@ -356,6 +359,7 @@ export class FqBackupAppSettings {
     this.readerDialogueHighlightColor = readerDialogueHighlightColor;
     this.readerCustomDialogueColors = readerCustomDialogueColors;
     this.mineSettingsStyle = mineSettingsStyle;
+    this.dramaPageEnabled = dramaPageEnabled;
     this.playback = playback;
   }
 }
@@ -594,7 +598,8 @@ export class FqLibraryBackup {
       FqAppSettingsStore.getHomeStyle(),
       readerSettings.dialogueHighlightColor,
       readerSettings.customDialogueColors,
-      FqAppSettingsStore.getMineSettingsStyle());
+      FqAppSettingsStore.getMineSettingsStyle(),
+      FqAppSettingsStore.getDramaPageEnabled());
     // 短剧观看历史段（短剧页「最近」频道）：local_ 排除，封面可移植化
     const watchHistory: FqWatchHistoryRecord[] = [];
     for (const record of FqWatchedStore.historyAll()) {
@@ -797,6 +802,10 @@ export class FqLibraryBackup {
         settings['readerCustomDialogueColors'] = data.settings.readerCustomDialogueColors;
       }
       settings['mineSettingsStyle'] = data.settings.mineSettingsStyle;
+      // 启用短剧页开关（旧备份无此字段跳过）
+      if (data.settings.dramaPageEnabled !== null) {
+        settings['dramaPageEnabled'] = data.settings.dramaPageEnabled;
+      }
       if (data.settings.playback !== null) {
         const playback: Record<string, Object> = {};
         playback['danmakuAlphaPercent'] = data.settings.playback.danmakuAlphaPercent;
@@ -1257,6 +1266,9 @@ export class FqLibraryBackup {
       // 我的、设置页面显示样式（旧备份无此字段：-1，恢复时跳过不重置本机）
       const mineSettingsStyle: number = settingsRec['mineSettingsStyle'] === undefined ? -1
         : fqBackupCheckRange(settingsRec, 'mineSettingsStyle', 0, 2);
+      // 启用短剧页开关（旧备份无此字段：null，恢复时跳过不重置本机）
+      const dramaPageEnabled: boolean | null = settingsRec['dramaPageEnabled'] === undefined ? null
+        : fqBackupCheckBool(settingsRec, 'dramaPageEnabled');
       // 播放设置段（旧备份无此段：null，恢复时跳过播放设置；存在则全量白名单校验）
       let playback: FqBackupPlaybackSettings | null = null;
       const playbackRaw: Object | undefined = settingsRec['playback'];
@@ -1321,7 +1333,8 @@ export class FqLibraryBackup {
         homeStyle,
         readerDialogueHighlightColor,
         readerCustomDialogueColors,
-        mineSettingsStyle);
+        mineSettingsStyle,
+        dramaPageEnabled);
     }
     return new FqLibraryBackupData(createdAt, appVersion, shelf, browse, listen,
       watched, reader, excluded, settings, groups, watchHistory);
@@ -1446,6 +1459,10 @@ export class FqLibraryBackup {
       // 我的、设置页面显示样式（旧备份无此字段跳过，不重置本机已有样式）
       if (settings.mineSettingsStyle >= 0) {
         FqAppSettingsStore.setMineSettingsStyle(settings.mineSettingsStyle);
+      }
+      // 启用短剧页开关（旧备份无此字段跳过，不重置本机已有设置）
+      if (settings.dramaPageEnabled !== null) {
+        FqAppSettingsStore.setDramaPageEnabled(settings.dramaPageEnabled);
       }
       // 自定义阅读主题：先写回内嵌背景图文件（本机已有同名文件保留现状），
       // 再按模式校验重建条目（无内嵌数据的旧备份仍走沙箱文件存在性校验）

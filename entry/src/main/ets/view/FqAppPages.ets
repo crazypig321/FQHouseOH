@@ -5,7 +5,7 @@
  */
 
 import { ROUTE_DETAIL, ROUTE_RANK, ROUTE_READER2, ROUTE_SEARCH, ROUTE_AUTHOR, ROUTE_LISTEN, ROUTE_PLAYER, ROUTE_COMIC, ROUTE_LISTEN_VIDEO, ROUTE_ABOUT, ROUTE_CACHED_BOOKS, ROUTE_CACHED_DRAMAS, ROUTE_CACHED_AUDIO, ROUTE_CACHED_COMICS, ROUTE_CACHE_MANAGE, ROUTE_LOGS, ROUTE_BACKUP, ROUTE_WEBDAV, ROUTE_FANQIE_IMPORT, ROUTE_TTS_SETTINGS, ROUTE_API_SERVICE, ROUTE_PROFILE, ROUTE_SETTINGS } from '../model/FqNavModels';
-import { MENU_CONFIG, MenuItem, tabBarSymbolOf, fqVisibleTabIndexes } from '../model/FqTabsModels';
+import { MENU_CONFIG, MenuItem, tabBarSymbolOf, fqVisibleTabIndexes, fqIsDramaTabActive } from '../model/FqTabsModels';
 import { HomePage } from '../pages/HomePage';
 import { ShelfPage } from '../pages/ShelfPage';
 import { ProfilePage } from '../pages/ProfilePage';
@@ -37,7 +37,7 @@ import { appState } from '../entryability/AppState';
 function tabBarOf(item: MenuItem): BottomTabBarStyle {
   const style: BottomTabBarStyle = new BottomTabBarStyle(tabBarSymbolOf(item), item.label);
   // 短剧页未选中文字同样固定用深色模式的浅色（黑底上可见），其余跟随系统
-  if (appState.currTabsIndex === 1) {
+  if (fqIsDramaTabActive()) {
     style.labelStyle({ unselectedColor: '#99FFFFFF', selectedColor: appState.accentColor });
   } else {
     style.labelStyle({ selectedColor: appState.accentColor });

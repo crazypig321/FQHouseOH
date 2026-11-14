@@ -103,6 +103,10 @@ export class AppState {
    *  持久化于 FqAppSettingsStore，写入统一走 FqAppSettingsStore.setMineSettingsStyle）。 */
   @Trace mineSettingsStyle: number = 2;
 
+  /** 启用短剧页开关（关=底部隐藏短剧页签，主 Tab 可见列表据此响应式切换；
+   *  持久化于 FqAppSettingsStore，写入统一走 FqAppSettingsStore.setDramaPageEnabled）。 */
+  @Trace dramaPageEnabled: boolean = true;
+
   /** 静默检查更新发现的 GitHub 新版本号（空 = 暂无更新；设置页「关于」红点与关于页新版本标签共用）。 */
   @Trace latestVersion: string = '';
 

@@ -31,7 +31,7 @@ import { useSidebarLayout } from '../utils/BreakpointUtils';
 import { PcMainLayout } from '../view/pcUI/PcMainLayout';
 import { FqContinueKit } from '../utils/continue/FqContinueKit';
 import { FqShareKit } from '../utils/share/FqShareKit';
-import { fqPhysicalIndexOf, fqVisibleTabIndexes } from '../model/FqTabsModels';
+import { fqPhysicalIndexOf, fqVisibleTabIndexes, fqIsDramaTabActive } from '../model/FqTabsModels';
 
 @Entry
 @ComponentV2
@@ -73,6 +73,24 @@ struct Index {
     appState.currTabsIndex = physical;
   }
 
+  /** 「启用短剧页」变化：关闭时正处短剧页签则回首页，否则保持原页签逻辑位置重映射物理下标。 */
+  @Monitor('appStateUse.dramaPageEnabled')
+  onDramaPageEnabledChange(): void {
+    if (this.isPcLayout) {
+      return; // PC 布局由 PcMainLayout 同步 pcTabIndex
+    }
+    const style: number = appState.mineSettingsStyle;
+    const visible: number[] = fqVisibleTabIndexes(style);
+    let target: number = this.currentLogicalTab;
+    if (visible.indexOf(target) < 0) {
+      target = 0; // 短剧页签被隐藏 → 回首页
+    }
+    this.currentLogicalTab = target;
+    const physical: number = fqPhysicalIndexOf(target, style);
+    this.mainTabIndex = physical;
+    appState.currTabsIndex = physical;
+  }
+
   /** 监听 tabbar的显示和消失 */
   @Monitor('appStateUse.isBatchMode')
   isShowTabBar(){
@@ -93,10 +111,10 @@ struct Index {
     return useSidebarLayout(appState.WidthBp, appState.windowWidthVp, appState.displayWidthVp);
   }
 
-  /** 底栏渐变遮罩：短剧页（沉浸视频流，物理下标 1）透明不遮画面，其余 Tab 用默认渐变。 */
+  /** 底栏渐变遮罩：短剧页（沉浸视频流）透明不遮画面，其余 Tab 用默认渐变。 */
   @Computed
   get tabGradientMask(): HdsTabsBackgroundStyle | undefined {
-    return appState.currTabsIndex === 1 ? { maskColor: Color.Transparent } : undefined;
+    return fqIsDramaTabActive() ? { maskColor: Color.Transparent } : undefined;
   }
 
   aboutToAppear(): void {

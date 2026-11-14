@@ -2,6 +2,7 @@
  * 应用设置页（主 Tab 第四页 + 我的-应用设置入口共用，@Param isTab 区分）：
  * - 外观：深色模式（跟随系统/浅色/深色，FqMenu 档位直选，即时生效）；
  *   启动默认展示页（首页/书架/我的/设置，FqMenu 直选，下次冷启动生效）；
+ *   启用短剧页开关（关=底部隐藏短剧页签，即时生效）；
  * - 播放：开启后台播放开关（开=支持后台播放，关=无法后台播放）；
  * - 数据：缓存与管理入口、备份与恢复入口、清除所有数据（确认弹窗提示重启，清全部 KV/缓存/设置后 restartApp）；
  * - 服务：本地接口入口（状态/自测、地址与局域网共享、可用端点，ApiServicePage）+ 运行日志入口；
@@ -34,7 +35,7 @@ import { FqUpdateChecker } from '../core/FqUpdateChecker';
 import { DialogManager } from '../utils/DialogUtils';
 import { FqSmartReach } from '../utils/FqSmartReach';
 import { FqColorUtils } from '../utils/FqColorUtils';
-import { MENU_CONFIG } from '../model/FqTabsModels';
+import { MENU_CONFIG, fqVisibleTabIndexes } from '../model/FqTabsModels';
 import { appState } from '../entryability/AppState';
 
 const FQ_HOME_TOP_INSET: number = 56;
@@ -133,6 +134,8 @@ export struct SettingsPage {
             this.HomeStyleRow()
             this.RowDivider()
             this.MineSettingsStyleRow()
+            this.RowDivider()
+            this.DramaPageRow()
           }
 
           this.SectionHeader('阅读与播放')
@@ -204,7 +207,12 @@ export struct SettingsPage {
   /** 启动默认展示页菜单：首页/书架/我的/设置 四选项（主 Tab 同名），选中打勾，下次冷启动生效。 */
   private openStartupTabMenu(): void {
     const items: FqMenuItem[] = [];
+    const visible: number[] = fqVisibleTabIndexes(appState.mineSettingsStyle);
     for (let index: number = 0; index < MENU_CONFIG.length; index++) {
+      // 当前显示样式 / 短剧页开关下被隐藏的页签不出现在选项里
+      if (visible.indexOf(index) < 0) {
+        continue;
+      }
       const item: FqMenuItem = new FqMenuItem();
       item.label = MENU_CONFIG[index].label;
       if (index === this.startupTab) {
@@ -734,6 +742,42 @@ export struct SettingsPage {
     .onClick((): void => {
       this.openMineSettingsStyleMenu();
     })
+  }
+
+  /** 启用短剧页行（Toggle：关=底部隐藏短剧页签，开=恢复显示，即时生效）。 */
+  @Builder
+  private DramaPageRow() {
+    Row({ space: 12 }) {
+      Stack() {
+        SymbolGlyph($r('sys.symbol.template_fill'))
+          .fontSize(17)
+          .fontColor(['#FFEC4899'])
+      }
+      .width(34)
+      .height(34)
+      .borderRadius(10)
+      .backgroundColor(FqColorUtils.withOpacity('#FFEC4899', 0.12))
+
+      Column({ space: 3 }) {
+        Text('启用短剧页')
+          .fontSize(14.5)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('sys.color.font_primary'))
+        Text('关闭后底部隐藏短剧页签，重新开启即恢复')
+          .fontSize(11.5)
+          .fontColor($r('sys.color.font_secondary'))
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+
+      Toggle({ type: ToggleType.Switch, isOn: appState.dramaPageEnabled })
+        .selectedColor(appState.accentColor)
+        .onChange((isOn: boolean): void => {
+          FqAppSettingsStore.setDramaPageEnabled(isOn);
+        })
+    }
+    .padding({ left: 14, right: 14, top: 11, bottom: 11 })
+    .width('100%')
   }
 
   /** 点击书籍直接进入阅读行（Toggle：开=点小说/漫画跳过详情页从进度直接开读）。 */

@@ -27,6 +27,8 @@
  * - mineSettingsStyle：我的、设置页面显示样式（0 我的含设置入口 / 1 设置含我的入口 /
  *   2 我的和设置单独显示，默认 2）：0 隐藏设置 Tab（我的页右上角设置按钮路由进设置），
  *   1 隐藏我的 Tab（设置页「用户」区入口路由进我的），2 保持双 Tab（我的页隐藏快捷入口）；
+ * - dramaPageEnabled：启用短剧页开关（默认开）：关=底部隐藏短剧页签（fqVisibleTabIndexes
+ *   过滤逻辑下标 1），开=恢复显示；appState.dramaPageEnabled 响应式联动主 Tab；
  * - chapterCacheLimitMb：章节自动缓存大小上限（MB，默认 80，1-102400 即 1MB-100GB；
  *   章节缓存页右上角调节，仅约束阅读自动缓存，整本下载 pin 在预算外不受限）；
  * - dramaAutoCacheAhead：剧集边看边往后缓存集数（对齐 fqapp DramaCachePreferences：
@@ -57,6 +59,7 @@ const FQ_SETTINGS_KEY_STARTUP_TAB: string = 'startupTabIndexV2';
 const FQ_SETTINGS_KEY_STARTUP_TAB_LEGACY: string = 'startupTabIndex';
 const FQ_SETTINGS_KEY_HOME_STYLE: string = 'homeStyle';
 const FQ_SETTINGS_KEY_MINE_SETTINGS_STYLE: string = 'mineSettingsStyle';
+const FQ_SETTINGS_KEY_DRAMA_PAGE_ENABLED: string = 'dramaPageEnabled';
 const FQ_SETTINGS_KEY_TTS_PERSON: string = 'ttsPerson';
 const FQ_SETTINGS_KEY_TTS_RATE: string = 'ttsRate';
 const FQ_SETTINGS_KEY_SMART_REACH: string = 'smartReach';
@@ -152,6 +155,8 @@ export class FqAppSettingsStore {
   private static homeStyle: number = FQ_HOME_STYLE_SPOTLIGHT;
   /** 我的、设置页面显示样式（0 我的含设置入口 / 1 设置含我的入口 / 2 单独显示；appState 响应式联动）。 */
   private static mineSettingsStyle: number = FQ_MINE_STYLE_SEPARATE;
+  /** 启用短剧页开关（关=底部隐藏短剧页签；appState.dramaPageEnabled 响应式联动主 Tab）。 */
+  private static dramaPageEnabled: boolean = true;
   /** 离线朗读音色（textToSpeech person；0 默认女声聆小珊）。 */
   private static ttsPerson: number = 0;
   /** 离线朗读语速（0.5 ~ 2）。 */
@@ -264,6 +269,11 @@ export class FqAppSettingsStore {
         && rawMineSettingsStyle <= FQ_MINE_STYLE_MAX) {
         FqAppSettingsStore.mineSettingsStyle = Math.round(rawMineSettingsStyle);
       }
+      const rawDramaPageEnabled: preferences.ValueType =
+        pref.getSync(FQ_SETTINGS_KEY_DRAMA_PAGE_ENABLED, true);
+      if (typeof rawDramaPageEnabled === 'boolean') {
+        FqAppSettingsStore.dramaPageEnabled = rawDramaPageEnabled;
+      }
       const rawTtsPerson: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_TTS_PERSON, 0);
       if (typeof rawTtsPerson === 'number' && rawTtsPerson >= 0) {
         FqAppSettingsStore.ttsPerson = rawTtsPerson;
@@ -340,6 +350,7 @@ export class FqAppSettingsStore {
     appState.smartReachEnabled = FqAppSettingsStore.smartReach;
     appState.homeStyle = FqAppSettingsStore.homeStyle;
     appState.mineSettingsStyle = FqAppSettingsStore.mineSettingsStyle;
+    appState.dramaPageEnabled = FqAppSettingsStore.dramaPageEnabled;
   }
 
   /** 当前深色模式档位（0 跟随系统 / 1 浅色 / 2 深色）。 */
@@ -647,6 +658,29 @@ export class FqAppSettingsStore {
     }
     try {
       pref.putSync(FQ_SETTINGS_KEY_MINE_SETTINGS_STYLE, FqAppSettingsStore.mineSettingsStyle);
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
+  }
+
+  /** 启用短剧页开关（关=底部隐藏短剧页签，开=恢复显示）。 */
+  public static getDramaPageEnabled(): boolean {
+    return FqAppSettingsStore.dramaPageEnabled;
+  }
+
+  /** 设置启用短剧页开关（appState.dramaPageEnabled 即时联动主 Tab 可见列表）。 */
+  public static setDramaPageEnabled(enabled: boolean): void {
+    FqAppSettingsStore.dramaPageEnabled = enabled;
+    appState.dramaPageEnabled = enabled;
+    const pref: preferences.Preferences | null = FqAppSettingsStore.pref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.putSync(FQ_SETTINGS_KEY_DRAMA_PAGE_ENABLED, enabled);
       pref.flush().catch((_error: BusinessError): void => {
         // 落盘失败不阻断
       });

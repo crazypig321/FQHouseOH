@@ -33,6 +33,7 @@ import { url } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { appState } from '../../entryability/AppState';
+import { fqLogicalIndexOf } from '../../model/FqTabsModels';
 import { FqShelfItem, FqShelfStore } from '../../core/FqShelfStore';
 import { FqLocalBookStore } from '../../core/FqLocalBookStore';
 import { FqBackend } from '../../core/FqBackend';
@@ -616,7 +617,8 @@ export class FqShareKit {
       return result;
     }
     // 书架 Tab（主 Tab 无压栈页）：多选模式分享所选，普通态分享整架书单
-    if (names.length === 0 && appState.currTabsIndex === 1) {
+    if (names.length === 0
+      && fqLogicalIndexOf(appState.currTabsIndex, appState.mineSettingsStyle) === 2) {
       result.records = FqShareKit.buildShelfRecordsForGesture();
       return result;
     }
