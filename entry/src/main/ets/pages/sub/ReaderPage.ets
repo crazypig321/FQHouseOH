@@ -2665,6 +2665,7 @@ export struct ReaderPage {
     fqReaderSettingsBus.flipIndex = this.flipIndex;
     fqReaderSettingsBus.fontIndex = this.fontIndex;
     fqReaderSettingsBus.showParagraphComment = this.showParagraphComment;
+    fqReaderSettingsBus.dialogueHighlightColor = this.dialogueHighlightColor;
     fqReaderSettingsBus.customThemes = this.customThemes;
     fqReaderSettingsBus.customThemeId = this.customThemeId;
     fqReaderSettingsBus.customFonts = this.customFonts;
