@@ -1,7 +1,7 @@
 /**
  * 「阅读设置」弹窗内容（经 utils/DialogUtils 的 DialogManager.OpenDialog('阅读设置') 打开，
  * 由宿主页 CustomContentDialog 装配：无标题无按钮仅内容区，悬于工具条上方居中）：
- * 字号/行距/主题/字体/翻页/段评/音量键翻页七行；当前值经 @Param 注入、变更经 @Event 回调宿主页；
+ * 字号+行距同排/主题/字体/翻页/段评/音量键翻页六行；当前值经 @Param 注入、变更经 @Event 回调宿主页；
  * 主题行为「添加」固定卡片 + 横向滚动 List + ForEach（@Computed 选项，键含名称/图路径，改名换图即重建）：
  * 预设档 + 自定义主题列表（缩略图按应生效模式取图）；添加卡片固定在前，滑动主题时不随滚动划走；
  * 配色跟随系统深浅色（弹窗卡片为系统色），阅读主题常量集中于此导出供宿主页共用。
@@ -145,45 +145,53 @@ export struct ReaderSettingsDialogContent {
 
   build() {
     Column({ space: 16 }) {
-      Row({ space: 12 }) {
-        Text('字号')
-          .fontSize(14)
-          .fontColor(themeUtils.textColor)
-          .width(36)
-        SettingChip($r('sys.symbol.minus'), (): void => {
-          this.fontSizeChange(-1);
-        })
-        Text(`${this.fontSize}`)
-          .fontSize(14)
-          .fontColor(themeUtils.textColor)
-          .width(20)
-          .textAlign(TextAlign.Center)
-        SettingChip($r('sys.symbol.plus'), (): void => {
-          this.fontSizeChange(1);
-        })
-      }
-      .width('100%')
-      .alignItems(VerticalAlign.Center)
+      Row({ space: 16 }) {
+        Row({ space: 10 }) {
+          Text('字号')
+            .fontSize(14)
+            .fontColor(themeUtils.textColor)
+          SettingChip($r('sys.symbol.minus'), (): void => {
+            this.fontSizeChange(-1);
+          })
+          Text(`${this.fontSize}`)
+            .fontSize(14)
+            .fontColor(themeUtils.textColor)
+            .width(22)
+            .textAlign(TextAlign.Center)
+          SettingChip($r('sys.symbol.plus'), (): void => {
+            this.fontSizeChange(1);
+          })
+        }
+        .layoutWeight(1)
+        .justifyContent(FlexAlign.SpaceBetween)
 
-      Row({ space: 12 }) {
-        Text('行距')
-          .fontSize(14)
-          .fontColor(themeUtils.textColor)
-          .width(36)
-        SettingChip($r('sys.symbol.minus'), (): void => {
-          this.lineHeightChange(-0.1);
-        })
-        Text(`${this.lineHeight.toFixed(1)}`)
-          .fontSize(14)
-          .fontColor(themeUtils.textColor)
-          .width(20)
-          .textAlign(TextAlign.Center)
-        SettingChip($r('sys.symbol.plus'), (): void => {
-          this.lineHeightChange(0.1);
-        })
+        Divider()
+          .vertical(true)
+          .height(20)
+          .color($r('sys.color.comp_divider'))
+
+        Row({ space: 10 }) {
+          Text('行距')
+            .fontSize(14)
+            .fontColor(themeUtils.textColor)
+          SettingChip($r('sys.symbol.minus'), (): void => {
+            this.lineHeightChange(-0.1);
+          })
+          Text(`${this.lineHeight.toFixed(1)}`)
+            .fontSize(14)
+            .fontColor(themeUtils.textColor)
+            .width(28)
+            .textAlign(TextAlign.Center)
+          SettingChip($r('sys.symbol.plus'), (): void => {
+            this.lineHeightChange(0.1);
+          })
+        }
+        .layoutWeight(1)
+        .justifyContent(FlexAlign.SpaceBetween)
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
+      .justifyContent(FlexAlign.SpaceBetween)
 
       Row({ space: 8 }) {
         Text('主题')
