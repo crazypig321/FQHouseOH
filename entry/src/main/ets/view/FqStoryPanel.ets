@@ -96,7 +96,9 @@ export struct FqStoryPanel {
         }
       }
       .width('100%')
-      .padding({ bottom: 10 })
+      // 无同系列按钮时补 8vp 右内边距：定位图标与屏幕右缘保持 16vp 避让
+      // （有同系列按钮时其自带 16vp 右内边距已避让，不叠加）
+      .padding({ bottom: 10, right: this.onOpenRelatedSeries !== null ? 0 : 8 })
       .alignItems(VerticalAlign.Center)
 
       if (this.episodes.length > FQ_STORY_PAGE_SIZE) {
@@ -259,6 +261,8 @@ export struct FqStoryPanel {
     .height(36)
     .scrollable(ScrollDirection.Horizontal)
     .scrollBar(BarState.Off)
+    // Scroll 内容小于视口时默认 Alignment.Center 整行居中（fqapp 为左对齐 12），显式左对齐
+    .align(Alignment.Start)
   }
 
   /** 格子文字色：当前集橙、已看（按集 itemId 记录，与下标无关）灰、普通黑。 */
