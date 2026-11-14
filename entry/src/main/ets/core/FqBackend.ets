@@ -82,6 +82,10 @@ export const FQ_SHORT_TIMEOUT_MS: number = 10000;
 const COMIC_CONTENT_TIMEOUT_MS: number = 60000;
 /** rankCatalog 内存 TTL（ms）：每次进排行榜页必拉，短缓存内直接复用。 */
 const RANK_CATALOG_TTL_MS: number = 30000;
+/** 评论排序：热门（官方 SmartHot 默认序）。 */
+export const FQ_COMMENT_SORT_HOT: number = 1;
+/** 评论排序：最新（官方 TimeDesc，fqapp UgcSort）。 */
+export const FQ_COMMENT_SORT_LATEST: number = 3;
 const MAX_CONCURRENCY: number = 6;
 
 export class FqRequestError extends Error {
@@ -558,16 +562,33 @@ export class FqBackend {
 
   /**
    * 短剧剧评一页（/api/v1/series/{id}/comments，官方 gx1/m.java:168-181：
-    * 播放页评论区即整部剧的评论列表）：sort=1 官方「全部」排序，
-    * cursor 续拉（不透明串）；响应与弹幕列表同形（data_list + common_list_info）；
-    * 详情页预览传 timeoutMs=FQ_SHORT_TIMEOUT_MS，面板翻页保持默认。
-    */
-  public async seriesComments(seriesId: string, cursor: string,
+   * 播放页评论区即整部剧的评论列表）：sort 1=热门（官方「全部」SmartHot）、
+   * 3=最新（TimeDesc，fqapp UgcSort），cursor 续拉（不透明串）；
+   * 响应与弹幕列表同形（data_list + common_list_info）；
+   * 详情页预览传 timeoutMs=FQ_SHORT_TIMEOUT_MS，面板翻页保持默认。
+   */
+  public async seriesComments(seriesId: string, cursor: string, sort: number = FQ_COMMENT_SORT_HOT,
     timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<FqEpisodeCommentPage> {
-    const query: string = 'sort=1&count=20'
+    const safeSort: number = sort === FQ_COMMENT_SORT_LATEST ? FQ_COMMENT_SORT_LATEST : FQ_COMMENT_SORT_HOT;
+    const query: string = `sort=${safeSort}&count=20`
       + (cursor.length > 0 ? `&cursor=${encodeURIComponent(cursor)}` : '');
     const payload: Record<string, Object> =
       await this.getJson(`/api/v1/series/${encodeURIComponent(seriesId)}/comments`, query, timeoutMs);
+    return fqParseEpisodeComments(payload);
+  }
+
+  /**
+   * 书评最新一页（/api/v1/books/{id}/reviews，commentapi 评论列表 API：
+   * 与剧评同族接口，sort=3 TimeDesc 最新排序，cursor 续拉）：
+   * 热门排序走 bookComments（legacy 端点 count/offset），本方法仅承接「最新」；
+   * 响应与剧评同形（data_list + common_list_info），fqParseEpisodeComments 直接解析。
+   */
+  public async bookCommentsLatest(bookId: string, cursor: string,
+    timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<FqEpisodeCommentPage> {
+    const query: string = 'sort=3&count=20'
+      + (cursor.length > 0 ? `&cursor=${encodeURIComponent(cursor)}` : '');
+    const payload: Record<string, Object> =
+      await this.getJson(`/api/v1/books/${encodeURIComponent(bookId)}/reviews`, query, timeoutMs);
     return fqParseEpisodeComments(payload);
   }
 

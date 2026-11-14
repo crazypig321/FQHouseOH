@@ -13,6 +13,7 @@ import {
   HdsNavigationMenuItemOptions, TitleBarContentOptions } from '@kit.UIDesignKit';
 import { appState } from '../../entryability/AppState';
 import { themeUtils } from '../../utils/ThemeUtils';
+import { FQ_COMMENT_SORT_HOT, FQ_COMMENT_SORT_LATEST } from '../../core/FqBackend';
 import { CommonSearch } from '../CommonCom';
 import { CommonNav } from '../CommonNav';
 import { SymbolGlyphModifier, uiMaterial } from '@kit.ArkUI';
@@ -82,6 +83,10 @@ export struct CommonSheet {
   @Param orderActive: boolean = false;
   /** 标题栏右侧是否显示移出分组按钮（关闭钮之前）。 */
   @Param showRemove: boolean = false;
+  /** 标题栏右侧是否显示评论排序图标组（火焰=热门 / 时钟=最新，评论弹层用；选中项主题色高亮）。 */
+  @Param showCommentSort: boolean = false;
+  /** 评论排序当前值（1 热门 / 3 最新）。 */
+  @Param commentSort: number = FQ_COMMENT_SORT_HOT;
   /** 隐藏 HDS 标题栏（内容区自绘头部：返回/关闭等 HDS 标题栏放不下的控件）。 */
   @Param hideTitleBar: boolean = false;
   @Event searchToggle: () => void = (): void => {};
@@ -96,6 +101,7 @@ export struct CommonSheet {
   @Event addClick: () => void = (): void => {};
   @Event orderClick: () => void = (): void => {};
   @Event removeClick: () => void = (): void => {};
+  @Event commentSortChange: (sort: number) => void = (_sort: number): void => {};
   @BuilderParam content: () => void;
 
   build() {
@@ -251,6 +257,32 @@ export struct CommonSheet {
           label: 'remove',
           action: (): void => {
             this.removeClick();
+          },
+        },
+      });
+    }
+    if (this.showCommentSort) {
+      menus.push({
+        content: {
+          // 评论排序：火焰=热门（选中主题色高亮，SymbolGlyphModifier 携带 fontColor）
+          icon: this.commentSort === FQ_COMMENT_SORT_HOT
+            ? new SymbolGlyphModifier($r('sys.symbol.flame')).fontColor([appState.accentColor])
+            : $r('sys.symbol.flame'),
+          label: '热门',
+          action: (): void => {
+            this.commentSortChange(FQ_COMMENT_SORT_HOT);
+          },
+        },
+      });
+      menus.push({
+        content: {
+          // 评论排序：时钟=最新（选中主题色高亮）
+          icon: this.commentSort === FQ_COMMENT_SORT_LATEST
+            ? new SymbolGlyphModifier($r('sys.symbol.clock')).fontColor([appState.accentColor])
+            : $r('sys.symbol.clock'),
+          label: '最新',
+          action: (): void => {
+            this.commentSortChange(FQ_COMMENT_SORT_LATEST);
           },
         },
       });

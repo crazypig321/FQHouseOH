@@ -9,7 +9,7 @@
 
 import pasteboard from '@ohos.pasteboard';
 import { promptAction } from '@kit.ArkUI';
-import { FqBackend, FQ_SHORT_TIMEOUT_MS, fqErrorMessage } from '../../core/FqBackend';
+import { FqBackend, FQ_COMMENT_SORT_HOT, FQ_SHORT_TIMEOUT_MS, fqErrorMessage } from '../../core/FqBackend';
 import {
   FqBookComment,
   FqBookCommentPage,
@@ -657,7 +657,8 @@ export struct DetailPage {
 
   /** 书评/剧评半模态：公共 FqCommentSheet（懒加载分页，文案随作品类型）；
    *  剧 kind 走剧评 cursorLoader + 剧评回复 loader（series 端点），
-   *  其余走内置书评配方 + 书评回复（replyBookId）。 */
+   *  其余走内置书评配方 + 书评回复（replyBookId）；
+   *  顶部右上角「热门 / 最新」切换（sort 透传 series / 书评 commentapi 端点）。 */
   @Builder
   private CommentSheetBuilder() {
     FqCommentSheet({
@@ -667,6 +668,7 @@ export struct DetailPage {
       cursorLoader: this.makeSeriesCommentLoader(),
       replyCursorLoader: this.makeSeriesReplyLoader(),
       replyBookId: this.isDramaKind() ? '' : (this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId),
+      showSortTabs: true,
     })
   }
 
@@ -677,16 +679,16 @@ export struct DetailPage {
 
   /** 剧评加载器工厂：剧 kind 返回 cursor 分页加载器（cursor 本页自理），
    *  其余返回 undefined 走 FqCommentSheet 内置书评配方。 */
-  private makeSeriesCommentLoader(): ((refresh: boolean) => Promise<FqBookCommentPage>) | undefined {
+  private makeSeriesCommentLoader(): ((refresh: boolean, sort: number) => Promise<FqBookCommentPage>) | undefined {
     if (!this.isDramaKind()) {
       return undefined;
     }
-    return (refresh: boolean): Promise<FqBookCommentPage> => this.loadSeriesComments(refresh);
+    return (refresh: boolean, sort: number): Promise<FqBookCommentPage> => this.loadSeriesComments(refresh, sort);
   }
 
-  /** 剧评一页（/api/v1/series/{id}/comments，sort=1 cursor 分页）：
+  /** 剧评一页（/api/v1/series/{id}/comments，sort 1=热门 3=最新 cursor 分页）：
    *  refresh=true 重置游标拉首页，false 触底续拉；失败向上抛由 FqCommentSheet 落错误态。 */
-  private async loadSeriesComments(refresh: boolean): Promise<FqBookCommentPage> {
+  private async loadSeriesComments(refresh: boolean, sort: number): Promise<FqBookCommentPage> {
     const contentId: string = this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId;
     if (contentId.length === 0) {
       return new FqBookCommentPage([], 0, 0, '', false, 0);
@@ -695,7 +697,7 @@ export struct DetailPage {
       this.seriesCommentCursor = '';
     }
     const cursorIn: string = this.seriesCommentCursor;
-    const page: FqEpisodeCommentPage = await FqBackend.get().seriesComments(contentId, cursorIn);
+    const page: FqEpisodeCommentPage = await FqBackend.get().seriesComments(contentId, cursorIn, sort);
     this.seriesCommentCursor = page.cursor;
     return new FqBookCommentPage(page.comments, page.totalCount, 0, '', page.hasMore, 0);
   }
@@ -1204,7 +1206,7 @@ export struct DetailPage {
         if (this.isDramaKind()) {
           // 剧评预览：series 剧评端点首页（短超时，对齐书评预览）
           const seriesPage: FqEpisodeCommentPage =
-            await FqBackend.get().seriesComments(contentId, '', FQ_SHORT_TIMEOUT_MS);
+            await FqBackend.get().seriesComments(contentId, '', FQ_COMMENT_SORT_HOT, FQ_SHORT_TIMEOUT_MS);
           commentsPage =
             new FqBookCommentPage(seriesPage.comments, seriesPage.totalCount, 0, '', seriesPage.hasMore, 0);
         } else {

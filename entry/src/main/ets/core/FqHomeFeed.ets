@@ -23,11 +23,12 @@ export const FQ_SOURCE_SEARCH: number = 1;
 export const FQ_SOURCE_SEARCH_PAGED: number = 2;
 
 /**
- * 走官方第二段（series-feed/cell/change）分页的 homepage 频道。
- * 听书（5）/短剧（8）的 tab 游标是装饰性的（offset 翻页一律 101116），
- * 真实分页由 cell 内容接口承载。
+ * 走官方第二段（series-feed/cell/change）分页的 homepage 频道（fqapp
+ * `_seriesFlowTabs` 语义）：第一段只开 cell（cell_id_str + session），
+ * 真实分页由 cell 内容接口承载。短剧页推荐频道（t16 视频流）第一段只回
+ * 两张 407 模板卡且没有翻页游标，内容全靠第二段补齐。
  */
-const FQ_SERIES_FLOW_TABS: number[] = [5, 8];
+const FQ_SERIES_FLOW_TABS: number[] = [5, 8, 16];
 
 /** 单个推荐源及其游标状态（含 search 兜底阶段配置）。 */
 export class FqHomeSource {

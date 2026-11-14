@@ -7,13 +7,16 @@
  *   空态 / LazyForEach 触底续拉），aboutToAppear 自动拉第一页；
  *   chapterItemId 非空走章评配方（章末聚合桶 + cursor 分页），空走书评；
  *   cursorLoader 非空走自定义页加载器（播放页剧评：/api/v1/series/{id}/comments
- *   cursor 分页，加载器自理 cursor，refresh=true 重拉首页）。
+ *   cursor 分页，加载器自理 cursor，refresh=true 重拉首页）；
+ *   showSortTabs 开启标题栏右侧「热门 / 最新」图标切换（火焰/时钟，选中主题色高亮；
+ *   热门 = 默认序，最新 = sort=3 TimeDesc 重拉：剧评透传 series 端点，
+ *   书评走 /books/{id}/reviews commentapi 列表）。
  * - fqCommentSheetHeightVp：统一 Sheet 高度（屏高 82%）。
  */
 
 import { display } from '@kit.ArkUI';
-import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
-import { FqBookComment, FqBookCommentPage, FqChapterIdeaMeta, FqCommentReplyPage, fqFormatCountInt } from '../../model/FqModels';
+import { FqBackend, FQ_COMMENT_SORT_HOT, FQ_COMMENT_SORT_LATEST, fqErrorMessage } from '../../core/FqBackend';
+import { FqBookComment, FqBookCommentPage, FqChapterIdeaMeta, FqCommentReplyPage, FqEpisodeCommentPage, fqFormatCountInt } from '../../model/FqModels';
 import { CommonLoading } from '../CommonCom';
 import { CommonSheet } from './CommonSheet';
 import { FqReplySection } from './FqReplySheet';
@@ -257,8 +260,9 @@ export struct FqCommentSheet {
   /** 章评模式：当前章节内容版本（章评接口必传）。 */
   @Param chapterVersion: string = '';
   /** 自定义页加载器（集评等 cursor 分页场景）：非空时优先于内置书评/章评配方，
-   *  refresh=true 重置拉首页、false 触底续拉，cursor 由加载器自理。 */
-  @Param cursorLoader: ((refresh: boolean) => Promise<FqBookCommentPage>) | undefined = undefined;
+   *  refresh=true 重置拉首页、false 触底续拉，cursor 由加载器自理；sort 为评论排序
+   *  （1 热门 / 3 最新），详情页剧评加载器透传给 series 端点。 */
+  @Param cursorLoader: ((refresh: boolean, sort: number) => Promise<FqBookCommentPage>) | undefined = undefined;
   /** 打开令牌：宿主每次打开 +1，组件据此重置分页并重拉（兼容内容重建/复用两种挂载）。 */
   @Param openToken: number = 0;
   /** 回复书 id（非空启用「展开 N 条回复」；group_id=book_id=此值。剧评不传，改走 replyCursorLoader）。 */
@@ -267,6 +271,9 @@ export struct FqCommentSheet {
    *  剧评场景与 replyBookId 互斥使用，非空启用剧评回复展开。 */
   @Param replyCursorLoader:
     ((commentId: string, cursor: string) => Promise<FqCommentReplyPage>) | undefined = undefined;
+  /** 顶部右上角「热门 / 最新」排序切换（详情页书评/剧评开启；章评等不显示）：
+   *  经 CommonSheet 标题栏右侧图标组（火焰/时钟）呈现。 */
+  @Param showSortTabs: boolean = false;
   @Local loading: boolean = false;
   @Local errorMsg: string = '';
   @Local count: number = 0;
@@ -274,9 +281,13 @@ export struct FqCommentSheet {
   @Local hasMore: boolean = false;
   @Local loadingMore: boolean = false;
   @Local moreFailed: boolean = false;
+  /** 当前评论排序（1 热门 SmartHot / 3 最新 TimeDesc）。 */
+  @Local commentSort: number = FQ_COMMENT_SORT_HOT;
   private source: FqCommentSource = new FqCommentSource();
   private scroller: Scroller = new Scroller();
   private nextOffset: number = 0;
+  /** 内置书评配方「最新」续拉游标（commentapi 列表 API，不透明串）。 */
+  private latestCursor: string = '';
   /** 章评模式：已解析的章末聚合段键（-1 未解析）。 */
   private resolvedParaIndex: number = -1;
   /** 加载代际：重开重载递增，作废在途请求的迟到写入。 */
@@ -302,8 +313,18 @@ export struct FqCommentSheet {
     this.loadingMore = false;
     this.loading = false;
     this.nextOffset = 0;
+    this.latestCursor = '';
     this.resolvedParaIndex = -1;
     this.loadComments(true);
+  }
+
+  /** 切换「热门 / 最新」：换排序后清列表重拉首页（在途请求由 loadGen 作废）。 */
+  private switchCommentSort(sort: number): void {
+    if (this.commentSort === sort) {
+      return;
+    }
+    this.commentSort = sort;
+    this.resetForReload();
   }
 
   /** Sheet 标题：总数就绪后带计数（章评 · 123）。 */
@@ -376,12 +397,18 @@ export struct FqCommentSheet {
     const offset: number = refresh ? 0 : this.nextOffset;
     try {
       let page: FqBookCommentPage;
-      const loader: ((refresh: boolean) => Promise<FqBookCommentPage>) | undefined = this.cursorLoader;
+      const loader: ((refresh: boolean, sort: number) => Promise<FqBookCommentPage>) | undefined = this.cursorLoader;
       if (loader !== undefined) {
-        page = await loader(refresh);
+        page = await loader(refresh, this.commentSort);
       } else if (chapterMode) {
         page = await FqBackend.get().chapterComments(this.bookId, this.chapterItemId,
           this.chapterVersion, this.resolvedParaIndex, 20, refresh ? '' : `${offset}`);
+      } else if (this.commentSort === FQ_COMMENT_SORT_LATEST) {
+        // 书评「最新」：commentapi 评论列表 API（与剧评同族）cursor 续拉
+        const latest: FqEpisodeCommentPage = await FqBackend.get().bookCommentsLatest(this.bookId,
+          refresh ? '' : this.latestCursor);
+        this.latestCursor = latest.cursor;
+        page = new FqBookCommentPage(latest.comments, latest.totalCount, 0, '', latest.hasMore, 0);
       } else {
         page = await FqBackend.get().bookComments(this.bookId, 20, offset);
       }
@@ -422,6 +449,11 @@ export struct FqCommentSheet {
   build() {
     CommonSheet({
       sheetTitle: this.sheetTitle(),
+      showCommentSort: this.showSortTabs,
+      commentSort: this.commentSort,
+      commentSortChange: (sort: number): void => {
+        this.switchCommentSort(sort);
+      },
     }) {
       Column() {
         if (this.loading) {
