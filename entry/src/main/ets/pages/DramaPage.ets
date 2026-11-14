@@ -411,6 +411,12 @@ export struct DramaPage {
   @Local feedbackPlaying: boolean = false;
   /** 反馈图标自动隐藏定时器（0 无任务）。 */
   private feedbackTimer: number = 0;
+  /** 当前起播的流式 CENC key（空 = 本地缓存/后端代理流，无需客户端解密）。 */
+  private streamKeyInUse: string = '';
+  /** 流式直连未起播后是否已回退过后端代理（每次加载重置，只回退一次）。 */
+  private streamProxyFallbackTried: boolean = false;
+  /** 本次加载的起播偏移（流式起播失败回退代理时沿用）。 */
+  private currentLoadStartSec: number = -1;
   /** 已展开简介的条目 id（点击「展开/收起」增删）。 */
   @Local expandedIntroIds: string[] = [];
   /** 可见性自暂停（切 Tab/路由压顶）：回到可见自动续播；用户手动暂停不置位。 */
@@ -819,7 +825,11 @@ export struct DramaPage {
     }
   }
 
-  /** 加载并起播一集（episodeSource 取流 → mpv open；startSec > 0 偏移起播）。 */
+  /**
+    * 加载并起播一集（本地缓存 → 流式直连 → 失败回退后端代理整集下载）：
+    * 流式直连对齐 fqapp mode=stream（CDN 直链 + mpv decryption_key 边下边解密），
+    * 不等后端整集下载即可秒开；startSec > 0 偏移起播。
+    */
   private async loadActiveEpisode(index: number, startSec: number): Promise<void> {
     const item: FqMediaItem | undefined = this.feedItems[this.activeIndex];
     const episode: FqChapter | undefined = this.activeEpisodes[index];
@@ -837,19 +847,53 @@ export struct DramaPage {
     this.hasDisplayed = false;
     this.videoStarted = false;
     this.seekPreview = -1;
+    this.streamKeyInUse = '';
+    this.streamProxyFallbackTried = false;
+    this.currentLoadStartSec = startSec;
+    // 离线缓存命中：直接播本地文件，免取流秒开（播放页/fqapp _offlineSource 同款）
+    if (FqDramaCacheStore.has(episode.itemId)) {
+      this.beginPlayback(FqDramaCacheStore.filePath(episode.itemId), startSec, '');
+      return;
+    }
     try {
       await FqBackend.get().start(getContext(this));
+      const source = await FqBackend.get().episodeSourceStream(episode.itemId,
+        fqKindToTab(item.kind), FqAppSettingsStore.getVideoQualityPref());
+      if (token !== this.loadToken) {
+        return;
+      }
+      this.beginPlayback(source.url, startSec, source.keyHex);
+    } catch (error) {
+      if (token !== this.loadToken) {
+        return;
+      }
+      // 流式取流失败：回退后端代理整集下载（老链路，自带下载重试）
+      this.loadEpisodeViaProxy(episode, item, token);
+    }
+  }
+
+  /** 起播准备公共段：清加载态、关听书、转 startPlayback（open/暂存）。 */
+  private beginPlayback(url: string, startSec: number, keyHex: string): void {
+    this.episodeLoading = false;
+    // 播放视频即停止听书（fqAudioSession 完整关闭链路）
+    if (fqAudioSession.hasSession) {
+      fqAudioSession.close();
+    }
+    this.startPlayback(url, startSec, keyHex);
+  }
+
+  /** 流式直连失败的后端代理回退（整集下载 + /src/ 供流，mpv 拉明文无需 key）。 */
+  private async loadEpisodeViaProxy(episode: FqChapter, item: FqMediaItem, token: number): Promise<void> {
+    hilog.info(0x0001, FQ_AUTO_CACHE_LOG_TAG, 'stream play fallback to backend proxy');
+    this.episodeLoading = true;
+    this.episodeErrorMsg = '';
+    try {
       const source = await FqBackend.get().episodeSource(episode.itemId,
         fqKindToTab(item.kind), FqAppSettingsStore.getVideoQualityPref());
       if (token !== this.loadToken) {
         return;
       }
-      this.episodeLoading = false;
-      // 播放视频即停止听书（fqAudioSession 完整关闭链路）
-      if (fqAudioSession.hasSession) {
-        fqAudioSession.close();
-      }
-      this.startPlayback(source.url, startSec);
+      this.beginPlayback(source.url, this.currentLoadStartSec, '');
     } catch (error) {
       if (token !== this.loadToken) {
         return;
@@ -869,9 +913,13 @@ export struct DramaPage {
   }
 
   /** 起播公共尾段：surface 就绪立即 open，未就绪暂存待 onReady 补播；
+    * 流式直连带 CENC key（mpv mov demuxer decryption_key 边下边解密）；
     * 非自动播放上下文 open(media, false) 并按拦截源置恢复标记。 */
-  private startPlayback(url: string, startSec: number): void {
-    const media: Media = startSec > 0 ? new Media(url, { start: startSec }) : new Media(url);
+  private startPlayback(url: string, startSec: number, keyHex: string): void {
+    this.streamKeyInUse = keyHex;
+    const media: Media = startSec > 0
+      ? new Media(url, { start: startSec, decryptionKey: keyHex })
+      : new Media(url, { decryptionKey: keyHex });
     const autoplay: boolean = this.shouldAutoPlay();
     if (this.surfaceReady) {
       this.player.open(media, autoplay);
@@ -1065,6 +1113,16 @@ export struct DramaPage {
       return;
     }
     if (!this.hasDisplayed) {
+      // 流式直连未起播（CDN 边缘 403 / 解密失败等）：回退后端代理整集下载一次
+      if (this.streamKeyInUse.length > 0 && !this.streamProxyFallbackTried) {
+        const fallbackItem: FqMediaItem | undefined = this.feedItems[this.activeIndex];
+        const fallbackEpisode: FqChapter | undefined = this.activeEpisodes[this.activeEpisodeIndex];
+        if (fallbackItem !== undefined && fallbackEpisode !== undefined) {
+          this.streamProxyFallbackTried = true;
+          this.loadEpisodeViaProxy(fallbackEpisode, fallbackItem, this.loadToken);
+          return;
+        }
+      }
       if (this.episodeErrorMsg.length === 0) {
         this.episodeErrorMsg = '视频加载失败，请重试';
       }

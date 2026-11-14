@@ -87,6 +87,10 @@ export const FQ_COMMENT_SORT_HOT: number = 1;
 /** 评论排序：最新（官方 TimeDesc，fqapp UgcSort）。 */
 export const FQ_COMMENT_SORT_LATEST: number = 3;
 const MAX_CONCURRENCY: number = 6;
+/** 瞬时错误状态码（限流/网关错误/超时）：静默重试后多半即可恢复。 */
+const FQ_RETRYABLE_STATUSES: number[] = [429, 500, 502, 503, 504];
+/** 瞬时错误重试间隔基数（ms）：第 n 次重试等待 n 倍，共 600ms/1200ms。 */
+const FQ_RETRY_DELAY_MS: number = 600;
 
 export class FqRequestError extends Error {
   readonly statusCode: number;
@@ -263,6 +267,35 @@ export class FqBackend {
     return task;
   }
 
+  /**
+   * GET 并解析 JSON，瞬时错误（429/5xx/超时）静默重试最多 retries 次。
+   * 上游推荐/目录接口偶发抖动时自动恢复，用户无需手动点重试。
+   */
+  public async getJsonRetryable(path: string, query: string,
+    retries: number = 2, timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<Record<string, Object>> {
+    let lastError: FqRequestError | null = null;
+    for (let attempt: number = 0; attempt <= retries; attempt++) {
+      if (attempt > 0) {
+        await new Promise<void>((resolve: () => void) => {
+          setTimeout(resolve, FQ_RETRY_DELAY_MS * attempt);
+        });
+      }
+      try {
+        return await this.getJson(path, query, timeoutMs);
+      } catch (error) {
+        if (error instanceof FqRequestError && FQ_RETRYABLE_STATUSES.indexOf(error.statusCode) >= 0) {
+          lastError = error;
+          continue;
+        }
+        throw error instanceof Error ? error : new Error(String(error));
+      }
+    }
+    if (lastError !== null) {
+      throw lastError;
+    }
+    throw new Error('请求失败');
+  }
+
   private async fetchJson(path: string, query: string,
     timeoutMs: number): Promise<Record<string, Object>> {
     const requestId: string = this.nextRequestId();
@@ -354,7 +387,7 @@ export class FqBackend {
     if (sessionId.length > 0) {
       query = `${query}&session_id=${encodeURIComponent(sessionId)}`;
     }
-    const payload: Record<string, Object> = await this.getJson('/api/v1/recommend/homepage', query);
+    const payload: Record<string, Object> = await this.getJsonRetryable('/api/v1/recommend/homepage', query);
     return fqParseHomepage(payload, tabType);
   }
 
@@ -373,7 +406,7 @@ export class FqBackend {
     if (sessionId.length > 0) {
       query = `${query}&session_id=${encodeURIComponent(sessionId)}`;
     }
-    const payload: Record<string, Object> = await this.getJson('/api/v1/recommend/series-feed', query);
+    const payload: Record<string, Object> = await this.getJsonRetryable('/api/v1/recommend/series-feed', query);
     return fqParseSeriesFeed(payload);
   }
 
@@ -792,7 +825,7 @@ export class FqBackend {
   public async directoryChapters(bookId: string, tab: string): Promise<FqChapter[]> {
     const query: string = `source=${encodeURIComponent('番茄')}&book_id=${encodeURIComponent(bookId)}`
       + `&tab=${encodeURIComponent(tab)}`;
-    const payload: Record<string, Object> = await this.getJson('/api/directory', query);
+    const payload: Record<string, Object> = await this.getJsonRetryable('/api/directory', query);
     const chapters: FqChapter[] = fqParseDirectory(payload);
     let versioned: number = 0;
     for (const chapter of chapters) {
@@ -817,7 +850,35 @@ export class FqBackend {
     if (quality.length > 0) {
       query = `${query}&quality=${encodeURIComponent(quality)}`;
     }
-    const payload: Record<string, Object> = await this.getJson('/api/content', query);
+    const payload: Record<string, Object> = await this.getJsonRetryable('/api/content', query, 1);
+    const source: FqEpisodeSource = fqParseEpisodeSource(payload);
+    const url: string = this.resourceUrl(source.url);
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      throw new Error('获取播放地址失败');
+    }
+    const variants: FqEpisodeVariant[] = [];
+    for (const variant of source.variants) {
+      const variantUrl: string = this.resourceUrl(variant.url);
+      if (variantUrl.startsWith('http://') || variantUrl.startsWith('https://')) {
+        variants.push(new FqEpisodeVariant(variant.name, variantUrl, variant.keyHex, variant.height));
+      }
+    }
+    return new FqEpisodeSource(url, source.keyHex, variants, source.quality);
+  }
+
+  /**
+    * 剧集可播放流（流式直连，对齐 fqapp 恒带 mode=stream）：后端只解析
+    * CDN 直链与 CENC key_hex 不代下载，客户端 mpv 带 decryption_key
+    * 边下边解密秒开；URL 锚定与校验同 episodeSource。
+    * key_hex 可为空（明文档），此时 mpv 按明文直读。
+    */
+  public async episodeSourceStream(itemId: string, tab: string, quality: string = ''): Promise<FqEpisodeSource> {
+    let query: string = `source=${encodeURIComponent('番茄')}&item_id=${encodeURIComponent(itemId)}`
+      + `&tab=${encodeURIComponent(tab)}&mode=stream`;
+    if (quality.length > 0) {
+      query = `${query}&quality=${encodeURIComponent(quality)}`;
+    }
+    const payload: Record<string, Object> = await this.getJsonRetryable('/api/content', query, 1);
     const source: FqEpisodeSource = fqParseEpisodeSource(payload);
     const url: string = this.resourceUrl(source.url);
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
