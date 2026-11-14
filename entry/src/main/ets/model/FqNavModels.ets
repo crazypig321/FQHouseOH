@@ -26,6 +26,10 @@ export const ROUTE_PLAYER: string = 'player';
 export const ROUTE_LISTEN_VIDEO: string = 'listenVideo';
 /** 关于我们页（我的-关于我们，占位）。 */
 export const ROUTE_ABOUT: string = 'about';
+/** 我的页（「设置含我的入口」样式经设置页「用户」区路由推入）。 */
+export const ROUTE_PROFILE: string = 'profile';
+/** 应用设置页（「我的含设置入口」样式经我的页右上角按钮/快捷入口路由推入）。 */
+export const ROUTE_SETTINGS: string = 'settings';
 /** 章节缓存页（我的-章节缓存，占位）。 */
 export const ROUTE_CACHED_BOOKS: string = 'cachedBooks';
 /** 剧集缓存页（我的-剧集缓存，占位）。 */
@@ -269,7 +273,8 @@ export function FqTitleBarTwoMenusOptions(mainTitle: ResourceStr,
 export function FqTitleBarOptions(mainTitle: ResourceStr, showSearch: boolean,
   bottomBuilder?: BottomBuilderParams, onRefresh?: () => void,
   showRank?: boolean, onShelf?: () => void, shelfActive?: boolean,
-  subTitle?: ResourceStr, onCategory?: () => void, categoryActive?: boolean): TitleBarContentOptions {
+  subTitle?: ResourceStr, onCategory?: () => void, categoryActive?: boolean,
+  onSettings?: () => void): TitleBarContentOptions {
   const title: HdsNavigationTitle = {
     mainTitle: mainTitle,
   };
@@ -333,6 +338,15 @@ export function FqTitleBarOptions(mainTitle: ResourceStr, showSearch: boolean,
           : $r('sys.symbol.rectangle_stack'),
         label: '分类',
         action: onCategory,
+      },
+    });
+  }
+  if (onSettings !== undefined) {
+    menus.push({
+      content: {
+        icon: $r('sys.symbol.gearshape_fill'),
+        label: '设置',
+        action: onSettings,
       },
     });
   }

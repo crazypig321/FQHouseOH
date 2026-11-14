@@ -1,9 +1,11 @@
 import { HdsNavigation, HdsNavigationTitleMode } from '@kit.UIDesignKit';
-import { appState } from '../../entryability/AppState';
+import { appState, AppState } from '../../entryability/AppState';
 import { MainTabPagesBuilder, PageMapBuilder } from '../FqAppPages';
 import { PcTitleBar } from './PcTitleBar';
 import { PcSideBar } from './PcSideBar';
 import { NavPathUtils } from '../../utils/NavPathUtils';
+import { FQ_MINE_STYLE_MINE_WITH_SETTINGS } from '../../core/FqAppSettingsStore';
+import { fqPhysicalIndexOf, fqVisibleTabIndexes } from '../../model/FqTabsModels';
 
 /**
  * PC 主布局（对齐 musicfreeOH PcMainLayout，2in1/平板使用）：
@@ -20,9 +22,29 @@ export struct PcMainLayout {
   @Param initialTabIndex: number = 0;
   /** Tabs index 绑定值：初始取启动默认展示页，切页签后同步，防内容区重建时回跳启动页 */
   @Local pcTabIndex: number = 0;
+  /** 当前所在主 Tab 的逻辑下标（0 首页 / 1 书架 / 2 我的 / 3 设置）；显示样式切换 reconcile 用。 */
+  @Local currentLogicalTab: number = 0;
+  @Local appStateUse: AppState = appState;
 
   aboutToAppear(): void {
     this.pcTabIndex = this.initialTabIndex;
+    this.currentLogicalTab = fqVisibleTabIndexes(appState.mineSettingsStyle)[this.pcTabIndex] ?? 0;
+  }
+
+  /** 「我的、设置页面显示样式」变化：当前页签被隐藏时落到对方用户页，否则保持原页签物理位置。 */
+  @Monitor('appStateUse.mineSettingsStyle')
+  onMineSettingsStyleChange(): void {
+    const style: number = appState.mineSettingsStyle;
+    const visible: number[] = fqVisibleTabIndexes(style);
+    let target: number = this.currentLogicalTab;
+    if (visible.indexOf(target) < 0) {
+      target = style === FQ_MINE_STYLE_MINE_WITH_SETTINGS ? 2 : 3;
+    }
+    this.currentLogicalTab = target;
+    const physical: number = fqPhysicalIndexOf(target, style);
+    this.pcTabIndex = physical;
+    appState.currTabsIndex = physical;
+    this.tabsController.changeIndex(physical);
   }
 
   @Builder
@@ -44,7 +66,8 @@ export struct PcMainLayout {
             expanded: appState.sidebarExpanded,
             onSelect: (index: number): void => {
               NavPathUtils.pop()
-              this.tabsController.changeIndex(index);
+              // index 为逻辑下标，按当前显示样式映射为物理下标再切换
+              this.tabsController.changeIndex(fqPhysicalIndexOf(index, appState.mineSettingsStyle));
             },
             onToggle: (): void => {
               this.getUIContext().animateTo({ duration: 250, curve: Curve.Smooth }, (): void => {
@@ -67,6 +90,7 @@ export struct PcMainLayout {
           .onChange((index: number): void => {
             this.pcTabIndex = index;
             appState.currTabsIndex = index;
+            this.currentLogicalTab = fqVisibleTabIndexes(appState.mineSettingsStyle)[index] ?? 0;
           })
         }
         .titleMode(HdsNavigationTitleMode.MINI)

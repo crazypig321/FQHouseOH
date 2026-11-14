@@ -4,8 +4,8 @@
  * - PageMapBuilder：二级路由页（Navigation.navDestination 单 builder 页表）
  */
 
-import { ROUTE_DETAIL, ROUTE_RANK, ROUTE_READER2, ROUTE_SEARCH, ROUTE_AUTHOR, ROUTE_LISTEN, ROUTE_PLAYER, ROUTE_COMIC, ROUTE_LISTEN_VIDEO, ROUTE_ABOUT, ROUTE_CACHED_BOOKS, ROUTE_CACHED_DRAMAS, ROUTE_CACHED_AUDIO, ROUTE_CACHED_COMICS, ROUTE_CACHE_MANAGE, ROUTE_LOGS, ROUTE_BACKUP, ROUTE_WEBDAV, ROUTE_FANQIE_IMPORT, ROUTE_TTS_SETTINGS, ROUTE_API_SERVICE } from '../model/FqNavModels';
-import { MENU_CONFIG, MenuItem, tabBarSymbolOf } from '../model/FqTabsModels';
+import { ROUTE_DETAIL, ROUTE_RANK, ROUTE_READER2, ROUTE_SEARCH, ROUTE_AUTHOR, ROUTE_LISTEN, ROUTE_PLAYER, ROUTE_COMIC, ROUTE_LISTEN_VIDEO, ROUTE_ABOUT, ROUTE_CACHED_BOOKS, ROUTE_CACHED_DRAMAS, ROUTE_CACHED_AUDIO, ROUTE_CACHED_COMICS, ROUTE_CACHE_MANAGE, ROUTE_LOGS, ROUTE_BACKUP, ROUTE_WEBDAV, ROUTE_FANQIE_IMPORT, ROUTE_TTS_SETTINGS, ROUTE_API_SERVICE, ROUTE_PROFILE, ROUTE_SETTINGS } from '../model/FqNavModels';
+import { MENU_CONFIG, MenuItem, tabBarSymbolOf, fqVisibleTabIndexes } from '../model/FqTabsModels';
 import { HomePage } from '../pages/HomePage';
 import { ShelfPage } from '../pages/ShelfPage';
 import { ProfilePage } from '../pages/ProfilePage';
@@ -39,24 +39,24 @@ function tabBarOf(item: MenuItem): BottomTabBarStyle {
   return style;
 }
 
-/** 主页面 TabContent 装配 */
+/** 主页面 TabContent 装配（按「我的、设置页面显示样式」过滤可见 Tab；ForEach 键为逻辑下标） */
 @Builder
 export function MainTabPagesBuilder() {
-  ForEach(MENU_CONFIG, (item: MenuItem, i: number) => {
+  ForEach(fqVisibleTabIndexes(appState.mineSettingsStyle), (logicalIndex: number) => {
     TabContent() {
-      if (i === 0) {
+      if (logicalIndex === 0) {
         HomePage()
-      } else if (i === 1) {
+      } else if (logicalIndex === 1) {
         ShelfPage()
-      } else if (i === 2) {
-        ProfilePage()
+      } else if (logicalIndex === 2) {
+        ProfilePage({ isTab: true })
       } else {
         SettingsPage({ isTab: true })
       }
     }
-    .tabBar(tabBarOf(item))
+    .tabBar(tabBarOf(MENU_CONFIG[logicalIndex]))
 
-  }, (item: MenuItem, i: number) => `tab_${i}`)
+  }, (logicalIndex: number) => `tab_${logicalIndex}`)
 }
 
 /** 二级路由页装配（由 Navigation.navDestination 调用） */
@@ -104,5 +104,9 @@ export function PageMapBuilder(name: string) {
     TtsSettingsPage()
   } else if (name === ROUTE_API_SERVICE) {
     ApiServicePage()
+  } else if (name === ROUTE_PROFILE) {
+    ProfilePage({ isTab: false })
+  } else if (name === ROUTE_SETTINGS) {
+    SettingsPage({ isTab: false })
   }
 }

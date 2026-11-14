@@ -34,3 +34,24 @@ export const MENU_CONFIG: MenuItem[] = [
 
 /** 设置 Tab 下标（MENU_CONFIG 第 4 项；我的-应用设置经主 Tab 切换进入）。 */
 export const SETTINGS_TAB_INDEX: number = 3;
+
+/**
+ * 我的、设置页面显示样式下的可见主 Tab 逻辑下标列表：
+ * 0 我的含设置入口 → [首页, 书架, 我的]；1 设置含我的入口 → [首页, 书架, 设置]；其余 → 全部 4 Tab。
+ */
+export function fqVisibleTabIndexes(style: number): number[] {
+  if (style === 0) {
+    return [0, 1, 2];
+  }
+  if (style === 1) {
+    return [0, 1, 3];
+  }
+  return [0, 1, 2, 3];
+}
+
+/** 逻辑下标 → Tabs 实际（物理）下标；样式下不可见时回退 0（首页）。 */
+export function fqPhysicalIndexOf(logicalIndex: number, style: number): number {
+  const visible: number[] = fqVisibleTabIndexes(style);
+  const pos: number = visible.indexOf(logicalIndex);
+  return pos >= 0 ? pos : 0;
+}

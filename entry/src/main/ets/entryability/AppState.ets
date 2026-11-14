@@ -98,6 +98,11 @@ export class AppState {
    *  持久化于 FqAppSettingsStore，写入统一走 FqAppSettingsStore.setHomeStyle）。 */
   @Trace homeStyle: number = 0;
 
+  /** 我的、设置页面显示样式（0 我的含设置入口 / 1 设置含我的入口 / 2 单独显示；
+   *  主 Tab 可见列表与两页入口据此响应式切换；
+   *  持久化于 FqAppSettingsStore，写入统一走 FqAppSettingsStore.setMineSettingsStyle）。 */
+  @Trace mineSettingsStyle: number = 2;
+
   /** 静默检查更新发现的 GitHub 新版本号（空 = 暂无更新；设置页「关于」红点与关于页新版本标签共用）。 */
   @Trace latestVersion: string = '';
 

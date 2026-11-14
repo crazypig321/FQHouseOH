@@ -17,6 +17,7 @@ import {
   ROUTE_CACHED_BOOKS,
   ROUTE_CACHED_DRAMAS,
   ROUTE_DETAIL,
+  ROUTE_SETTINGS,
 } from '../model/FqNavModels';
 import { SETTINGS_TAB_INDEX } from '../model/FqTabsModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
@@ -25,6 +26,11 @@ import { FqBrowseItem, FqBrowseStore } from '../core/FqBrowseStore';
 import { FqColorUtils } from '../utils/FqColorUtils';
 import { FqBackend } from '../core/FqBackend';
 import { appState } from '../entryability/AppState';
+import {
+  FQ_MINE_STYLE_MINE_WITH_SETTINGS,
+  FQ_MINE_STYLE_SETTINGS_WITH_MINE,
+  FQ_MINE_STYLE_SEPARATE,
+} from '../core/FqAppSettingsStore';
 
 const FQ_DAY_MS: number = 86400000;
 /** 列表内容起始偏移：标题栏 56 ） */
@@ -219,6 +225,8 @@ struct FqStatsCard {
 
 @ComponentV2
 export struct ProfilePage {
+  /** Tab 模式（主 Tab 第三页）：隐藏返回、双击回顶；「设置含我的入口」经设置页路由推入时默认 false（带返回）。 */
+  @Param isTab: boolean = false;
   private scroller: Scroller = new Scroller();
 
   /** 选中日期（当日零点毫秒；影响热力图终点与每日记录窗口）。 */
@@ -428,11 +436,16 @@ export struct ProfilePage {
     CommonNav({
       titleBarOp: FqTitleBarOptions('我的', false, undefined, (): void => {
         this.startRefresh();
-      }),
-      embedded: true,
-      isHideBackButton: true,
+      }, false, undefined, false, undefined, undefined, false,
+        // 「我的含设置入口」样式：设置 Tab 已隐藏，右上角补设置按钮路由进设置页
+        appState.mineSettingsStyle === FQ_MINE_STYLE_MINE_WITH_SETTINGS
+          ? (): void => {
+            NavPathUtils.push(ROUTE_SETTINGS);
+          } : undefined),
+      embedded: this.isTab,
+      isHideBackButton: this.isTab,
       scroller: this.scroller,
-      doubleTapToTop: true,
+      doubleTapToTop: this.isTab,
       scrollToTopYOffset: - appState.topRect - FQ_HOME_TOP_INSET,
       onShown: (): void => {
         this.rebuild();
@@ -442,7 +455,10 @@ export struct ProfilePage {
         Scroll(this.scroller) {
           Column({ space: 12 }) {
             this.ProfileCard()
-            this.ShortcutsRow()
+            // 「我的和设置单独显示」样式：设置独立成 Tab，快捷入口与设置页重复，不显示
+            if (appState.mineSettingsStyle !== FQ_MINE_STYLE_SEPARATE) {
+              this.ShortcutsRow()
+            }
             this.SectionHeader('阅读与视听统计')
             this.DateOverviewCard()
             FqStatsCard({ title: '阅读热力图', subtitle: '最近 16 周' }) {
@@ -566,8 +582,17 @@ export struct ProfilePage {
     })
   }
 
-  /** 应用设置：经主 Tab index 回调切到一级设置页（tabsController.changeIndex），非 nav 二级路由。 */
+  /** 应用设置入口：「我的含设置入口」路由推入设置页；「设置含我的入口」返回设置页；其余经主 Tab 切换。 */
   private openSettingsTab(): void {
+    if (appState.mineSettingsStyle === FQ_MINE_STYLE_MINE_WITH_SETTINGS) {
+      NavPathUtils.push(ROUTE_SETTINGS);
+      return;
+    }
+    if (appState.mineSettingsStyle === FQ_MINE_STYLE_SETTINGS_WITH_MINE) {
+      // 本页由设置页「用户」区推入，返回即回设置页（非 nav 二级路由）
+      NavPathUtils.pop();
+      return;
+    }
     const switchMainTab = appState.switchMainTab;
     if (switchMainTab !== null) {
       switchMainTab(SETTINGS_TAB_INDEX);

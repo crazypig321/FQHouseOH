@@ -11,7 +11,7 @@
 import { CommonNav } from '../view/CommonNav';
 import { FqMenu, FqMenuItem } from '../view/CommonMenu';
 import { common, Want } from '@kit.AbilityKit';
-import { FqTitleBarOptions, ROUTE_ABOUT, ROUTE_API_SERVICE, ROUTE_CACHE_MANAGE, ROUTE_LOGS, ROUTE_BACKUP, ROUTE_TTS_SETTINGS } from '../model/FqNavModels';
+import { FqTitleBarOptions, ROUTE_ABOUT, ROUTE_API_SERVICE, ROUTE_CACHE_MANAGE, ROUTE_LOGS, ROUTE_BACKUP, ROUTE_TTS_SETTINGS, ROUTE_PROFILE } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import {
   FQ_THEME_DARK,
@@ -21,6 +21,10 @@ import {
   FQ_HOME_STYLE_RANK,
   FQ_HOME_STYLE_BOTH,
   FQ_HOME_STYLE_MAX,
+  FQ_MINE_STYLE_MINE_WITH_SETTINGS,
+  FQ_MINE_STYLE_SETTINGS_WITH_MINE,
+  FQ_MINE_STYLE_SEPARATE,
+  FQ_MINE_STYLE_MAX,
   FqAppSettingsStore,
 } from '../core/FqAppSettingsStore';
 import { FqReaderStore } from '../core/FqReaderStore';
@@ -40,12 +44,15 @@ const FQ_THEME_ANCHOR_ID: string = 'settings_theme_anchor';
 const FQ_THEME_COLOR_ANCHOR_ID: string = 'settings_theme_color_anchor';
 const FQ_STARTUP_TAB_ANCHOR_ID: string = 'settings_startup_tab_anchor';
 const FQ_HOME_STYLE_ANCHOR_ID: string = 'settings_home_style_anchor';
+const FQ_MINE_STYLE_ANCHOR_ID: string = 'settings_mine_style_anchor';
 /** 行内分割线左右避让：左侧行 padding 14 + 图标块 34 + 间距 12，右侧对称一致。 */
 const FQ_ROW_DIVIDER_INSET: number = 60;
 /** 深色模式档位文案（下标即档位值）。 */
 const FQ_THEME_LABELS: string[] = ['跟随系统', '浅色', '深色'];
 /** 首页样式档位文案（下标即档位值）。 */
 const FQ_HOME_STYLE_LABELS: string[] = ['今日焦点', '排行榜', '今日焦点和排行榜共存'];
+/** 我的、设置页面显示样式档位文案（下标即档位值）。 */
+const FQ_MINE_STYLE_LABELS: string[] = ['我的含设置入口', '设置含我的入口', '我的和设置单独显示'];
 
 @Builder
 function fqSettingsEmptyContent() {
@@ -77,6 +84,7 @@ export struct SettingsPage {
   @Local pipVideo: boolean = false;
   @Local startupTab: number = 0;
   @Local homeStyle: number = FQ_HOME_STYLE_SPOTLIGHT;
+  @Local mineSettingsStyle: number = FQ_MINE_STYLE_SEPARATE;
 
   aboutToAppear(): void {
     this.themeMode = FqAppSettingsStore.getThemeMode();
@@ -84,6 +92,7 @@ export struct SettingsPage {
     this.pipVideo = FqAppSettingsStore.isPipVideoEnabled();
     this.startupTab = FqAppSettingsStore.getStartupTabIndex();
     this.homeStyle = FqAppSettingsStore.getHomeStyle();
+    this.mineSettingsStyle = FqAppSettingsStore.getMineSettingsStyle();
     // 进入设置页静默检查更新（会话内节流，与关于页共用）：
     // 发现新版本时「关于」条目显示红点，无新版本时清空红点
     FqUpdateChecker.checkLatestSilently();
@@ -100,6 +109,17 @@ export struct SettingsPage {
     }) {
       Scroll(this.scroller) {
         Column({ space: 12 }) {
+          // 「设置含我的入口」样式：我的 Tab 已隐藏，设置页顶部补「用户」区入口进我的页
+          if (this.mineSettingsStyle === FQ_MINE_STYLE_SETTINGS_WITH_MINE) {
+            this.SectionHeader('用户')
+            FqSettingsCard() {
+              this.SettingRow($r('sys.symbol.person_fill'), '#FF8B5CF6', '我的',
+                '阅读热力图、最近阅读与视听统计', '', true,
+                (): void => {
+                  NavPathUtils.push(ROUTE_PROFILE);
+                })
+            }
+          }
           this.SectionHeader('外观')
           FqSettingsCard() {
             this.ThemeRow()
@@ -111,6 +131,8 @@ export struct SettingsPage {
             this.StartupTabRow()
             this.RowDivider()
             this.HomeStyleRow()
+            this.RowDivider()
+            this.MineSettingsStyleRow()
           }
 
           this.SectionHeader('阅读与播放')
@@ -227,6 +249,34 @@ export struct SettingsPage {
     }
     this.homeStyle = style;
     FqAppSettingsStore.setHomeStyle(style);
+  }
+
+  /** 我的、设置页面显示样式菜单：三选项（当前档尾勾，点击即时生效）。 */
+  private openMineSettingsStyleMenu(): void {
+    const items: FqMenuItem[] = [];
+    const styles: number[] =
+      [FQ_MINE_STYLE_MINE_WITH_SETTINGS, FQ_MINE_STYLE_SETTINGS_WITH_MINE, FQ_MINE_STYLE_SEPARATE];
+    for (const style of styles) {
+      const item: FqMenuItem = new FqMenuItem();
+      item.label = FQ_MINE_STYLE_LABELS[style];
+      if (style === this.mineSettingsStyle) {
+        item.endIcon = $r('sys.symbol.checkmark');
+      }
+      const picked: number = style;
+      item.onAction = (): void => {
+        this.applyMineSettingsStyle(picked);
+      };
+      items.push(item);
+    }
+    FqMenu.open(this.getUIContext(), FQ_MINE_STYLE_ANCHOR_ID, items);
+  }
+
+  private applyMineSettingsStyle(style: number): void {
+    if (style < 0 || style > FQ_MINE_STYLE_MAX) {
+      return;
+    }
+    this.mineSettingsStyle = style;
+    FqAppSettingsStore.setMineSettingsStyle(style);
   }
 
   private openThemeMenu(): void {
@@ -641,6 +691,48 @@ export struct SettingsPage {
     .width('100%')
     .onClick((): void => {
       this.openHomeStyleMenu();
+    })
+  }
+
+  /** 我的、设置页面显示样式行（锚点 FqMenu 三选项：合并入口或单独显示，即时生效）。 */
+  @Builder
+  private MineSettingsStyleRow() {
+    Row({ space: 12 }) {
+      Stack() {
+        SymbolGlyph($r('sys.symbol.square_grid_2x2'))
+          .fontSize(17)
+          .fontColor(['#FF6366F1'])
+      }
+      .width(34)
+      .height(34)
+      .borderRadius(10)
+      .backgroundColor(FqColorUtils.withOpacity('#FF6366F1', 0.12))
+
+      Column({ space: 3 }) {
+        Text('我的、设置页面显示样式')
+          .fontSize(14.5)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('sys.color.font_primary'))
+        Text('选择「我的」与「设置」的组合方式，即时生效')
+          .fontSize(11.5)
+          .fontColor($r('sys.color.font_secondary'))
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+
+      Text(this.mineSettingsStyle >= 0 && this.mineSettingsStyle < FQ_MINE_STYLE_LABELS.length
+        ? FQ_MINE_STYLE_LABELS[this.mineSettingsStyle] : '')
+        .fontSize(12.5)
+        .fontColor($r('sys.color.font_secondary'))
+      SymbolGlyph($r('sys.symbol.chevron_right'))
+        .fontSize(13)
+        .fontColor([$r('sys.color.font_tertiary')])
+    }
+    .id(FQ_MINE_STYLE_ANCHOR_ID)
+    .padding({ left: 14, right: 14, top: 11, bottom: 11 })
+    .width('100%')
+    .onClick((): void => {
+      this.openMineSettingsStyleMenu();
     })
   }
 

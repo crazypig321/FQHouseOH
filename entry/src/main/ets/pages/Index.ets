@@ -24,13 +24,14 @@ import { HomeCategoryDialogContent } from '../view/dialog/HomeCategoryDialogCont
 import { FqPlaybackBall } from '../view/FqPlaybackBall';
 import { FqSheetOptions } from '../view/sheet/CommonSheet';
 import { FqChangelogSheet } from '../view/sheet/FqChangelogSheet';
-import { FqAppSettingsStore } from '../core/FqAppSettingsStore';
+import { FqAppSettingsStore, FQ_MINE_STYLE_MINE_WITH_SETTINGS } from '../core/FqAppSettingsStore';
 import { FqReaderStore } from '../core/FqReaderStore';
 import { HSBColorPicker, HSBColorPickerLayout } from '@keke/color-picker';
 import { useSidebarLayout } from '../utils/BreakpointUtils';
 import { PcMainLayout } from '../view/pcUI/PcMainLayout';
 import { FqContinueKit } from '../utils/continue/FqContinueKit';
 import { FqShareKit } from '../utils/share/FqShareKit';
+import { fqPhysicalIndexOf, fqVisibleTabIndexes } from '../model/FqTabsModels';
 
 @Entry
 @ComponentV2
@@ -47,8 +48,30 @@ struct Index {
   @Local appVersionName: string = ''
   /** 主 Tab 绑定下标（HdsTabs index 参数）：冷启动取「启动默认展示页」设置；
    *  之后仅在 onChange（切换动画完成后）同步为落定页签——提前/同帧赋值都会让 index 参数
-   *  瞬时重放、吃掉 changeIndex 的切换动画；保持同步是为防返回主页时 index 重放回跳启动页。 */
+   *  瞬时重放、吃掉 changeIndex 的切换动画；保持同步是为防返回主页时 index 重放回跳启动页。
+   *  「我的、设置页面显示样式」下 Tab 数可变，此处为物理下标（可见列表内位置）。 */
   @Local mainTabIndex: number = 0
+  /** 当前所在主 Tab 的逻辑下标（0 首页 / 1 书架 / 2 我的 / 3 设置）；样式切换 reconcile 用。 */
+  @Local currentLogicalTab: number = 0
+
+  /** 「我的、设置页面显示样式」变化：当前页签被隐藏时落到对方用户页，否则保持原页签物理位置。 */
+  @Monitor('appStateUse.mineSettingsStyle')
+  onMineSettingsStyleChange(): void {
+    if (this.isPcLayout) {
+      return; // PC 布局由 PcMainLayout 同步 pcTabIndex
+    }
+    const style: number = appState.mineSettingsStyle;
+    const visible: number[] = fqVisibleTabIndexes(style);
+    let target: number = this.currentLogicalTab;
+    if (visible.indexOf(target) < 0) {
+      // 隐藏设置 → 落我的；隐藏我的 → 落设置（合并样式下入口在对方页内）
+      target = style === FQ_MINE_STYLE_MINE_WITH_SETTINGS ? 2 : 3;
+    }
+    this.currentLogicalTab = target;
+    const physical: number = fqPhysicalIndexOf(target, style);
+    this.mainTabIndex = physical;
+    appState.currTabsIndex = physical;
+  }
 
   /** 监听 tabbar的显示和消失 */
   @Monitor('appStateUse.isBatchMode')
@@ -72,13 +95,18 @@ struct Index {
 
   aboutToAppear(): void {
     // 启动默认展示页（设置 → 外观「启动默认展示页」）：冷启动直接落在所选主 Tab
-    this.mainTabIndex = FqAppSettingsStore.getStartupTabIndex();
+    // （所选 Tab 在「我的、设置页面显示样式」下被隐藏时回退首页）
+    const startupTab: number = FqAppSettingsStore.getStartupTabIndex();
+    this.mainTabIndex = fqPhysicalIndexOf(startupTab, appState.mineSettingsStyle);
+    this.currentLogicalTab = fqVisibleTabIndexes(appState.mineSettingsStyle)[this.mainTabIndex] ?? 0;
     appState.currTabsIndex = this.mainTabIndex;
     appState.switchMainTab = (index: number): void => {
+      // index 为逻辑下标（MENU_CONFIG 序），按当前显示样式映射为物理下标再切换
+      const physical: number = fqPhysicalIndexOf(index, appState.mineSettingsStyle);
       if (this.isPcLayout) {
-        this.sideTabsController.changeIndex(index);
+        this.sideTabsController.changeIndex(physical);
       } else {
-        this.tabsController.changeIndex(index);
+        this.tabsController.changeIndex(physical);
       }
     };
     DialogManager.Register((): void => {
@@ -184,6 +212,7 @@ struct Index {
           // 切换动画完成后才同步 index 绑定值，避免参数瞬时重放吃掉动画
           .onChange((index: number) => {
             this.mainTabIndex = index
+            this.currentLogicalTab = fqVisibleTabIndexes(appState.mineSettingsStyle)[index] ?? 0
           })
         }
         .titleMode(HdsNavigationTitleMode.MINI)

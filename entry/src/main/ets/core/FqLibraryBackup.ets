@@ -320,6 +320,8 @@ export class FqBackupAppSettings {
   readonly readerDialogueHighlightColor: string | null;
   /** 自定义对话高亮色板（旧备份缺省为 null，恢复时跳过不重置本机）。 */
   readonly readerCustomDialogueColors: string[] | null;
+  /** 我的、设置页面显示样式（旧备份缺省 -1，恢复时跳过不重置本机）。 */
+  readonly mineSettingsStyle: number;
   /** 播放设置段（旧备份无此段时为 null，恢复时跳过播放设置）。 */
   readonly playback: FqBackupPlaybackSettings | null;
 
@@ -333,7 +335,8 @@ export class FqBackupAppSettings {
     startupTabIndex: number = -1,
     homeStyle: number = -1,
     readerDialogueHighlightColor: string | null = null,
-    readerCustomDialogueColors: string[] | null = null) {
+    readerCustomDialogueColors: string[] | null = null,
+    mineSettingsStyle: number = -1) {
     this.themeMode = themeMode;
     this.themeColor = themeColor;
     this.themeCustomColor = themeCustomColor;
@@ -352,6 +355,7 @@ export class FqBackupAppSettings {
     this.readerCustomThemeId = readerCustomThemeId;
     this.readerDialogueHighlightColor = readerDialogueHighlightColor;
     this.readerCustomDialogueColors = readerCustomDialogueColors;
+    this.mineSettingsStyle = mineSettingsStyle;
     this.playback = playback;
   }
 }
@@ -585,7 +589,8 @@ export class FqLibraryBackup {
       FqAppSettingsStore.getStartupTabIndex(),
       FqAppSettingsStore.getHomeStyle(),
       readerSettings.dialogueHighlightColor,
-      readerSettings.customDialogueColors);
+      readerSettings.customDialogueColors,
+      FqAppSettingsStore.getMineSettingsStyle());
     // 书架分组段：分组 + 组内作品（仅书架内可移植书；local_ 与不在书架的书排除）
     const shelfIdSet: Set<string> = new Set<string>();
     for (const item of shelf) {
@@ -754,6 +759,7 @@ export class FqLibraryBackup {
       if (data.settings.readerCustomDialogueColors !== null) {
         settings['readerCustomDialogueColors'] = data.settings.readerCustomDialogueColors;
       }
+      settings['mineSettingsStyle'] = data.settings.mineSettingsStyle;
       if (data.settings.playback !== null) {
         const playback: Record<string, Object> = {};
         playback['danmakuAlphaPercent'] = data.settings.playback.danmakuAlphaPercent;
@@ -1173,6 +1179,9 @@ export class FqLibraryBackup {
           }
         }
       }
+      // 我的、设置页面显示样式（旧备份无此字段：-1，恢复时跳过不重置本机）
+      const mineSettingsStyle: number = settingsRec['mineSettingsStyle'] === undefined ? -1
+        : fqBackupCheckRange(settingsRec, 'mineSettingsStyle', 0, 2);
       // 播放设置段（旧备份无此段：null，恢复时跳过播放设置；存在则全量白名单校验）
       let playback: FqBackupPlaybackSettings | null = null;
       const playbackRaw: Object | undefined = settingsRec['playback'];
@@ -1236,7 +1245,8 @@ export class FqLibraryBackup {
         startupTabIndex,
         homeStyle,
         readerDialogueHighlightColor,
-        readerCustomDialogueColors);
+        readerCustomDialogueColors,
+        mineSettingsStyle);
     }
     return new FqLibraryBackupData(createdAt, appVersion, shelf, browse, listen,
       watched, reader, excluded, settings, groups);
@@ -1353,6 +1363,10 @@ export class FqLibraryBackup {
       // 自定义对话高亮色板（旧备份无此字段跳过，不重置本机已有色板）
       if (settings.readerCustomDialogueColors !== null) {
         FqReaderStore.restoreCustomDialogueColors(settings.readerCustomDialogueColors);
+      }
+      // 我的、设置页面显示样式（旧备份无此字段跳过，不重置本机已有样式）
+      if (settings.mineSettingsStyle >= 0) {
+        FqAppSettingsStore.setMineSettingsStyle(settings.mineSettingsStyle);
       }
       // 自定义阅读主题：先写回内嵌背景图文件（本机已有同名文件保留现状），
       // 再按模式校验重建条目（无内嵌数据的旧备份仍走沙箱文件存在性校验）

@@ -23,6 +23,9 @@
  *   Index 冷启动按此初始化 HdsTabs/PC Tabs 与 appState.currTabsIndex；
  * - homeStyle：首页样式（0 今日焦点 / 1 排行榜立体书架 / 2 两者共存，默认 0 今日焦点）；
  *   首页按 appState.homeStyle 响应式切换顶部内容；
+ * - mineSettingsStyle：我的、设置页面显示样式（0 我的含设置入口 / 1 设置含我的入口 /
+ *   2 我的和设置单独显示，默认 2）：0 隐藏设置 Tab（我的页右上角设置按钮路由进设置），
+ *   1 隐藏我的 Tab（设置页「用户」区入口路由进我的），2 保持双 Tab（我的页隐藏快捷入口）；
  * - chapterCacheLimitMb：章节自动缓存大小上限（MB，默认 80，1-102400 即 1MB-100GB；
  *   章节缓存页右上角调节，仅约束阅读自动缓存，整本下载 pin 在预算外不受限）；
  * - dramaAutoCacheAhead：剧集边看边往后缓存集数（对齐 fqapp DramaCachePreferences：
@@ -50,6 +53,7 @@ const FQ_SETTINGS_KEY_UPDATE_PROXY: string = 'updateProxyDownload';
 const FQ_SETTINGS_KEY_CHANGELOG_SHOWN: string = 'changelogShownVersion';
 const FQ_SETTINGS_KEY_STARTUP_TAB: string = 'startupTabIndex';
 const FQ_SETTINGS_KEY_HOME_STYLE: string = 'homeStyle';
+const FQ_SETTINGS_KEY_MINE_SETTINGS_STYLE: string = 'mineSettingsStyle';
 const FQ_SETTINGS_KEY_TTS_PERSON: string = 'ttsPerson';
 const FQ_SETTINGS_KEY_TTS_RATE: string = 'ttsRate';
 const FQ_SETTINGS_KEY_SMART_REACH: string = 'smartReach';
@@ -117,6 +121,14 @@ export const FQ_HOME_STYLE_RANK: number = 1;
 export const FQ_HOME_STYLE_BOTH: number = 2;
 /** 首页样式档位上限。 */
 export const FQ_HOME_STYLE_MAX: number = 2;
+/** 我的、设置页面显示样式：我的含设置入口（隐藏设置 Tab）。 */
+export const FQ_MINE_STYLE_MINE_WITH_SETTINGS: number = 0;
+/** 我的、设置页面显示样式：设置含我的入口（隐藏我的 Tab）。 */
+export const FQ_MINE_STYLE_SETTINGS_WITH_MINE: number = 1;
+/** 我的、设置页面显示样式：我的和设置单独显示（默认，双 Tab 保留）。 */
+export const FQ_MINE_STYLE_SEPARATE: number = 2;
+/** 我的、设置页面显示样式档位上限。 */
+export const FQ_MINE_STYLE_MAX: number = 2;
 
 export class FqAppSettingsStore {
   private static pref: preferences.Preferences | null = null;
@@ -135,6 +147,8 @@ export class FqAppSettingsStore {
   private static startupTabIndex: number = 0;
   /** 首页样式（0 今日焦点 / 1 排行榜 / 2 共存；appState.homeStyle 响应式联动）。 */
   private static homeStyle: number = FQ_HOME_STYLE_SPOTLIGHT;
+  /** 我的、设置页面显示样式（0 我的含设置入口 / 1 设置含我的入口 / 2 单独显示；appState 响应式联动）。 */
+  private static mineSettingsStyle: number = FQ_MINE_STYLE_SEPARATE;
   /** 离线朗读音色（textToSpeech person；0 默认女声聆小珊）。 */
   private static ttsPerson: number = 0;
   /** 离线朗读语速（0.5 ~ 2）。 */
@@ -224,6 +238,12 @@ export class FqAppSettingsStore {
         && rawHomeStyle <= FQ_HOME_STYLE_MAX) {
         FqAppSettingsStore.homeStyle = Math.round(rawHomeStyle);
       }
+      const rawMineSettingsStyle: preferences.ValueType =
+        pref.getSync(FQ_SETTINGS_KEY_MINE_SETTINGS_STYLE, FQ_MINE_STYLE_SEPARATE);
+      if (typeof rawMineSettingsStyle === 'number' && rawMineSettingsStyle >= FQ_MINE_STYLE_MINE_WITH_SETTINGS
+        && rawMineSettingsStyle <= FQ_MINE_STYLE_MAX) {
+        FqAppSettingsStore.mineSettingsStyle = Math.round(rawMineSettingsStyle);
+      }
       const rawTtsPerson: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_TTS_PERSON, 0);
       if (typeof rawTtsPerson === 'number' && rawTtsPerson >= 0) {
         FqAppSettingsStore.ttsPerson = rawTtsPerson;
@@ -299,6 +319,7 @@ export class FqAppSettingsStore {
     appState.directReadEnabled = FqAppSettingsStore.directRead;
     appState.smartReachEnabled = FqAppSettingsStore.smartReach;
     appState.homeStyle = FqAppSettingsStore.homeStyle;
+    appState.mineSettingsStyle = FqAppSettingsStore.mineSettingsStyle;
   }
 
   /** 当前深色模式档位（0 跟随系统 / 1 浅色 / 2 深色）。 */
@@ -579,6 +600,33 @@ export class FqAppSettingsStore {
     }
     try {
       pref.putSync(FQ_SETTINGS_KEY_HOME_STYLE, FqAppSettingsStore.homeStyle);
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
+  }
+
+  /** 我的、设置页面显示样式（0 我的含设置入口 / 1 设置含我的入口 / 2 单独显示）。 */
+  public static getMineSettingsStyle(): number {
+    return FqAppSettingsStore.mineSettingsStyle;
+  }
+
+  /** 设置我的、设置页面显示样式（范围外静默忽略；appState.mineSettingsStyle 即时联动主 Tab）。 */
+  public static setMineSettingsStyle(style: number): void {
+    if (!Number.isFinite(style) || style < FQ_MINE_STYLE_MINE_WITH_SETTINGS
+      || style > FQ_MINE_STYLE_MAX) {
+      return;
+    }
+    FqAppSettingsStore.mineSettingsStyle = Math.round(style);
+    appState.mineSettingsStyle = FqAppSettingsStore.mineSettingsStyle;
+    const pref: preferences.Preferences | null = FqAppSettingsStore.pref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.putSync(FQ_SETTINGS_KEY_MINE_SETTINGS_STYLE, FqAppSettingsStore.mineSettingsStyle);
       pref.flush().catch((_error: BusinessError): void => {
         // 落盘失败不阻断
       });
