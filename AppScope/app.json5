@@ -2,8 +2,8 @@
   "app": {
     "bundleName": "com.crazypig321.FQhouseOH",
     "vendor": "example",
-    "versionCode": 1010500,
-    "versionName": "1.1.5",
+    "versionCode": 1010600,
+    "versionName": "1.1.6",
     "icon": "$media:layered_image",
     "label": "$string:app_name"
   }
