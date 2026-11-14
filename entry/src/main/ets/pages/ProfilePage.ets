@@ -13,16 +13,22 @@ import {
   FqTitleBarOptions,
   fqPushBookOrDetail,
   DetailNavParams,
+  ReaderNavParams,
   ROUTE_ABOUT,
   ROUTE_BACKUP,
   ROUTE_CACHE_MANAGE,
   ROUTE_DETAIL,
+  ROUTE_READER2,
   ROUTE_SETTINGS,
 } from '../model/FqNavModels';
 import { SETTINGS_TAB_INDEX } from '../model/FqTabsModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
 import { FqReadStatsStore } from '../core/FqReadStatsStore';
 import { FqBrowseItem, FqBrowseStore } from '../core/FqBrowseStore';
+import { FqLocalBookStore } from '../core/FqLocalBookStore';
+import { FqShelfStore } from '../core/FqShelfStore';
+import { FqChapterCacheStore } from '../core/FqChapterCacheStore';
+import { DialogManager } from '../utils/DialogUtils';
 import { FqColorUtils } from '../utils/FqColorUtils';
 import { FqBackend } from '../core/FqBackend';
 import { appState } from '../entryability/AppState';
@@ -46,6 +52,8 @@ const FQ_DAILY_DAYS: number = 14;
 const FQ_RECENT_LIMIT: number = 6;
 const FQ_COVER_LIMIT: number = 5;
 const FQ_RANK_LIMIT: number = 5;
+/** 删除操作文字色（与缓存管理页删除色一致）。 */
+const FQ_DANGER_TEXT: string = '#FFF43F5E';
 const FQ_WEEKDAY_LABELS: string[] = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
 /** 统计条目（浏览历史 + 按书累计分钟；minutes < 0 表示无真实时长记录）。 */
@@ -182,12 +190,14 @@ function fqProfileBookMinutes(bookDays: Map<string, Map<string, number>>, bookId
 function fqStatsEmptyContent() {
 }
 
-/** 统计卡片壳：强调条 + 标题/副标题 + 内容。 */
+/** 统计卡片壳：强调条 + 标题/副标题 + 可选标题行右侧操作区 + 内容。 */
 @ComponentV2
 struct FqStatsCard {
   @Param title: string = '';
   @Param subtitle: string = '';
   @BuilderParam content: () => void = fqStatsEmptyContent;
+  /** 标题行右侧操作区（最近阅读「编辑」/编辑态「全选/删除/完成」）。 */
+  @BuilderParam trailing: () => void = fqStatsEmptyContent;
 
   build() {
     Column({ space: 12 }) {
@@ -210,6 +220,7 @@ struct FqStatsCard {
         }
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
+        this.trailing()
       }
       .width('100%')
       this.content()
@@ -221,6 +232,7 @@ struct FqStatsCard {
     .width('100%')
   }
 }
+
 
 @ComponentV2
 export struct ProfilePage {
@@ -244,6 +256,14 @@ export struct ProfilePage {
   @Local rankItems: FqStatsEntry[] = [];
   @Local dailyRows: FqDailyRow[] = [];
   @Local rankSheetVisible: boolean = false;
+  /** 阅读排行 sheet 编辑模式（行首勾选圈 + 标题栏全选/删除）。 */
+  @Local rankEditMode: boolean = false;
+  /** 编辑模式已选条目 id。 */
+  @Local rankSelectedIds: string[] = [];
+  /** 最近阅读卡片编辑模式（行首勾选圈 + 标题行全选/删除/完成）。 */
+  @Local recentEditMode: boolean = false;
+  /** 最近阅读编辑模式已选条目 id。 */
+  @Local recentSelectedIds: string[] = [];
   /** 右上角刷新中（全屏覆盖 loading）。 */
   @Local refreshing: boolean = false;
 
@@ -320,7 +340,7 @@ export struct ProfilePage {
       entries.push(new FqStatsEntry(item.id, item.kind, item.title, item.cover, item.visitedAt,
         fqProfileBookMinutes(bookDays, item.id)));
     }
-    // 有时长但浏览记录已被淘汰的条目（合成；kind 空 → 不可点）
+    // 有时长但浏览记录已被淘汰的条目（本地书 / 书旗离线续读等场景）：回填元数据
     bookDays.forEach((_days: Map<string, number>, bookId: string): void => {
       let exists: boolean = false;
       for (const item of browsed) {
@@ -334,7 +354,7 @@ export struct ProfilePage {
       }
       const minutes: number = fqProfileBookMinutes(bookDays, bookId);
       if (minutes > 0) {
-        entries.push(new FqStatsEntry(bookId, '', bookId, '', 0, minutes));
+        entries.push(this.resolveStatsEntry(bookId, minutes));
       }
     });
 
@@ -402,6 +422,17 @@ export struct ProfilePage {
     if (entry.kind.length === 0) {
       return;
     }
+    // 本地导入书：无详情页，直接进阅读页（对齐书架打开链路）
+    if (FqLocalBookStore.isLocalBookId(entry.id)) {
+      ReaderNavParams.id = entry.id;
+      ReaderNavParams.kind = 'book';
+      ReaderNavParams.title = entry.title;
+      ReaderNavParams.cover = entry.cover;
+      ReaderNavParams.chapterIndex = -1;
+      ReaderNavParams.listenAlong = false;
+      NavPathUtils.push(ROUTE_READER2);
+      return;
+    }
     // 书旗来源（shuqi: 前缀 id）：进书旗只读详情
     if (entry.id.startsWith('shuqi:')) {
       DetailNavParams.id = entry.id.substring('shuqi:'.length);
@@ -413,6 +444,46 @@ export struct ProfilePage {
       return;
     }
     fqPushBookOrDetail(entry.id, entry.kind, entry.title, entry.cover);
+  }
+
+  /** 无浏览记录的按书条目回填元数据：本地书取导入元数据 + 书架封面，
+   *  书旗优先书架、回退章节缓存目录；其余来源书架可查则可点，否则保持不可点。 */
+  private resolveStatsEntry(bookId: string, minutes: number): FqStatsEntry {
+    let kind: string = 'book';
+    let title: string = '';
+    let cover: string = '';
+    if (FqLocalBookStore.isLocalBookId(bookId)) {
+      title = FqLocalBookStore.bookTitle(bookId);
+    } else if (!bookId.startsWith('shuqi:')) {
+      kind = '';
+    }
+    for (const shelfItem of FqShelfStore.all()) {
+      if (shelfItem.id === bookId) {
+        if (title.length === 0) {
+          title = shelfItem.title;
+        }
+        cover = shelfItem.cover;
+        if (kind.length === 0) {
+          kind = shelfItem.kind;
+        }
+        break;
+      }
+    }
+    if (bookId.startsWith('shuqi:') && (title.length === 0 || cover.length === 0)) {
+      const catalog = FqChapterCacheStore.catalog(bookId);
+      if (catalog !== null) {
+        if (title.length === 0) {
+          title = catalog.title;
+        }
+        if (cover.length === 0) {
+          cover = catalog.cover;
+        }
+      }
+    }
+    if (title.length === 0) {
+      title = bookId;
+    }
+    return new FqStatsEntry(bookId, kind, title, cover, 0, minutes);
   }
 
   private heatColor(minutes: number): ResourceColor {
@@ -460,21 +531,40 @@ export struct ProfilePage {
             }
             this.SectionHeader('阅读与视听统计')
             this.DateOverviewCard()
-            FqStatsCard({ title: '阅读热力图', subtitle: '最近 16 周' }) {
-              this.HeatmapContent()
-            }
-            FqStatsCard({ title: '最近阅读' }) {
-              this.RecentContent()
-            }
-            FqStatsCard({ title: '每日记录' }) {
-              this.DailyContent()
-            }
-            FqStatsCard({ title: '最近封面' }) {
-              this.CoversContent()
-            }
-            FqStatsCard({ title: '阅读排行' }) {
-              this.RankContent()
-            }
+            FqStatsCard({
+              title: '阅读热力图',
+              subtitle: '最近 16 周',
+              content: (): void => {
+                this.HeatmapContent()
+              },
+            })
+            FqStatsCard({
+              title: '最近阅读',
+              content: (): void => {
+                this.RecentContent()
+              },
+              trailing: (): void => {
+                this.RecentEditControls()
+              },
+            })
+            FqStatsCard({
+              title: '每日记录',
+              content: (): void => {
+                this.DailyContent()
+              },
+            })
+            FqStatsCard({
+              title: '最近封面',
+              content: (): void => {
+                this.CoversContent()
+              },
+            })
+            FqStatsCard({
+              title: '阅读排行',
+              content: (): void => {
+                this.RankContent()
+              },
+            })
           }
           .padding({ left: 16, right: 16, top: 10, bottom: 40 })
           .width('100%')
@@ -493,6 +583,7 @@ export struct ProfilePage {
       .height('100%')
       .bindSheet(this.rankSheetVisible, this.RankSheetBuilder(), FqSheetOptions((): void => {
         this.rankSheetVisible = false;
+        this.exitRankEditMode();
       }))
     }
   }
@@ -720,43 +811,185 @@ export struct ProfilePage {
     if (this.recentItems.length === 0) {
       this.EmptyHint('暂无最近阅读')
     } else {
-      Column() {
+      // Scroll 嵌套下 List 不设高度自适应全部展开（官方 FAQ）；行间分隔用独立 ListItem 承载
+      List() {
         ForEach(this.recentItems, (item: FqStatsEntry, index: number) => {
           if (index > 0) {
-            Divider()
-              .color($r('sys.color.comp_divider'))
-          }
-          Row({ space: 10 }) {
-            this.EntryCover(item, 40, 54)
-            Column({ space: 4 }) {
-              Text(item.title.length > 0 ? item.title : item.id)
-                .fontSize(13.5)
-                .fontWeight(FontWeight.Medium)
-                .fontColor($r('sys.color.font_primary'))
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-              Text(`最近打开 · ${fqStatsVisitedText(item.visitedAt)}`)
-                .fontSize(11)
-                .fontColor($r('sys.color.font_secondary'))
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
+            ListItem() {
+              Divider()
+                .color($r('sys.color.comp_divider'))
             }
-            .alignItems(HorizontalAlign.Start)
-            .layoutWeight(1)
-
-            Text(item.minutes > 0 ? fqStatsDuring(item.minutes) : '——')
-              .fontSize(12)
-              .fontColor($r('sys.color.font_secondary'))
           }
-          .padding({ top: 9, bottom: 9 })
-          .width('100%')
-          .onClick((): void => {
-            this.openEntry(item);
-          })
+          ListItem() {
+            this.RecentRow(item)
+          }
         }, (item: FqStatsEntry) => `recent_${item.id}`)
       }
       .width('100%')
+      .scrollBar(BarState.Off)
+      .edgeEffect(EdgeEffect.None)
     }
+  }
+
+  /** 最近阅读标题行操作区：常态「编辑」；编辑态「全选 / 删除 / 完成」。 */
+  @Builder
+  private RecentEditControls() {
+    if (this.recentEditMode) {
+      Row({ space: 14 }) {
+        Text('全选')
+          .fontSize(12.5)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.allRecentSelected() ? appState.accentColor : $r('sys.color.font_secondary'))
+          .onClick((): void => {
+            this.toggleRecentSelectAll();
+          })
+        Text('删除')
+          .fontSize(12.5)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(FQ_DANGER_TEXT)
+          .onClick((): void => {
+            this.confirmDeleteRecent();
+          })
+        Text('完成')
+          .fontSize(12.5)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(appState.accentColor)
+          .onClick((): void => {
+            this.exitRecentEditMode();
+          })
+      }
+    } else {
+      Text('编辑')
+        .fontSize(12.5)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(appState.accentColor)
+        .onClick((): void => {
+          this.enterRecentEditMode();
+        })
+    }
+  }
+
+  /** 最近阅读单行：编辑模式行首勾选圈，点击切换选中而非打开。 */
+  @Builder
+  private RecentRow(item: FqStatsEntry) {
+    Row({ space: 10 }) {
+      if (this.recentEditMode) {
+        SymbolGlyph(this.isRecentSelected(item.id)
+          ? $r('sys.symbol.checkmark_circle_fill') : $r('sys.symbol.circle'))
+          .fontSize(22)
+          .fontColor([this.isRecentSelected(item.id)
+            ? appState.accentColor : $r('sys.color.icon_tertiary')])
+      }
+      this.EntryCover(item, 40, 54, (entry: FqStatsEntry): void => {
+        this.handleRecentTap(entry);
+      })
+      Column({ space: 4 }) {
+        Text(item.title.length > 0 ? item.title : item.id)
+          .fontSize(13.5)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('sys.color.font_primary'))
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(`最近打开 · ${fqStatsVisitedText(item.visitedAt)}`)
+          .fontSize(11)
+          .fontColor($r('sys.color.font_secondary'))
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+
+      Text(item.minutes > 0 ? fqStatsDuring(item.minutes) : '——')
+        .fontSize(12)
+        .fontColor($r('sys.color.font_secondary'))
+    }
+    .padding({ top: 9, bottom: 9 })
+    .width('100%')
+    .onClick((): void => {
+      this.handleRecentTap(item);
+    })
+  }
+
+  /** 最近阅读行/封面统一点击：编辑模式切换选中，否则打开条目。 */
+  private handleRecentTap(entry: FqStatsEntry): void {
+    if (this.recentEditMode) {
+      this.toggleRecentSelected(entry.id);
+      return;
+    }
+    this.openEntry(entry);
+  }
+
+  /** 排行行/封面统一点击：编辑模式切换选中，否则打开条目。 */
+  private handleRankTap(entry: FqStatsEntry): void {
+    if (this.rankEditMode) {
+      this.toggleRankSelected(entry.id);
+      return;
+    }
+    this.openEntry(entry);
+  }
+
+  private isRecentSelected(id: string): boolean {
+    return this.recentSelectedIds.indexOf(id) !== -1;
+  }
+
+  private toggleRecentSelected(id: string): void {
+    const next: string[] = this.recentSelectedIds.slice();
+    const index: number = next.indexOf(id);
+    if (index === -1) {
+      next.push(id);
+    } else {
+      next.splice(index, 1);
+    }
+    this.recentSelectedIds = next;
+  }
+
+  private allRecentSelected(): boolean {
+    return this.recentItems.length > 0 && this.recentSelectedIds.length === this.recentItems.length;
+  }
+
+  private toggleRecentSelectAll(): void {
+    if (this.allRecentSelected()) {
+      this.recentSelectedIds = [];
+      return;
+    }
+    const ids: string[] = [];
+    for (const item of this.recentItems) {
+      ids.push(item.id);
+    }
+    this.recentSelectedIds = ids;
+  }
+
+  private enterRecentEditMode(): void {
+    this.recentEditMode = true;
+    this.recentSelectedIds = [];
+  }
+
+  private exitRecentEditMode(): void {
+    this.recentEditMode = false;
+    this.recentSelectedIds = [];
+  }
+
+  /** 最近阅读编辑模式批量删除确认：清浏览记录 + 按书时长（书架与阅读进度不受影响）。 */
+  private confirmDeleteRecent(): void {
+    if (this.recentSelectedIds.length === 0) {
+      this.showToast('请先选择条目');
+      return;
+    }
+    const ids: string[] = this.recentSelectedIds.slice();
+    DialogManager.ShowConfirm('删除最近阅读',
+      `确定删除选中的 ${ids.length} 条记录吗？将从最近阅读与阅读排行中移除，书架与阅读进度不受影响。`,
+      '删除',
+      (): void => {
+        FqBrowseStore.removeByIds(ids);
+        FqReadStatsStore.removeBooks(ids);
+        this.recentSelectedIds = [];
+        this.rebuild();
+        this.showToast(`已删除 ${ids.length} 条`);
+      });
+  }
+
+  private showToast(message: string): void {
+    this.getUIContext().getPromptAction().showToast({ message: message, duration: 1500 });
   }
 
   @Builder
@@ -799,7 +1032,9 @@ export struct ProfilePage {
       Scroll() {
         Row({ space: 10 }) {
           ForEach(this.coverItems, (item: FqStatsEntry) => {
-            this.EntryCover(item, 74, 104)
+            this.EntryCover(item, 74, 104, (entry: FqStatsEntry): void => {
+              this.openEntry(entry);
+            })
           }, (item: FqStatsEntry) => `cover_${item.id}`)
         }
       }
@@ -849,13 +1084,22 @@ export struct ProfilePage {
   @Builder
   private RankRow(item: FqStatsEntry, index: number) {
     Row({ space: 10 }) {
+      if (this.rankEditMode) {
+        SymbolGlyph(this.isRankSelected(item.id)
+          ? $r('sys.symbol.checkmark_circle_fill') : $r('sys.symbol.circle'))
+          .fontSize(22)
+          .fontColor([this.isRankSelected(item.id)
+            ? appState.accentColor : $r('sys.color.icon_tertiary')])
+      }
       Text(`${index + 1}`)
         .fontSize(index < 3 ? 15 : 13)
         .fontWeight(FontWeight.Bold)
         .fontColor(index < 3 ? appState.accentColor : $r('sys.color.font_secondary'))
         .width(20)
         .textAlign(TextAlign.Center)
-      this.EntryCover(item, 32, 44)
+      this.EntryCover(item, 32, 44, (entry: FqStatsEntry): void => {
+        this.handleRankTap(entry);
+      })
       Text(item.title.length > 0 ? item.title : item.id)
         .fontSize(13)
         .fontColor($r('sys.color.font_primary'))
@@ -869,36 +1113,118 @@ export struct ProfilePage {
     .padding({ top: 8, bottom: 8 })
     .width('100%')
     .onClick((): void => {
-      this.openEntry(item);
+      this.handleRankTap(item);
     })
   }
 
-  /** 阅读排行「查看全部」半模态。 */
+  /** 阅读排行「查看全部」半模态：右上角编辑（进入/退出编辑模式），编辑模式显示全选 + 删除。 */
   @Builder
   private RankSheetBuilder() {
     CommonSheet({
       sheetTitle: '阅读排行',
+      showEdit: true,
+      editActive: this.rankEditMode,
+      editClick: (): void => {
+        this.toggleRankEditMode();
+      },
+      showSelectAll: this.rankEditMode,
+      selectAllActive: this.allRankSelected(),
+      selectAllClick: (): void => {
+        this.toggleRankSelectAll();
+      },
+      showRemove: this.rankEditMode,
+      removeClick: (): void => {
+        this.confirmDeleteRanked();
+      },
       closeClick: (): void => {
-        this.rankSheetVisible = false;
+        this.closeRankSheet();
       },
     }) {
-      List() {
-        ForEach(this.rankItems, (item: FqStatsEntry, index: number) => {
-          ListItem() {
-            this.RankRow(item, index)
-          }
-        }, (item: FqStatsEntry) => `rank_sheet_${item.id}`)
+      if (this.rankItems.length === 0) {
+        this.EmptyHint('暂无排行数据')
+      } else {
+        List() {
+          ForEach(this.rankItems, (item: FqStatsEntry, index: number) => {
+            ListItem() {
+              this.RankRow(item, index)
+            }
+          }, (item: FqStatsEntry) => `rank_sheet_${item.id}`)
+        }
+        .width('100%')
+        .height('100%')
+        .padding({ left: 16, right: 16, bottom: 16 })
+        .scrollBar(BarState.Off)
       }
-      .width('100%')
-      .height('100%')
-      .padding({ left: 16, right: 16, bottom: 16 })
-      .scrollBar(BarState.Off)
     }
   }
 
-  /** 条目封面（无封面显示书籍图标占位；点击进详情）。 */
+  private isRankSelected(id: string): boolean {
+    return this.rankSelectedIds.indexOf(id) !== -1;
+  }
+
+  private toggleRankSelected(id: string): void {
+    const next: string[] = this.rankSelectedIds.slice();
+    const index: number = next.indexOf(id);
+    if (index === -1) {
+      next.push(id);
+    } else {
+      next.splice(index, 1);
+    }
+    this.rankSelectedIds = next;
+  }
+
+  private allRankSelected(): boolean {
+    return this.rankItems.length > 0 && this.rankSelectedIds.length === this.rankItems.length;
+  }
+
+  private toggleRankSelectAll(): void {
+    if (this.allRankSelected()) {
+      this.rankSelectedIds = [];
+      return;
+    }
+    const ids: string[] = [];
+    for (const item of this.rankItems) {
+      ids.push(item.id);
+    }
+    this.rankSelectedIds = ids;
+  }
+
+  private toggleRankEditMode(): void {
+    this.rankEditMode = !this.rankEditMode;
+    this.rankSelectedIds = [];
+  }
+
+  private exitRankEditMode(): void {
+    this.rankEditMode = false;
+    this.rankSelectedIds = [];
+  }
+
+  private closeRankSheet(): void {
+    this.rankSheetVisible = false;
+    this.exitRankEditMode();
+  }
+
+  /** 阅读排行编辑模式批量删除确认：清选中条目的按书时长（全局日累计保留）。 */
+  private confirmDeleteRanked(): void {
+    if (this.rankSelectedIds.length === 0) {
+      this.showToast('请先选择条目');
+      return;
+    }
+    const ids: string[] = this.rankSelectedIds.slice();
+    DialogManager.ShowConfirm('删除阅读排行',
+      `确定删除选中的 ${ids.length} 条记录吗？对应作品的阅读时长统计将被清除。`, '删除',
+      (): void => {
+        FqReadStatsStore.removeBooks(ids);
+        this.rankSelectedIds = [];
+        this.rebuild();
+        this.showToast(`已删除 ${ids.length} 条`);
+      });
+  }
+
+  /** 条目封面（无封面显示书籍图标占位）；点击行为由调用方决定（编辑模式下切换选中）。 */
   @Builder
-  private EntryCover(item: FqStatsEntry, widthVp: number, heightVp: number) {
+  private EntryCover(item: FqStatsEntry, widthVp: number, heightVp: number,
+    onTap: (entry: FqStatsEntry) => void) {
     if (item.cover.length > 0) {
       Image(FqBackend.get().resourceUrl(item.cover))
         .width(widthVp)
@@ -906,8 +1232,9 @@ export struct ProfilePage {
         .borderRadius(8)
         .objectFit(ImageFit.Cover)
         .backgroundColor($r('sys.color.comp_background_tertiary'))
+        .draggable(false)
         .onClick((): void => {
-          this.openEntry(item);
+          onTap(item);
         })
     } else {
       Stack() {
@@ -920,7 +1247,7 @@ export struct ProfilePage {
       .borderRadius(8)
       .backgroundColor($r('sys.color.comp_background_tertiary'))
       .onClick((): void => {
-        this.openEntry(item);
+        onTap(item);
       })
     }
   }

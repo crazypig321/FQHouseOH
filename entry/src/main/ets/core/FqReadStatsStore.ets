@@ -102,6 +102,22 @@ export class FqReadStatsStore {
     return FqReadStatsStore.books;
   }
 
+  /** 批量删除按书累计（阅读排行编辑模式多选删除；全局日累计与其余书不受影响）。 */
+  public static removeBooks(bookIds: string[]): void {
+    if (bookIds.length === 0) {
+      return;
+    }
+    let changed: boolean = false;
+    for (const bookId of bookIds) {
+      if (FqReadStatsStore.books.delete(bookId)) {
+        changed = true;
+      }
+    }
+    if (changed) {
+      FqReadStatsStore.persist();
+    }
+  }
+
   /** 清空全部阅读统计（设置-清空历史）。 */
   public static clear(): void {
     FqReadStatsStore.days.clear();

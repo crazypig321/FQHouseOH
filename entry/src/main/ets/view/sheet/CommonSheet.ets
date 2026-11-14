@@ -81,6 +81,14 @@ export struct CommonSheet {
   @Param showOrder: boolean = false;
   /** 排序模式激活（排序按钮主题色高亮）。 */
   @Param orderActive: boolean = false;
+  /** 标题栏右侧是否显示编辑按钮（阅读排行进入/退出编辑模式，管理钮之前）。 */
+  @Param showEdit: boolean = false;
+  /** 编辑模式激活（编辑按钮主题色高亮）。 */
+  @Param editActive: boolean = false;
+  /** 标题栏右侧是否显示全选按钮（编辑模式，编辑钮之后）。 */
+  @Param showSelectAll: boolean = false;
+  /** 全选状态（全选按钮主题色高亮，未全选显示空圈）。 */
+  @Param selectAllActive: boolean = false;
   /** 标题栏右侧是否显示移出分组按钮（关闭钮之前）。 */
   @Param showRemove: boolean = false;
   /** 标题栏右侧是否显示评论排序图标组（火焰=热门 / 时钟=最新，评论弹层用；选中项主题色高亮）。 */
@@ -100,6 +108,8 @@ export struct CommonSheet {
   @Event resetClick: () => void = (): void => {};
   @Event addClick: () => void = (): void => {};
   @Event orderClick: () => void = (): void => {};
+  @Event editClick: () => void = (): void => {};
+  @Event selectAllClick: () => void = (): void => {};
   @Event removeClick: () => void = (): void => {};
   @Event commentSortChange: (sort: number) => void = (_sort: number): void => {};
   @BuilderParam content: () => void;
@@ -228,6 +238,47 @@ export struct CommonSheet {
         },
       });
     }
+    if (this.showSelectAll) {
+      menus.push({
+        content: {
+          // 全选状态主题色高亮（fontSize 显式 24 与 HDS 菜单图标一致，避免首帧 16fp 偏小）
+          icon: this.selectAllActive
+            ? new SymbolGlyphModifier($r('sys.symbol.checkmark_square_on_square'))
+              .fontColor([appState.accentColor]).fontSize(24)
+            : $r('sys.symbol.checkmark_square_on_square'),
+          label: '全选',
+          action: (): void => {
+            this.selectAllClick();
+          },
+        },
+      });
+    }
+    if (this.showRemove) {
+      menus.push({
+        content: {
+          icon: $r('sys.symbol.trash'),
+          label: 'remove',
+          action: (): void => {
+            this.removeClick();
+          },
+        },
+      });
+    }
+    if (this.showEdit) {
+      menus.push({
+        content: {
+          // 编辑模式激活时主题色高亮（fontSize 显式 24 与 HDS 菜单图标一致，避免首帧 16fp 偏小）
+          icon: this.editActive
+            ? new SymbolGlyphModifier($r('sys.symbol.square_and_pencil'))
+              .fontColor([appState.accentColor]).fontSize(24)
+            : $r('sys.symbol.square_and_pencil'),
+          label: 'edit',
+          action: (): void => {
+            this.editClick();
+          },
+        },
+      });
+    }
     if (this.showManage) {
       menus.push({
         content: {
@@ -246,17 +297,6 @@ export struct CommonSheet {
           label: 'reset',
           action: (): void => {
             this.resetClick();
-          },
-        },
-      });
-    }
-    if (this.showRemove) {
-      menus.push({
-        content: {
-          icon: $r('sys.symbol.trash'),
-          label: 'remove',
-          action: (): void => {
-            this.removeClick();
           },
         },
       });
