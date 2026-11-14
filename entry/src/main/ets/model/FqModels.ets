@@ -67,6 +67,10 @@ export class FqMediaItem {
   readonly source: string;
   /** 连载状态：0 完结 / 1 连载 / -1 未知（fqapp MediaItem.creationStatus，搜索筛选用）。 */
   readonly creationStatus: number;
+  /** 分类 chips（secondary_infos data_type=3，fallback category_schema name 列表）。 */
+  readonly categories: string[];
+  /** AI 生成内容（ai_usage_type > 0，信息层「内容由AI生成」声明）。 */
+  readonly aiGenerated: boolean;
 
   constructor(
     id: string,
@@ -84,6 +88,8 @@ export class FqMediaItem {
     tag: FqMediaTag | null = null,
     source: string = 'fanqie',
     creationStatus: number = -1,
+    categories: string[] = [],
+    aiGenerated: boolean = false,
   ) {
     this.id = id;
     this.title = title;
@@ -100,13 +106,16 @@ export class FqMediaItem {
     this.tag = tag;
     this.source = source;
     this.creationStatus = creationStatus;
+    this.categories = categories;
+    this.aiGenerated = aiGenerated;
   }
 
   /** 换封面（今日焦点 1080px 高清封面升级等）：其余字段原样拷贝。 */
   withCover(cover: string): FqMediaItem {
     return new FqMediaItem(this.id, this.title, cover, this.author, this.badge, this.ep,
       this.kind, this.score, this.intro, this.seriesId, this.episodeId,
-      this.followerCount, this.tag, this.source, this.creationStatus);
+      this.followerCount, this.tag, this.source, this.creationStatus,
+      this.categories, this.aiGenerated);
   }
 }
 

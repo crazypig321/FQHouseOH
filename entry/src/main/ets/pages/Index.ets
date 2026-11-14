@@ -51,7 +51,7 @@ struct Index {
    *  瞬时重放、吃掉 changeIndex 的切换动画；保持同步是为防返回主页时 index 重放回跳启动页。
    *  「我的、设置页面显示样式」下 Tab 数可变，此处为物理下标（可见列表内位置）。 */
   @Local mainTabIndex: number = 0
-  /** 当前所在主 Tab 的逻辑下标（0 首页 / 1 书架 / 2 我的 / 3 设置）；样式切换 reconcile 用。 */
+  /** 当前所在主 Tab 的逻辑下标（0 首页 / 1 短剧 / 2 书架 / 3 我的 / 4 设置）；样式切换 reconcile 用。 */
   @Local currentLogicalTab: number = 0
 
   /** 「我的、设置页面显示样式」变化：当前页签被隐藏时落到对方用户页，否则保持原页签物理位置。 */
@@ -65,7 +65,7 @@ struct Index {
     let target: number = this.currentLogicalTab;
     if (visible.indexOf(target) < 0) {
       // 隐藏设置 → 落我的；隐藏我的 → 落设置（合并样式下入口在对方页内）
-      target = style === FQ_MINE_STYLE_MINE_WITH_SETTINGS ? 2 : 3;
+      target = style === FQ_MINE_STYLE_MINE_WITH_SETTINGS ? 3 : 4;
     }
     this.currentLogicalTab = target;
     const physical: number = fqPhysicalIndexOf(target, style);
@@ -202,6 +202,9 @@ struct Index {
             systemMaterialEffect: {
               materialType: appState.materialType,
               materialLevel: appState.materialLevel
+            },
+            gradientMask: {
+              maskColor: undefined
             },
             // 智感握姿：随设置开关 handedness 适配
             adaptToHandedness: appState.smartReachEnabled,

@@ -18,6 +18,7 @@ import { ComicPage } from '../pages/sub/ComicPage';
 import { ListenPage } from '../pages/sub/ListenPage';
 import { ListenVideoPage } from '../pages/sub/ListenVideoPage';
 import { PlayerPage } from '../pages/sub/PlayerPage';
+import { DramaPage } from '../pages/DramaPage';
 import { SettingsPage } from '../pages/SettingsPage';
 import { AboutPage } from '../pages/sub/AboutPage';
 import { CachedBooksPage } from '../pages/sub/CachedBooksPage';
@@ -47,8 +48,10 @@ export function MainTabPagesBuilder() {
       if (logicalIndex === 0) {
         HomePage()
       } else if (logicalIndex === 1) {
-        ShelfPage()
+        DramaPage()
       } else if (logicalIndex === 2) {
+        ShelfPage()
+      } else if (logicalIndex === 3) {
         ProfilePage({ isTab: true })
       } else {
         SettingsPage({ isTab: true })

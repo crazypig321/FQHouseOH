@@ -441,6 +441,10 @@ export class FqHomeFeed {
         item.episodeId,
         item.followerCount,
         item.tag,
+        'fanqie',
+        item.creationStatus,
+        item.categories,
+        item.aiGenerated,
       ));
     }
     return out;

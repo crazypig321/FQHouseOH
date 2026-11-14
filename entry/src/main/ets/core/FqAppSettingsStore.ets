@@ -19,7 +19,8 @@
  *   开=经代理下载更新包，关=直连）；
  * - changelogShownVersion：更新日志已展示到的版本号（空 = 尚未记录，首次安装）；
  *   Index 冷启动比对当前版本号，不同则自动弹出更新日志 sheet；
- * - startupTabIndex：启动默认展示页（主 Tab 下标 0-3 = 首页/书架/我的/设置，默认 0 首页）；
+ * - startupTabIndexV2：启动默认展示页（主 Tab 下标 0-4 = 首页/短剧/书架/我的/设置，默认 0 首页；
+ *   短剧 Tab 插入后换新键，旧键 startupTabIndex 0-3 在 init 时重映射迁移）；
  *   Index 冷启动按此初始化 HdsTabs/PC Tabs 与 appState.currTabsIndex；
  * - homeStyle：首页样式（0 今日焦点 / 1 排行榜立体书架 / 2 两者共存，默认 0 今日焦点）；
  *   首页按 appState.homeStyle 响应式切换顶部内容；
@@ -51,7 +52,9 @@ const FQ_SETTINGS_KEY_PIP_VIDEO: string = 'pipVideo';
 const FQ_SETTINGS_KEY_DIRECT_READ: string = 'directRead';
 const FQ_SETTINGS_KEY_UPDATE_PROXY: string = 'updateProxyDownload';
 const FQ_SETTINGS_KEY_CHANGELOG_SHOWN: string = 'changelogShownVersion';
-const FQ_SETTINGS_KEY_STARTUP_TAB: string = 'startupTabIndex';
+const FQ_SETTINGS_KEY_STARTUP_TAB: string = 'startupTabIndexV2';
+/** 短剧 Tab 插入前的旧启动页键（0-3；init 读到时重映射迁移到新键）。 */
+const FQ_SETTINGS_KEY_STARTUP_TAB_LEGACY: string = 'startupTabIndex';
 const FQ_SETTINGS_KEY_HOME_STYLE: string = 'homeStyle';
 const FQ_SETTINGS_KEY_MINE_SETTINGS_STYLE: string = 'mineSettingsStyle';
 const FQ_SETTINGS_KEY_TTS_PERSON: string = 'ttsPerson';
@@ -111,8 +114,8 @@ export const FQ_THEME_FOLLOW: number = 0;
 export const FQ_THEME_LIGHT: number = 1;
 /** 深色模式档位：深色。 */
 export const FQ_THEME_DARK: number = 2;
-/** 启动默认展示页 Tab 下标上限（主 Tab 共 4 页：首页/书架/我的/设置）。 */
-export const FQ_STARTUP_TAB_MAX_INDEX: number = 3;
+/** 启动默认展示页 Tab 下标上限（主 Tab 共 5 页：首页/短剧/书架/我的/设置）。 */
+export const FQ_STARTUP_TAB_MAX_INDEX: number = 4;
 /** 首页样式：今日焦点（默认）。 */
 export const FQ_HOME_STYLE_SPOTLIGHT: number = 0;
 /** 首页样式：排行榜立体书架。 */
@@ -143,7 +146,7 @@ export class FqAppSettingsStore {
   private static directRead: boolean = false;
   private static updateProxyDownload: boolean = false;
   private static changelogShownVersion: string = '';
-  /** 启动默认展示页（主 Tab 下标 0-3；Index 冷启动初始化 Tab 用）。 */
+  /** 启动默认展示页（主 Tab 下标 0-4；Index 冷启动初始化 Tab 用）。 */
   private static startupTabIndex: number = 0;
   /** 首页样式（0 今日焦点 / 1 排行榜 / 2 共存；appState.homeStyle 响应式联动）。 */
   private static homeStyle: number = FQ_HOME_STYLE_SPOTLIGHT;
@@ -227,10 +230,27 @@ export class FqAppSettingsStore {
       if (typeof rawShown === 'string') {
         FqAppSettingsStore.changelogShownVersion = rawShown;
       }
-      const rawStartupTab: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_STARTUP_TAB, 0);
+      const rawStartupTab: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_STARTUP_TAB, -1);
       if (typeof rawStartupTab === 'number' && rawStartupTab >= 0
         && rawStartupTab <= FQ_STARTUP_TAB_MAX_INDEX) {
         FqAppSettingsStore.startupTabIndex = Math.round(rawStartupTab);
+      } else {
+        // 短剧 Tab 插入（index 1）后的旧键迁移：0-3（首页/书架/我的/设置）
+        // → 0-4（首页/短剧/书架/我的/设置），迁移结果顺手落新键
+        const legacyTab: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_STARTUP_TAB_LEGACY, -1);
+        if (typeof legacyTab === 'number' && legacyTab >= 0 && legacyTab <= 3) {
+          const legacy: number = Math.round(legacyTab);
+          const migrated: number = legacy === 0 ? 0 : legacy + 1;
+          FqAppSettingsStore.startupTabIndex = migrated;
+          try {
+            pref.putSync(FQ_SETTINGS_KEY_STARTUP_TAB, migrated);
+            pref.flush().catch((_error: BusinessError): void => {
+              // 落盘失败不阻断
+            });
+          } catch (error) {
+            // 忽略写入失败
+          }
+        }
       }
       const rawHomeStyle: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_HOME_STYLE,
         FQ_HOME_STYLE_SPOTLIGHT);
@@ -556,7 +576,7 @@ export class FqAppSettingsStore {
     }
   }
 
-  /** 启动默认展示页（主 Tab 下标 0-3 = 首页/书架/我的/设置；Index 冷启动初始化 Tab 用）。 */
+  /** 启动默认展示页（主 Tab 下标 0-4 = 首页/短剧/书架/我的/设置；Index 冷启动初始化 Tab 用）。 */
   public static getStartupTabIndex(): number {
     return FqAppSettingsStore.startupTabIndex;
   }

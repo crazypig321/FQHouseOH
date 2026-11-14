@@ -27,26 +27,28 @@ export function tabBarSymbolOf(item: MenuItem): TabBarSymbol {
 
 export const MENU_CONFIG: MenuItem[] = [
   { icon: $r('sys.symbol.house_fill_1'), label: '首页' },
+  { icon: $r('sys.symbol.video_fill'), label: '短剧' },
   { icon: $r('sys.symbol.bookshelf'), label: '书架' },
   { icon: $r('sys.symbol.person_fill'), label: '我的' },
   { icon: $r('sys.symbol.gearshape_fill'), label: '设置' },
 ];
 
-/** 设置 Tab 下标（MENU_CONFIG 第 4 项；我的-应用设置经主 Tab 切换进入）。 */
-export const SETTINGS_TAB_INDEX: number = 3;
+/** 设置 Tab 下标（MENU_CONFIG 第 5 项；我的-应用设置经主 Tab 切换进入）。 */
+export const SETTINGS_TAB_INDEX: number = 4;
 
 /**
  * 我的、设置页面显示样式下的可见主 Tab 逻辑下标列表：
- * 0 我的含设置入口 → [首页, 书架, 我的]；1 设置含我的入口 → [首页, 书架, 设置]；其余 → 全部 4 Tab。
+ * 0 我的含设置入口 → [首页, 短剧, 书架, 我的]；1 设置含我的入口 → [首页, 短剧, 书架, 设置]；
+ * 其余 → 全部 5 Tab。
  */
 export function fqVisibleTabIndexes(style: number): number[] {
   if (style === 0) {
-    return [0, 1, 2];
+    return [0, 1, 2, 3];
   }
   if (style === 1) {
-    return [0, 1, 3];
+    return [0, 1, 2, 4];
   }
-  return [0, 1, 2, 3];
+  return [0, 1, 2, 3, 4];
 }
 
 /** 逻辑下标 → Tabs 实际（物理）下标；样式下不可见时回退 0（首页）。 */

@@ -24,7 +24,7 @@ import { ListenVideoNavParams } from '../../model/FqNavModels';
 import { FqChapter } from '../../model/FqModels';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { FqVideoMedia } from '../../core/FqVideoMedia';
-import { FqWatchedStore, FqWatchedProgress } from '../../core/FqWatchedStore';
+import { FqWatchedStore, FqWatchedProgress, FqWatchHistoryRecord } from '../../core/FqWatchedStore';
 import { FqReadStatsStore } from '../../core/FqReadStatsStore';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { appState } from '../../entryability/AppState';
@@ -1037,6 +1037,13 @@ export struct ListenVideoPage {
       new FqWatchedProgress(episode.itemId,
         this.player.state.position, this.player.state.duration,
         this.seriesPercent(this.episodeFraction())));
+    // 观看历史（短剧页「最近」频道）：按剧 upsert，最新在前
+    FqWatchedStore.recordHistory(new FqWatchHistoryRecord(
+      ListenVideoNavParams.contentId, ListenVideoNavParams.kind,
+      ListenVideoNavParams.title, ListenVideoNavParams.cover,
+      episode.itemId, this.index,
+      this.player.state.position, this.player.state.duration,
+      this.seriesPercent(this.episodeFraction()), Date.now()));
   }
 
   /** 整剧百分比 0..100（书架角标）：(当前集下标 + 集内比例)/总集数；无效返回 -1。 */

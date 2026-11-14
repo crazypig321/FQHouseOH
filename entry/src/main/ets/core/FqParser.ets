@@ -346,8 +346,8 @@ export function fqItemFromRaw(rec: Record<string, Object>, forcedKind: string): 
   const ep: string = fqFirstString(rec, ['ep', 'serial_count', 'item_count', 'episode_count', 'episode_cnt'])
     || fqFirstString(bd, ['ep', 'serial_count', 'item_count', 'episode_count', 'episode_cnt']);
 
-  const intro: string = fqFirstString(rec, ['series_intro', 'intro'])
-    || fqFirstString(bd, ['series_intro', 'intro']);
+  const intro: string = fqFirstString(rec, ['series_intro', 'intro', 'abstract'])
+    || fqFirstString(bd, ['series_intro', 'intro', 'abstract']);
 
   const scoreRawBd: Object | undefined = bd['score'];
   const scoreRaw: Object | undefined = scoreRawBd !== undefined && scoreRawBd !== null ? scoreRawBd : rec['score'];
@@ -367,10 +367,54 @@ export function fqItemFromRaw(rec: Record<string, Object>, forcedKind: string): 
   const rawCreationStatus: number = fqAsInt(bd['creation_status'], fqAsInt(rec['creation_status'], -1));
   const creationStatus: number = rawCreationStatus === 0 || rawCreationStatus === 1 ? rawCreationStatus : -1;
 
+  // 信息面板：分类 chips（secondary_infos data_type=3；fallback category_schema
+  // name 正则提取，fqapp _secondaryCategories）+ AI 声明（ai_usage_type > 0）
+  const categories: string[] = fqSecondaryCategories(
+    rec['secondary_infos'] !== undefined ? rec['secondary_infos'] : bd['secondary_infos'],
+    rec['category_schema'] !== undefined ? rec['category_schema'] : bd['category_schema']);
+  const aiUsageType: number = fqAsInt(rec['ai_usage_type'], fqAsInt(bd['ai_usage_type'], 0));
+
   return new FqMediaItem(
     id, title, cover, author, badge, ep, kind, score, intro, seriesId, episodeId, followerCount, tag,
-    'fanqie', creationStatus,
+    'fanqie', creationStatus, categories, aiUsageType > 0,
   );
+}
+
+/**
+ * 信息面板分类 chips（fqapp _secondaryCategories）：secondary_infos 中
+ * data_type == 3 的 content（其余条目是演员等）；空时 fallback
+ * category_schema——`{name: …}` 记录的 JSON 串，正则提 name。
+ */
+function fqSecondaryCategories(secondaryInfos: Object | undefined,
+  fallback: Object | undefined): string[] {
+  const names: string[] = [];
+  const arr: Object[] | null = fqAsArray(secondaryInfos);
+  if (arr !== null) {
+    for (const entryValue of arr) {
+      const entry: Record<string, Object> | null = fqAsRecord(entryValue);
+      if (entry === null) {
+        continue;
+      }
+      const contentType: number = fqAsInt(entry['data_type'], 0);
+      const content: Object | undefined = entry['content'];
+      if (contentType === 3 && typeof content === 'string' && content.trim().length > 0) {
+        names.push(content.trim());
+      }
+    }
+  }
+  if (names.length === 0 && typeof fallback === 'string' && fallback.trim().length > 0) {
+    const matches: string[] | null = fallback.match(/"name"\s*:\s*"([^"]+)"/g);
+    if (matches !== null) {
+      for (const match of matches) {
+        const found: RegExpMatchArray | null = match.match(/"name"\s*:\s*"([^"]+)"/);
+        const name: string = found !== null && found.length > 1 ? found[1].trim() : '';
+        if (name.length > 0) {
+          names.push(name);
+        }
+      }
+    }
+  }
+  return names;
 }
 
 // ---------------------------------------------------------------------------

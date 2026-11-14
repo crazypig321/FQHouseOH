@@ -14,6 +14,10 @@ import { fqStoreBus } from './FqStoreBus';
 const FQ_WATCHED_STORE_NAME: string = 'fq_watched';
 /** 续播进度 key 前缀（与已看集合同文件、不同 key 命名空间）。 */
 const FQ_WATCHED_PROGRESS_PREFIX: string = 'progress.';
+/** 观看历史 key（同文件；短剧页「最近」频道数据源，最新在前）。 */
+const FQ_WATCHED_HISTORY_KEY: string = 'history';
+/** 观看历史容量上限（超出裁最旧）。 */
+const FQ_WATCHED_HISTORY_MAX: number = 100;
 
 /** 单剧续播进度（fqapp video_progress：集 itemId + 位置/时长，秒）。 */
 export class FqWatchedProgress {
@@ -33,10 +37,51 @@ export class FqWatchedProgress {
   }
 }
 
+/**
+ * 观看历史记录（短剧页「最近」频道：含元数据，按剧 upsert，最新在前；
+ * 对齐 fqapp LibraryStore.history / media_history_store 的 DramaPage 语义）。
+ */
+export class FqWatchHistoryRecord {
+  /** 剧 id（已看/续播同键 contentId）。 */
+  readonly id: string;
+  /** 内容类型（video/manju）。 */
+  readonly kind: string;
+  readonly title: string;
+  readonly cover: string;
+  /** 当前集 itemId（续播键）。 */
+  readonly episodeId: string;
+  /** 当前集下标（0 起；-1 未知，「已看到第N集」行缺省）。 */
+  readonly episodeIndex: number;
+  /** 播放位置（秒）。 */
+  readonly position: number;
+  /** 时长（秒，未知 0）。 */
+  readonly duration: number;
+  /** 整剧百分比 0..100；-1 未记录。 */
+  readonly percent: number;
+  /** 更新时间（ms）。 */
+  readonly updatedAt: number;
+
+  constructor(id: string, kind: string, title: string, cover: string, episodeId: string,
+    episodeIndex: number, position: number, duration: number, percent: number, updatedAt: number) {
+    this.id = id;
+    this.kind = kind;
+    this.title = title;
+    this.cover = cover;
+    this.episodeId = episodeId;
+    this.episodeIndex = episodeIndex;
+    this.position = position;
+    this.duration = duration;
+    this.percent = percent;
+    this.updatedAt = updatedAt;
+  }
+}
+
 export class FqWatchedStore {
   private static pref: preferences.Preferences | null = null;
   /** 剧 id → 已看集 itemId 集合（内存缓存，读穿）。 */
   private static cache: Map<string, Set<string>> = new Map<string, Set<string>>();
+  /** 观看历史缓存（null 未加载；写后即时更新）。 */
+  private static historyCache: FqWatchHistoryRecord[] | null = null;
 
   public static init(context: common.Context): void {
     if (FqWatchedStore.pref !== null) {
@@ -121,6 +166,7 @@ export class FqWatchedStore {
   /** 清空全部已看记录与续播进度（设置-清空历史；本文件独立，整文件清空安全）。 */
   public static clear(): void {
     FqWatchedStore.cache.clear();
+    FqWatchedStore.historyCache = null;
     const pref: preferences.Preferences | null = FqWatchedStore.pref;
     if (pref === null) {
       return;
@@ -305,6 +351,148 @@ export class FqWatchedStore {
     }
     fqStoreBus.watchedVersion++;
     return new FqWatchedMergeOutcome(added, progressWritten);
+  }
+
+  // -------------------------------------------------------------------------
+  // 观看历史（短剧页「最近」频道）
+  // -------------------------------------------------------------------------
+
+  /** 全部观看历史（最新在前；首次读盘，之后走内存缓存）。 */
+  public static historyAll(): FqWatchHistoryRecord[] {
+    const cached: FqWatchHistoryRecord[] | null = FqWatchedStore.historyCache;
+    if (cached !== null) {
+      return cached;
+    }
+    const result: FqWatchHistoryRecord[] = [];
+    const pref: preferences.Preferences | null = FqWatchedStore.pref;
+    if (pref !== null) {
+      try {
+        const raw: preferences.ValueType = pref.getSync(FQ_WATCHED_HISTORY_KEY, '');
+        if (typeof raw === 'string' && raw.length > 0) {
+          const parsed: Object | null = JSON.parse(raw);
+          const arr: Object[] | null = fqAsArray(parsed);
+          if (arr !== null) {
+            for (const entry of arr) {
+              const record: FqWatchHistoryRecord | null = FqWatchedStore.historyRecordFrom(entry);
+              if (record !== null) {
+                result.push(record);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        // 损坏数据按空历史处理
+      }
+    }
+    FqWatchedStore.historyCache = result;
+    return result;
+  }
+
+  /** 记录一条观看历史（按剧 id upsert：去旧插最前，超出容量裁最旧）。 */
+  public static recordHistory(record: FqWatchHistoryRecord): void {
+    if (record.id.length === 0 || FqWatchedStore.pref === null) {
+      return;
+    }
+    const current: FqWatchHistoryRecord[] = FqWatchedStore.historyAll();
+    const next: FqWatchHistoryRecord[] = [];
+    for (const entry of current) {
+      if (entry.id !== record.id) {
+        next.push(entry);
+      }
+    }
+    next.unshift(record);
+    while (next.length > FQ_WATCHED_HISTORY_MAX) {
+      next.pop();
+    }
+    FqWatchedStore.persistHistory(next);
+  }
+
+  /** 合并恢复观看历史（备份恢复：只补本机缺失的剧，不动已有记录与顺序）。 */
+  public static mergeHistory(records: FqWatchHistoryRecord[]): number {
+    if (records.length === 0 || FqWatchedStore.pref === null) {
+      return 0;
+    }
+    const current: FqWatchHistoryRecord[] = FqWatchedStore.historyAll();
+    const known: Set<string> = new Set<string>();
+    for (const entry of current) {
+      known.add(entry.id);
+    }
+    const next: FqWatchHistoryRecord[] = current.slice();
+    let added: number = 0;
+    for (const record of records) {
+      if (record.id.length === 0 || known.has(record.id) || next.length >= FQ_WATCHED_HISTORY_MAX) {
+        continue;
+      }
+      known.add(record.id);
+      next.push(record);
+      added++;
+    }
+    if (added > 0) {
+      FqWatchedStore.persistHistory(next);
+    }
+    return added;
+  }
+
+  /** 历史记录落盘（含缓存更新与版本通知）。 */
+  private static persistHistory(list: FqWatchHistoryRecord[]): void {
+    const pref: preferences.Preferences | null = FqWatchedStore.pref;
+    if (pref === null) {
+      return;
+    }
+    const arr: Object[] = [];
+    for (const record of list) {
+      const rec: Record<string, Object> = {};
+      rec['id'] = record.id;
+      rec['kind'] = record.kind;
+      rec['title'] = record.title;
+      rec['cover'] = record.cover;
+      rec['episodeId'] = record.episodeId;
+      rec['episodeIndex'] = record.episodeIndex;
+      rec['position'] = record.position;
+      rec['duration'] = record.duration;
+      rec['percent'] = record.percent;
+      rec['updatedAt'] = record.updatedAt;
+      arr.push(rec);
+    }
+    try {
+      pref.putSync(FQ_WATCHED_HISTORY_KEY, JSON.stringify(arr));
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+      return;
+    }
+    FqWatchedStore.historyCache = list;
+    fqStoreBus.watchedVersion++;
+  }
+
+  /** 单条历史 JSON → 记录（id 空/字段畸形返回 null；数值做范围钳制）。 */
+  private static historyRecordFrom(entry: Object): FqWatchHistoryRecord | null {
+    const rec: Record<string, Object> | null = fqAsRecord(entry);
+    if (rec === null) {
+      return null;
+    }
+    const id: string = fqStr(rec, 'id');
+    if (id.length === 0) {
+      return null;
+    }
+    const kindRaw: string = fqStr(rec, 'kind');
+    const kind: string = kindRaw === 'manju' ? 'manju' : 'video';
+    const episodeIndex: number = Math.trunc(fqNum(rec, 'episodeIndex'));
+    const percent: number = fqNum(rec, 'percent');
+    return new FqWatchHistoryRecord(
+      id,
+      kind,
+      fqStr(rec, 'title'),
+      fqStr(rec, 'cover'),
+      fqStr(rec, 'episodeId'),
+      episodeIndex >= 0 ? episodeIndex : -1,
+      Math.max(0, fqNum(rec, 'position')),
+      Math.max(0, fqNum(rec, 'duration')),
+      percent >= 0 && percent <= 100 ? Math.trunc(percent) : -1,
+      Math.max(0, fqNum(rec, 'updatedAt')),
+    );
   }
 }
 

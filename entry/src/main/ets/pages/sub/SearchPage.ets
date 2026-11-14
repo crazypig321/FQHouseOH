@@ -13,7 +13,7 @@ import { FqHotSearchEntry, FqMediaItem, FqSearchTab } from '../../model/FqModels
 import { fqMediaIdFromSearch } from '../../core/FqParser';
 import { FqMediaDataSource } from '../../core/FqMediaDataSource';
 import { FqItemCard } from '../../view/FqItemCard';
-import { DetailNavParams, fqPushBookOrDetail, ROUTE_DETAIL } from '../../model/FqNavModels';
+import { DetailNavParams, fqPushBookOrDetail, ROUTE_DETAIL, SearchNavParams } from '../../model/FqNavModels';
 import { FqShuqiBook, fqIsShuqiItem, fqShuqiIdFromSearch } from '../../model/FqShuqiModels';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { CommonSearch, CommonLoading } from '../../view/CommonCom';
@@ -106,6 +106,12 @@ export struct SearchPage {
       },
       height: FQ_SEARCH_BOTTOM_BUILDER_HEIGHT,
     });
+    // 短剧页搜索入口带入的初始类目（消费后复位；fqapp 按频道语境搜）
+    if (SearchNavParams.initialCategoryIndex >= 0
+      && SearchNavParams.initialCategoryIndex < FQ_SEARCH_CATEGORIES.length) {
+      this.categoryIndex = SearchNavParams.initialCategoryIndex;
+    }
+    SearchNavParams.initialCategoryIndex = -1;
     this.initHistory();
     this.loadHotSearch();
   }

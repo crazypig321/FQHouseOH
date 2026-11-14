@@ -137,6 +137,12 @@ export class PlayerNavParams {
   static previewNoSave: boolean = false;
 }
 
+/** 搜索页跳转参数（短剧页搜索入口带频道语境：漫剧频道搜漫剧，其余搜短剧）。 */
+export class SearchNavParams {
+  /** 初始类目下标（FQ_SEARCH_CATEGORIES 序；-1 未指定走默认「综合」）。 */
+  static initialCategoryIndex: number = -1;
+}
+
 /** 听视频页跳转参数（播放页「听视频」进入；退出结果由播放页 onShown 消费）。 */
 export class ListenVideoNavParams {
   /** 剧集内容 id（已看/续播持久化键，与播放页同键）。 */

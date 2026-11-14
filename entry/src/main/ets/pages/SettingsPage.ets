@@ -443,7 +443,7 @@ export struct SettingsPage {
   private AboutEntryRow() {
     Row({ space: 12 }) {
       Stack() {
-        SymbolGlyph($r('sys.symbol.person_fill'))
+        SymbolGlyph($r('sys.symbol.info_circle'))
           .fontSize(17)
           .fontColor(['#FF8B5CF6'])
       }

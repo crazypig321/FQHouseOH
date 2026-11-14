@@ -13,7 +13,7 @@ import { FqShelfItem, FqShelfStore } from './FqShelfStore';
 import { FqShelfGroup, FqShelfGroupStore } from './FqShelfGroupStore';
 import { FqBrowseItem, FqBrowseStore } from './FqBrowseStore';
 import { FqListenRecord, FqAudioHistory } from './FqAudioHistory';
-import { FqWatchedMergeOutcome, FqWatchedProgress, FqWatchedStore } from './FqWatchedStore';
+import { FqWatchedMergeOutcome, FqWatchedProgress, FqWatchedStore, FqWatchHistoryRecord } from './FqWatchedStore';
 import { FqReaderProgress, FqReaderSettings, FqReaderStore,
 fqDecodeReadRanges, fqEncodeReadRanges, fqNormalizeThemeFontColor, fqNormalizeDialogueColor } from './FqReaderStore';
 import { FqAppSettingsStore, FQ_DRAMA_AUTO_CACHE_AHEAD_MAX,
@@ -299,8 +299,8 @@ export class FqBackupAppSettings {
   readonly themeColor: string;
   readonly themeCustomColor: string;
   readonly backgroundAudio: boolean;
-  /** 启动默认展示页（主 Tab 下标 0-3；旧备份缺省 -1，恢复时跳过不重置本机）。 */
-  readonly startupTabIndex: number;
+  /** 启动默认展示页（主 Tab 下标 0-4 = 首页/短剧/书架/我的/设置；旧备份缺省 -1，恢复时跳过不重置本机）。 */
+  readonly startupTabIndexV2: number;
   /** 首页样式（0 今日焦点 / 1 排行榜 / 2 共存；旧备份缺省 -1，恢复时跳过不重置本机）。 */
   readonly homeStyle: number;
   readonly readerFontSize: number;
@@ -332,7 +332,7 @@ export class FqBackupAppSettings {
     readerVolumeKeyPaging: boolean,
     readerCustomThemes: FqBackupCustomTheme[], readerCustomThemeId: string,
     playback: FqBackupPlaybackSettings | null = null,
-    startupTabIndex: number = -1,
+    startupTabIndexV2: number = -1,
     homeStyle: number = -1,
     readerDialogueHighlightColor: string | null = null,
     readerCustomDialogueColors: string[] | null = null,
@@ -341,7 +341,7 @@ export class FqBackupAppSettings {
     this.themeColor = themeColor;
     this.themeCustomColor = themeCustomColor;
     this.backgroundAudio = backgroundAudio;
-    this.startupTabIndex = startupTabIndex;
+    this.startupTabIndexV2 = startupTabIndexV2;
     this.homeStyle = homeStyle;
     this.readerFontSize = readerFontSize;
     this.readerLineHeight = readerLineHeight;
@@ -385,11 +385,14 @@ export class FqLibraryBackupData {
   readonly settings: FqBackupAppSettings | null;
   /** 书架分组段（旧备份无此段时为 null，恢复时跳过）。 */
   readonly groups: FqBackupShelfGroup[] | null;
+  /** 短剧观看历史段（旧备份无此段时为 null，恢复时跳过）。 */
+  readonly watchHistory: FqWatchHistoryRecord[] | null;
 
   constructor(createdAt: number, appVersion: string, shelf: FqShelfItem[],
     browse: FqBrowseItem[], listen: FqListenRecord[], watched: FqBackupWatched[],
     reader: FqBackupReaderProgress[], excludedLocalRecords: number,
-    settings: FqBackupAppSettings | null, groups: FqBackupShelfGroup[] | null = null) {
+    settings: FqBackupAppSettings | null, groups: FqBackupShelfGroup[] | null = null,
+    watchHistory: FqWatchHistoryRecord[] | null = null) {
     this.createdAt = createdAt;
     this.appVersion = appVersion;
     this.shelf = shelf;
@@ -400,6 +403,7 @@ export class FqLibraryBackupData {
     this.excludedLocalRecords = excludedLocalRecords;
     this.settings = settings;
     this.groups = groups;
+    this.watchHistory = watchHistory;
   }
 
   /** 已看集总数（预览统计用）。 */
@@ -591,6 +595,18 @@ export class FqLibraryBackup {
       readerSettings.dialogueHighlightColor,
       readerSettings.customDialogueColors,
       FqAppSettingsStore.getMineSettingsStyle());
+    // 短剧观看历史段（短剧页「最近」频道）：local_ 排除，封面可移植化
+    const watchHistory: FqWatchHistoryRecord[] = [];
+    for (const record of FqWatchedStore.historyAll()) {
+      if (record.id.startsWith('local_')) {
+        excluded++;
+        continue;
+      }
+      fqBackupCheckId(record.id);
+      watchHistory.push(new FqWatchHistoryRecord(record.id, record.kind, record.title,
+        fqBackupPortableCover(record.cover), record.episodeId, record.episodeIndex,
+        record.position, record.duration, record.percent, record.updatedAt));
+    }
     // 书架分组段：分组 + 组内作品（仅书架内可移植书；local_ 与不在书架的书排除）
     const shelfIdSet: Set<string> = new Set<string>();
     for (const item of shelf) {
@@ -607,7 +623,7 @@ export class FqLibraryBackup {
       groups.push(new FqBackupShelfGroup(group.name, books));
     }
     return new FqLibraryBackupData(Date.now(), FqLibraryBackup.appVersion(),
-      shelf, browse, listen, watched, reader, excluded, settings, groups);
+      shelf, browse, listen, watched, reader, excluded, settings, groups, watchHistory);
   }
 
   /** 序列化为备份 JSON 文本（体积超限抛错）。 */
@@ -677,6 +693,27 @@ export class FqLibraryBackup {
       watched.push(rec);
     }
     root['watched'] = watched;
+    // 短剧观看历史段（旧备份无此段）
+    if (data.watchHistory !== null) {
+      const watchHistory: Object[] = [];
+      for (const record of data.watchHistory) {
+        const rec: Record<string, Object> = {};
+        rec['id'] = record.id;
+        rec['kind'] = record.kind;
+        rec['title'] = record.title;
+        rec['cover'] = record.cover;
+        rec['episodeId'] = record.episodeId;
+        rec['episodeIndex'] = record.episodeIndex;
+        rec['position'] = record.position;
+        rec['duration'] = record.duration;
+        if (record.percent >= 0) {
+          rec['percent'] = record.percent;
+        }
+        rec['updatedAt'] = record.updatedAt;
+        watchHistory.push(rec);
+      }
+      root['watchHistory'] = watchHistory;
+    }
     const reader: Object[] = [];
     for (const entry of data.reader) {
       const rec: Record<string, Object> = {};
@@ -714,7 +751,7 @@ export class FqLibraryBackup {
       settings['themeColor'] = data.settings.themeColor;
       settings['themeCustomColor'] = data.settings.themeCustomColor;
       settings['backgroundAudio'] = data.settings.backgroundAudio;
-      settings['startupTabIndex'] = data.settings.startupTabIndex;
+      settings['startupTabIndexV2'] = data.settings.startupTabIndexV2;
       settings['homeStyle'] = data.settings.homeStyle;
       settings['readerFontSize'] = data.settings.readerFontSize;
       settings['readerLineHeight'] = data.settings.readerLineHeight;
@@ -916,6 +953,38 @@ export class FqLibraryBackup {
       }
       watched.push(new FqBackupWatched(seriesId, episodes, progress));
     }
+    // 短剧观看历史段（旧备份无此段 → null，恢复时跳过）
+    let watchHistory: FqWatchHistoryRecord[] | null = null;
+    if (root['watchHistory'] !== undefined) {
+      watchHistory = [];
+      const watchHistoryIds: Set<string> = new Set<string>();
+      for (const value of fqBackupCheckList(root['watchHistory'])) {
+        const rec: Record<string, Object> | null = fqAsRecord(value);
+        if (rec === null) {
+          throw new Error('备份观看历史格式无效');
+        }
+        const id: string = fqBackupCheckId(fqStr(rec, 'id'));
+        if (watchHistoryIds.has(id)) {
+          throw new Error('备份中有重复的观看历史');
+        }
+        watchHistoryIds.add(id);
+        const kindRaw: string = fqStr(rec, 'kind');
+        if (kindRaw !== 'video' && kindRaw !== 'manju') {
+          throw new Error('备份观看历史类型无效');
+        }
+        watchHistory.push(new FqWatchHistoryRecord(
+          id,
+          kindRaw,
+          fqBackupCheckText(rec, 'title'),
+          fqBackupPortableCover(fqBackupCheckText(rec, 'cover')),
+          fqStr(rec, 'episodeId'),
+          fqBackupCheckRange(rec, 'episodeIndex', -1, 2147483647),
+          fqBackupCheckNumber(rec, 'position', 1e12),
+          fqBackupCheckNumber(rec, 'duration', 1e12),
+          fqBackupDecodePercent(rec),
+          fqBackupCheckInt(rec, 'updatedAt', FQ_BACKUP_MAX_TIME)));
+      }
+    }
     const reader: FqBackupReaderProgress[] = [];
     const readerIds: Set<string> = new Set<string>();
     for (const value of fqBackupCheckList(root['reader'])) {
@@ -1000,9 +1069,15 @@ export class FqLibraryBackup {
       if (!FQ_BACKUP_HEX_COLOR.test(themeCustomColor)) {
         throw new Error('备份字段 themeCustomColor 无效');
       }
-      // 启动默认展示页（旧备份缺省 -1：恢复时跳过，不重置本机设置）
-      const startupTabIndex: number = settingsRec['startupTabIndex'] === undefined ? -1
-        : fqBackupCheckRange(settingsRec, 'startupTabIndex', 0, 3);
+      // 启动默认展示页（短剧 Tab 插入后换 V2 字段：0-4；旧备份缺省 -1：恢复时跳过，
+      // 不重置本机设置。旧字段 startupTabIndex（0-3）重映射 0→0/1→2/2→3/3→4 后并入）
+      let startupTabIndexV2: number = settingsRec['startupTabIndexV2'] === undefined ? -1
+        : fqBackupCheckRange(settingsRec, 'startupTabIndexV2', 0, 4);
+      const legacyStartupTab: Object | undefined = settingsRec['startupTabIndex'];
+      if (startupTabIndexV2 < 0 && legacyStartupTab !== undefined) {
+        const legacy: number = fqBackupCheckRange(settingsRec, 'startupTabIndex', 0, 3);
+        startupTabIndexV2 = legacy === 0 ? 0 : legacy + 1;
+      }
       // 首页样式（旧备份缺省 -1：恢复时跳过，不重置本机设置）
       const homeStyle: number = settingsRec['homeStyle'] === undefined ? -1
         : fqBackupCheckRange(settingsRec, 'homeStyle', 0, 2);
@@ -1242,14 +1317,14 @@ export class FqLibraryBackup {
         customThemes,
         customThemeId,
         playback,
-        startupTabIndex,
+        startupTabIndexV2,
         homeStyle,
         readerDialogueHighlightColor,
         readerCustomDialogueColors,
         mineSettingsStyle);
     }
     return new FqLibraryBackupData(createdAt, appVersion, shelf, browse, listen,
-      watched, reader, excluded, settings, groups);
+      watched, reader, excluded, settings, groups, watchHistory);
   }
 
   /** 合并恢复到本机（只补缺失，绝不覆盖本机已有记录）。 */
@@ -1271,6 +1346,10 @@ export class FqLibraryBackup {
       if (outcome.progressWritten) {
         progressAdded++;
       }
+    }
+    // 短剧观看历史段（旧备份无此段跳过）：只补本机缺失的剧
+    if (data.watchHistory !== null) {
+      FqWatchedStore.mergeHistory(data.watchHistory);
     }
     let readerAdded: number = 0;
     for (const entry of data.reader) {
@@ -1323,8 +1402,8 @@ export class FqLibraryBackup {
       FqAppSettingsStore.setThemeColor(settings.themeColor);
       FqAppSettingsStore.setBackgroundAudio(settings.backgroundAudio);
       // 启动默认展示页（旧备份无此字段跳过，不重置本机已有设置）
-      if (settings.startupTabIndex >= 0) {
-        FqAppSettingsStore.setStartupTabIndex(settings.startupTabIndex);
+      if (settings.startupTabIndexV2 >= 0) {
+        FqAppSettingsStore.setStartupTabIndex(settings.startupTabIndexV2);
       }
       // 首页样式（旧备份无此字段跳过，不重置本机已有设置）
       if (settings.homeStyle >= 0) {
