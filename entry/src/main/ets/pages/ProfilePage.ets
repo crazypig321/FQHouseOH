@@ -1,6 +1,6 @@
 /**
  * 「我的」Tab 页（对齐 fqapp MinePage + StatsPage）：
- * - 书友卡片 + 快捷入口（章节缓存/剧集缓存/应用设置/关于我们）；
+ * - 书友卡片 + 快捷入口（缓存管理/备份恢复/应用设置/关于我们，「我的含设置入口」样式显示）；
  * - 阅读与视听统计：概览、16 周热力图、最近阅读、每日记录、最近封面、
  *   阅读排行（「查看全部」半模态 sheet）。
  * 数据源：FqReadStatsStore（全局日累计 + 按书日累计）+ FqBrowseStore（浏览历史）。
@@ -14,8 +14,8 @@ import {
   fqPushBookOrDetail,
   DetailNavParams,
   ROUTE_ABOUT,
-  ROUTE_CACHED_BOOKS,
-  ROUTE_CACHED_DRAMAS,
+  ROUTE_BACKUP,
+  ROUTE_CACHE_MANAGE,
   ROUTE_DETAIL,
   ROUTE_SETTINGS,
 } from '../model/FqNavModels';
@@ -29,7 +29,6 @@ import { appState } from '../entryability/AppState';
 import {
   FQ_MINE_STYLE_MINE_WITH_SETTINGS,
   FQ_MINE_STYLE_SETTINGS_WITH_MINE,
-  FQ_MINE_STYLE_SEPARATE,
 } from '../core/FqAppSettingsStore';
 
 const FQ_DAY_MS: number = 86400000;
@@ -455,8 +454,8 @@ export struct ProfilePage {
         Scroll(this.scroller) {
           Column({ space: 12 }) {
             this.ProfileCard()
-            // 「我的和设置单独显示」样式：设置独立成 Tab，快捷入口与设置页重复，不显示
-            if (appState.mineSettingsStyle !== FQ_MINE_STYLE_SEPARATE) {
+            // 仅「我的含设置入口」样式显示快捷入口：其余样式入口与设置页重复，不显示
+            if (appState.mineSettingsStyle === FQ_MINE_STYLE_MINE_WITH_SETTINGS) {
               this.ShortcutsRow()
             }
             this.SectionHeader('阅读与视听统计')
@@ -534,15 +533,15 @@ export struct ProfilePage {
     .width('100%')
   }
 
-  /** 快捷入口四宫格。 */
+  /** 快捷入口四宫格（「我的含设置入口」样式）。 */
   @Builder
   private ShortcutsRow() {
     Row({ space: 9 }) {
-      this.ShortcutTile($r('sys.symbol.book'), '#FF3B82F6', '章节缓存', (): void => {
-        NavPathUtils.push(ROUTE_CACHED_BOOKS);
+      this.ShortcutTile($r('sys.symbol.externaldrive'), '#FF3B82F6', '缓存管理', (): void => {
+        NavPathUtils.push(ROUTE_CACHE_MANAGE);
       })
-      this.ShortcutTile($r('sys.symbol.film'), '#FFEF5038', '剧集缓存', (): void => {
-        NavPathUtils.push(ROUTE_CACHED_DRAMAS);
+      this.ShortcutTile($r('sys.symbol.archivebox'), '#FFEF5038', '备份恢复', (): void => {
+        NavPathUtils.push(ROUTE_BACKUP);
       })
       this.ShortcutTile($r('sys.symbol.textformat'), '#FF10B981', '应用设置', (): void => {
         this.openSettingsTab();

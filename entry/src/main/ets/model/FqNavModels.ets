@@ -344,7 +344,7 @@ export function FqTitleBarOptions(mainTitle: ResourceStr, showSearch: boolean,
   if (onSettings !== undefined) {
     menus.push({
       content: {
-        icon: $r('sys.symbol.gearshape_fill'),
+        icon: $r('sys.symbol.gearshape'),
         label: '设置',
         action: onSettings,
       },
