@@ -16,11 +16,13 @@
 
 import { FqBackend, FqRequestError, fqErrorMessage } from './FqBackend';
 import { FqLog } from './FqLogStore';
-import { FqHomePage, FqMediaItem, FqSearchTab } from '../model/FqModels';
+import { FqHomePage, FqHongguoGridPage, FqMediaItem, FqSearchTab } from '../model/FqModels';
 
 export const FQ_SOURCE_HOMEPAGE: number = 0;
 export const FQ_SOURCE_SEARCH: number = 1;
 export const FQ_SOURCE_SEARCH_PAGED: number = 2;
+/** 红果原生 catalog 源（query 字段承载 category，page 字段翻页）。 */
+export const FQ_SOURCE_HONGGUO_CATALOG: number = 3;
 
 /**
  * 走官方第二段（series-feed/cell/change）分页的 homepage 频道（fqapp
@@ -93,6 +95,15 @@ export class FqHomeSource {
   /** 纯旧版页码搜索源（首页频道分类模式：分类关键词直搜，无推荐阶段）。 */
   public static pagedSearch(query: string, forcedKind: string): FqHomeSource {
     return new FqHomeSource(FQ_SOURCE_SEARCH_PAGED, 0, query, forcedKind, -1, '', 0);
+  }
+
+  /** 红果原生 catalog 源（短剧页看剧/漫剧网格频道）：query 承载红果
+   * category（short_play/comic_series），page 递增 + hasMore 翻页；
+   * 红果失败/熔断时同一次调用内转入 fallbackMode 番茄兜底链路。 */
+  public static hongguoCatalog(category: string, forcedKind: string,
+    fallbackMode: number, fallbackQuery: string, fallbackTabType: number): FqHomeSource {
+    return new FqHomeSource(FQ_SOURCE_HONGGUO_CATALOG, 0, category, forcedKind,
+      fallbackMode, fallbackQuery, fallbackTabType);
   }
 
   /** 回到初始阶段（loadFirst/restore 前调用）。 */
@@ -255,6 +266,18 @@ export class FqHomeFeed {
   }
 
   private async loadSource(source: FqHomeSource): Promise<FqMediaItem[]> {
+    if (source.mode === FQ_SOURCE_HONGGUO_CATALOG) {
+      try {
+        return await this.loadHongguoCatalogStage(source);
+      } catch (error) {
+        if (source.fallbackMode < 0) {
+          throw new FqRequestError(fqErrorMessage(error), 0);
+        }
+        // 红果失败/熔断：同一次调用内转入番茄兜底（fqapp 推荐故障 fall through 语义）。
+        FqLog.w('home', `红果源请求失败，转入番茄兜底(${source.fallbackQuery}): ${fqErrorMessage(error)}`);
+        this.enterFallback(source);
+      }
+    }
     if (source.mode === FQ_SOURCE_HOMEPAGE) {
       let items: FqMediaItem[] = [];
       let failed: boolean = false;
@@ -351,6 +374,17 @@ export class FqHomeFeed {
   }
 
   /** 旧版 /api/search 页码阶段：hasMore = 本页有匹配条目（fqapp `_searchProgress` 非 漫画/漫剧 分支）。 */
+  /** 红果 catalog 阶段：page 递增 + hasMore 翻页（FqBackend.hongguoGridPage
+   *  内置健康熔断：熔断期请求直接抛错，由 loadSource 转入番茄兜底）。 */
+  private async loadHongguoCatalogStage(source: FqHomeSource): Promise<FqMediaItem[]> {
+    const backend: FqBackend = FqBackend.get();
+    const page: FqHongguoGridPage =
+      await backend.hongguoGridPage(source.query, source.page, source.forcedKind);
+    source.hasMore = page.hasMore;
+    source.page += 1;
+    return page.items;
+  }
+
   private async loadPagedStage(source: FqHomeSource): Promise<FqMediaItem[]> {
     const backend: FqBackend = FqBackend.get();
     const tabs: FqSearchTab[] = await backend.searchTabsPaged(source.query, source.page);

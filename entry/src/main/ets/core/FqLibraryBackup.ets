@@ -272,11 +272,14 @@ export class FqBackupPlaybackSettings {
   readonly pipVideo: boolean;
   readonly ttsPerson: number;
   readonly ttsRate: number;
+  /** 仅番茄源播放（null = 旧备份缺省，恢复时跳过不重置本机）。 */
+  readonly videoFanqieOnly: boolean | null;
 
   constructor(danmakuAlphaPercent: number, danmakuSpeedTier: number, danmakuLineCount: number,
     danmakuLineSpaceTier: number, danmakuSizeTier: number, danmakuBgTransparent: boolean,
     videoHwdec: boolean, videoQualityPref: string | null, dramaAutoCacheAhead: number,
-    dramaAutoCacheWifiOnly: boolean, pipVideo: boolean, ttsPerson: number, ttsRate: number) {
+    dramaAutoCacheWifiOnly: boolean, pipVideo: boolean, ttsPerson: number, ttsRate: number,
+    videoFanqieOnly: boolean | null = null) {
     this.danmakuAlphaPercent = danmakuAlphaPercent;
     this.danmakuSpeedTier = danmakuSpeedTier;
     this.danmakuLineCount = danmakuLineCount;
@@ -290,6 +293,7 @@ export class FqBackupPlaybackSettings {
     this.pipVideo = pipVideo;
     this.ttsPerson = ttsPerson;
     this.ttsRate = ttsRate;
+    this.videoFanqieOnly = videoFanqieOnly;
   }
 }
 
@@ -577,7 +581,8 @@ export class FqLibraryBackup {
       FqAppSettingsStore.isDramaAutoCacheWifiOnly(),
       FqAppSettingsStore.isPipVideoEnabled(),
       FqAppSettingsStore.getTtsPerson(),
-      FqAppSettingsStore.getTtsRate());
+      FqAppSettingsStore.getTtsRate(),
+      FqAppSettingsStore.getVideoFanqieOnly());
     const settings: FqBackupAppSettings = new FqBackupAppSettings(
       FqAppSettingsStore.getThemeMode(),
       FqAppSettingsStore.getThemeColor(),
@@ -821,6 +826,7 @@ export class FqLibraryBackup {
         playback['pipVideo'] = data.settings.playback.pipVideo;
         playback['ttsPerson'] = data.settings.playback.ttsPerson;
         playback['ttsRate'] = data.settings.playback.ttsRate;
+        playback['videoFanqieOnly'] = data.settings.playback.videoFanqieOnly === true;
         settings['playback'] = playback;
       }
       root['settings'] = settings;
@@ -1296,6 +1302,9 @@ export class FqLibraryBackup {
           }
           pbQualityPref = pbQuality;
         }
+        // 仅番茄源播放（旧备份无此字段为 null，恢复时跳过不重置本机已有设置）
+        const pbFanqieOnly: boolean | null = pbRec['videoFanqieOnly'] === undefined ? null
+          : fqBackupCheckBool(pbRec, 'videoFanqieOnly');
         playback = new FqBackupPlaybackSettings(pbAlpha, pbSpeed, pbLines, pbSpace, pbSize,
           fqBackupCheckBool(pbRec, 'danmakuBgTransparent'),
           fqBackupCheckBool(pbRec, 'videoHwdec'),
@@ -1304,7 +1313,8 @@ export class FqLibraryBackup {
           fqBackupCheckBool(pbRec, 'dramaAutoCacheWifiOnly'),
           fqBackupCheckBool(pbRec, 'pipVideo'),
           fqBackupCheckInt(pbRec, 'ttsPerson', 2147483647),
-          pbTtsRate);
+          pbTtsRate,
+          pbFanqieOnly);
       }
       // 旧备份（v1/v2）主题档位迁移：2=夜间→3，3=自定义→4；v3 备份已是新档位。
       let readerThemeIndex: number =
@@ -1441,6 +1451,10 @@ export class FqLibraryBackup {
         FqAppSettingsStore.setPipVideoEnabled(playback.pipVideo);
         FqAppSettingsStore.setTtsPerson(playback.ttsPerson);
         FqAppSettingsStore.setTtsRate(playback.ttsRate);
+        // 仅番茄源播放（旧备份无此字段为 null，跳过不重置本机已有设置）
+        if (playback.videoFanqieOnly !== null) {
+          FqAppSettingsStore.setVideoFanqieOnly(playback.videoFanqieOnly);
+        }
         playbackApplied = true;
       }
       FqReaderStore.saveSettings(settings.readerFontSize, settings.readerLineHeight,

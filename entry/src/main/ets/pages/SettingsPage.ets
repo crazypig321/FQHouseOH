@@ -46,6 +46,7 @@ const FQ_THEME_COLOR_ANCHOR_ID: string = 'settings_theme_color_anchor';
 const FQ_STARTUP_TAB_ANCHOR_ID: string = 'settings_startup_tab_anchor';
 const FQ_HOME_STYLE_ANCHOR_ID: string = 'settings_home_style_anchor';
 const FQ_MINE_STYLE_ANCHOR_ID: string = 'settings_mine_style_anchor';
+const FQ_VIDEO_SOURCE_ANCHOR_ID: string = 'settings_video_source_anchor';
 /** 行内分割线左右避让：左侧行 padding 14 + 图标块 34 + 间距 12，右侧对称一致。 */
 const FQ_ROW_DIVIDER_INSET: number = 60;
 /** 深色模式档位文案（下标即档位值）。 */
@@ -54,6 +55,8 @@ const FQ_THEME_LABELS: string[] = ['跟随系统', '浅色', '深色'];
 const FQ_HOME_STYLE_LABELS: string[] = ['今日焦点', '排行榜', '今日焦点和排行榜共存'];
 /** 我的、设置页面显示样式档位文案（下标即档位值）。 */
 const FQ_MINE_STYLE_LABELS: string[] = ['我的含设置入口', '设置含我的入口', '我的和设置单独显示'];
+/** 视频播放源档位文案（false 自动切换 = 智能选源异常回退；true 默认源 = 固定单一链路）。 */
+const FQ_VIDEO_SOURCE_LABELS: string[] = ['自动切换', '默认源'];
 
 @Builder
 function fqSettingsEmptyContent() {
@@ -83,6 +86,7 @@ export struct SettingsPage {
   @Local themeMode: number = FQ_THEME_FOLLOW;
   @Local backgroundAudio: boolean = true;
   @Local pipVideo: boolean = false;
+  @Local fanqieOnly: boolean = false;
   @Local startupTab: number = 0;
   @Local homeStyle: number = FQ_HOME_STYLE_SPOTLIGHT;
   @Local mineSettingsStyle: number = FQ_MINE_STYLE_SEPARATE;
@@ -91,6 +95,7 @@ export struct SettingsPage {
     this.themeMode = FqAppSettingsStore.getThemeMode();
     this.backgroundAudio = FqAppSettingsStore.isBackgroundAudio();
     this.pipVideo = FqAppSettingsStore.isPipVideoEnabled();
+    this.fanqieOnly = FqAppSettingsStore.getVideoFanqieOnly();
     this.startupTab = FqAppSettingsStore.getStartupTabIndex();
     this.homeStyle = FqAppSettingsStore.getHomeStyle();
     this.mineSettingsStyle = FqAppSettingsStore.getMineSettingsStyle();
@@ -147,6 +152,8 @@ export struct SettingsPage {
             this.BackgroundAudioRow()
             this.RowDivider()
             this.PipVideoRow()
+            this.RowDivider()
+            this.VideoSourceRow()
             this.RowDivider()
             this.SettingRow($r('sys.symbol.waveform_headphones'), '#FF8B5CF6', '离线朗读',
               '朗读音色下载与语速设置', '', true,
@@ -894,7 +901,7 @@ export struct SettingsPage {
   private PipVideoRow() {
     Row({ space: 12 }) {
       Stack() {
-        SymbolGlyph($r('sys.symbol.film'))
+        SymbolGlyph($r('sys.symbol.rectangle_portrait_filled_on_rectangle_portrait'))
           .fontSize(17)
           .fontColor(['#FF06B6D4'])
       }
@@ -924,6 +931,67 @@ export struct SettingsPage {
     }
     .padding({ left: 14, right: 14, top: 11, bottom: 11 })
     .width('100%')
+  }
+
+  /** 视频播放源行（锚点 FqMenu：自动切换 = 智能选源、异常自动回退；默认源 = 固定单一链路）。 */
+  @Builder
+  private VideoSourceRow() {
+    Row({ space: 12 }) {
+      Stack() {
+        SymbolGlyph($r('sys.symbol.resolution_video'))
+          .fontSize(17)
+          .fontColor(['#FF0EA5E9'])
+      }
+      .width(34)
+      .height(34)
+      .borderRadius(10)
+      .backgroundColor(FqColorUtils.withOpacity('#FF0EA5E9', 0.12))
+
+      Column({ space: 3 }) {
+        Text('视频播放源')
+          .fontSize(14.5)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('sys.color.font_primary'))
+        Text('短剧/漫剧播放与缓存走哪种源播放形式')
+          .fontSize(11.5)
+          .fontColor($r('sys.color.font_secondary'))
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+
+      Text(FQ_VIDEO_SOURCE_LABELS[this.fanqieOnly ? 1 : 0])
+        .fontSize(12.5)
+        .fontColor($r('sys.color.font_secondary'))
+      SymbolGlyph($r('sys.symbol.chevron_right'))
+        .fontSize(13)
+        .fontColor([$r('sys.color.font_tertiary')])
+    }
+    .id(FQ_VIDEO_SOURCE_ANCHOR_ID)
+    .padding({ left: 14, right: 14, top: 11, bottom: 11 })
+    .width('100%')
+    .onClick((): void => {
+      this.openVideoSourceMenu();
+    })
+  }
+
+  /** 视频播放源菜单：自动切换/默认源 两选项（当前档尾勾，点击即时生效）。 */
+  private openVideoSourceMenu(): void {
+    const items: FqMenuItem[] = [];
+    const options: boolean[] = [false, true];
+    for (const option of options) {
+      const item: FqMenuItem = new FqMenuItem();
+      item.label = FQ_VIDEO_SOURCE_LABELS[option ? 1 : 0];
+      if (option === this.fanqieOnly) {
+        item.endIcon = $r('sys.symbol.checkmark');
+      }
+      const picked: boolean = option;
+      item.onAction = (): void => {
+        this.fanqieOnly = picked;
+        FqAppSettingsStore.setVideoFanqieOnly(picked);
+      };
+      items.push(item);
+    }
+    FqMenu.open(this.getUIContext(), FQ_VIDEO_SOURCE_ANCHOR_ID, items);
   }
 
   /** 页面内统一 toast。 */

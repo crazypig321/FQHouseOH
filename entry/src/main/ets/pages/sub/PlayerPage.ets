@@ -92,8 +92,9 @@ import { FqPlayerSettingsSheet } from '../../view/player/FqPlayerSettingsSheet';
 import { FqPlayerSettingsPanel } from '../../view/player/FqPlayerSettingsPanel';
 import { FqDanmakuSettingsPanel } from '../../view/player/FqDanmakuSettingsPanel';
 import { fqPushBookOrDetail, PlayerNavParams, ListenVideoNavParams, ROUTE_LISTEN_VIDEO, ROUTE_CACHED_DRAMAS, DetailNavParams, ROUTE_DETAIL } from '../../model/FqNavModels';
-import { FqBookCommentPage, FqChapter, FqCommentReplyPage, FqDanmaku, FqDanmakuPage, FqEpisodeCommentPage, FqEpisodeSource, FqEpisodeVariant, FqHongguoMap, FqSeriesRelateBook, FqRelatedSeries, fqKindToTab, FqCacheTaskView } from '../../model/FqModels';
-import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
+import { FqBookCommentPage, FqChapter, FqCommentReplyPage, FqDanmaku, FqDanmakuPage, FqEpisodeCommentPage, FqEpisodeSource, FqEpisodeVariant, FqHongguoChapters, FqHongguoMap, FqSeriesRelateBook, FqRelatedSeries, fqKindToTab, FqCacheTaskView } from '../../model/FqModels';
+import { FqBackend, FqRequestError, fqErrorMessage } from '../../core/FqBackend';
+import { fqHongguoQualityHeight } from '../../core/FqParser';
 import { fqAudioSession } from '../../core/FqAudioSession';
 import { FqVideoMedia } from '../../core/FqVideoMedia';
 import {
@@ -196,6 +197,8 @@ const FQ_CACHE_PAGE_SIZE: number = 30;
 
 /** 红果弹幕源连续失败上限（达到后整场回退番茄源，避免每次请求都白等超时）。 */
 const FQ_HONGGUO_MAX_FAILS: number = 2;
+/** 红果取流连续降级集数上限（达到后本场播放不再尝试红果取流，直接走番茄）。 */
+const FQ_HONGGUO_STREAM_FALLBACK_MAX: number = 3;
 /** 预热下一集提前量（秒；fqapp player_page_preload _warmLead = 30s）。 */
 const FQ_WARM_LEAD_SEC: number = 30;
 /** PC 右侧详情侧边栏宽（对齐 fqapp 桌面停靠目录 304 一档，取本项目圆整）。 */
@@ -390,6 +393,12 @@ export struct PlayerPage {
   private hongguoMapToken: number = 0;
   /** 红果弹幕连续失败计数（达到上限整场弃用红果源，回退番茄）。 */
   private hongguoFailCount: number = 0;
+  /** 红果原生会话（目录取自红果 detail）：取流同源贯穿走 hongguoEpisodeSource。 */
+  private hongguoSession: boolean = false;
+  /** 红果会话原始章节串（集序号 → detail 原始 chapter JSON，红果取流必带参数）。 */
+  private hongguoRawChapters: Map<number, string> = new Map();
+  /** 红果取流连续降级集数（本集降级番茄 +1、红果成功清零；达上限本场不再尝试红果）。 */
+  private hongguoStreamFailCount: number = 0;
   /** 当前集已实际播放（position > 0；切集重置，已看标记 guard）。 */
   private hasDisplayed: boolean = false;
   /** 用户选定的清晰度档名（跨集/跨进页记忆，经 FqAppSettingsStore 持久化；空 = 跟默认最高档）。 */
@@ -1117,11 +1126,37 @@ export struct PlayerPage {
       }
       .constraintSize({ maxWidth: '100%' })
       .onClick((): void => {
-        NavPathUtils.pop();
+        this.openSeriesDetailFromTitle();
       })
     }
     .width('100%')
     .padding({ left: 6, right: 6 })
+  }
+
+  /** 剧名行点击进剧集详情（官方 onOpenSeriesDetail 同语义）：从详情页进来的
+   *  原路返回（详情就在栈顶下）；看剧/漫剧/最近/收藏网格直进播放页等场景
+   *  改推入本剧详情页（先暂停并保存进度，返回播放页保持暂停由用户手动续播）。 */
+  private openSeriesDetailFromTitle(): void {
+    if (PlayerNavParams.contentId.length === 0) {
+      NavPathUtils.pop();
+      return;
+    }
+    const names: string[] = appState.pageInfos.getAllPathName();
+    if (names.length >= 2 && names[names.length - 2] === ROUTE_DETAIL
+      && DetailNavParams.id === PlayerNavParams.contentId) {
+      NavPathUtils.pop();
+      return;
+    }
+    if (this.fullScreen) {
+      this.exitFullscreen();
+    }
+    this.player.pause();
+    this.saveCurrentProgress();
+    DetailNavParams.id = PlayerNavParams.contentId;
+    DetailNavParams.kind = PlayerNavParams.kind;
+    DetailNavParams.title = this.title;
+    DetailNavParams.cover = PlayerNavParams.cover;
+    NavPathUtils.push(ROUTE_DETAIL);
   }
 
   /**
@@ -1961,7 +1996,7 @@ export struct PlayerPage {
       if (episode !== undefined && itemIds.includes(episode.itemId)) {
         this.dl.enqueue(PlayerNavParams.contentId, episode.itemId, episode.title,
           this.title, PlayerNavParams.cover, PlayerNavParams.kind, i + 1, false,
-          this.qualityPreference);
+          this.qualityPreference, this.hongguoSession ? (this.hongguoRawChapters.get(i) ?? '') : '');
       }
     }
     this.cacheSelectedIds = new Set<string>();
@@ -2181,6 +2216,11 @@ export struct PlayerPage {
    * 续播记录由听视频页退出时写入，这里跳过 loadEpisode 的旧集回写。
    */
   private onNavShown(): void {
+    // 剧集缓存管理页删除后返回：离线缓存 sheet/侧边栏还开着的话同步刷新
+    // 已缓存集合与任务态（删除不会主动通知播放页，不刷新会一直显示已缓存）。
+    if (this.cacheSheetVisible || this.sidePanel === 'cache') {
+      this.refreshCacheSheetState();
+    }
     if (!this.listenReturnPending) {
       return;
     }
@@ -3644,11 +3684,11 @@ export struct PlayerPage {
   private async warmNextEpisode(episode: FqChapter): Promise<void> {
     const itemId: string = episode.itemId;
     const quality: string = this.qualityPreference;
+    const nextIndex: number = this.index + 1;
     this.warmInFlight = true;
     try {
       await FqBackend.get().start(getContext(this));
-      const source: FqEpisodeSource =
-        await FqBackend.get().episodeSource(itemId, this.tab, quality);
+      const source: FqEpisodeSource = await this.fetchEpisodeSource(nextIndex);
       const current: FqChapter | undefined = this.episodes[this.index + 1];
       if (current !== undefined && current.itemId === itemId && this.qualityPreference === quality) {
         this.warmItemId = itemId;
@@ -3908,7 +3948,7 @@ export struct PlayerPage {
     fqPushBookOrDetail(book.id, 'book', book.title, book.cover);
   }
 
-  /** 目录为空时先拉剧集目录（tab 由 kind 映射：短剧/漫剧）。 */
+  /** 目录为空时先拉剧集目录（红果原生优先：id 与番茄互通；失败/熔断回退番茄目录）。 */
   private async loadEpisodes(): Promise<void> {
     const token: number = ++this.loadToken;
     this.loading = true;
@@ -3916,8 +3956,32 @@ export struct PlayerPage {
     try {
       await FqBackend.get().start(getContext(this));
       this.resolveCover();
-      const episodes: FqChapter[] =
-        await FqBackend.get().directoryChapters(PlayerNavParams.contentId, this.tab);
+      let episodes: FqChapter[] = [];
+      this.hongguoSession = false;
+      this.hongguoRawChapters = new Map();
+      this.hongguoStreamFailCount = 0;
+      // 红果原生目录优先（「仅番茄源播放」开启时跳过；同源贯穿：目录与取流同源；
+      // itemId 即红果 vid，与番茄目录集 id 完全一致，已看/续播/弹幕/离线缓存记录跨源通用）
+      if (!FqAppSettingsStore.getVideoFanqieOnly()) {
+        try {
+          const hongguo: FqHongguoChapters =
+            await FqBackend.get().hongguoDramaChapters(PlayerNavParams.contentId, this.title);
+          if (token !== this.loadToken) {
+            return;
+          }
+          this.hongguoSession = true;
+          this.hongguoRawChapters = hongguo.rawByIndex;
+          episodes = hongguo.chapters;
+        } catch (error) {
+          // 红果失败/熔断/剧不在红果：回退番茄目录（会话切番茄源）
+          if (token !== this.loadToken) {
+            return;
+          }
+        }
+      }
+      if (episodes.length === 0) {
+        episodes = await FqBackend.get().directoryChapters(PlayerNavParams.contentId, this.tab);
+      }
       if (token !== this.loadToken) {
         return;
       }
@@ -3941,6 +4005,43 @@ export struct PlayerPage {
       this.loading = false;
       this.errorMsg = fqErrorMessage(error);
     }
+  }
+
+  /** 在线取流一集（同源贯穿 + 单集降级）：红果会话走 hongguoEpisodeSource
+   * （detail 原始章节串 + 清晰度偏好换算短边像素），瞬时失败静默重试一次，
+   * 再失败本集降级番茄取流（集 id 跨源一致，进度/已看/缓存记录不受影响），
+   * 连续降级达上限本场不再尝试红果；番茄会话 / 仅番茄开关走原链路。 */
+  private async fetchEpisodeSource(index: number): Promise<FqEpisodeSource> {
+    const episode: FqChapter | undefined = this.episodes[index];
+    if (episode === undefined) {
+      throw new FqRequestError('暂无剧集', 502);
+    }
+    if (this.hongguoSession && !FqAppSettingsStore.getVideoFanqieOnly()
+      && this.hongguoStreamFailCount < FQ_HONGGUO_STREAM_FALLBACK_MAX) {
+      const chapterJson: string = this.hongguoRawChapters.get(index) ?? '';
+      for (let attempt: number = 0; attempt < 2; attempt++) {
+        try {
+          const source: FqEpisodeSource = await FqBackend.get().hongguoEpisodeSource(
+            PlayerNavParams.contentId, chapterJson, index,
+            fqHongguoQualityHeight(this.qualityPreference), this.title);
+          this.hongguoStreamFailCount = 0;
+          return source;
+        } catch (error) {
+          // 熔断中（503）不重试直接降级；其余失败静默重试一次（间歇性抽风多数可恢复）
+          if (attempt === 0 && !(error instanceof FqRequestError && error.statusCode === 503)) {
+            await new Promise<void>((resolve: () => void): void => {
+              setTimeout(resolve, 600);
+            });
+            continue;
+          }
+          break;
+        }
+      }
+      this.hongguoStreamFailCount++;
+      hilog.warn(0x0001, FQ_AUTO_CACHE_LOG_TAG,
+        'hongguo stream fallback to fanqie, episode %{public}d', index);
+    }
+    return FqBackend.get().episodeSource(episode.itemId, this.tab, this.qualityPreference);
   }
 
   /** 加载并起播一集（/api/content 取流 → mpv open）。 */
@@ -3983,6 +4084,8 @@ export struct PlayerPage {
     }
     try {
       let playUrl: string = '';
+      // CENC 内容密钥（红果 cenc-aes-ctr 流必带；番茄 /src/ 与本地缓存为明文，空串）
+      let playKeyHex: string = '';
       // 清晰度档重置（离线缓存/取流失败回退均按默认流处理）
       this.qualityVariants = [];
       this.qualityIndex = -1;
@@ -4003,11 +4106,10 @@ export struct PlayerPage {
         // 预热命中（fqapp _takeWarm）：免取流直接用预取地址
         let source: FqEpisodeSource | null = this.takeWarmSource(episode.itemId);
         if (source === null) {
-          // quality 携带用户选定档：后端命中 variants 档时按该档取流，
-          // 并以 quality 回显实际起播档（未命中为空 → 默认）
-          source = await FqBackend.get().episodeSource(episode.itemId, this.tab, this.qualityPreference);
+          source = await this.fetchEpisodeSource(index);
         }
         playUrl = source.url;
+        playKeyHex = source.keyHex;
         this.qualityVariants = source.variants;
         if (source.quality.length > 0) {
           for (let i: number = 0; i < source.variants.length; i++) {
@@ -4021,14 +4123,14 @@ export struct PlayerPage {
       if (token !== this.loadToken) {
         return;
       }
-      this.startEpisodePlayback(episode, playUrl, startSec, wasDisplayed, switched, keepListenProgress);
+      this.startEpisodePlayback(episode, playUrl, playKeyHex, startSec, wasDisplayed, switched, keepListenProgress);
     } catch (error) {
       if (token !== this.loadToken) {
         return;
       }
       // 在线取流失败回退离线缓存（联网失败仍可看已缓存集）
       if (FqDramaCacheStore.has(episode.itemId)) {
-        this.startEpisodePlayback(episode, FqDramaCacheStore.filePath(episode.itemId),
+        this.startEpisodePlayback(episode, FqDramaCacheStore.filePath(episode.itemId), '',
           startSec, wasDisplayed, switched, keepListenProgress);
         return;
       }
@@ -4050,22 +4152,22 @@ export struct PlayerPage {
 
   /**
    * 起播公共尾段（在线取流 / 离线缓存命中 / 取流失败回退缓存共用）：
-   * 关听书、mpv open（含续播 start 偏移）、AVSession/后台任务、
-   * 续播记录重置与弹幕整池作废。
+   * 关听书、mpv open（含续播 start 偏移与 CENC decryptionKey）、AVSession/后台任务、
+   * 续播记录重置与弹幕整池作废。keyHex 为空即明文流（番茄 /src/、本地缓存）。
    */
-  private startEpisodePlayback(episode: FqChapter, url: string, startSec: number,
+  private startEpisodePlayback(episode: FqChapter, url: string, keyHex: string, startSec: number,
     wasDisplayed: boolean, switched: boolean, keepListenProgress: boolean): void {
     // surface 未就绪：暂存 Media 延到 onReady 回调补播（loading 保持 true 盖住空窗）；
     // 就绪则立即起播并关 loading
     if (this.surfaceReady) {
       this.loading = false;
       this.player.open(startSec > 0
-        ? new Media(url, { start: startSec })
-        : new Media(url));
+        ? new Media(url, { start: startSec, decryptionKey: keyHex })
+        : new Media(url, { decryptionKey: keyHex }));
     } else {
       this.pendingOpenMedia = startSec > 0
-        ? new Media(url, { start: startSec })
-        : new Media(url);
+        ? new Media(url, { start: startSec, decryptionKey: keyHex })
+        : new Media(url, { decryptionKey: keyHex });
     }
     // 播放视频即停止听书（fqAudioSession 完整关闭链路：进度持久化、
     // 引擎释放、后台任务停止、AVSession 销毁、播控球消失）
@@ -4159,7 +4261,7 @@ export struct PlayerPage {
       if (episode !== undefined) {
         this.dl.enqueue(PlayerNavParams.contentId, episode.itemId, episode.title,
           this.title, PlayerNavParams.cover, PlayerNavParams.kind, i + 1, true,
-          this.qualityPreference);
+          this.qualityPreference, this.hongguoSession ? (this.hongguoRawChapters.get(i) ?? '') : '');
         enqueued++;
       }
     }

@@ -36,6 +36,7 @@ import {
   FqEpisodeSource,
   FqEpisodeVariant,
   FqHomePage,
+  FqHongguoChapters,
   FqHongguoMap,
   FqMediaItem,
   FqRankBoard,
@@ -1974,6 +1975,206 @@ export function fqParseHongguoMap(payload: Record<string, Object>): FqHongguoMap
   const matched: boolean = payload['matched'] === true
     && hongguoSeriesId.length > 0 && vids.length > 0;
   return new FqHongguoMap(matched, hongguoSeriesId, title, vids);
+}
+
+// ---------------------------------------------------------------------------
+// 红果原生内容源（/api/v1/hongguo/native/*，Go libduanju_core 透传）
+// ---------------------------------------------------------------------------
+
+/** 红果条目 id 去 'hongguo:' 前缀：与番茄 series_id 同为纯数字长 ID，下游零感知。 */
+function fqHongguoNumericId(rawId: string): string {
+  const trimmed: string = rawId.trim();
+  const separator: number = trimmed.indexOf(':');
+  return separator >= 0 ? trimmed.substring(separator + 1).trim() : trimmed;
+}
+
+/** 红果剧集清晰度档名（短边像素 → 档名，与番茄 variant_display_name 映射一致）。 */
+function fqHongguoQualityName(height: number): string {
+  if (height <= 0) {
+    return '';
+  }
+  if (height <= 360) {
+    return '360P';
+  }
+  if (height <= 480) {
+    return '480P';
+  }
+  if (height <= 540) {
+    return '540P';
+  }
+  if (height <= 720) {
+    return '720P';
+  }
+  if (height <= 1080) {
+    return '1080P';
+  }
+  if (height <= 1440) {
+    return '2K';
+  }
+  return '4K';
+}
+
+/** 清晰度偏好档名 → media 端点请求用短边像素（无法解析回 0 = 默认最高档）。 */
+export function fqHongguoQualityHeight(name: string): number {
+  const trimmed: string = name.trim();
+  if (trimmed === '2K') {
+    return 1440;
+  }
+  if (trimmed === '4K') {
+    return 2160;
+  }
+  const parsed: number = Number.parseInt(trimmed, 10);
+  if (Number.isNaN(parsed) || parsed <= 0) {
+    return 0;
+  }
+  return parsed;
+}
+
+/**
+ * 红果原生内容条目（catalog/recommendations/rankings 共用，items 形状同构；
+ * rankings 条目外层带 drama 包装）。id 去 'hongguo:' 前缀与番茄互通，
+ * kind 由频道传入（'video'/'manju'）；ep 为集数数字串（网格副标题
+ * 「分类·N集」直接可用）；score 0-10；creationStatus 按 releaseStatus 映射。
+ */
+export function fqParseHongguoItems(payload: Record<string, Object>, kind: string): FqMediaItem[] {
+  const out: FqMediaItem[] = [];
+  const rawItems: Object[] | null = fqAsArray(payload['items']);
+  if (rawItems === null) {
+    return out;
+  }
+  const seen: Set<string> = new Set<string>();
+  for (const entry of rawItems) {
+    const wrapper: Record<string, Object> | null = fqAsRecord(entry);
+    if (wrapper === null) {
+      continue;
+    }
+    const rec: Record<string, Object> = fqAsRecord(wrapper['drama']) ?? wrapper;
+    const id: string = fqHongguoNumericId(fqFirstString(rec, ['id', 'sourceId', 'source_id']));
+    const title: string = fqStr(rec, 'title').trim();
+    if (id.length === 0 || title.length === 0 || seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    const categories: string[] = [];
+    const category: string = fqStr(rec, 'category').trim();
+    if (category.length > 0) {
+      categories.push(category);
+    }
+    const rawTags: Object[] | null = fqAsArray(rec['tags']);
+    if (rawTags !== null) {
+      for (const tagValue of rawTags) {
+        if (typeof tagValue !== 'string') {
+          continue;
+        }
+        const tag: string = tagValue.trim();
+        if (tag.length > 0 && categories.indexOf(tag) < 0) {
+          categories.push(tag);
+        }
+      }
+    }
+    const parsedScore: number = Number.parseFloat(fqStr(rec, 'score').trim());
+    const score: number = Number.isNaN(parsedScore) ? 0 : Math.min(10, Math.max(0, parsedScore));
+    const releaseStatus: string = fqStr(rec, 'releaseStatus').trim();
+    const creationStatus: number = releaseStatus === 'finished' ? 0
+      : releaseStatus === 'ongoing' ? 1 : -1;
+    const episodes: number = fqAsInt(rec['episodes'], 0);
+    out.push(new FqMediaItem(
+      id,
+      title,
+      fqStr(rec, 'cover'),
+      '',
+      rec['vip'] === true ? 'VIP' : '',
+      episodes > 0 ? `${episodes}` : '',
+      kind,
+      score,
+      fqStr(rec, 'description'),
+      id,
+      '',
+      0,
+      null,
+      'hongguo',
+      creationStatus,
+      categories,
+      false,
+    ));
+  }
+  return out;
+}
+
+/** 红果集 vid：videoUrl 'hongguo-cenc://<vid>' 优先，回退 id 末段（sid:vid）。 */
+function fqHongguoEpisodeVid(rec: Record<string, Object>): string {
+  const videoUrl: string = fqStr(rec, 'videoUrl').trim();
+  const markerIndex: number = videoUrl.indexOf('hongguo-cenc://');
+  if (markerIndex >= 0) {
+    const vid: string = videoUrl.substring(markerIndex + 'hongguo-cenc://'.length).trim();
+    if (vid.length > 0) {
+      return vid;
+    }
+  }
+  const id: string = fqStr(rec, 'id').trim();
+  if (id.length === 0) {
+    return '';
+  }
+  const lastSeparator: number = id.lastIndexOf(':');
+  return lastSeparator >= 0 ? id.substring(lastSeparator + 1).trim() : id;
+}
+
+/**
+ * 红果原生目录（/api/v1/hongguo/native/detail）：chapters → FqChapter[]
+ * （itemId=集 vid 纯数字）+ 集序号 → 原始 chapter JSON 串（取流回喂）。
+ * 无效条目跳过，rawByIndex 键与 chapters 数组下标严格对齐。
+ */
+export function fqParseHongguoChapters(payload: Record<string, Object>): FqHongguoChapters {
+  const chapters: FqChapter[] = [];
+  const rawByIndex: Map<number, string> = new Map<number, string>();
+  const rawChapters: Object[] | null = fqAsArray(payload['chapters']);
+  if (rawChapters === null) {
+    return new FqHongguoChapters(chapters, rawByIndex);
+  }
+  for (const entry of rawChapters) {
+    const rec: Record<string, Object> | null = fqAsRecord(entry);
+    if (rec === null) {
+      continue;
+    }
+    const vid: string = fqHongguoEpisodeVid(rec);
+    if (vid.length === 0) {
+      continue;
+    }
+    const title: string = fqStr(rec, 'title').trim();
+    const chapterIndex: number = chapters.length;
+    chapters.push(new FqChapter(vid, title.length > 0 ? title : `第${chapterIndex + 1}集`));
+    rawByIndex.set(chapterIndex, JSON.stringify(rec));
+  }
+  return new FqHongguoChapters(chapters, rawByIndex);
+}
+
+/**
+ * 红果取流结果（/api/v1/hongguo/native/media）：url 为 Go 本地流代理绝对
+ * 地址（直用，不经 resourceUrl 锚定）；keyHex=decryptionKey；variants 按
+ * qualities 生成档位（换档走带 quality 重取流链路，variant 自身不携带 url）。
+ */
+export function fqParseHongguoMedia(payload: Record<string, Object>): FqEpisodeSource {
+  const url: string = fqStr(payload, 'url').trim();
+  if (url.length === 0) {
+    throw new Error('获取播放地址失败');
+  }
+  const keyHex: string = fqStr(payload, 'decryptionKey').trim();
+  const variants: FqEpisodeVariant[] = [];
+  const seenNames: Set<string> = new Set<string>();
+  const rawQualities: Object[] | null = fqAsArray(payload['qualities']);
+  if (rawQualities !== null) {
+    for (const entry of rawQualities) {
+      const height: number = fqAsInt(entry, 0);
+      const name: string = fqHongguoQualityName(height);
+      if (name.length === 0 || seenNames.has(name)) {
+        continue;
+      }
+      seenNames.add(name);
+      variants.push(new FqEpisodeVariant(name, '', keyHex, height));
+    }
+  }
+  return new FqEpisodeSource(url, keyHex, variants,
+    fqHongguoQualityName(fqAsInt(payload['quality'], 0)));
 }
 
 /**

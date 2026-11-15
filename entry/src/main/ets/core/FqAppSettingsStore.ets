@@ -36,7 +36,9 @@
  * - dramaAutoCacheWifiOnly：剧集自动缓存仅 Wi-Fi（默认开；计量网络不自动缓存，
  *   手动下载不受影响）；
  * - videoQualityPref：视频清晰度偏好档名（'' 跟随默认最高档 / 360P-4K 白名单；
- *   播放页清晰度菜单切换即写入，下次进页沿用；白名单见 FQ_VIDEO_QUALITY_PREF_WHITELIST）。
+ *   播放页清晰度菜单切换即写入，下次进页沿用；白名单见 FQ_VIDEO_QUALITY_PREF_WHITELIST）；
+ * - videoFanqieOnly：仅番茄源播放（默认关 = 智能：红果优先、异常自动回退番茄；
+ *   开 = 播放页目录/取流/缓存全程番茄链路，不尝试红果）。
  */
 
 import preferences from '@ohos.data.preferences';
@@ -75,6 +77,7 @@ const FQ_SETTINGS_KEY_DANMAKU_SIZE: string = 'danmakuSizeTier';
 const FQ_SETTINGS_KEY_DANMAKU_BG_TRANSPARENT: string = 'danmakuBgTransparent';
 const FQ_SETTINGS_KEY_VIDEO_HWDEC: string = 'videoHwdec';
 const FQ_SETTINGS_KEY_VIDEO_QUALITY_PREF: string = 'videoQualityPref';
+const FQ_SETTINGS_KEY_VIDEO_FANQIE_ONLY: string = 'videoFanqieOnly';
 
 /** 章节自动缓存大小上限默认值（MB）。 */
 export const FQ_CHAPTER_CACHE_LIMIT_DEFAULT_MB: number = 80;
@@ -187,6 +190,8 @@ export class FqAppSettingsStore {
   private static videoHwdec: boolean = true;
   /** 视频清晰度偏好档名（'' = 跟随默认最高可用档；白名单外值回退 ''）。 */
   private static videoQualityPref: string = '';
+  /** 仅番茄源播放（false = 智能红果优先自动回退；true = 播放页全程番茄链路）。 */
+  private static videoFanqieOnly: boolean = false;
 
   public static init(context: common.Context): void {
     if (FqAppSettingsStore.pref !== null) {
@@ -340,6 +345,10 @@ export class FqAppSettingsStore {
       if (typeof rawQualityPref === 'string'
         && FQ_VIDEO_QUALITY_PREF_WHITELIST.indexOf(rawQualityPref) >= 0) {
         FqAppSettingsStore.videoQualityPref = rawQualityPref;
+      }
+      const rawFanqieOnly: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_VIDEO_FANQIE_ONLY, false);
+      if (typeof rawFanqieOnly === 'boolean') {
+        FqAppSettingsStore.videoFanqieOnly = rawFanqieOnly;
       }
     } catch (error) {
       // 损坏数据按默认值处理
@@ -882,6 +891,27 @@ export class FqAppSettingsStore {
     }
     try {
       pref.putSync(FQ_SETTINGS_KEY_VIDEO_QUALITY_PREF, FqAppSettingsStore.videoQualityPref);
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
+  }
+
+  /** 仅番茄源播放（false = 智能红果优先自动回退；true = 短剧/漫剧播放全程番茄链路）。 */
+  public static getVideoFanqieOnly(): boolean {
+    return FqAppSettingsStore.videoFanqieOnly;
+  }
+
+  public static setVideoFanqieOnly(enabled: boolean): void {
+    FqAppSettingsStore.videoFanqieOnly = enabled;
+    const pref: preferences.Preferences | null = FqAppSettingsStore.pref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.putSync(FQ_SETTINGS_KEY_VIDEO_FANQIE_ONLY, enabled);
       pref.flush().catch((_error: BusinessError): void => {
         // 落盘失败不阻断
       });

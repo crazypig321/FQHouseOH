@@ -56,6 +56,9 @@ const FQ_DRAMA_CHROME_HEIGHT: number = FQ_DRAMA_SEARCH_ROW_HEIGHT + FQ_DRAMA_STR
 /** 边看边缓存日志标签（与播放页共用）。 */
 const FQ_AUTO_CACHE_LOG_TAG: string = 'FqAutoCache';
 
+/** 横屏片源 contain 居中后的上移比例（占剩余黑边高度；竖屏片源居中不动）。 */
+const FQ_DRAMA_LANDSCAPE_LIFT: number = 0.15;
+
 /** 最近/收藏卡片数据（历史记录与书架条目统一成卡片模型）。 */
 class FqDramaHistoryCardData {
   readonly id: string;
@@ -632,9 +635,13 @@ export struct DramaPage {
       this.player.play();
     }
     if (index === 1) {
-      this.ensureGrid(this.watchGrid, [FqHomeSource.homepageFallback(8, 'video', FQ_SOURCE_SEARCH_PAGED, '短剧', 0)]);
+      // 看剧网格：红果 catalog 优先（ID 与番茄互通），红果失败/熔断同调用内回退番茄 t8 链路
+      this.ensureGrid(this.watchGrid,
+        [FqHomeSource.hongguoCatalog('short_play', 'video', FQ_SOURCE_SEARCH_PAGED, '短剧', 0)]);
     } else if (index === 2) {
-      this.ensureGrid(this.manjuGrid, [FqHomeSource.homepageFallback(24, 'manju', FQ_SOURCE_SEARCH, '漫剧', 11)]);
+      // 漫剧网格：红果 comic_series 优先，回退番茄 t24 链路
+      this.ensureGrid(this.manjuGrid,
+        [FqHomeSource.hongguoCatalog('comic_series', 'manju', FQ_SOURCE_SEARCH, '漫剧', 11)]);
     } else if (index === 3) {
       this.refreshRecentCards();
     } else if (index === 4) {
@@ -1188,6 +1195,17 @@ export struct DramaPage {
     return Math.max(1, Math.min(this.layoutH, byWidth));
   }
 
+  /** 画面纵向偏移（vp）：横屏片源 contain 居中后往上挪一点（剩黑边高的固定比例），
+   *  让画面避开底部信息层；竖屏片源/尺寸未知保持居中不动。 */
+  private videoRectLiftY(): number {
+    const dw: number = this.player.state.videoParams.dw;
+    const dh: number = this.player.state.videoParams.dh;
+    if (dw <= 0 || dh <= 0 || dw <= dh) {
+      return 0;
+    }
+    return (this.layoutH - this.videoRectHeight()) * FQ_DRAMA_LANDSCAPE_LIFT;
+  }
+
   /** 常亮开关（失败静默）。 */
   private setKeepScreenOn(on: boolean): void {
     if (this.mainWin !== null) {
@@ -1307,6 +1325,7 @@ export struct DramaPage {
           }
           .width(this.videoRectWidth())
           .height(this.videoRectHeight())
+          .offset({ y: -this.videoRectLiftY() })
         }
         Swiper(this.swiperController) {
           ForEach(this.feedItems, (item: FqMediaItem, index: number) => {

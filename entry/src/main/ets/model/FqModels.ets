@@ -465,6 +465,34 @@ export class FqHongguoMap {
 }
 
 /**
+ * 红果原生目录解析结果（/api/v1/hongguo/native/detail）：
+ * FqChapter 列表（itemId=集 vid 纯数字，与番茄 vid 同字段形态）+
+ * 集序号 → 原始 chapter 对象 JSON 串（含 hongguo-cenc:// 取流地址，
+ * media 端点取流时原样回喂）。
+ */
+export class FqHongguoChapters {
+  readonly chapters: FqChapter[];
+  /** 集序号（chapters 数组下标）→ detail 原始 chapter JSON 串。 */
+  readonly rawByIndex: Map<number, string>;
+
+  constructor(chapters: FqChapter[], rawByIndex: Map<number, string>) {
+    this.chapters = chapters;
+    this.rawByIndex = rawByIndex;
+  }
+}
+
+/** 红果原生网格一页（catalog）：条目 + hasMore 翻页。 */
+export class FqHongguoGridPage {
+  readonly items: FqMediaItem[];
+  readonly hasMore: boolean;
+
+  constructor(items: FqMediaItem[], hasMore: boolean) {
+    this.items = items;
+    this.hasMore = hasMore;
+  }
+}
+
+/**
  * 短剧关联原著（/api/v1/series/{id} 的 data.video_relate_book.book_info，
  * 官方 SaasBookInfo 子集：book_id/book_name/thumb_url）。剧无原著关联为 null。
  */

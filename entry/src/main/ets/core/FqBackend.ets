@@ -17,6 +17,7 @@ import { FqKeyStore } from './FqKeyStore';
 import {   fqParseAuthorProfile, fqParseBookComments, fqParseBookDetail, fqParseChapterCommentPage, fqParseChapterIdeaCounts, fqParseChapterIdeaMeta, fqParseChapterSummaries,
   fqParseCommentReplies,
   fqParseDanmaku, fqParseDirectory, fqParseEpisodeComments, fqParseEpisodeSource, fqParseHomepage,
+  fqParseHongguoChapters, fqParseHongguoItems, fqParseHongguoMedia, fqHongguoQualityHeight,
   fqParseHongguoMap, fqParseParagraphCommentPage, fqParseRankBoard, fqParseRankCatalog,
   fqParseSearchTabs, fqParseSeriesFeed, fqParseSeriesRelateBook, fqParseRelatedSeries, fqLegacyChapterText, fqNormalizeChapterWithIdx, fqParseNovelChapter,
   fqParseHotSearch,
@@ -34,6 +35,7 @@ import {
 import { fqParseObject } from './FqJson';
 import { FqLog } from './FqLogStore';
 import { FqAppSettingsStore } from './FqAppSettingsStore';
+import { HgHealth } from './HgHealth';
 import {
   FqAuthorProfile,
   FqBookCommentPage,
@@ -46,6 +48,8 @@ import {
   FqEpisodeSource,
   FqEpisodeVariant,
   FqHomePage,
+  FqHongguoChapters,
+  FqHongguoGridPage,
   FqHongguoMap,
   FqHotSearchEntry,
   FqMediaItem,
@@ -91,6 +95,15 @@ const MAX_CONCURRENCY: number = 6;
 const FQ_RETRYABLE_STATUSES: number[] = [429, 500, 502, 503, 504];
 /** 瞬时错误重试间隔基数（ms）：第 n 次重试等待 n 倍，共 600ms/1200ms。 */
 const FQ_RETRY_DELAY_MS: number = 600;
+/** 红果原生请求超时（ms）：Go 本地调用正常 <1s，8s 覆盖红果上游慢响应；
+ * 超时即回退番茄（不做二次重试，回退链路本身即恢复手段）。 */
+export const FQ_HONGGUO_TIMEOUT_MS: number = 8000;
+/** 红果代下载整集超时（mode=download：后端先整集下载再回包，远长于取流）。 */
+export const FQ_HONGGUO_DOWNLOAD_TIMEOUT_MS: number = 180000;
+/** 红果代下载瞬时失败重试间隔（ms）：上游抖动常见，3s/8s 两次退避，全部失败才计一次熔断失败。 */
+const FQ_HONGGUO_DOWNLOAD_RETRY_DELAYS_MS: number[] = [3000, 8000];
+/** 红果 detail 目录会话缓存条数上限（超过淘汰最早条目）。 */
+const FQ_HONGGUO_DETAIL_CACHE_MAX: number = 8;
 
 export class FqRequestError extends Error {
   readonly statusCode: number;
@@ -113,6 +126,8 @@ export class FqBackend {
   private inflightGet: Map<string, Promise<Record<string, Object>>> = new Map();
   private rankCatalogValue: FqRankCatalog | null = null;
   private rankCatalogCachedAtMs: number = 0;
+  /** 红果 detail 目录会话缓存（dramaId:title → 解析结果；进播放页幂等）。 */
+  private hongguoDetailCache: Map<string, FqHongguoChapters> = new Map();
 
   private constructor() {
   }
@@ -665,6 +680,138 @@ export class FqBackend {
       + (title.length > 0 ? `&title=${encodeURIComponent(title)}` : '')
       + (force ? '&force=1' : '');
     return this.getJsonRetryable('/api/v1/hongguo/native/media', q);
+  }
+
+  // ---------------------------------------------------------------------------
+  // 红果优先双源（健康时串行只发红果；熔断/失败由调用方回退番茄链路）
+  // ---------------------------------------------------------------------------
+
+  /** 红果原生请求公共段：熔断期直接抛错（调用方零延迟回退番茄），
+   * 成败计入 HgHealth（8s 超时，失败不重试——回退链路即恢复手段）。 */
+  private async hongguoHealthRequest(path: string, query: string,
+    timeoutMs: number = FQ_HONGGUO_TIMEOUT_MS): Promise<Record<string, Object>> {
+    const health: HgHealth = HgHealth.get();
+    if (health.shouldBypass(Date.now())) {
+      throw new FqRequestError('红果源暂时不可用', 503);
+    }
+    try {
+      const payload: Record<string, Object> = await this.getJson(path, query, timeoutMs);
+      health.recordSuccess();
+      return payload;
+    } catch (error) {
+      health.recordFailure(Date.now());
+      throw error instanceof Error ? error : new Error(String(error));
+    }
+  }
+
+  /** 红果原生网格一页（catalog，page 1 起 + hasMore 翻页）；
+   * 失败/熔断抛错，调用方回退番茄链路。kind 为条目强制类型（'video'/'manju'）。 */
+  public async hongguoGridPage(category: string, page: number,
+    kind: string): Promise<FqHongguoGridPage> {
+    const query: string = `source=${encodeURIComponent('hongguo')}`
+      + `&category=${encodeURIComponent(category)}`
+      + `&page=${page < 1 ? 1 : page}`;
+    const payload: Record<string, Object> = await this.hongguoHealthRequest(
+      '/api/v1/hongguo/native/catalog', query);
+    return new FqHongguoGridPage(fqParseHongguoItems(payload, kind), payload['hasMore'] === true);
+  }
+
+  /** 红果原生目录（detail，会话缓存幂等；dramaId 为纯数字 id，内部补
+   * 'hongguo:' 前缀）。失败/熔断抛错，调用方回退番茄 directoryChapters。 */
+  public async hongguoDramaChapters(dramaId: string,
+    title: string = ''): Promise<FqHongguoChapters> {
+    const cacheKey: string = `${dramaId}:${title}`;
+    const cached: FqHongguoChapters | undefined = this.hongguoDetailCache.get(cacheKey);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const query: string = `drama_id=${encodeURIComponent(`hongguo:${dramaId}`)}`
+      + (title.length > 0 ? `&title=${encodeURIComponent(title)}` : '');
+    const payload: Record<string, Object> = await this.hongguoHealthRequest(
+      '/api/v1/hongguo/native/detail', query);
+    const chapters: FqHongguoChapters = fqParseHongguoChapters(payload);
+    if (chapters.chapters.length === 0) {
+      throw new FqRequestError('暂无剧集', 502);
+    }
+    if (this.hongguoDetailCache.size >= FQ_HONGGUO_DETAIL_CACHE_MAX) {
+      const oldestKey: string | undefined = this.hongguoDetailCache.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.hongguoDetailCache.delete(oldestKey);
+      }
+    }
+    this.hongguoDetailCache.set(cacheKey, chapters);
+    return chapters;
+  }
+
+  /** 红果取流（同源贯穿：仅红果目录会话调用；失败不跨源回退，调用方重试）。
+   * chapterJson 为 detail 原始章节串（rawByIndex），qualityHeight 为短边
+   * 像素（fqHongguoQualityHeight 换算；0 = 默认最高档）；url 为 Go 本地
+   * 流代理绝对地址，mpv 直连。 */
+  public async hongguoEpisodeSource(dramaId: string, chapterJson: string, index: number,
+    qualityHeight: number, title: string = ''): Promise<FqEpisodeSource> {
+    const query: string = `drama_id=${encodeURIComponent(`hongguo:${dramaId}`)}`
+      + `&chapter=${encodeURIComponent(chapterJson)}`
+      + `&index=${index < 0 ? 0 : index}`
+      + `&quality=${qualityHeight < 0 ? 0 : qualityHeight}`
+      + (title.length > 0 ? `&title=${encodeURIComponent(title)}` : '');
+    const payload: Record<string, Object> = await this.hongguoHealthRequest(
+      '/api/v1/hongguo/native/media', query);
+    const source: FqEpisodeSource = fqParseHongguoMedia(payload);
+    if (!source.url.startsWith('http://') && !source.url.startsWith('https://')) {
+      throw new FqRequestError('获取播放地址失败', 502);
+    }
+    return source;
+  }
+
+  /** 红果代下载取流（mode=download，离线缓存/边看边缓存专用）：后端先解析
+   *  再整集代下载（CENC 密文 + key sidecar 落 src/），url 为 /src/ 明文本地
+   *  相对路径（resourceUrl 锚定后由下载器直存，播放免密钥）。后台下载不走
+   *  熔断读门（播放侧熔断时批量下载不整批 503 秒失败），成败仍计入
+   *  HgHealth；瞬时失败（429/500/502）按退避静默重试，整链失败才计一次。 */
+  public async hongguoEpisodeSourceDownload(dramaId: string, chapterJson: string, index: number,
+    qualityHeight: number, title: string = ''): Promise<FqEpisodeSource> {
+    const query: string = `drama_id=${encodeURIComponent(`hongguo:${dramaId}`)}`
+      + `&chapter=${encodeURIComponent(chapterJson)}`
+      + `&index=${index < 0 ? 0 : index}`
+      + `&quality=${qualityHeight < 0 ? 0 : qualityHeight}`
+      + `&mode=download`
+      + (title.length > 0 ? `&title=${encodeURIComponent(title)}` : '');
+    const health: HgHealth = HgHealth.get();
+    let lastError: Error | null = null;
+    let source: FqEpisodeSource | null = null;
+    let url: string = '';
+    for (let attempt: number = 0; attempt <= FQ_HONGGUO_DOWNLOAD_RETRY_DELAYS_MS.length; attempt++) {
+      if (attempt > 0) {
+        await new Promise<void>((resolve: () => void): void => {
+          setTimeout(resolve, FQ_HONGGUO_DOWNLOAD_RETRY_DELAYS_MS[attempt - 1]);
+        });
+      }
+      try {
+        const payload: Record<string, Object> = await this.getJson(
+          '/api/v1/hongguo/native/media', query, FQ_HONGGUO_DOWNLOAD_TIMEOUT_MS);
+        const parsed: FqEpisodeSource = fqParseHongguoMedia(payload);
+        const resolved: string = this.resourceUrl(parsed.url);
+        if (!resolved.startsWith('http://') && !resolved.startsWith('https://')) {
+          throw new FqRequestError('获取播放地址失败', 502);
+        }
+        source = parsed;
+        url = resolved;
+        break;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        const retryable: boolean = error instanceof FqRequestError
+          && [429, 500, 502].indexOf(error.statusCode) >= 0;
+        if (!retryable) {
+          break;
+        }
+      }
+    }
+    if (source === null) {
+      health.recordFailure(Date.now());
+      throw lastError !== null ? lastError : new Error('请求失败');
+    }
+    health.recordSuccess();
+    return new FqEpisodeSource(url, source.keyHex, source.variants, source.quality);
   }
 
   /**

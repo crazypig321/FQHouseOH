@@ -13,7 +13,8 @@ import http from '@ohos.net.http';
 import { common } from '@kit.AbilityKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { FqBackend } from './FqBackend';
+import { FqBackend, FqRequestError } from './FqBackend';
+import { fqHongguoQualityHeight } from './FqParser';
 import { FqCachedEpisode, FqDramaCacheStore } from './FqDramaCacheStore';
 import { fqKindToTab, FqCacheTaskView } from '../model/FqModels';
 
@@ -51,6 +52,8 @@ export class FqDramaDownloadTask implements FqCacheTaskView {
   public readonly auto: boolean;
   /** 入队时快照的清晰度偏好（空 = 后端默认最高档；下载跟播放同档，fqapp 同语义）。 */
   public readonly quality: string;
+  /** 红果会话：detail 原始章节串（hongguoRawChapters 快照；空 = 番茄链路）。 */
+  public readonly hongguoChapterJson: string;
   /** 取流返回的实际下载档名（完成时写入缓存记录；上游不带档位时为空）。 */
   public servedQuality: string = '';
   @Trace public status: DramaDownloadStatus = DramaDownloadStatus.Waiting;
@@ -59,7 +62,8 @@ export class FqDramaDownloadTask implements FqCacheTaskView {
   @Trace public errorText: string = '';
 
   constructor(seriesId: string, itemId: string, title: string, seriesTitle: string,
-    cover: string, kind: string, index: number, auto: boolean, quality: string) {
+    cover: string, kind: string, index: number, auto: boolean, quality: string,
+    hongguoChapterJson: string = '') {
     this.seriesId = seriesId;
     this.itemId = itemId;
     this.title = title;
@@ -69,6 +73,7 @@ export class FqDramaDownloadTask implements FqCacheTaskView {
     this.index = index;
     this.auto = auto;
     this.quality = quality;
+    this.hongguoChapterJson = hongguoChapterJson;
   }
 }
 
@@ -86,15 +91,26 @@ export class FqDramaDownloader {
   }
 
   /** 入队一集下载：已完整缓存/已在队列则跳过；auto = 边看边往后缓存自动排的集；
-   *  quality = 入队时的清晰度偏好（空 = 后端默认最高档，与默认播放同档）。 */
+   *  quality = 入队时的清晰度偏好（空 = 后端默认最高档，与默认播放同档）；
+   *  hongguoChapterJson 非空走红果代下载链路（mode=download）。 */
   public enqueue(seriesId: string, itemId: string, title: string, seriesTitle: string,
-    cover: string, kind: string, index: number, auto: boolean, quality: string): void {
+    cover: string, kind: string, index: number, auto: boolean, quality: string,
+    hongguoChapterJson: string = ''): void {
     if (itemId.length === 0 || FqDramaCacheStore.has(itemId)) {
       hilog.info(0x0001, TAG, `enqueue skip (cached/empty): ${itemId}`);
       return;
     }
-    const existing: FqDramaDownloadTask | null = this.taskOf(itemId);
+    const existing: FqDramaDownloadTask | null = this.findTask(itemId);
     if (existing !== null) {
+      if (existing.status === DramaDownloadStatus.Completed) {
+        // 完成后缓存被管理页删除（enqueue 前置 has 检查已排除已缓存）：
+        // 复活该任务重新下载，复用对象避免同 itemId 双任务。
+        existing.status = DramaDownloadStatus.Waiting;
+        existing.errorText = '';
+        existing.servedQuality = '';
+        this.pump();
+        return;
+      }
       hilog.info(0x0001, TAG, `enqueue skip (in queue): ${itemId}`);
       if (existing.status === DramaDownloadStatus.Failed
         || existing.status === DramaDownloadStatus.Paused) {
@@ -104,19 +120,33 @@ export class FqDramaDownloader {
       }
       return;
     }
-    hilog.info(0x0001, TAG, `enqueue: ${itemId} index=${index} auto=${auto} quality=${quality}`);
+    hilog.info(0x0001, TAG,
+      `enqueue: ${itemId} index=${index} auto=${auto} quality=${quality} hongguo=${hongguoChapterJson.length > 0}`);
     this.taskList.push(new FqDramaDownloadTask(seriesId, itemId, title, seriesTitle,
-      cover, kind, index, auto, quality));
+      cover, kind, index, auto, quality, hongguoChapterJson));
     this.pump();
   }
 
-  public taskOf(itemId: string): FqDramaDownloadTask | null {
+  /** 查找任务（含已完成，不过滤缓存有效性；enqueue 复活被删缓存的完成任务用）。 */
+  private findTask(itemId: string): FqDramaDownloadTask | null {
     for (const task of this.taskList) {
       if (task.itemId === itemId) {
         return task;
       }
     }
     return null;
+  }
+
+  /** 查询任务：已完成但缓存记录已被管理页删除的视为无任务（显示与重下走
+   *  enqueue 链路）。渲染期高频调用，不改动 taskList（重启清空即可，
+   *  避免渲染中改 @Trace 数组触发「渲染期间状态变更」）。 */
+  public taskOf(itemId: string): FqDramaDownloadTask | null {
+    const task: FqDramaDownloadTask | null = this.findTask(itemId);
+    if (task !== null && task.status === DramaDownloadStatus.Completed
+      && !FqDramaCacheStore.has(itemId)) {
+      return null;
+    }
+    return task;
   }
 
   /** 暂停：等待中直接置 Paused；下载中置 Paused 后 destroy 请求（.part 保留续传）。 */
@@ -252,8 +282,13 @@ export class FqDramaDownloader {
         task.status = DramaDownloadStatus.Completed;
         return;
       }
-      const source = await FqBackend.get().episodeSource(task.itemId, fqKindToTab(task.kind),
-        task.quality);
+      // 红果会话走代下载链路（mode=download：后端整集代下载回 /src/ 明文）；
+      // 番茄会话走 /api/content 代下载链路（.part 断点续传两者共用）
+      const source = task.hongguoChapterJson.length > 0
+        ? await FqBackend.get().hongguoEpisodeSourceDownload(task.seriesId,
+          task.hongguoChapterJson, task.index - 1, fqHongguoQualityHeight(task.quality),
+          task.seriesTitle)
+        : await FqBackend.get().episodeSource(task.itemId, fqKindToTab(task.kind), task.quality);
       task.servedQuality = source.quality;
       if (task.status !== DramaDownloadStatus.Downloading) {
         return;
@@ -396,7 +431,13 @@ export class FqDramaDownloader {
     } catch (error) {
       if (!fqIsPaused(task.status)) {
         task.status = DramaDownloadStatus.Failed;
-        task.errorText = '下载失败，点击重试';
+        // FqRequestError 消息面向用户（如「红果源暂时不可用」「请求超时」），
+        // 直接透出；其余保持通用文案。失败原因同时落 hilog 便于排查。
+        const message: string = error instanceof FqRequestError ? error.message
+          : (error instanceof Error ? error.message : String(error));
+        hilog.error(0x0001, TAG, `task ${task.itemId} failed: ${message}`);
+        task.errorText = error instanceof FqRequestError
+          && message.length > 0 ? message : '下载失败，点击重试';
       }
       this.pump();
     } finally {
