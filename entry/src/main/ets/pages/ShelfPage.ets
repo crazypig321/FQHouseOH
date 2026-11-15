@@ -1706,16 +1706,19 @@ export struct ShelfPage {
           ListItem() {
             Column() {
               Text('全部')
-                .fontSize(15)
+                .fontSize(this.filterGroupId.length === 0 ? 17 : 15)
                 .fontWeight(this.filterGroupId.length === 0 ? FontWeight.Bold : FontWeight.Normal)
                 .fontColor(this.filterGroupId.length === 0 ? appState.accentColor : $r('sys.color.font_secondary'))
+                .maxLines(1)
+                .animation({ duration: 180, curve: Curve.EaseOut })
               Row()
                 .width(14)
                 .height(3)
                 .borderRadius(1.5)
                 .backgroundColor(appState.accentColor)
                 .margin({ top: 3 })
-                .visibility(this.filterGroupId.length === 0 ? Visibility.Visible : Visibility.Hidden)
+                .opacity(this.filterGroupId.length === 0 ? 1 : 0)
+                .animation({ duration: 180, curve: Curve.EaseOut })
             }
             .justifyContent(FlexAlign.Center)
             .height(36)
@@ -1728,20 +1731,22 @@ export struct ShelfPage {
             ListItem() {
               Column() {
                 Text(group.name)
-                  .fontSize(15)
+                  .fontSize(this.filterGroupId === group.id ? 17 : 15)
                   .fontWeight(this.filterGroupId === group.id ? FontWeight.Bold : FontWeight.Normal)
                   .fontColor(this.filterGroupId === group.id ? appState.accentColor : $r('sys.color.font_secondary'))
                   .maxLines(1)
                   .textOverflow({ overflow: TextOverflow.Ellipsis })
                   .constraintSize({ maxWidth: 140 })
-                // 选中项底部主题色小横条（未选中占位隐藏，避免行高跳动）
+                  .animation({ duration: 180, curve: Curve.EaseOut })
+                // 选中项底部主题色小横条（常驻占位，未选中透明淡出，避免行高跳动）
                 Row()
                   .width(14)
                   .height(3)
                   .borderRadius(1.5)
                   .backgroundColor(appState.accentColor)
                   .margin({ top: 3 })
-                  .visibility(this.filterGroupId === group.id ? Visibility.Visible : Visibility.Hidden)
+                  .opacity(this.filterGroupId === group.id ? 1 : 0)
+                  .animation({ duration: 180, curve: Curve.EaseOut })
               }
               .justifyContent(FlexAlign.Center)
               .height(36)
