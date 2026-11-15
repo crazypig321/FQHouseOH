@@ -87,6 +87,8 @@ class FqDramaGridState {
   token: number = 0;
   moreInFlight: boolean = false;
   loaded: boolean = false;
+  /** 建源时的「视频播放源」档位（与当前设置不一致时重建 feed）。 */
+  fanqieOnly: boolean = false;
 }
 
 /** 海报卡副标题（fqapp「分类·集数」：首个分类 + 集数，空回退类型名）。 */
@@ -526,12 +528,14 @@ export struct DramaPage {
     }
   }
 
-  /** 看剧/漫剧网格频道：首次进入建源并拉首屏。 */
+  /** 看剧/漫剧网格频道：首次进入或「视频播放源」档位变化时建源并拉首屏。 */
   private ensureGrid(grid: FqDramaGridState, sources: FqHomeSource[]): void {
-    if (grid.loaded) {
+    const fanqieOnly: boolean = FqAppSettingsStore.getVideoFanqieOnly();
+    if (grid.loaded && grid.fanqieOnly === fanqieOnly) {
       return;
     }
     grid.loaded = true;
+    grid.fanqieOnly = fanqieOnly;
     grid.feed = new FqHomeFeed(sources);
     this.loadGridFirst(grid);
   }
@@ -593,10 +597,30 @@ export struct DramaPage {
     }
   }
 
+  /** 看剧网格源：「自动切换」= 红果 catalog 优先 + 番茄 t8 兜底；「默认源」= 纯番茄 t8。 */
+  private watchGridSources(): FqHomeSource[] {
+    return [FqAppSettingsStore.getVideoFanqieOnly()
+      ? FqHomeSource.pagedSearch('短剧', 'video')
+      : FqHomeSource.hongguoCatalog('short_play', 'video', FQ_SOURCE_SEARCH_PAGED, '短剧', 0)];
+  }
+
+  /** 漫剧网格源：「自动切换」= 红果 comic_series 优先 + 番茄 t24 兜底；「默认源」= 纯番茄 t24。 */
+  private manjuGridSources(): FqHomeSource[] {
+    return [FqAppSettingsStore.getVideoFanqieOnly()
+      ? FqHomeSource.search('漫剧', 11, 'manju')
+      : FqHomeSource.hongguoCatalog('comic_series', 'manju', FQ_SOURCE_SEARCH, '漫剧', 11)];
+  }
+
   /** 主 Tab 切换：切走暂停存档（tabPaused），切回短剧主 Tab 自动续播。 */
   @Monitor('appStateUse.currTabsIndex')
   onMainTabChange(): void {
     if (appState.currTabsIndex === 1) {
+      // 切回短剧 Tab：设置里「视频播放源」档位变化时重建当前网格频道数据
+      if (this.channelIndex === 1) {
+        this.ensureGrid(this.watchGrid, this.watchGridSources());
+      } else if (this.channelIndex === 2) {
+        this.ensureGrid(this.manjuGrid, this.manjuGridSources());
+      }
       if (this.tabPaused) {
         this.tabPaused = false;
         if (this.channelIndex === 0) {
@@ -635,13 +659,12 @@ export struct DramaPage {
       this.player.play();
     }
     if (index === 1) {
-      // 看剧网格：红果 catalog 优先（ID 与番茄互通），红果失败/熔断同调用内回退番茄 t8 链路
-      this.ensureGrid(this.watchGrid,
-        [FqHomeSource.hongguoCatalog('short_play', 'video', FQ_SOURCE_SEARCH_PAGED, '短剧', 0)]);
+      // 看剧网格：「自动切换」红果 catalog 优先（ID 与番茄互通），失败/熔断回退番茄 t8；
+      // 「默认源」直接走番茄 t8 链路
+      this.ensureGrid(this.watchGrid, this.watchGridSources());
     } else if (index === 2) {
-      // 漫剧网格：红果 comic_series 优先，回退番茄 t24 链路
-      this.ensureGrid(this.manjuGrid,
-        [FqHomeSource.hongguoCatalog('comic_series', 'manju', FQ_SOURCE_SEARCH, '漫剧', 11)]);
+      // 漫剧网格：「自动切换」红果 comic_series 优先，回退番茄 t24；「默认源」直接走番茄 t24
+      this.ensureGrid(this.manjuGrid, this.manjuGridSources());
     } else if (index === 3) {
       this.refreshRecentCards();
     } else if (index === 4) {

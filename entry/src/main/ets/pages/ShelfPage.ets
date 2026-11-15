@@ -60,6 +60,12 @@ const SHELF_GROUP_ROW_ANCHOR_PREFIX: string = 'shelf_group_row_';
 const SHELF_GROUP_TAG_ANCHOR_PREFIX: string = 'shelf_group_tag_';
 /** 分组标签行高度（标题栏避让与滚动补偿共用）。 */
 const SHELF_GROUP_TAGS_HEIGHT: number = 36;
+/** 胶囊行高：margin 4 + 滑块 30 + margin 10（插槽声明高必须与实际内容一致）。 */
+const SHELF_CAPSULE_ROW_HEIGHT: number = 44;
+/** 搜索行高：CommonSearch（Search 默认高 40）。 */
+const SHELF_SEARCH_ROW_HEIGHT: number = 40;
+/** HdsTitleBar MINI 模式标题行高。 */
+const SHELF_TITLE_BAR_HEIGHT: number = 56;
 
 /** 书架/浏览历史统一展示行（勾选态由 batchSelected 实时派生，不随行快照，避免批量操作整表重载闪烁）。 */
 class ShelfRow {
@@ -435,15 +441,17 @@ export struct ShelfPage {
     return this.currentTab === 0 && this.sheetGroups.length > 0;
   }
 
-  /** 列表顶部避让：标题栏 56 + 胶囊 54（+ 分组标签行）（+ 搜索行 56）。 */
+  /** 列表顶部避让：状态栏 + 标题行 56 + 标题栏扩展区（与插槽声明高同源，避免两处手算漂移）。 */
   private listTopInset(): number {
-    return appState.topRect + 110 + (this.groupTagsVisible() ? SHELF_GROUP_TAGS_HEIGHT : 0)
-      + (this.showSearchBox ? 56 : 0);
+    return appState.topRect + SHELF_TITLE_BAR_HEIGHT + this.titleExtraHeight();
   }
 
-  /** 标题栏扩展区高度：胶囊 40 + 分组标签行 + 搜索行 70。 */
+  /** 标题栏扩展区高度：胶囊行 + 分组标签行 + 搜索行。
+   *  必须与 TitleExtraBuilder 实际内容高严格一致：插槽声明高与内容不符时，
+   *  切换 tab 重建插槽会让底部组件（滑块/标签行）瞬时错位上下跳。 */
   private titleExtraHeight(): number {
-    return 40 + (this.groupTagsVisible() ? SHELF_GROUP_TAGS_HEIGHT : 0) + (this.showSearchBox ? 70 : 0);
+    return SHELF_CAPSULE_ROW_HEIGHT + (this.groupTagsVisible() ? SHELF_GROUP_TAGS_HEIGHT : 0)
+      + (this.showSearchBox ? SHELF_SEARCH_ROW_HEIGHT : 0);
   }
 
   /** 重新读取 store 并重建懒加载数据。 */
