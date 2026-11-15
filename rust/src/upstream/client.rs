@@ -90,6 +90,10 @@ pub struct UpstreamRequest {
     pub headers: Vec<(String, String)>,
     pub no_sign: bool,
     pub pin: Option<PinnedDevice>,
+    /// Playback requests put their `iid` into Argus bean field 16 and must not
+    /// carry the media-specific `x-medusa` header（对齐 fqapp 2026-11 抓包：
+    /// 签名偏差会抬高上游风控空响应率）。
+    pub playback_sign: bool,
 }
 
 pub struct UpstreamClient {
@@ -201,13 +205,27 @@ impl UpstreamClient {
         }
 
         if !req.no_sign {
+            let query = parsed.query().unwrap_or("");
+            let opt = crate::sign::HeaderOpts {
+                install_id_field16: if req.playback_sign {
+                    crate::sign::query_param(query, "iid")
+                        .or_else(|| crate::sign::query_param(query, "install_id"))
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                },
+                ..Default::default()
+            };
             let sig = self
                 .sign
-                .generate_headers(parsed.query().unwrap_or(""), req.body.as_deref());
+                .generate_headers_with_opts(query, req.body.as_deref(), &opt);
             for (k, v) in sig {
                 headers.retain(|(hk, _)| !hk.eq_ignore_ascii_case(&k));
                 headers.push((k, v));
             }
+        }
+        if req.playback_sign {
+            headers.retain(|(k, _)| !k.eq_ignore_ascii_case("x-medusa"));
         }
 
         let resp = self
@@ -236,7 +254,10 @@ impl UpstreamClient {
             })?;
 
         if resp.status != 200 {
-            if is_auth_fail_status(resp.status) {
+            // NoSign 请求（如红果）没有可轮换的设备身份，401/403 只是上游
+            // 对该请求的拒绝，不是设备鉴权失败——不判 DeviceFailed 以免
+            // 调用方据此做设备淘汰（对齐 fqapp）。
+            if is_auth_fail_status(resp.status) && !req.no_sign {
                 return Err(ClientError::DeviceFailed(format!("HTTP {}", resp.status)));
             }
             if is_retryable_status(resp.status) {

@@ -380,18 +380,136 @@ fn sanitize_quality(raw: &str) -> String {
 
 /// Queries the phoenix multi_video_model endpoint.
 ///
-/// 上游风控/抖动存在两种「HTTP 200 但不可用」形态：空 body（parse 即
-/// EOF）与业务失败包（`{BaseResp, Code:110001}` 无 `data`）。http 层按
-/// 200 放行、不进任何重试——一次抖动就直接 500 / 丢 1080P 档，只能靠
-/// 用户手动重试（实测隔几秒重发大概率恢复）。这里按响应可用性——JSON
-/// 可解析且 `data` 为对象（与下方 phoenix warn 判据一致）——自动补重试：
-/// shortplay 主解析 3 次尝试（400ms/800ms 退避），phoenix 辅助 2 次
-/// （失败非致命，不拖慢主路径）；重试间隔走共享 deadline，余量不足时
-/// 保持旧行为原样返回。
+/// 上游风控/抖动的「HTTP 200 但不可用」形态（http 层按 200 放行、不进任何
+/// 重试，一次抖动就直接 500 / 丢 1080P 档，只能靠用户手动重试）：空 body
+/// （parse 即 EOF）、显式失败包（`success=false` / `Code!=0` / `BaseResp`
+/// 失败码，如 phoenix 实测的 `{BaseResp, Code:110001}`）、以及「有 data
+/// 但无候选流」的降级包。判据对齐 fqapp 的 `video_data_is_usable`：
+/// `data` 为非空对象，且任一 video_model 携带候选流（`fallback_api`
+/// 非空，或 `video_list` 内存在 main/backup url 非空的条目），或 `data`
+/// 内任意深度存在可播放 URL 形状。shortplay 主解析 3 次尝试（400ms/
+/// 800ms 退避），phoenix 辅助 2 次；重试间隔走共享 deadline，余量不足
+/// 时保持旧行为原样返回。
 fn video_body_usable(raw: &[u8]) -> bool {
-    serde_json::from_slice::<Value>(raw)
-        .map(|root| root.get("data").is_some_and(Value::is_object))
-        .unwrap_or(false)
+    let Ok(root) = serde_json::from_slice::<Value>(raw) else {
+        return false;
+    };
+    if upstream_response_is_failure(&root) {
+        return false;
+    }
+    let Some(data_value) = root.get("data") else {
+        return false;
+    };
+    let Some(data) = data_value.as_object() else {
+        return false;
+    };
+    if data.is_empty() {
+        return false;
+    }
+    video_models(data).any(|model| video_model_has_candidate(&model))
+        || has_compatible_playable_url(data_value, 0)
+}
+
+/// 上游显式失败包判定：顶层 `success=false`、`code`/`Code` 非 0/200，
+/// 或 `BaseResp` 内失败码（phoenix 业务错误外壳只给通用码不给原因）。
+fn upstream_response_is_failure(root: &Value) -> bool {
+    if root.get("success").and_then(Value::as_bool) == Some(false)
+        || ["code", "Code"]
+            .iter()
+            .any(|key| upstream_code_is_failure(root.get(*key)))
+    {
+        return true;
+    }
+    root.get("BaseResp")
+        .and_then(Value::as_object)
+        .is_some_and(|base| {
+            ["code", "Code", "StatusCode"]
+                .iter()
+                .any(|key| upstream_code_is_failure(base.get(*key)))
+        })
+}
+
+fn upstream_code_is_failure(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::Number(code)) => code
+            .as_i64()
+            .map(|code| code != 0 && code != 200)
+            .unwrap_or(false),
+        Some(Value::String(code)) => code
+            .trim()
+            .parse::<i64>()
+            .map(|code| code != 0 && code != 200)
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
+/// video_model 携带候选流：`fallback_api` 非空，或 `video_list`（对象或
+/// 数组形状均可）内存在 main/backup url 非空的条目。质量分判定在 OH
+/// 语境恒真（video_quality_score 对 bytevc2 有意放行、恒 Some），候选
+/// 与否实际由 url 非空决定。
+fn video_model_has_candidate(model: &Map<String, Value>) -> bool {
+    if !fallback_api_url(model).is_empty() {
+        return true;
+    }
+    match model.get("video_list") {
+        Some(Value::Object(list)) => list.values().any(video_entry_has_candidate),
+        Some(Value::Array(list)) => list.iter().any(video_entry_has_candidate),
+        _ => false,
+    }
+}
+
+fn video_entry_has_candidate(entry: &Value) -> bool {
+    let Some(info) = entry.as_object() else {
+        return false;
+    };
+    video_quality_score(info).is_some()
+        && ["main_url", "backup_url", "backup_url_1", "play_url"]
+            .iter()
+            .any(|key| {
+                info.get(*key)
+                    .and_then(Value::as_str)
+                    .is_some_and(|url| !url.is_empty())
+            })
+}
+
+/// `data` 内任意深度存在可播放 URL 形状（跳过 `fallback_api` 原文），
+/// 兜住非标准形状的可用响应——判据在宽松侧：宁可多重试一次也不把可用
+/// 响应误判为不可用。深度上限 8 防病态嵌套。
+fn has_compatible_playable_url(value: &Value, depth: usize) -> bool {
+    if depth > 8 {
+        return false;
+    }
+    match value {
+        Value::Object(map) => {
+            if video_quality_score(map).is_some()
+                && [
+                    "video_url",
+                    "play_url",
+                    "main_url",
+                    "backup_url",
+                    "backup_url_1",
+                ]
+                .iter()
+                .filter_map(|key| map.get(*key).and_then(Value::as_str))
+                .any(|url| playable_url_text(url))
+            {
+                return true;
+            }
+            map.iter().any(|(key, nested)| {
+                key != "fallback_api" && has_compatible_playable_url(nested, depth + 1)
+            })
+        }
+        Value::Array(list) => list
+            .iter()
+            .any(|nested| has_compatible_playable_url(nested, depth + 1)),
+        _ => false,
+    }
+}
+
+fn playable_url_text(url: &str) -> bool {
+    let url = url.trim();
+    url.starts_with("http://") || url.starts_with("https://") || url.starts_with("/src/")
 }
 
 /// 按响应可用性重试取模型：`once` 单次取流，`attempts` 总尝试次数，
@@ -450,6 +568,7 @@ async fn fetch_phoenix_video_model_once(ctx: &Ctx, video_id: &str) -> ApiResult<
             raw_url: Some(phoenix_player_url()),
             body: Some(post_body),
             headers: phoenix_player_headers(),
+            playback_sign: true,
             ..Default::default()
         })
         .await
@@ -491,6 +610,7 @@ async fn fetch_shortplay_video_model_once(ctx: &Ctx, video_id: &str) -> ApiResul
             raw_url: Some(SHORTPLAY_VIDEO_MODEL_URL.to_string()),
             body: Some(post_body),
             headers: dragon_read_json_headers(),
+            playback_sign: true,
             ..Default::default()
         })
         .await
@@ -1474,6 +1594,7 @@ async fn unsigned_get(ctx: &Ctx, url: &str, user_agent: &str, max_bytes: usize) 
         headers: vec![("User-Agent".to_string(), user_agent.to_string())],
         no_sign: true,
         pin: None,
+        playback_sign: false,
     };
     match ctx.up.do_request_capped(&req, max_bytes).await {
         Ok((body, _)) => Some(body),

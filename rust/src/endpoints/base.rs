@@ -39,6 +39,8 @@ pub struct UpstreamRequestSpec {
     pub body: Option<Vec<u8>>,
     pub headers: Vec<(String, String)>,
     pub pin_device: String,
+    /// Playback endpoints sign Argus bean field 16 with the request `iid`.
+    pub playback_sign: bool,
 }
 
 impl Default for UpstreamRequestSpec {
@@ -53,6 +55,7 @@ impl Default for UpstreamRequestSpec {
             body: None,
             headers: Vec::new(),
             pin_device: String::new(),
+            playback_sign: false,
         }
     }
 }
@@ -94,6 +97,7 @@ impl Upstream {
                     device_id: spec.pin_device.clone(),
                 })
             },
+            playback_sign: spec.playback_sign,
         }
     }
 
