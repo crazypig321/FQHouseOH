@@ -263,6 +263,7 @@ export struct RankPage {
             .padding({ left: 14, right: 14, top: 7, bottom: 7 })
             .borderRadius(999)
             .backgroundColor(this.rankIndex === index ? appState.accentColor : Color.Transparent)
+            .animation({ duration: 180, curve: Curve.EaseOut })
             .attributeModifier(this.rankIndex === index ? undefined : textImmersiveModifier)
             .onClick(() => this.selectRank(index))
         }, (tab: FqRankTab): string => tab.name)
@@ -284,9 +285,10 @@ export struct RankPage {
       Row({ space: 4 }) {
         ForEach(this.catalog.categories, (category: FqRankCategory, index: number) => {
           Text(category.name)
-            .fontSize(12)
+            .fontSize(this.categoryIndex === index ? 14 : 12)
             .fontWeight(this.categoryIndex === index ? 700 : 400)
             .fontColor(this.categoryIndex === index ? appState.accentColor : $r('sys.color.font_tertiary'))
+            .animation({ duration: 180, curve: Curve.EaseOut })
             .padding({ left: 8, right: 8, top: 6, bottom: 6 })
             .onClick(() => this.selectCategory(index))
         }, (category: FqRankCategory): string => `${category.id}`)

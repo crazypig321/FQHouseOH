@@ -392,12 +392,25 @@ export struct SearchPage {
       List({ space: 22 }) {
         ForEach(FQ_SEARCH_CATEGORIES, (category: FqSearchCategoryDef, index: number) => {
           ListItem() {
-            Text(category.title)
-              .fontSize(15)
-              .fontWeight(this.categoryWeight(index))
-              .fontColor(this.categoryColor(index))
-              .padding({ top: 6, bottom: 6 })
-              .onClick(() => this.selectCategory(index))
+            Column() {
+              Text(category.title)
+                .fontSize(this.categoryIndex === index ? 17 : 15)
+                .fontWeight(this.categoryWeight(index))
+                .fontColor(this.categoryColor(index))
+                .maxLines(1)
+                .animation({ duration: 180, curve: Curve.EaseOut })
+              Row()
+                .width(14)
+                .height(3)
+                .borderRadius(1.5)
+                .backgroundColor(appState.accentColor)
+                .margin({ top: 3 })
+                .opacity(this.categoryIndex === index ? 1 : 0)
+                .animation({ duration: 180, curve: Curve.EaseOut })
+            }
+            .justifyContent(FlexAlign.Center)
+            .height(36)
+            .onClick(() => this.selectCategory(index))
           }
         }, (category: FqSearchCategoryDef): string => category.title)
       }
