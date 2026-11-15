@@ -4021,7 +4021,9 @@ export struct PlayerPage {
   /** 在线取流一集（同源贯穿 + 单集降级）：红果会话走 hongguoEpisodeSource
    * （detail 原始章节串 + 清晰度偏好换算短边像素），瞬时失败静默重试一次，
    * 再失败本集降级番茄取流（集 id 跨源一致，进度/已看/缓存记录不受影响），
-   * 连续降级达上限本场不再尝试红果；番茄会话 / 仅番茄开关走原链路。 */
+   * 连续降级达上限本场不再尝试红果；番茄会话 / 仅番茄开关走流式直连
+   * （对齐 fqapp player 恒 mode=stream：后端只解析 CDN 直链与 CENC key，
+   * 不整集代下载，起播快且不易后端 500）。 */
   private async fetchEpisodeSource(index: number): Promise<FqEpisodeSource> {
     const episode: FqChapter | undefined = this.episodes[index];
     if (episode === undefined) {
@@ -4052,7 +4054,7 @@ export struct PlayerPage {
       hilog.warn(0x0001, FQ_AUTO_CACHE_LOG_TAG,
         'hongguo stream fallback to fanqie, episode %{public}d', index);
     }
-    return FqBackend.get().episodeSource(episode.itemId, this.tab, this.qualityPreference);
+    return FqBackend.get().episodeSourceStream(episode.itemId, this.tab, this.qualityPreference);
   }
 
   /** 加载并起播一集（/api/content 取流 → mpv open）。 */

@@ -379,7 +379,54 @@ fn sanitize_quality(raw: &str) -> String {
 }
 
 /// Queries the phoenix multi_video_model endpoint.
+///
+/// 上游风控/抖动存在两种「HTTP 200 但不可用」形态：空 body（parse 即
+/// EOF）与业务失败包（`{BaseResp, Code:110001}` 无 `data`）。http 层按
+/// 200 放行、不进任何重试——一次抖动就直接 500 / 丢 1080P 档，只能靠
+/// 用户手动重试（实测隔几秒重发大概率恢复）。这里按响应可用性——JSON
+/// 可解析且 `data` 为对象（与下方 phoenix warn 判据一致）——自动补重试：
+/// shortplay 主解析 3 次尝试（400ms/800ms 退避），phoenix 辅助 2 次
+/// （失败非致命，不拖慢主路径）；重试间隔走共享 deadline，余量不足时
+/// 保持旧行为原样返回。
+fn video_body_usable(raw: &[u8]) -> bool {
+    serde_json::from_slice::<Value>(raw)
+        .map(|root| root.get("data").is_some_and(Value::is_object))
+        .unwrap_or(false)
+}
+
+/// 按响应可用性重试取模型：`once` 单次取流，`attempts` 总尝试次数，
+/// `delay` 首次重试间隔（逐次翻倍）。最后一份响应原样返回——parse 失败
+/// 仍走原有错误路径，业务失败包仍透传给客户端，行为与不重试时一致。
+async fn fetch_video_model_with_retry<F, Fut>(once: F, attempts: u32, delay: Duration) -> ApiResult<Vec<u8>>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = ApiResult<Vec<u8>>>,
+{
+    let mut delay = delay;
+    for attempt in 0..attempts {
+        let raw = once().await?;
+        if video_body_usable(&raw) {
+            return Ok(raw);
+        }
+        if attempt + 1 == attempts || !crate::upstream::budget::retry_pause(delay).await {
+            return Ok(raw);
+        }
+        delay *= 2;
+    }
+    unreachable!("retry loop always returns on its last attempt")
+}
+
+/// Queries the phoenix multi_video_model endpoint.
 async fn fetch_phoenix_video_model(ctx: &Ctx, video_id: &str) -> ApiResult<Vec<u8>> {
+    fetch_video_model_with_retry(
+        || fetch_phoenix_video_model_once(ctx, video_id),
+        2,
+        Duration::from_millis(400),
+    )
+    .await
+}
+
+async fn fetch_phoenix_video_model_once(ctx: &Ctx, video_id: &str) -> ApiResult<Vec<u8>> {
     let post_body = serde_json::to_vec(&json!({
         "biz_param": {
             "detail_page_version": 0,
@@ -410,6 +457,15 @@ async fn fetch_phoenix_video_model(ctx: &Ctx, video_id: &str) -> ApiResult<Vec<u
 
 /// Queries the shortplay-style video_model endpoint used for short drama ids.
 async fn fetch_shortplay_video_model(ctx: &Ctx, video_id: &str) -> ApiResult<Vec<u8>> {
+    fetch_video_model_with_retry(
+        || fetch_shortplay_video_model_once(ctx, video_id),
+        3,
+        Duration::from_millis(400),
+    )
+    .await
+}
+
+async fn fetch_shortplay_video_model_once(ctx: &Ctx, video_id: &str) -> ApiResult<Vec<u8>> {
     let post_body = serde_json::to_vec(&json!({
         "video_id": video_id,
         "content_type": 1004,

@@ -814,7 +814,9 @@ export struct ListenVideoPage {
     return Math.abs(value - step) < FQ_SPEED_STEP / 2;
   }
 
-  /** 加载并起播一集（episodeSource 取流 → mpv open；startSec > 0 偏移起播）。 */
+  /** 加载并起播一集（episodeSourceStream 流式直连取流 → mpv open；对齐
+   * fqapp 听视频恒 mode=stream；CENC 密文流带 decryptionKey 边下边解密；
+   * startSec > 0 偏移起播）。 */
   private async loadEpisode(index: number, startSec: number): Promise<void> {
     const episode: FqChapter | undefined = this.episodes[index];
     if (episode === undefined) {
@@ -835,14 +837,14 @@ export struct ListenVideoPage {
     try {
       await FqBackend.get().start(getContext(this));
       this.resolveCover();
-      const source = await FqBackend.get().episodeSource(episode.itemId, this.tab);
+      const source = await FqBackend.get().episodeSourceStream(episode.itemId, this.tab);
       if (token !== this.loadToken) {
         return;
       }
       this.loading = false;
       this.player.open(startSec > 0
-        ? new Media(source.url, { start: startSec })
-        : new Media(source.url));
+        ? new Media(source.url, { start: startSec, decryptionKey: source.keyHex })
+        : new Media(source.url, { decryptionKey: source.keyHex }));
       // 新集起播：重置「实际播放」guard
       this.hasDisplayed = false;
       // AVSession/后台长时任务：会话确保 + 元数据（时长随 1s tick 补发）
