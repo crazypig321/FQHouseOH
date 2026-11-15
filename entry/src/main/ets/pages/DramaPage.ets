@@ -597,17 +597,19 @@ export struct DramaPage {
     }
   }
 
-  /** 看剧网格源：「自动切换」= 红果 catalog 优先 + 番茄 t8 兜底；「默认源」= 纯番茄 t8。 */
+  /** 看剧网格源：「自动切换」= 红果 catalog 优先 + 番茄 t8 兜底；
+   *  「默认源」= 原番茄链路（homepage t8 推荐流 + 搜索兜底）。 */
   private watchGridSources(): FqHomeSource[] {
     return [FqAppSettingsStore.getVideoFanqieOnly()
-      ? FqHomeSource.pagedSearch('短剧', 'video')
+      ? FqHomeSource.homepageFallback(8, 'video', FQ_SOURCE_SEARCH_PAGED, '短剧', 0)
       : FqHomeSource.hongguoCatalog('short_play', 'video', FQ_SOURCE_SEARCH_PAGED, '短剧', 0)];
   }
 
-  /** 漫剧网格源：「自动切换」= 红果 comic_series 优先 + 番茄 t24 兜底；「默认源」= 纯番茄 t24。 */
+  /** 漫剧网格源：「自动切换」= 红果 comic_series 优先 + 番茄 t24 兜底；
+   *  「默认源」= 原番茄链路（homepage t24 推荐流 + 搜索兜底）。 */
   private manjuGridSources(): FqHomeSource[] {
     return [FqAppSettingsStore.getVideoFanqieOnly()
-      ? FqHomeSource.search('漫剧', 11, 'manju')
+      ? FqHomeSource.homepageFallback(24, 'manju', FQ_SOURCE_SEARCH, '漫剧', 11)
       : FqHomeSource.hongguoCatalog('comic_series', 'manju', FQ_SOURCE_SEARCH, '漫剧', 11)];
   }
 

@@ -62,8 +62,8 @@ const SHELF_GROUP_TAG_ANCHOR_PREFIX: string = 'shelf_group_tag_';
 const SHELF_GROUP_TAGS_HEIGHT: number = 36;
 /** 胶囊行高：margin 4 + 滑块 30 + margin 10（插槽声明高必须与实际内容一致）。 */
 const SHELF_CAPSULE_ROW_HEIGHT: number = 44;
-/** 搜索行高：CommonSearch（Search 默认高 40）。 */
-const SHELF_SEARCH_ROW_HEIGHT: number = 40;
+/** 搜索行高：CommonSearch（Search 默认高 40）+ 底部留白 10。 */
+const SHELF_SEARCH_ROW_HEIGHT: number = 50;
 /** HdsTitleBar MINI 模式标题行高。 */
 const SHELF_TITLE_BAR_HEIGHT: number = 56;
 
@@ -445,13 +445,12 @@ export struct ShelfPage {
   private listTopInset(): number {
     return appState.topRect + SHELF_TITLE_BAR_HEIGHT + this.titleExtraHeight();
   }
-
   /** 标题栏扩展区高度：胶囊行 + 分组标签行 + 搜索行。
    *  必须与 TitleExtraBuilder 实际内容高严格一致：插槽声明高与内容不符时，
    *  切换 tab 重建插槽会让底部组件（滑块/标签行）瞬时错位上下跳。 */
   private titleExtraHeight(): number {
     return SHELF_CAPSULE_ROW_HEIGHT + (this.groupTagsVisible() ? SHELF_GROUP_TAGS_HEIGHT : 0)
-      + (this.showSearchBox ? SHELF_SEARCH_ROW_HEIGHT : 0);
+      + (this.showSearchBox ? SHELF_SEARCH_ROW_HEIGHT : 0) + 10;
   }
 
   /** 重新读取 store 并重建懒加载数据。 */
@@ -1818,6 +1817,7 @@ export struct ShelfPage {
     })
       .width('100%')
       .padding({ left: 16, right: 16 })
+      .margin({ bottom: 10 })
       .transition(TransitionEffect.move(TransitionEdge.TOP))
   }
 
