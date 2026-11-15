@@ -26,11 +26,12 @@ export const FQ_SOURCE_HONGGUO_CATALOG: number = 3;
 
 /**
  * 走官方第二段（series-feed/cell/change）分页的 homepage 频道（fqapp
- * `_seriesFlowTabs` 语义）：第一段只开 cell（cell_id_str + session），
- * 真实分页由 cell 内容接口承载。短剧页推荐频道（t16 视频流）第一段只回
- * 两张 407 模板卡且没有翻页游标，内容全靠第二段补齐。
+ * `_seriesFlowTabs = {8, 16, 24}` 语义，另含本项目的听书 t5）：第一段只开
+ * cell（cell_id_str + session），真实分页由 cell 内容接口承载。短剧页推荐
+ * 频道（t16 视频流）第一段只回两张 407 模板卡且没有翻页游标，内容全靠第二
+ * 段补齐。
  */
-const FQ_SERIES_FLOW_TABS: number[] = [5, 8, 16];
+const FQ_SERIES_FLOW_TABS: number[] = [5, 8, 16, 24];
 
 /** 单个推荐源及其游标状态（含 search 兜底阶段配置）。 */
 export class FqHomeSource {

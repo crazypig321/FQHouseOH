@@ -672,9 +672,12 @@ export struct PlayerPage {
     });
     // 画中画：设置开启且系统支持时前台创建控制器（退后台自动小窗续播）
     this.setupPip();
-    if (this.episodes.length === 0) {
+    if (this.episodes.length === 0 || !FqAppSettingsStore.getVideoFanqieOnly()) {
+      // 无目录拉目录；有预载目录（详情页/搜索页/分享/观看全集）且「自动切换」：
+      // 同样红果目录优先（失败回退预载目录），与看剧频道网格直进同源
       this.loadEpisodes();
     } else {
+      // 「默认源」：直接用预载目录起播（不经红果）
       // 显式起播集（详情目录点击进页）优先；否则续播（fqapp resumeEpisodeIndex）
       const resumeIndex: number = this.explicitStartIndex >= 0 ? -1 : this.resumeStartIndex();
       if (resumeIndex >= 0) {
@@ -3948,11 +3951,14 @@ export struct PlayerPage {
     fqPushBookOrDetail(book.id, 'book', book.title, book.cover);
   }
 
-  /** 目录为空时先拉剧集目录（红果原生优先：id 与番茄互通；失败/熔断回退番茄目录）。 */
+  /** 目录为空或需红果优先时拉剧集目录（红果原生优先：失败/熔断回退番茄目录；
+   * 进页预载的番茄目录作为回退，不重复拉取）。 */
   private async loadEpisodes(): Promise<void> {
     const token: number = ++this.loadToken;
     this.loading = true;
     this.errorMsg = '';
+    // 进页预载目录（详情页/搜索页/分享/观看全集传入的番茄目录）：红果失败时的回退
+    const preloaded: FqChapter[] = this.episodes;
     try {
       await FqBackend.get().start(getContext(this));
       this.resolveCover();
@@ -3980,7 +3986,12 @@ export struct PlayerPage {
         }
       }
       if (episodes.length === 0) {
-        episodes = await FqBackend.get().directoryChapters(PlayerNavParams.contentId, this.tab);
+        // 预载的番茄目录直接用（详情页等入口已拉好），无预载再拉
+        if (preloaded.length > 0) {
+          episodes = preloaded;
+        } else {
+          episodes = await FqBackend.get().directoryChapters(PlayerNavParams.contentId, this.tab);
+        }
       }
       if (token !== this.loadToken) {
         return;
