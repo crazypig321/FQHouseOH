@@ -175,7 +175,7 @@ export struct BackupPage {
                 .fontWeight(FontWeight.Medium)
                 .fontColor($r('sys.color.font_primary'))
                 .width('100%')
-              Text(`包含书架收藏（含自定义分组）、浏览记录、收听进度、阅读进度、已看剧集（含续播进度）、短剧观看历史与外观、阅读设置，` +
+              Text(`包含书架收藏（含自定义分组）、浏览记录、收听进度、阅读进度、阅读书签、已看剧集（含续播进度）、短剧观看历史与外观、阅读设置，` +
                 '以及播放设置（弹幕样式、清晰度偏好、解码方式、边看边缓存、画中画、朗读音色语速）。\n\n' +
                 '不含本地 TXT 书籍、下载缓存、阅读时长统计与搜索历史，这些需要另行保留。\n\n' +
                 `导出的备份保存在 ${FQ_BACKUP_DIR_TEXT} 目录，可跨设备传输；` +
@@ -207,7 +207,7 @@ export struct BackupPage {
     }
     DialogManager.ShowConfirm('导出备份',
       `备份将保存到 ${FQ_BACKUP_DIR_TEXT} 目录，包含书架收藏（含自定义分组）、浏览记录、收听进度、` +
-      '阅读进度、已看剧集、短剧观看历史与外观、阅读、播放设置。将文件传到新设备，在本页选择导入即可恢复。',
+      '阅读进度、阅读书签、已看剧集、短剧观看历史与外观、阅读、播放设置。将文件传到新设备，在本页选择导入即可恢复。',
       '导出', (): void => {
         this.runExport();
       });
@@ -228,7 +228,7 @@ export struct BackupPage {
       await fqExportTextFile(getContext(this), name, text);
       let summary: string = `备份已保存到 ${FQ_BACKUP_DIR_TEXT}/${name}\n` +
         `收录收藏 ${data.shelf.length} 条、浏览 ${data.browse.length} 条、收听 ${data.listen.length} 条、` +
-        `阅读进度 ${data.reader.length} 本、已看剧集 ${data.episodeCount()} 集` +
+        `阅读进度 ${data.reader.length} 本、书签 ${data.bookmarks !== null ? data.bookmarks.length : 0} 条、已看剧集 ${data.episodeCount()} 集` +
         `${this.themeSummary(data)}。\n` +
         '将文件传到新设备，在本页选择导入即可。';
       if (data.excludedLocalRecords > 0) {
@@ -306,6 +306,9 @@ export struct BackupPage {
       }
       if (result.groupsApplied) {
         summary += '\n书架分组已同步（仅补未分组的书）。';
+      }
+      if (data.bookmarks !== null) {
+        summary += '\n阅读书签已同步（已有书签保持不变）。';
       }
       this.message = summary;
     } catch (error) {
@@ -416,6 +419,9 @@ export struct BackupPage {
         this.StatCell(`${data.episodeCount()}`, '已看剧集')
         if (data.watchHistory !== null && data.watchHistory.length > 0) {
           this.StatCell(`${data.watchHistory.length}`, '观看历史')
+        }
+        if (data.bookmarks !== null && data.bookmarks.length > 0) {
+          this.StatCell(`${data.bookmarks.length}`, '阅读书签')
         }
         if (data.settings !== null && data.settings.readerCustomThemes.length > 0) {
           this.StatCell(`${data.settings.readerCustomThemes.length}`, '自定义主题')

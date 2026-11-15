@@ -27,9 +27,13 @@ import { ComicNavParams, ROUTE_CACHED_COMICS } from '../../model/FqNavModels';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { CommonNav, titleBarOf } from '../../view/CommonNav';
 import { CommonLoading } from '../../view/CommonCom';
+import { FqBookmarkRibbon } from '../../view/FqBookmarkRibbon';
 import { FqSheetOptions } from '../../view/sheet/CommonSheet';
 import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/sheet/FqCommentSheet';
 import { FqCatalogSheet } from '../../view/sheet/FqCatalogSheet';
+import { FqBookmarkSheet, FQ_BOOKMARK_PULL_THRESHOLD_VP, FQ_BOOKMARK_PULL_DAMPING,
+  FQ_BOOKMARK_PULL_MAX_VP } from '../../view/sheet/FqBookmarkSheet';
+import { FqReaderBookmark, FqReaderBookmarkStore } from '../../core/FqReaderBookmarkStore';
 import { FqCacheSheet } from '../../view/sheet/FqCacheSheet';
 import { FqComicCacheStore } from '../../core/FqComicCacheStore';
 import {
@@ -163,6 +167,19 @@ export struct ComicPage {
   @Local cacheDownloadedIds: Set<string> = new Set<string>();
   /** 漫画下载器单例（@Trace taskList 驱动缓存格任务态实时刷新）。 */
   @Local dl: FqComicDownloader = fqComicDownloader;
+  /** 书签半模态（标题栏「书签」呼出；条目由本页持有，增删后刷新）。 */
+  @Local bookmarkSheetVisible: boolean = false;
+  @Local bookmarkItems: FqReaderBookmark[] = [];
+  /** 下拉书签跟手位移（阻尼后，vp；0 = 无下拉）。 */
+  @Local bookmarkPullVp: number = 0;
+  /** 下拉累计原始距离（vp）。 */
+  private pullDistanceVp: number = 0;
+  /** 下拉已达阈值（松手提交）。 */
+  private pullArmed: boolean = false;
+  /** 下拉起手时当前页已有书签（下拉变删除）。 */
+  private pullRemoving: boolean = false;
+  /** 下拉会话中（起手到松手）。 */
+  private pullSession: boolean = false;
 
   private bookId: string = '';
   private bookTitle: string = '';
@@ -210,6 +227,8 @@ export struct ComicPage {
     ComicNavParams.initialDomPos = '';
     this.previewNoSave = ComicNavParams.previewNoSave;
     ComicNavParams.previewNoSave = false;
+    // 预载本书书签：右上角色带标识（已收藏页）渲染依赖 bookmarkItems
+    this.reloadBookmarkItems();
     this.titleBarOp = titleBarOf(this.bookTitle, undefined, [
       {
         content: {
@@ -226,6 +245,16 @@ export struct ComicPage {
           label: 'cache',
           action: (): void => {
             this.openCacheSheet();
+          },
+        },
+      },
+      // 书签：当前页收藏/列表跳转（半模态）
+      {
+        content: {
+          icon: $r('sys.symbol.bookmark'),
+          label: '书签',
+          action: (): void => {
+            this.openBookmarkSheet();
           },
         },
       },
@@ -333,13 +362,32 @@ export struct ComicPage {
               footerRenderer: (slot: number): void => {
                 this.slotFooter(slot);
               },
+              ribbonRenderer: (slot: number): void => {
+                this.slotRibbon(slot);
+              },
               onTurn: (isNext: boolean): void => {
                 this.onFlipTurn(isNext);
               },
               onMenuTap: (): void => {
                 this.toggleMenu();
               },
+              pullEnabled: this.flipPullEnabled(),
+              pullDown: (offsetVp: number): void => {
+                this.onFlipPullDown(offsetVp);
+              },
+              pullEnd: (): void => {
+                this.onFlipPullEnd();
+              },
+              pullCancel: (): void => {
+                this.onFlipPullCancel();
+              },
             })
+              .translate({ y: this.bookmarkPullVp })
+          }
+
+          // 当前页书签标识（上下滚动模式页面外右上角；仿真/覆盖在 imageSlot 槽位页内）
+          if (this.comicFlipIndex === 2 && this.currentPageBookmarked()) {
+            FqBookmarkRibbon({ color: appState.accentColor })
           }
 
           // 漫评半模态宿主（0 尺寸稳定节点）
@@ -349,6 +397,14 @@ export struct ComicPage {
             .bindSheet(this.commentSheetVisible, this.CommentSheet(), FqSheetOptions((): void => {
               this.onCommentSheetClose();
             }, fqCommentSheetHeightVp()))
+
+          // 书签半模态宿主（0 尺寸稳定节点）
+          Column()
+            .width(0)
+            .height(0)
+            .bindSheet(this.bookmarkSheetVisible, this.BookmarkSheet(), FqSheetOptions((): void => {
+              this.onBookmarkSheetClose();
+            }, this.bookmarkSheetHeightVp()))
 
           // 离线缓存 sheet 宿主（0 尺寸稳定节点，标题栏下载键呼出）
           Column()
@@ -386,6 +442,24 @@ export struct ComicPage {
             .backgroundColor(FQ_COMIC_BG)
           }
 
+          // 下拉书签提示条（跟手位移渐显；armed 后文案切「松手…」+ 箭头向上）
+          if (this.bookmarkPullVp > 0) {
+            Row({ space: 6 }) {
+              SymbolGlyph(this.pullArmed ? $r('sys.symbol.arrow_up') : $r('sys.symbol.arrow_down'))
+                .fontSize(14)
+                .fontColor([FQ_COMIC_TEXT])
+              Text(this.pullRemoving
+                ? (this.pullArmed ? '松手删除书签' : '下拉删除书签')
+                : (this.pullArmed ? '松手添加书签' : '下拉添加书签'))
+                .fontSize(13)
+                .fontColor(FQ_COMIC_TEXT)
+            }
+            .width('100%')
+            .justifyContent(FlexAlign.End)
+            .padding({ top: appState.topRect + 12, right: 28 })
+            .opacity(Math.min(1, this.bookmarkPullVp / 24))
+          }
+
           if (this.menuVisible) {
             Column()
               .width('100%')
@@ -399,6 +473,7 @@ export struct ComicPage {
         .width('100%')
         .height(this.bodyHeightVp > 0 ? this.bodyHeightVp : '100%')
         .offset({ y: -this.bodyTopCompVp })
+        .alignContent(Alignment.Top)
         .backgroundColor(FQ_COMIC_BG)
         .bindSheet(this.sheetVisible, this.CatalogSheet(), FqSheetOptions((): void => {
           this.onSheetClose();
@@ -428,6 +503,14 @@ export struct ComicPage {
         source: this.slotSources[slot + 1],
         heightVp: this.pagedImageHeightVp,
       })
+    }
+  }
+
+  /** 槽位页整页右上角书签标识（覆盖层：含眉页区，随快照翻页/下拉位移；菜单呼出时隐藏避让标题栏）。 */
+  @Builder
+  private slotRibbon(slot: number) {
+    if (!this.menuVisible && this.slotBookmarked(slot)) {
+      FqBookmarkRibbon({ color: appState.accentColor })
     }
   }
 
@@ -924,12 +1007,262 @@ export struct ComicPage {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // 书签（标题栏「书签」：当前页收藏 / 列表跳转 / 删除；仿真/覆盖下拉快捷添加删除）
+  // ---------------------------------------------------------------------------
+
+  /** 打开书签半模态：重拉列表。 */
+  private openBookmarkSheet(): void {
+    this.reloadBookmarkItems();
+    this.bookmarkSheetVisible = true;
+  }
+
+  private onBookmarkSheetClose(): void {
+    this.bookmarkSheetVisible = false;
+  }
+
+  /** 书签 Sheet 高度：屏高 55%（vp），异常回退 420。 */
+  private bookmarkSheetHeightVp(): number {
+    const displayData: display.Display = display.getDefaultDisplaySync();
+    const density: number = displayData.densityPixels > 0 ? displayData.densityPixels : 1;
+    const screenHeight: number = appState.screenHeight > 0 ? appState.screenHeight : displayData.height;
+    const height: number = Math.round((screenHeight / density) * 0.55);
+    return height > 0 ? height : 420;
+  }
+
+  private reloadBookmarkItems(): void {
+    this.bookmarkItems = FqReaderBookmarkStore.loadBook(this.bookId);
+  }
+
+  /** 当前阅读位置（进度同款编码）：'img:章内图下标'（翻页/垂直均取 pageIndex）。 */
+  private currentDomPos(): string {
+    if (this.pageIndex < 0 || this.pageIndex >= this.curImages.length) {
+      return '';
+    }
+    return `img:${this.pageIndex}`;
+  }
+
+  /** 当前页书签 key（bookId|chapterItemId|img:N；空 = 位置未就绪）。 */
+  private currentPageBookmarkKey(): string {
+    const domPos: string = this.currentDomPos();
+    const chapter: FqChapter | undefined = this.chapters[this.chapterIndex];
+    if (domPos.length === 0 || chapter === undefined) {
+      return '';
+    }
+    return `${this.bookId}|${chapter.itemId}|${domPos}`;
+  }
+
+  /** 当前页是否已收藏书签（上下滚动模式右上角标识）。
+   *  从 @Local bookmarkItems 里查而不是查静态 store：
+   *  V2 细粒度观察只追踪渲染期读到的可观察状态，静态 store 变化不会触发本条件重算；
+   *  bookmarkItems 在每次增删后整体替换，pageIndex 变化亦会触发重算。 */
+  private currentPageBookmarked(): boolean {
+    const key: string = this.currentPageBookmarkKey();
+    if (key.length === 0) {
+      return false;
+    }
+    for (let i = 0; i < this.bookmarkItems.length; i++) {
+      if (this.bookmarkItems[i].key === key) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** 槽位页（slot -1/0/1 = 上一页/当前页/下一页）是否已收藏书签（页面内右上角标识）。
+   *  章界邻页（邻话预载图）按所属话算 key；章内按本章算。 */
+  private slotBookmarked(slot: number): boolean {
+    const index: number = this.pageIndex + slot;
+    let chapterIndex: number = this.chapterIndex;
+    let imageIndex: number = -1;
+    if (index >= 0 && index < this.curImages.length) {
+      imageIndex = index;
+    } else if (index < 0) {
+      if (this.prevImages.length > 0) {
+        chapterIndex = this.chapterIndex - 1;
+        imageIndex = this.prevImages.length - 1;
+      }
+    } else if (this.nextImages.length > 0) {
+      chapterIndex = this.chapterIndex + 1;
+      imageIndex = 0;
+    }
+    if (imageIndex < 0) {
+      return false;
+    }
+    const chapter: FqChapter | undefined = this.chapters[chapterIndex];
+    if (chapter === undefined) {
+      return false;
+    }
+    const key: string = `${this.bookId}|${chapter.itemId}|img:${imageIndex}`;
+    for (let i = 0; i < this.bookmarkItems.length; i++) {
+      if (this.bookmarkItems[i].key === key) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** 添加当前页书签：正文未就绪提示；同位置已有提示；摘录 = 章内页序。 */
+  private addBookmarkAtCurrent(): void {
+    const domPos: string = this.currentDomPos();
+    const chapter: FqChapter | undefined = this.chapters[this.chapterIndex];
+    if (domPos.length === 0 || chapter === undefined) {
+      promptAction.showToast({ message: '阅读位置尚未就绪', duration: 1500 });
+      return;
+    }
+    const record: FqReaderBookmark = new FqReaderBookmark(this.bookId, this.chapterIndex,
+      chapter.itemId, chapter.title, domPos, `第 ${this.pageIndex + 1} 页`, Date.now());
+    try {
+      if (!FqReaderBookmarkStore.add(record)) {
+        promptAction.showToast({ message: '当前位置已有书签', duration: 1500 });
+        return;
+      }
+    } catch (error) {
+      promptAction.showToast({ message: `${error}`, duration: 1500 });
+      return;
+    }
+    this.reloadBookmarkItems();
+    promptAction.showToast({ message: '已添加书签', duration: 1500 });
+  }
+
+  /** 书签跳转：itemId 找回章节（空 itemId 回退章下标），同章只做章内重定位。 */
+  private jumpToBookmark(item: FqReaderBookmark): void {
+    let index: number = -1;
+    if (item.chapterItemId.length > 0) {
+      for (let i = 0; i < this.chapters.length; i++) {
+        const chapter: FqChapter | undefined = this.chapters[i];
+        if (chapter !== undefined && chapter.itemId === item.chapterItemId) {
+          index = i;
+          break;
+        }
+      }
+    } else if (item.chapterIndex >= 0 && item.chapterIndex < this.totalChapters) {
+      index = item.chapterIndex;
+    }
+    if (index < 0) {
+      promptAction.showToast({ message: '目录中已找不到这条书签的章节', duration: 1500 });
+      return;
+    }
+    this.onBookmarkSheetClose();
+    if (index === this.chapterIndex) {
+      this.repositionInsideChapter(item.domPos);
+    } else {
+      this.openChapter(index, item.domPos);
+    }
+  }
+
+  /** 同章章内重定位：翻页/覆盖直接设图下标，上下滚动源内定位条目滚动。 */
+  private repositionInsideChapter(domPos: string): void {
+    if (this.curImages.length === 0) {
+      return;
+    }
+    const target: number = this.restoreImageIndex(domPos, this.curImages.length);
+    if (target === this.pageIndex) {
+      return;
+    }
+    if (this.comicFlipIndex === 2) {
+      // 源内定位所属章+图下标的条目（滚动回调自行更新进度）
+      for (let i = 0; i < this.verticalSource.totalCount(); i++) {
+        const item: FqComicImageItem = this.verticalSource.getData(i);
+        if (item.chapterIndex === this.chapterIndex && item.imageIndex === target) {
+          this.verticalScroller.scrollToIndex(i, true);
+          break;
+        }
+      }
+      return;
+    }
+    this.pageIndex = target;
+    this.saveProgressNow();
+    this.preloadVisiblePixels();
+  }
+
+  /** 删除书签：确认弹窗（对齐 fqapp 不可撤销语义）。 */
+  private removeBookmark(item: FqReaderBookmark): void {
+    const title: string = item.chapterTitle.length > 0 ? item.chapterTitle
+      : `第${item.chapterIndex + 1}章`;
+    DialogManager.ShowConfirm('删除书签？', `删除「${title}」的书签？此操作不可撤销。`,
+      '删除书签', (): void => {
+        FqReaderBookmarkStore.remove(item.key);
+        this.reloadBookmarkItems();
+        promptAction.showToast({ message: '删除书签成功', duration: 1500 });
+      });
+  }
+
+  // ---------------------------------------------------------------------------
+  // 下拉书签（仿真/覆盖翻页：FqComicFlip 竖直下拉，阈值 80vp、阻尼 0.7、上限 240）
+  // ---------------------------------------------------------------------------
+
+  /** 下拉书签启用：翻页容器挂载（仿真/覆盖）+ 正文就绪 + 无菜单遮挡。 */
+  private flipPullEnabled(): boolean {
+    return this.comicFlipIndex !== 2 && this.curImages.length > 0 && !this.loadingState
+      && this.errorMsg.length === 0 && !this.menuVisible;
+  }
+
+  /** 下拉跟手：累计距离（clamp 0-240），阻尼 0.7 驱动内容位移与提示条。 */
+  private onFlipPullDown(offsetVp: number): void {
+    if (!this.pullSession) {
+      this.pullSession = true;
+      this.pullRemoving = FqReaderBookmarkStore.has(this.currentPageBookmarkKey());
+    }
+    this.pullDistanceVp = Math.min(FQ_BOOKMARK_PULL_MAX_VP, Math.max(0, offsetVp));
+    this.bookmarkPullVp = this.pullDistanceVp * FQ_BOOKMARK_PULL_DAMPING;
+    this.pullArmed = this.pullDistanceVp >= FQ_BOOKMARK_PULL_THRESHOLD_VP;
+  }
+
+  /** 下拉松手：达阈值且起手态未变 → 添加/删除当前页书签；否则回弹。 */
+  private onFlipPullEnd(): void {
+    const commit: boolean = this.pullSession && this.pullArmed && this.flipPullEnabled();
+    const removing: boolean = this.pullRemoving;
+    this.resetPullAnimated();
+    if (!commit) {
+      return;
+    }
+    if (removing) {
+      this.removeCurrentPageBookmark();
+    } else {
+      this.addBookmarkAtCurrent();
+    }
+  }
+
+  /** 下拉取消（系统打断）：回弹复位，不提交。 */
+  private onFlipPullCancel(): void {
+    this.resetPullAnimated();
+  }
+
+  /** 回弹复位（200ms 摩擦曲线），清下拉会话状态。 */
+  private resetPullAnimated(): void {
+    this.pullSession = false;
+    this.pullArmed = false;
+    this.pullRemoving = false;
+    this.pullDistanceVp = 0;
+    if (this.bookmarkPullVp > 0) {
+      this.getUIContext().animateTo({ duration: 200, curve: Curve.Friction }, (): void => {
+        this.bookmarkPullVp = 0;
+      });
+    }
+  }
+
+  /** 下拉删除当前页书签（轻交互无确认，对齐 fqapp 下拉删除；toast 提示）。 */
+  private removeCurrentPageBookmark(): void {
+    const key: string = this.currentPageBookmarkKey();
+    if (key.length === 0) {
+      return;
+    }
+    FqReaderBookmarkStore.remove(key);
+    this.reloadBookmarkItems();
+    promptAction.showToast({ message: '删除书签成功', duration: 1500 });
+  }
+
   /** 系统返回：先关漫评/目录半模态，再放行返回上一页。
    *  工具栏不在此拦截：左上角返回按钮点击即退出漫画页（对齐 fqapp），
    *  工具栏关闭走正文点击/菜单键。 */
   private handleBackPressed(): boolean {
     if (this.commentSheetVisible) {
       this.onCommentSheetClose();
+      return true;
+    }
+    if (this.bookmarkSheetVisible) {
+      this.onBookmarkSheetClose();
       return true;
     }
     if (this.sheetVisible) {
@@ -944,7 +1277,7 @@ export struct ComicPage {
   /** 沉浸控制：阅读时隐藏系统状态栏，菜单呼出（标题栏/工具栏出现）时恢复。
    *  同时驱动音量键翻页拦截同步：菜单/半模态/开关任一变化即重算注册态。 */
   @Monitor('menuVisible', 'comicFlipIndex', 'volumeKeyPaging', 'sheetVisible',
-    'commentSheetVisible', 'cacheSheetVisible')
+    'commentSheetVisible', 'cacheSheetVisible', 'bookmarkSheetVisible')
   onComicOverlayChange(): void {
     this.applySystemBar(this.menuVisible);
     this.syncVolumeKeyConsumer();
@@ -955,7 +1288,7 @@ export struct ComicPage {
   private syncVolumeKeyConsumer(): void {
     const want: boolean = this.pageShown && this.volumeKeyPaging
       && !this.menuVisible && !this.sheetVisible && !this.commentSheetVisible
-      && !this.cacheSheetVisible;
+      && !this.cacheSheetVisible && !this.bookmarkSheetVisible;
     FqVolumeKeyPaging.sync(want, (): void => {
       this.onVolumeKey(false);
     }, (): void => {
@@ -1524,6 +1857,24 @@ export struct ComicPage {
       fontColor: $r('sys.color.font_primary'),
       commentLabel: '漫评',
       replyBookId: this.bookId,
+    })
+  }
+
+  /** 书签半模态：公共 FqBookmarkSheet（右上角标识定位当前页书签）。 */
+  @Builder
+  private BookmarkSheet() {
+    FqBookmarkSheet({
+      items: this.bookmarkItems,
+      fontColor: $r('sys.color.font_primary'),
+      addClick: (): void => {
+        this.addBookmarkAtCurrent();
+      },
+      itemClick: (item: FqReaderBookmark): void => {
+        this.jumpToBookmark(item);
+      },
+      itemRemove: (item: FqReaderBookmark): void => {
+        this.removeBookmark(item);
+      },
     })
   }
 

@@ -28,6 +28,7 @@ import { FqBrowseStore } from '../core/FqBrowseStore';
 import { FqAudioHistory } from '../core/FqAudioHistory';
 import { FqWatchedStore } from '../core/FqWatchedStore';
 import { FqReaderStore } from '../core/FqReaderStore';
+import { FqReaderBookmarkStore } from '../core/FqReaderBookmarkStore';
 import { FqReadStatsStore } from '../core/FqReadStatsStore';
 import { FqLocalBookStore } from '../core/FqLocalBookStore';
 import { FqAppSettingsStore } from '../core/FqAppSettingsStore';
@@ -68,6 +69,8 @@ export default class EntryAbility extends UIAbility {
     FqAudioHistory.init(this.context);
     FqWatchedStore.init(this.context);
     FqReaderStore.init(this.context);
+    // 阅读书签（底部工具条收藏/跳转）：启动即初始化（备份导出需枚举全量书签）
+    FqReaderBookmarkStore.init(this.context);
     // 音量键翻页开关镜像到 AppState（设置页/小说/漫画三处开关共享）
     appState.volumeKeyPaging = FqReaderStore.getSettings().volumeKeyPaging;
     // 应用设置（深色模式恢复 + 后台保活开关）初始化

@@ -52,12 +52,22 @@ export struct FqComicFlip {
   /** 眉页 / 眉脚渲染回调（随槽位三区渲染，仿真截图含眉页眉脚）。 */
   @BuilderParam headerRenderer: (slot: number) => void;
   @BuilderParam footerRenderer: (slot: number) => void;
+  /** 槽位页整页右上角覆盖层渲染回调（书签标识等，随仿真截图翻页/下拉位移）。 */
+  @BuilderParam ribbonRenderer: (slot: number) => void;
   /** 翻页完成（isNext=true 向后翻页）。 */
   @Event onTurn: (isNext: boolean) => void = (isNext: boolean): void => {};
   /** 翻页前置校验（false = 目标页未就绪，拒绝本次翻页/提交回弹；父级应触发预载）。 */
   @Event canTurn: (isNext: boolean) => boolean = (_isNext: boolean): boolean => true;
   /** 中区点击呼出菜单。 */
   @Event onMenuTap: () => void = (): void => {};
+  /** 下拉书签启用（宿主：正文就绪 + 菜单关闭；启用时竖直下拉为书签交互）。 */
+  @Param pullEnabled: boolean = false;
+  /** 下拉跟手（offsetVp：起点至今竖直位移，正值向下；宿主驱动提示条与内容位移）。 */
+  @Event pullDown: (offsetVp: number) => void = (_offsetVp: number): void => {};
+  /** 下拉松手（宿主按阈值提交添加/删除书签，或回弹复位）。 */
+  @Event pullEnd: () => void = (): void => {};
+  /** 下拉取消（系统打断，宿主回弹复位）。 */
+  @Event pullCancel: () => void = (): void => {};
   /** 外部动画翻页触发器（音量键翻页等）：宿主持有实例传入，挂载时注册回调、卸载时清空。 */
   @Param turnController: FqFlipTurnController | null = null;
 
@@ -572,26 +582,33 @@ export struct FqComicFlip {
    *  槽位↔物理层固定绑定，槽位页数据变化时画布经 @Monitor 全量刷新。 */
   @Builder
   private slotContent(slot: number) {
-    Column() {
+    Stack() {
       Column() {
-        this.headerRenderer(slot)
-      }
-      .width('100%')
-      .height(this.headerZoneVp)
-      .justifyContent(FlexAlign.End)
+        Column() {
+          this.headerRenderer(slot)
+        }
+        .width('100%')
+        .height(this.headerZoneVp)
+        .justifyContent(FlexAlign.End)
 
-      Column() {
-        this.pageRenderer(slot)
-      }
-      .width('100%')
-      .layoutWeight(1)
+        Column() {
+          this.pageRenderer(slot)
+        }
+        .width('100%')
+        .layoutWeight(1)
 
-      Column() {
-        this.footerRenderer(slot)
+        Column() {
+          this.footerRenderer(slot)
+        }
+        .width('100%')
+        .height(this.footerZoneVp)
+        .justifyContent(FlexAlign.Start)
       }
       .width('100%')
-      .height(this.footerZoneVp)
-      .justifyContent(FlexAlign.Start)
+      .height('100%')
+
+      // 槽位页整页右上角覆盖层（书签标识：含眉页区，随快照翻页/下拉位移）
+      this.ribbonRenderer(slot)
     }
     .width('100%')
     .height('100%')
@@ -650,6 +667,7 @@ export struct FqComicFlip {
       this.onAreaChanged(newArea);
     })
     .gesture(
+      GestureGroup(GestureMode.Exclusive,
       PanGesture({ fingers: 1, direction: PanDirection.Horizontal })
         .onActionStart((event: GestureEvent) => {
           if (this.flipMode === 2) {
@@ -733,7 +751,24 @@ export struct FqComicFlip {
           } else if (this.simDrawing) {
             this.startSimAuto(false);
           }
+        }),
+      PanGesture({ fingers: 1, direction: PanDirection.Down })
+        .onActionUpdate((event: GestureEvent) => {
+          if (this.pullEnabled) {
+            this.pullDown(Math.max(0, event.offsetY));
+          }
         })
+        .onActionEnd((event: GestureEvent) => {
+          if (this.pullEnabled) {
+            this.pullEnd();
+          }
+        })
+        .onActionCancel(() => {
+          if (this.pullEnabled) {
+            this.pullCancel();
+          }
+        })
+      )
     )
   }
 }

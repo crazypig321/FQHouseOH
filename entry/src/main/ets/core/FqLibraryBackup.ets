@@ -20,6 +20,7 @@ import { FqAppSettingsStore, FQ_DRAMA_AUTO_CACHE_AHEAD_MAX,
   FQ_DANMAKU_ALPHA_MIN_PERCENT, FQ_DANMAKU_ALPHA_MAX_PERCENT,
   FQ_VIDEO_QUALITY_PREF_WHITELIST } from './FqAppSettingsStore';
 import { fqAsArray, fqAsRecord, fqNum, fqStr } from './FqJson';
+import { FqReaderBookmark, FqReaderBookmarkStore, FQ_BOOKMARK_EXCERPT_MAX, FQ_BOOKMARK_MAX_ENTRIES } from './FqReaderBookmarkStore';
 
 const FQ_BACKUP_FORMAT: string = 'fqhouse.library-backup';
 /** 备份格式版本：v2 起包含应用设置段（外观/阅读偏好）；decode 兼容 v1（无设置段）。 */
@@ -189,6 +190,28 @@ export class FqBackupReaderProgress {
     this.readRanges = readRanges;
     this.percent = percent;
     this.updatedAt = updatedAt > 0 ? Math.trunc(updatedAt) : 0;
+  }
+}
+
+/** 备份内单条阅读书签：章 + 段内位置（与阅读进度同编码）+ 标题/摘录预览。 */
+export class FqBackupBookmark {
+  readonly bookId: string;
+  readonly chapterIndex: number;
+  readonly chapterItemId: string;
+  readonly chapterTitle: string;
+  readonly domPos: string;
+  readonly excerpt: string;
+  readonly createdAt: number;
+
+  constructor(bookId: string, chapterIndex: number, chapterItemId: string,
+    chapterTitle: string, domPos: string, excerpt: string, createdAt: number) {
+    this.bookId = bookId;
+    this.chapterIndex = chapterIndex;
+    this.chapterItemId = chapterItemId;
+    this.chapterTitle = chapterTitle;
+    this.domPos = domPos;
+    this.excerpt = excerpt;
+    this.createdAt = createdAt > 0 ? Math.trunc(createdAt) : 0;
   }
 }
 
@@ -395,12 +418,15 @@ export class FqLibraryBackupData {
   readonly groups: FqBackupShelfGroup[] | null;
   /** 短剧观看历史段（旧备份无此段时为 null，恢复时跳过）。 */
   readonly watchHistory: FqWatchHistoryRecord[] | null;
+  /** 阅读书签段（旧备份无此段时为 null，恢复时跳过）。 */
+  readonly bookmarks: FqBackupBookmark[] | null;
 
   constructor(createdAt: number, appVersion: string, shelf: FqShelfItem[],
     browse: FqBrowseItem[], listen: FqListenRecord[], watched: FqBackupWatched[],
     reader: FqBackupReaderProgress[], excludedLocalRecords: number,
     settings: FqBackupAppSettings | null, groups: FqBackupShelfGroup[] | null = null,
-    watchHistory: FqWatchHistoryRecord[] | null = null) {
+    watchHistory: FqWatchHistoryRecord[] | null = null,
+    bookmarks: FqBackupBookmark[] | null = null) {
     this.createdAt = createdAt;
     this.appVersion = appVersion;
     this.shelf = shelf;
@@ -412,6 +438,7 @@ export class FqLibraryBackupData {
     this.settings = settings;
     this.groups = groups;
     this.watchHistory = watchHistory;
+    this.bookmarks = bookmarks;
   }
 
   /** 已看集总数（预览统计用）。 */
@@ -632,8 +659,20 @@ export class FqLibraryBackup {
       }
       groups.push(new FqBackupShelfGroup(group.name, books));
     }
+    // 阅读书签段：local_ 排除（本地书依赖设备本地文件）
+    const bookmarks: FqBackupBookmark[] = [];
+    for (const item of FqReaderBookmarkStore.all()) {
+      if (item.bookId.startsWith('local_')) {
+        excluded++;
+        continue;
+      }
+      fqBackupCheckId(item.bookId);
+      bookmarks.push(new FqBackupBookmark(item.bookId, item.chapterIndex, item.chapterItemId,
+        item.chapterTitle, item.domPos, item.excerpt, item.createdAt));
+    }
     return new FqLibraryBackupData(Date.now(), FqLibraryBackup.appVersion(),
-      shelf, browse, listen, watched, reader, excluded, settings, groups, watchHistory);
+      shelf, browse, listen, watched, reader, excluded, settings, groups, watchHistory,
+      bookmarks);
   }
 
   /** 序列化为备份 JSON 文本（体积超限抛错）。 */
@@ -740,6 +779,22 @@ export class FqLibraryBackup {
       reader.push(rec);
     }
     root['reader'] = reader;
+    // 阅读书签段（旧备份无此段）
+    if (data.bookmarks !== null) {
+      const bookmarks: Object[] = [];
+      for (const item of data.bookmarks) {
+        const rec: Record<string, Object> = {};
+        rec['bookId'] = item.bookId;
+        rec['chapterIndex'] = item.chapterIndex;
+        rec['chapterItemId'] = item.chapterItemId;
+        rec['chapterTitle'] = item.chapterTitle;
+        rec['domPos'] = item.domPos;
+        rec['excerpt'] = item.excerpt;
+        rec['createdAt'] = item.createdAt;
+        bookmarks.push(rec);
+      }
+      root['bookmarks'] = bookmarks;
+    }
     // 书架分组段（旧备份无此段）
     if (data.groups !== null) {
       const groups: Object[] = [];
@@ -1026,6 +1081,36 @@ export class FqLibraryBackup {
         fqBackupCheckText(rec, 'domPos'),
         fqBackupCheckText(rec, 'read'),
         percent, fqNum(rec, 'updatedAt')));
+    }
+    // 阅读书签段（旧备份无此段 → null，恢复时跳过；条数上限与本机书签存储一致）
+    let bookmarks: FqBackupBookmark[] | null = null;
+    if (root['bookmarks'] !== undefined) {
+      const bookmarkList: Object[] = fqBackupCheckList(root['bookmarks']);
+      if (bookmarkList.length > FQ_BOOKMARK_MAX_ENTRIES) {
+        throw new Error(`备份书签超过 ${FQ_BOOKMARK_MAX_ENTRIES} 条上限`);
+      }
+      bookmarks = [];
+      const bookmarkKeys: Set<string> = new Set<string>();
+      for (const value of bookmarkList) {
+        const rec: Record<string, Object> | null = fqAsRecord(value);
+        if (rec === null) {
+          throw new Error('备份阅读书签格式无效');
+        }
+        const entry: FqBackupBookmark = new FqBackupBookmark(
+          fqBackupCheckId(fqStr(rec, 'bookId')),
+          fqBackupCheckInt(rec, 'chapterIndex', 2147483647),
+          fqBackupCheckText(rec, 'chapterItemId'),
+          fqBackupCheckText(rec, 'chapterTitle'),
+          fqBackupCheckText(rec, 'domPos'),
+          fqBackupCheckText(rec, 'excerpt'),
+          fqBackupCheckInt(rec, 'createdAt', FQ_BACKUP_MAX_TIME));
+        const key: string = `${entry.bookId}|${entry.chapterItemId}|${entry.domPos}`;
+        if (bookmarkKeys.has(key)) {
+          throw new Error('备份中有重复的阅读书签');
+        }
+        bookmarkKeys.add(key);
+        bookmarks.push(entry);
+      }
     }
     let excluded: number = 0;
     if (root['excludedLocalRecords'] !== undefined) {
@@ -1347,7 +1432,7 @@ export class FqLibraryBackup {
         dramaPageEnabled);
     }
     return new FqLibraryBackupData(createdAt, appVersion, shelf, browse, listen,
-      watched, reader, excluded, settings, groups, watchHistory);
+      watched, reader, excluded, settings, groups, watchHistory, bookmarks);
   }
 
   /** 合并恢复到本机（只补缺失，绝不覆盖本机已有记录）。 */
@@ -1385,6 +1470,16 @@ export class FqLibraryBackup {
         }
         readerAdded++;
       }
+    }
+    // 阅读书签段（旧备份无此段跳过）：锚点已存在的跳过，只补缺失，达上限静默停止
+    if (data.bookmarks !== null) {
+      const records: FqReaderBookmark[] = [];
+      for (const entry of data.bookmarks) {
+        records.push(new FqReaderBookmark(entry.bookId, entry.chapterIndex, entry.chapterItemId,
+          entry.chapterTitle, entry.domPos,
+          entry.excerpt.substring(0, FQ_BOOKMARK_EXCERPT_MAX), entry.createdAt));
+      }
+      FqReaderBookmarkStore.merge(records);
     }
     // 书架分组段（旧备份无此段跳过）：同名分组映射到本机分组（缺失则新建），
     // 组内作品仅补未分组的书（assignIfUnassigned，不覆盖本机已有归属）。
