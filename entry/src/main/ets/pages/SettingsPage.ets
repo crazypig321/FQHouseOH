@@ -119,7 +119,7 @@ export struct SettingsPage {
           if (this.mineSettingsStyle === FQ_MINE_STYLE_SETTINGS_WITH_MINE) {
             this.SectionHeader('用户')
             FqSettingsCard() {
-              this.SettingRow($r('sys.symbol.person_fill'), '#FF8B5CF6', '我的',
+              this.SettingRow($r('sys.symbol.person'), '#FF8B5CF6', '我的',
                 '阅读热力图、最近阅读与视听统计', '', true,
                 (): void => {
                   NavPathUtils.push(ROUTE_PROFILE);
@@ -630,7 +630,7 @@ export struct SettingsPage {
   private StartupTabRow() {
     Row({ space: 12 }) {
       Stack() {
-        SymbolGlyph($r('sys.symbol.house_fill_1'))
+        SymbolGlyph($r('sys.symbol.main_auxiliary_screen'))
           .fontSize(17)
           .fontColor(['#FF22C55E'])
       }
@@ -756,7 +756,7 @@ export struct SettingsPage {
   private DramaPageRow() {
     Row({ space: 12 }) {
       Stack() {
-        SymbolGlyph($r('sys.symbol.template_fill'))
+        SymbolGlyph($r('sys.symbol.template'))
           .fontSize(17)
           .fontColor(['#FFEC4899'])
       }
@@ -792,7 +792,7 @@ export struct SettingsPage {
   private DirectReadRow() {
     Row({ space: 12 }) {
       Stack() {
-        SymbolGlyph($r('sys.symbol.book_open_fill'))
+        SymbolGlyph($r('sys.symbol.book'))
           .fontSize(17)
           .fontColor(['#FFF59E0B'])
       }
@@ -828,7 +828,7 @@ export struct SettingsPage {
   private VolumeKeyPagingRow() {
     Row({ space: 12 }) {
       Stack() {
-        SymbolGlyph($r('sys.symbol.speaker_wave_2_fill'))
+        SymbolGlyph($r('sys.symbol.speaker_wave_2'))
           .fontSize(17)
           .fontColor(['#FF0EA5E9'])
       }
@@ -864,7 +864,7 @@ export struct SettingsPage {
   private BackgroundAudioRow() {
     Row({ space: 12 }) {
       Stack() {
-        SymbolGlyph($r('sys.symbol.play_fill'))
+        SymbolGlyph($r('sys.symbol.play'))
           .fontSize(17)
           .fontColor(['#FF10B981'])
       }
@@ -901,7 +901,7 @@ export struct SettingsPage {
   private PipVideoRow() {
     Row({ space: 12 }) {
       Stack() {
-        SymbolGlyph($r('sys.symbol.rectangle_portrait_filled_on_rectangle_portrait'))
+        SymbolGlyph($r('sys.symbol.smal_window_playback'))
           .fontSize(17)
           .fontColor(['#FF06B6D4'])
       }
