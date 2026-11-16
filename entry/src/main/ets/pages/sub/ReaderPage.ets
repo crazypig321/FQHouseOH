@@ -500,7 +500,7 @@ export struct ReaderPage {
       this.refreshFooterStatus();
       // 阅读页驻留累计今日已读时长（30s 心跳，按书+全局双层）；只读来源不计入统计
       if (!this.readOnly) {
-        FqReadStatsStore.addBookSeconds(this.bookId, 30);
+        FqReadStatsStore.addBookSeconds(this.bookId, 30, this.kind, this.bookTitle, this.readerCover);
       }
     }, 30000);
     this.cachedMetrics = this.buildMetrics();

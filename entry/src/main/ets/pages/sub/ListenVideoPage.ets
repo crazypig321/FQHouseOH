@@ -929,7 +929,8 @@ export struct ListenVideoPage {
       this.statsSec += 1;
       if (this.statsSec >= 15) {
         this.statsSec = 0;
-        FqReadStatsStore.addBookSeconds(ListenVideoNavParams.contentId, 15);
+        FqReadStatsStore.addBookSeconds(ListenVideoNavParams.contentId, 15,
+          ListenVideoNavParams.kind, ListenVideoNavParams.title, ListenVideoNavParams.cover);
       }
     } else {
       this.statsSec = 0;

@@ -128,13 +128,15 @@ export struct SearchPage {
         if (this.idQuery.length > 0 && this.submittedQuery.length > 0) {
           ListItem() {
             Row() {
+              // 当前生效的查找方式（ID 查找）用主题色标识选中态
               Text('按作品 ID 查找')
                 .fontSize(13)
-                .fontColor($r('sys.color.font_secondary'))
+                .fontColor(appState.accentColor)
               Blank()
+              // 切换为关键词搜索的操作入口（fqapp GlassTextButton）：透明背景纯文本
               Text('按关键词搜索')
                 .fontSize(13)
-                .fontColor(appState.accentColor)
+                .fontColor($r('sys.color.font_secondary'))
                 .onClick(() => this.searchAsKeyword())
             }
             .width('100%')

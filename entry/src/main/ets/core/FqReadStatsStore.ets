@@ -17,12 +17,28 @@ import { fqNum, fqParseObject, fqStr } from './FqJson';
 const FQ_READ_STATS_NAME: string = 'fq_read_stats';
 const FQ_READ_STATS_KEY: string = 'days';
 const FQ_READ_BOOKS_KEY: string = 'books';
+const FQ_READ_META_KEY: string = 'books_meta';
+
+/** 书目元数据（阅读/视听计时时随手记录；最近阅读/阅读排行无浏览记录时回填显示用）。 */
+export class FqStatsBookMeta {
+  public readonly kind: string;
+  public readonly title: string;
+  public readonly cover: string;
+
+  constructor(kind: string, title: string, cover: string) {
+    this.kind = kind;
+    this.title = title;
+    this.cover = cover;
+  }
+}
 
 export class FqReadStatsStore {
   private static pref: preferences.Preferences | null = null;
   private static days: Map<string, number> = new Map<string, number>();
   /** bookId → { 'yyyy-M-d': 秒 }（按书日累计）。 */
   private static books: Map<string, Map<string, number>> = new Map<string, Map<string, number>>();
+  /** bookId → 书目元数据（kind/title/cover）。 */
+  private static metas: Map<string, FqStatsBookMeta> = new Map<string, FqStatsBookMeta>();
 
   public static init(context: common.Context): void {
     if (FqReadStatsStore.pref !== null) {
@@ -53,6 +69,7 @@ export class FqReadStatsStore {
       }
     }
     FqReadStatsStore.loadBooks();
+    FqReadStatsStore.loadMetas();
   }
 
   /** 未初始化时静默跳过（调用方遍布播放/阅读心跳，不可因未初始化抛错）。 */
@@ -66,8 +83,9 @@ export class FqReadStatsStore {
     FqReadStatsStore.persist();
   }
 
-  /** 按书累计（全局日累计 + 按书日累计；bookId 空退化为仅全局累计）。 */
-  public static addBookSeconds(bookId: string, seconds: number): void {
+  /** 按书累计（全局日累计 + 按书日累计 + 可选书目元数据记录；bookId 空退化为仅全局累计）。 */
+  public static addBookSeconds(bookId: string, seconds: number,
+    kind?: string, title?: string, cover?: string): void {
     if (seconds <= 0) {
       return;
     }
@@ -83,6 +101,7 @@ export class FqReadStatsStore {
       FqReadStatsStore.books.set(bookId, bookDays);
     }
     bookDays.set(key, (bookDays.get(key) ?? 0) + seconds);
+    FqReadStatsStore.noteBookMeta(bookId, kind, title, cover);
     FqReadStatsStore.persist();
   }
 
@@ -102,6 +121,11 @@ export class FqReadStatsStore {
     return FqReadStatsStore.books;
   }
 
+  /** 书目元数据（bookId → kind/title/cover；最近阅读/阅读排行回填显示用，无记录返回 null）。 */
+  public static bookMeta(bookId: string): FqStatsBookMeta | null {
+    return FqReadStatsStore.metas.get(bookId) ?? null;
+  }
+
   /** 批量删除按书累计（阅读排行编辑模式多选删除；全局日累计与其余书不受影响）。 */
   public static removeBooks(bookIds: string[]): void {
     if (bookIds.length === 0) {
@@ -110,6 +134,9 @@ export class FqReadStatsStore {
     let changed: boolean = false;
     for (const bookId of bookIds) {
       if (FqReadStatsStore.books.delete(bookId)) {
+        changed = true;
+      }
+      if (FqReadStatsStore.metas.delete(bookId)) {
         changed = true;
       }
     }
@@ -122,6 +149,7 @@ export class FqReadStatsStore {
   public static clear(): void {
     FqReadStatsStore.days.clear();
     FqReadStatsStore.books.clear();
+    FqReadStatsStore.metas.clear();
     FqReadStatsStore.persist();
   }
 
@@ -166,6 +194,62 @@ export class FqReadStatsStore {
     }
   }
 
+  /** 记录书目元数据（新值非空则覆盖，空值保留已有；全未提供或无变化跳过）。 */
+  private static noteBookMeta(bookId: string, kind?: string, title?: string, cover?: string): void {
+    if (kind === undefined && title === undefined && cover === undefined) {
+      return;
+    }
+    const existing: FqStatsBookMeta | undefined = FqReadStatsStore.metas.get(bookId);
+    const kindValue: string = kind !== undefined && kind.length > 0
+      ? kind : (existing !== undefined ? existing.kind : '');
+    const titleValue: string = title !== undefined && title.length > 0
+      ? title : (existing !== undefined ? existing.title : '');
+    const coverValue: string = cover !== undefined && cover.length > 0
+      ? cover : (existing !== undefined ? existing.cover : '');
+    if (existing !== undefined && existing.kind === kindValue
+      && existing.title === titleValue && existing.cover === coverValue) {
+      return;
+    }
+    FqReadStatsStore.metas.set(bookId, new FqStatsBookMeta(kindValue, titleValue, coverValue));
+  }
+
+  /** 加载书目元数据（books_meta key：bookId → JSON 字符串 { kind, title, cover }）。 */
+  private static loadMetas(): void {
+    const pref: preferences.Preferences | null = FqReadStatsStore.pref;
+    if (pref === null) {
+      return;
+    }
+    let text: string = '';
+    try {
+      const raw: preferences.ValueType = pref.getSync(FQ_READ_META_KEY, '');
+      if (typeof raw === 'string') {
+        text = raw;
+      }
+    } catch (error) {
+      return;
+    }
+    if (text.length === 0) {
+      return;
+    }
+    const rec: Record<string, Object> | null = fqParseObject(text);
+    if (rec === null) {
+      return;
+    }
+    const bookIds: string[] = Object.keys(rec);
+    for (const bookId of bookIds) {
+      const metaText: string = fqStr(rec, bookId);
+      if (metaText.length === 0) {
+        continue;
+      }
+      const metaRec: Record<string, Object> | null = fqParseObject(metaText);
+      if (metaRec === null) {
+        continue;
+      }
+      FqReadStatsStore.metas.set(bookId,
+        new FqStatsBookMeta(fqStr(metaRec, 'kind'), fqStr(metaRec, 'title'), fqStr(metaRec, 'cover')));
+    }
+  }
+
   private static todayKey(): string {
     const now: Date = new Date();
     return `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
@@ -189,9 +273,18 @@ export class FqReadStatsStore {
       // 值存 JSON 字符串：两层 Record 序列化保持类型简单（读侧 fqParseObject 还原）
       booksRec[bookId] = JSON.stringify(dayRec);
     });
+    const metasRec: Record<string, Object> = {};
+    FqReadStatsStore.metas.forEach((meta: FqStatsBookMeta, bookId: string): void => {
+      const metaRec: Record<string, Object> = {};
+      metaRec['kind'] = meta.kind;
+      metaRec['title'] = meta.title;
+      metaRec['cover'] = meta.cover;
+      metasRec[bookId] = JSON.stringify(metaRec);
+    });
     try {
       pref.putSync(FQ_READ_STATS_KEY, JSON.stringify(rec));
       pref.putSync(FQ_READ_BOOKS_KEY, JSON.stringify(booksRec));
+      pref.putSync(FQ_READ_META_KEY, JSON.stringify(metasRec));
       pref.flush().catch((_error: BusinessError): void => {
         // 落盘失败不阻断
       });

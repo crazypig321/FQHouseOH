@@ -2558,7 +2558,8 @@ export struct PlayerPage {
       this.statsSec += 1;
       if (this.statsSec >= 15) {
         this.statsSec = 0;
-        FqReadStatsStore.addBookSeconds(PlayerNavParams.contentId, 15);
+        FqReadStatsStore.addBookSeconds(PlayerNavParams.contentId, 15,
+          PlayerNavParams.kind, PlayerNavParams.title, PlayerNavParams.cover);
       }
     } else {
       this.statsSec = 0;

@@ -23,11 +23,13 @@ import {
 } from '../model/FqNavModels';
 import { SETTINGS_TAB_INDEX } from '../model/FqTabsModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
-import { FqReadStatsStore } from '../core/FqReadStatsStore';
+import { FqReadStatsStore, FqStatsBookMeta } from '../core/FqReadStatsStore';
 import { FqBrowseItem, FqBrowseStore } from '../core/FqBrowseStore';
 import { FqLocalBookStore } from '../core/FqLocalBookStore';
 import { FqShelfStore } from '../core/FqShelfStore';
 import { FqChapterCacheStore } from '../core/FqChapterCacheStore';
+import { FqWatchedStore } from '../core/FqWatchedStore';
+import { FqAudioHistory, FqListenRecord } from '../core/FqAudioHistory';
 import { DialogManager } from '../utils/DialogUtils';
 import { FqColorUtils } from '../utils/FqColorUtils';
 import { FqBackend } from '../core/FqBackend';
@@ -446,8 +448,9 @@ export struct ProfilePage {
     fqPushBookOrDetail(entry.id, entry.kind, entry.title, entry.cover);
   }
 
-  /** 无浏览记录的按书条目回填元数据：本地书取导入元数据 + 书架封面，
-   *  书旗优先书架、回退章节缓存目录；其余来源书架可查则可点，否则保持不可点。 */
+  /** 无浏览记录的按书条目回填元数据：本地书取导入元数据，其余依次查书架、
+   *  观看历史（短剧/漫剧直接播放的存量记录）、听书记录、章节缓存目录、
+   *  阅读统计自带的书目元数据（阅读/视听计时随手记录）；都查不到才保持不可点。 */
   private resolveStatsEntry(bookId: string, minutes: number): FqStatsEntry {
     let kind: string = 'book';
     let title: string = '';
@@ -469,7 +472,36 @@ export struct ProfilePage {
         break;
       }
     }
-    if (bookId.startsWith('shuqi:') && (title.length === 0 || cover.length === 0)) {
+    // 观看历史（短剧/漫剧直接播放会记）：补齐类型/书名/封面
+    for (const record of FqWatchedStore.historyAll()) {
+      if (record.id === bookId) {
+        if (kind.length === 0) {
+          kind = record.kind;
+        }
+        if (title.length === 0) {
+          title = record.title;
+        }
+        if (cover.length === 0) {
+          cover = record.cover;
+        }
+        break;
+      }
+    }
+    // 听书记录（听书会话会记）：听书记录均为小说，类型按小说补齐可点开
+    const listen: FqListenRecord | null = FqAudioHistory.get(bookId);
+    if (listen !== null) {
+      if (kind.length === 0) {
+        kind = 'book';
+      }
+      if (title.length === 0) {
+        title = listen.title;
+      }
+      if (cover.length === 0) {
+        cover = listen.cover;
+      }
+    }
+    // 章节缓存目录（任意来源，含书旗）
+    if (title.length === 0 || cover.length === 0) {
       const catalog = FqChapterCacheStore.catalog(bookId);
       if (catalog !== null) {
         if (title.length === 0) {
@@ -478,6 +510,22 @@ export struct ProfilePage {
         if (cover.length === 0) {
           cover = catalog.cover;
         }
+        if (kind.length === 0) {
+          kind = catalog.kind;
+        }
+      }
+    }
+    // 阅读统计自带的书目元数据兜底：以上都查不到时补齐显示并可点开
+    const meta: FqStatsBookMeta | null = FqReadStatsStore.bookMeta(bookId);
+    if (meta !== null) {
+      if (kind.length === 0 && meta.kind.length > 0) {
+        kind = meta.kind;
+      }
+      if (title.length === 0 && meta.title.length > 0) {
+        title = meta.title;
+      }
+      if (cover.length === 0 && meta.cover.length > 0) {
+        cover = meta.cover;
       }
     }
     if (title.length === 0) {

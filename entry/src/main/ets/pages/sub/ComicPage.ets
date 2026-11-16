@@ -183,6 +183,7 @@ export struct ComicPage {
 
   private bookId: string = '';
   private bookTitle: string = '';
+  private bookCover: string = '';
   private startChapterIndex: number = -1;
   /** 外部定位话内图片（分享链接 dp；空 = 不定位）。 */
   private initialDomPos: string = '';
@@ -222,6 +223,7 @@ export struct ComicPage {
   aboutToAppear(): void {
     this.bookId = ComicNavParams.id;
     this.bookTitle = ComicNavParams.title;
+    this.bookCover = ComicNavParams.cover;
     this.startChapterIndex = ComicNavParams.chapterIndex;
     this.initialDomPos = ComicNavParams.initialDomPos;
     ComicNavParams.initialDomPos = '';
@@ -287,7 +289,7 @@ export struct ComicPage {
     this.clockTimer = setInterval((): void => {
       this.refreshFooterStatus();
       // 阅读页驻留累计今日已读时长（30s 心跳，按书+全局双层）
-      FqReadStatsStore.addBookSeconds(this.bookId, 30);
+      FqReadStatsStore.addBookSeconds(this.bookId, 30, 'manga', this.bookTitle, this.bookCover);
     }, 30000);
     this.applySystemBar(false);
     this.attachSettingsBus();

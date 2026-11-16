@@ -2143,7 +2143,8 @@ export class FqAudioSession {
       this.statPlayingTicks += 1;
       if (this.statPlayingTicks >= 10) {
         this.statPlayingTicks = 0;
-        FqReadStatsStore.addBookSeconds(this.bookId, 5);
+        FqReadStatsStore.addBookSeconds(this.bookId, 5,
+          this.tab === '听书' ? 'audio' : 'book', this.title, this.cover);
       }
     } else {
       this.statPlayingTicks = 0;
