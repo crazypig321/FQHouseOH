@@ -90,10 +90,6 @@ pub struct UpstreamRequest {
     pub headers: Vec<(String, String)>,
     pub no_sign: bool,
     pub pin: Option<PinnedDevice>,
-    /// Playback requests put their `iid` into Argus bean field 16 and must not
-    /// carry the media-specific `x-medusa` header（对齐 fqapp 2026-11 抓包：
-    /// 签名偏差会抬高上游风控空响应率）。
-    pub playback_sign: bool,
 }
 
 pub struct UpstreamClient {
@@ -165,7 +161,7 @@ impl UpstreamClient {
         &self,
         req: &UpstreamRequest,
     ) -> Result<(Vec<u8>, Vec<(String, String)>), ClientError> {
-        self.do_resp(req, None).await
+        self.do_resp(req, None, !req.no_sign).await
     }
 
     /// Capped variant of [UpstreamClient::do_request] for JSON/API calls.
@@ -174,13 +170,14 @@ impl UpstreamClient {
         req: &UpstreamRequest,
         body_limit: usize,
     ) -> Result<(Vec<u8>, Vec<(String, String)>), ClientError> {
-        self.do_resp(req, Some(body_limit)).await
+        self.do_resp(req, Some(body_limit), !req.no_sign).await
     }
 
     async fn do_resp(
         &self,
         req: &UpstreamRequest,
         body_limit: Option<usize>,
+        auth_is_device_failure: bool,
     ) -> Result<(Vec<u8>, Vec<(String, String)>), ClientError> {
         let target = self.effective_url(&req.url);
         let parsed =
@@ -204,28 +201,13 @@ impl UpstreamClient {
             headers.push((k.clone(), v.clone()));
         }
 
+        let query = parsed.query().unwrap_or("");
         if !req.no_sign {
-            let query = parsed.query().unwrap_or("");
-            let opt = crate::sign::HeaderOpts {
-                install_id_field16: if req.playback_sign {
-                    crate::sign::query_param(query, "iid")
-                        .or_else(|| crate::sign::query_param(query, "install_id"))
-                        .unwrap_or_default()
-                } else {
-                    String::new()
-                },
-                ..Default::default()
-            };
-            let sig = self
-                .sign
-                .generate_headers_with_opts(query, req.body.as_deref(), &opt);
+            let sig = self.sign.generate_headers(query, req.body.as_deref());
             for (k, v) in sig {
                 headers.retain(|(hk, _)| !hk.eq_ignore_ascii_case(&k));
                 headers.push((k, v));
             }
-        }
-        if req.playback_sign {
-            headers.retain(|(k, _)| !k.eq_ignore_ascii_case("x-medusa"));
         }
 
         let resp = self
@@ -254,10 +236,7 @@ impl UpstreamClient {
             })?;
 
         if resp.status != 200 {
-            // NoSign 请求（如红果）没有可轮换的设备身份，401/403 只是上游
-            // 对该请求的拒绝，不是设备鉴权失败——不判 DeviceFailed 以免
-            // 调用方据此做设备淘汰（对齐 fqapp）。
-            if is_auth_fail_status(resp.status) && !req.no_sign {
+            if is_auth_fail_status(resp.status) && auth_is_device_failure {
                 return Err(ClientError::DeviceFailed(format!("HTTP {}", resp.status)));
             }
             if is_retryable_status(resp.status) {
@@ -276,13 +255,15 @@ impl UpstreamClient {
     /// hint is honoured up to [RETRY_AFTER_CAP].
     async fn do_resp_with_transient_retry(
         &self,
-        req: &UpstreamRequest,
+        mut request_for_attempt: impl FnMut() -> Result<UpstreamRequest, ClientError>,
         body_limit: Option<usize>,
+        auth_is_device_failure: bool,
     ) -> Result<(Vec<u8>, Vec<(String, String)>), ClientError> {
         let mut attempt = 0;
         let mut delay = TRANSIENT_BACKOFF;
         loop {
-            match self.do_resp(req, body_limit).await {
+            let req = request_for_attempt()?;
+            match self.do_resp(&req, body_limit, auth_is_device_failure).await {
                 Err(err @ ClientError::Transient { retry_after, .. })
                     if attempt < TRANSIENT_RETRIES =>
                 {
@@ -365,7 +346,7 @@ impl UpstreamClient {
             attempt.pin = None;
 
             match self
-                .do_resp_with_transient_retry(&attempt, body_limit)
+                .do_resp_with_transient_retry(|| Ok(attempt.clone()), body_limit, !attempt.no_sign)
                 .await
             {
                 Ok((data, _)) => return Ok((data, dev)),
@@ -390,6 +371,75 @@ impl UpstreamClient {
             "device request failed after {} retries: {}",
             self.max_retries,
             last_err.map(|e| e.to_string()).unwrap_or_default()
+        )))
+    }
+
+    /// Calls the v5 playback door with the exact gzip bytes it signs.
+    ///
+    /// The v5 signer owns every query/header field and the wire body hash, so
+    /// this path deliberately bypasses generic signing. Transport/429/5xx
+    /// retries stay on the same device; only HTTP 401/403 replace it.
+    pub async fn v5_playback(&self, base: &str, body: &[u8]) -> Result<Vec<u8>, ClientError> {
+        let mut last_err = None;
+
+        for _ in 0..self.max_retries {
+            let dev = self
+                .pool
+                .get()
+                .await
+                .map_err(|e| ClientError::Other(format!("get device: {e}")))?;
+
+            let cdid = if dev.cdid.is_empty() {
+                dev.openudid.as_str()
+            } else {
+                dev.cdid.as_str()
+            };
+            let identity = crate::sign::v5::V5Identity {
+                device_id: &dev.device_id,
+                install_id: &dev.install_id,
+                cdid,
+            };
+            match self
+                .do_resp_with_transient_retry(
+                    || {
+                        let signed = crate::sign::v5::sign_playback_v5(base, body, &identity)
+                            .map_err(ClientError::Other)?;
+                        Ok(UpstreamRequest {
+                            method: Some("POST".to_string()),
+                            url: signed.url,
+                            body: Some(body.to_vec()),
+                            headers: signed.headers,
+                            no_sign: true,
+                            pin: None,
+                        })
+                    },
+                    Some(crate::upstream::http::API_BODY_LIMIT_BYTES),
+                    true,
+                )
+                .await
+            {
+                Ok((data, _)) => return Ok(data),
+                Err(err) => {
+                    last_err = Some(err.clone());
+                    if err.is_device_failed() {
+                        if super::budget::remaining().is_some_and(|left| left.is_zero()) {
+                            return Err(err);
+                        }
+                        let _ = self.pool.replace_failed(&dev.device_id).await;
+                        if !super::budget::retry_pause(Duration::from_millis(100)).await {
+                            return Err(err);
+                        }
+                        continue;
+                    }
+                    return Err(err);
+                }
+            }
+        }
+
+        Err(ClientError::Other(format!(
+            "v5 playback failed after {} device attempts: {}",
+            self.max_retries,
+            last_err.map(|error| error.to_string()).unwrap_or_default()
         )))
     }
 }
