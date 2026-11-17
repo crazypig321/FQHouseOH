@@ -129,6 +129,38 @@ export class FqExportedBook {
   }
 }
 
+/** 导出正文空白标记：空白 + 零宽空格 + BOM（对齐 fqapp _exportBlankMarkers）。 */
+const EXPORT_BLANK_MARKERS_RE: RegExp = /[\s\u200B\uFEFF]/g;
+
+/** 导出正文段落首尾不可见标记（对齐 fqapp _edgeMarkers）。 */
+const EXPORT_EDGE_MARKERS_RE: RegExp = /^[\u200B\uFEFF]+|[\u200B\uFEFF]+$/g;
+
+/** 段落是否含可导出正文：去除空白与零宽字符后非空（零宽空段整段丢弃）。 */
+function hasExportText(line: string): boolean {
+  return line.replace(EXPORT_BLANK_MARKERS_RE, '').length > 0;
+}
+
+/**
+ * 导出正文规范化（对齐 fqapp #395/#396）：段落修剪去零宽标记、丢弃零宽/纯空白空段、
+ * 去掉与章节标题重复的正文首段；无可导出正文返回 null（该章按未缓存跳过）。
+ */
+function normalizeExportBody(text: string, chapterTitle: string): string | null {
+  const paragraphs: string[] = [];
+  const lines: string[] = text.replace(/\r\n?/g, '\n').replace(/\u00A0/g, ' ').split('\n');
+  for (const line of lines) {
+    const trimmed: string = line.trim().replace(EXPORT_EDGE_MARKERS_RE, '').trim();
+    if (hasExportText(trimmed)) {
+      paragraphs.push(trimmed);
+    }
+  }
+  const wanted: string = chapterTitle.replace(/\s+/g, '');
+  if (wanted.length > 0 && paragraphs.length > 0
+    && paragraphs[0].replace(/\s+/g, '') === wanted) {
+    paragraphs.splice(0, 1);
+  }
+  return paragraphs.length > 0 ? paragraphs.join('\n') : null;
+}
+
 /** 章节头规范化：标题本身是「第X章」行则原样，否则补「第N章」前缀，保证重新导入可切分。 */
 function chapterHeader(title: string, index: number): string {
   const trimmed: string = title.trim();
@@ -152,13 +184,14 @@ export async function fqExportCachedBook(context: common.Context, bookId: string
   let exported: number = 0;
   for (const chapter of catalog.chapters) {
     const text: string = FqChapterCacheStore.read(bookId, chapter.itemId);
-    if (text.trim().length === 0) {
+    const body: string | null = normalizeExportBody(text, chapter.title);
+    if (body === null) {
       continue;
     }
     exported++;
     parts.push(chapterHeader(chapter.title, exported));
     parts.push('');
-    parts.push(text.trim());
+    parts.push(body);
     parts.push('');
     parts.push('');
   }
