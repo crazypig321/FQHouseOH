@@ -230,7 +230,7 @@ export struct AboutPage {
     authorItem.imageIcon = $r('app.media.crazypig321');
     sections.push(new FqAboutSection('开发者', [authorItem]));
     sections.push(new FqAboutSection('项目地址', [
-      new FqAboutItem($r('sys.symbol.bookshelf'), '#FF3B82F6', '仓库', FQ_REPO_URL, '', true,
+      new FqAboutItem($r('sys.symbol.house'), '#FF3B82F6', '仓库', FQ_REPO_URL, '', true,
         (): void => {
           this.openExternal(FQ_REPO_URL);
         }),
@@ -262,7 +262,7 @@ export struct AboutPage {
         (): void => {
           this.openSheet(FqAboutSheetKind.license);
         }),
-      new FqAboutItem($r('sys.symbol.book_pages'), '#FFF43F5E', '免责声明', '使用前请仔细阅读', '', true,
+      new FqAboutItem($r('sys.symbol.hand_raised_hexagon'), '#FFF43F5E', '免责声明', '使用前请仔细阅读', '', true,
         (): void => {
           this.openSheet(FqAboutSheetKind.disclaimer);
         }),

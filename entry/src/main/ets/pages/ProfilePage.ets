@@ -682,10 +682,10 @@ export struct ProfilePage {
       this.ShortcutTile($r('sys.symbol.archivebox'), '#FFEF5038', '备份恢复', (): void => {
         NavPathUtils.push(ROUTE_BACKUP);
       })
-      this.ShortcutTile($r('sys.symbol.textformat'), '#FF10B981', '应用设置', (): void => {
+      this.ShortcutTile($r('sys.symbol.gearshape'), '#FF10B981', '应用设置', (): void => {
         this.openSettingsTab();
       })
-      this.ShortcutTile($r('sys.symbol.person_fill'), '#FF8B5CF6', '关于我们', (): void => {
+      this.ShortcutTile($r('sys.symbol.person'), '#FF8B5CF6', '关于我们', (): void => {
         NavPathUtils.push(ROUTE_ABOUT);
       })
     }
