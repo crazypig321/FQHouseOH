@@ -567,6 +567,36 @@ impl DevicePool {
         Err(format!("replace device {device_id}: exhausted retries"))
     }
 
+    /// Removes a device that upstream silently rejected and tops the pool up in
+    /// the background. Unlike `replace_failed`, this does not wait for a new
+    /// registration, so a request that already has another usable stream can
+    /// finish without paying another device-registration round trip.
+    pub async fn quarantine(self: &Arc<Self>, device_id: &str) -> bool {
+        let removed = {
+            let mut state = self.state.lock().await;
+            match state
+                .devices
+                .iter()
+                .position(|device| device.device_id == device_id)
+            {
+                Some(index) => {
+                    state.devices.remove(index);
+                    state.dirty = true;
+                    true
+                }
+                None => false,
+            }
+        };
+        if !removed {
+            return false;
+        }
+        if let Err(error) = self.save().await {
+            log::warn!("quarantine device: failed to persist pool: {error}");
+        }
+        self.schedule_refill();
+        true
+    }
+
     /// Retires the pool: from the moment this returns, no commit belonging to
     /// this instance can replace the device file.
     ///

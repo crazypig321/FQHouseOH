@@ -95,9 +95,10 @@ async fn bytevc2_only_resolves_across_response_shapes() {
 }
 
 #[tokio::test]
-async fn invalid_seed_falls_back_to_the_raw_response() {
-    // key_seed 解不出时 shortplay 档无法解密：NotFound 原样透传上游响应。
-    // 编码门已放行（VVC 可软解），该场景不再是 500「该视频暂不支持播放」。
+async fn invalid_seed_still_serves_the_plain_url() {
+    // key_seed 解不出时密文档无法解密，但明文直链照常出流：取流链不再
+    // 原样透传上游响应，而是返回规范化 body（明文 URL 直出、variants 为
+    // 空）。编码门已放行（VVC 可软解），该场景不再是 500「该视频暂不支持播放」。
     for seed in [Value::Null, json!(""), json!("invalid!")] {
         let payload = json!({"data": {"video_model": {
             "key_seed": seed,
@@ -105,14 +106,14 @@ async fn invalid_seed_falls_back_to_the_raw_response() {
                 "codec_type": "bytevc2", "main_url": VVC_URL
             }}
         }}});
-        let expected = payload.clone();
         let upstream = MockUpstream::start(move |_| MockReply::json(payload.clone())).await;
         let dir = TempDir::new("video-codec-seed");
         let server =
             build_server(&dir, Some(upstream.origin.clone()), &[], &[], &pool_json(5)).await;
         let (status, body) = request_video(&server, "mode=stream").await;
         assert_eq!(status, 200, "{body}");
-        assert_eq!(body, expected, "{body}");
+        assert_eq!(body["video_url"], VVC_URL, "{body}");
+        assert_eq!(body["variants"], json!([]), "{body}");
     }
 }
 

@@ -21,7 +21,7 @@ import { CommonSheet, FqSheetOptions } from '../../view/sheet/CommonSheet';
 import { FqCatalogSheet } from '../../view/sheet/FqCatalogSheet';
 import { FqSettingRow } from '../../view/FqSettingRow';
 import { ListenVideoNavParams } from '../../model/FqNavModels';
-import { FqChapter } from '../../model/FqModels';
+import { FqChapter, FqEpisodeSource } from '../../model/FqModels';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { FqVideoMedia } from '../../core/FqVideoMedia';
 import { FqWatchedStore, FqWatchedProgress, FqWatchHistoryRecord } from '../../core/FqWatchedStore';
@@ -123,6 +123,12 @@ export struct ListenVideoPage {
   private loadToken: number = 0;
   /** 当前集已实际播放（position > 0；切集重置，已看标记 guard）。 */
   private hasDisplayed: boolean = false;
+  /** 当前集流的 CENC key（空 = 明文；流式未起播 eof 的代理回退判定用）。 */
+  private streamKeyInUse: string = '';
+  /** 流式未起播已回退后端代理（每集一次；防代理也失败后循环回退）。 */
+  private streamProxyFallbackTried: boolean = false;
+  /** 本次起播偏移（秒；流式未起播回退代理时沿用，续播位置不丢）。 */
+  private currentLoadStartSec: number = -1;
   /** 预览模式（分享「保持我的进度」）：本次不写已看/续播记录。 */
   private previewNoSave: boolean = false;
   /** 周期保存计数（5s 一存，仅播放中）。 */
@@ -834,6 +840,11 @@ export struct ListenVideoPage {
     this.loading = true;
     this.errorMsg = '';
     this.seekPreview = -1;
+    // 流式直连状态重置（新集重新判定未起播回退；currentLoadStartSec 记录
+    // 本次起播偏移，流式未起播回退代理时沿用）
+    this.streamKeyInUse = '';
+    this.streamProxyFallbackTried = false;
+    this.currentLoadStartSec = startSec;
     try {
       await FqBackend.get().start(getContext(this));
       this.resolveCover();
@@ -842,6 +853,9 @@ export struct ListenVideoPage {
         return;
       }
       this.loading = false;
+      // 记录当前集流的 CENC key（空 = 明文）：流式直连未起播的 eof 据此
+      // 判定是否可回退后端代理
+      this.streamKeyInUse = source.keyHex;
       this.player.open(startSec > 0
         ? new Media(source.url, { start: startSec, decryptionKey: source.keyHex })
         : new Media(source.url, { decryptionKey: source.keyHex }));
@@ -897,6 +911,15 @@ export struct ListenVideoPage {
       return;
     }
     if (!this.hasDisplayed) {
+      // 流式直连未起播（CDN 边缘 403 / 解密失败等）：回退后端代理整集下载一次
+      if (this.streamKeyInUse.length > 0 && !this.streamProxyFallbackTried) {
+        const fallbackEpisode: FqChapter | undefined = this.episodes[this.index];
+        if (fallbackEpisode !== undefined) {
+          this.streamProxyFallbackTried = true;
+          this.loadEpisodeViaProxy(fallbackEpisode, this.loadToken);
+          return;
+        }
+      }
       this.loading = false;
       if (this.errorMsg.length === 0) {
         this.errorMsg = '音频加载失败，请重试';
@@ -916,6 +939,36 @@ export struct ListenVideoPage {
     }
     this.markCurrentWatched();
     this.saveCurrentProgress();
+  }
+
+  /** 流式直连未起播的后端代理回退（/api/content 整集代下载 + /src/ 供流，
+   * 自带下载重试换边缘；沿用本次起播偏移，续播位置不丢）。 */
+  private async loadEpisodeViaProxy(episode: FqChapter, token: number): Promise<void> {
+    this.loading = true;
+    this.errorMsg = '';
+    try {
+      const source: FqEpisodeSource = await FqBackend.get().episodeSource(episode.itemId, this.tab);
+      if (token !== this.loadToken) {
+        return;
+      }
+      this.loading = false;
+      this.streamKeyInUse = source.keyHex;
+      this.player.open(this.currentLoadStartSec > 0
+        ? new Media(source.url, { start: this.currentLoadStartSec, decryptionKey: source.keyHex })
+        : new Media(source.url, { decryptionKey: source.keyHex }));
+      // 代理回退同款起播尾段：重置「实际播放」guard + AVSession/后台任务
+      this.hasDisplayed = false;
+      this.mediaDurationSynced = -1;
+      this.media.ensureSession('audio');
+      this.media.startBackground();
+      this.pushMediaMetadata();
+    } catch (error) {
+      if (token !== this.loadToken) {
+        return;
+      }
+      this.loading = false;
+      this.errorMsg = fqErrorMessage(error);
+    }
   }
 
   /** 周期任务：退出回传刷新 + AVSession 同步 + 睡眠倒计时 + 5s 周期保存续播进度。 */

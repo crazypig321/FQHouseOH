@@ -199,6 +199,8 @@ const FQ_CACHE_PAGE_SIZE: number = 30;
 const FQ_HONGGUO_MAX_FAILS: number = 2;
 /** 红果取流连续降级集数上限（达到后本场播放不再尝试红果取流，直接走番茄）。 */
 const FQ_HONGGUO_STREAM_FALLBACK_MAX: number = 3;
+/** eof 判定播完的最低进度占比（不足视为播放中断出重试卡，不误跳下一集）。 */
+const FQ_EOF_FINISHED_RATIO: number = 0.97;
 /** 预热下一集提前量（秒；fqapp player_page_preload _warmLead = 30s）。 */
 const FQ_WARM_LEAD_SEC: number = 30;
 /** PC 右侧详情侧边栏宽（对齐 fqapp 桌面停靠目录 304 一档，取本项目圆整）。 */
@@ -401,6 +403,12 @@ export struct PlayerPage {
   private hongguoStreamFailCount: number = 0;
   /** 当前集已实际播放（position > 0；切集重置，已看标记 guard）。 */
   private hasDisplayed: boolean = false;
+  /** 当前集流的 CENC key（空 = 明文/本地缓存/代理回退；流式未起播 eof 的代理回退判定用）。 */
+  private streamKeyInUse: string = '';
+  /** 流式未起播已回退后端代理（每集一次；防代理也失败后循环回退）。 */
+  private streamProxyFallbackTried: boolean = false;
+  /** 本次起播偏移（秒；流式未起播回退代理时沿用，续播位置不丢）。 */
+  private currentLoadStartSec: number = -1;
   /** 用户选定的清晰度档名（跨集/跨进页记忆，经 FqAppSettingsStore 持久化；空 = 跟默认最高档）。 */
   private qualityPreference: string = '';
   /** 预热的下一集流（fqapp _WarmEpisode；null = 无预热；单 mpv 实例，预热=取流先行）。 */
@@ -4092,6 +4100,11 @@ export struct PlayerPage {
     this.loading = true;
     this.errorMsg = '';
     this.seekPreview = -1;
+    // 流式直连状态重置（新集重新判定未起播回退；currentLoadStartSec 记录
+    // 本次起播偏移，流式未起播回退代理时沿用）
+    this.streamKeyInUse = '';
+    this.streamProxyFallbackTried = false;
+    this.currentLoadStartSec = startSec;
     // 切集且剧评面板开着：bump 打开令牌让面板重置重载（顺带刷新最新评论）
     if (switched && this.commentSheetVisible) {
       this.commentOpenToken += 1;
@@ -4171,6 +4184,9 @@ export struct PlayerPage {
    */
   private startEpisodePlayback(episode: FqChapter, url: string, keyHex: string, startSec: number,
     wasDisplayed: boolean, switched: boolean, keepListenProgress: boolean): void {
+    // 记录当前集流的 CENC key（空 = 明文/本地缓存/代理回退）：流式直连未起播
+    // 的 eof 据此判定是否可回退后端代理
+    this.streamKeyInUse = keyHex;
     // surface 未就绪：暂存 Media 延到 onReady 回调补播（loading 保持 true 盖住空窗）；
     // 就绪则立即起播并关 loading
     if (this.surfaceReady) {
@@ -5155,9 +5171,11 @@ export struct PlayerPage {
   }
 
   /**
-   * 播完回调：实际播放过（hasDisplayed）才自动连播下一集。
-   * mpv 打不开流同样触发 eof（加载失败）：未起播的 eof 出重试卡，
-   * 不再黑屏半天后直接跳下一集；末集停在末帧。
+   * 播完回调：实际播放过（hasDisplayed）且进度到 97% 才自动连播下一集。
+   * mpv 打不开流同样触发 eof（加载失败）：未起播的 eof 先回退后端代理
+   * 整集下载一次（CDN 边缘 403 换链路即好），仍失败才出重试卡；
+   * 播放中断的 eof（进度未到 97%，CDN 半途断流）同样出重试卡并保留
+   * 断点，不再误跳下一集；末集停在末帧。
    */
   private onEpisodeEnd(): void {
     // 取流中忽略（player.stop 后旧流残余事件；stop 本身不触发 eof）
@@ -5165,13 +5183,54 @@ export struct PlayerPage {
       return;
     }
     if (!this.hasDisplayed) {
+      // 流式直连未起播（CDN 边缘 403 / 解密失败等）：回退后端代理整集下载一次
+      if (this.streamKeyInUse.length > 0 && !this.streamProxyFallbackTried) {
+        const fallbackEpisode: FqChapter | undefined = this.episodes[this.index];
+        if (fallbackEpisode !== undefined) {
+          this.streamProxyFallbackTried = true;
+          this.loadEpisodeViaProxy(fallbackEpisode, this.loadToken);
+          return;
+        }
+      }
       this.loading = false;
       if (this.errorMsg.length === 0) {
         this.errorMsg = '视频加载失败，请重试';
       }
       return;
     }
+    // 进度到 97% 才算播完：中断的 eof（CDN 半途断流）保留断点出重试卡，
+    // 不把没看完的集误连播到下一集；时长未知（0）按老行为连播
+    const duration: number = this.player.state.duration;
+    const position: number = this.player.state.position;
+    if (duration > 0 && position < duration * FQ_EOF_FINISHED_RATIO) {
+      this.pendingResumeSec = position;
+      this.errorMsg = '播放中断，请重试';
+      return;
+    }
     this.nextEpisode();
+  }
+
+  /** 流式直连未起播的后端代理回退（/api/content 整集代下载 + /src/ 供流，
+   * 自带下载重试换边缘；沿用本次起播偏移，续播位置不丢）。 */
+  private async loadEpisodeViaProxy(episode: FqChapter, token: number): Promise<void> {
+    hilog.info(0x0001, FQ_AUTO_CACHE_LOG_TAG, 'stream play fallback to backend proxy');
+    this.loading = true;
+    this.errorMsg = '';
+    try {
+      const source: FqEpisodeSource = await FqBackend.get().episodeSource(
+        episode.itemId, this.tab, this.qualityPreference);
+      if (token !== this.loadToken) {
+        return;
+      }
+      this.startEpisodePlayback(episode, source.url, source.keyHex, this.currentLoadStartSec,
+        false, false, false);
+    } catch (error) {
+      if (token !== this.loadToken) {
+        return;
+      }
+      this.loading = false;
+      this.errorMsg = fqErrorMessage(error);
+    }
   }
 
   /** 失败重试：无目录先拉目录，否则重取当前集。 */
