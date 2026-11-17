@@ -5,8 +5,8 @@
 use futures::future::BoxFuture;
 use serde_json::Value;
 
-use crate::endpoints::base::HOST_FQNOVEL;
 use crate::endpoints::base::{dragon_read_headers, Upstream, UpstreamMode, UpstreamRequestSpec};
+use crate::endpoints::base::{HOST_FQNOVEL, HOST_FQNOVELA};
 use crate::endpoints::session::{record_device_session, session_id_from_response};
 use crate::endpoints::util::{default_val, raw_json};
 use crate::endpoints::{Ctx, Params, Server, INTERNAL_DEVICE_PIN_KEY};
@@ -15,6 +15,7 @@ use crate::error::{ApiError, ApiResult};
 const HOMEPAGE_RECOMMEND_PATH: &str = "/reading/bookapi/bookmall/tab/v";
 const SERIES_FEED_PATH: &str = "/reading/bookapi/bookmall/cell/change/v";
 const SERIES_RELATED_PATH: &str = "/reading/bookapi/plan/v";
+const UGC_STORY_FEED_PATH: &str = "/reading/ugc/feed/cell_data/v";
 
 /// Go's `reading724Params` (content_util.go), in `Params` form.
 pub(crate) fn reading724_params() -> Params {
@@ -125,6 +126,39 @@ fn homepage_recommend<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, Api
             }
         }
         raw_json(&raw)
+    })
+}
+
+fn ugc_stories<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult<Value>> {
+    Box::pin(async move {
+        let raw_offset = params.get_str("offset");
+        let offset = if raw_offset.is_empty() {
+            0
+        } else {
+            raw_offset
+                .parse::<u64>()
+                .map_err(|_| ApiError::BadRequest("offset必须是非负整数".to_string()))?
+        };
+
+        let mut p = Params::new();
+        p.set("offset", offset.to_string());
+        p.set("tab_type_new", "8");
+        p.set("aid", "1967");
+        let session_id = params.get_str("session_id");
+        if !session_id.is_empty() {
+            p.set("session_id", session_id);
+        }
+
+        Upstream::new(ctx.up.clone())
+            .json(&UpstreamRequestSpec {
+                mode: UpstreamMode::NoSign,
+                host: HOST_FQNOVELA.to_string(),
+                path: UGC_STORY_FEED_PATH.to_string(),
+                params: p.to_pairs(),
+                headers: dragon_read_headers(),
+                ..Default::default()
+            })
+            .await
     })
 }
 
@@ -344,6 +378,7 @@ fn series_related<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResu
 
 pub fn register(s: &mut Server) {
     s.add_route("homepage_recommend", homepage_recommend);
+    s.add_route("ugc_stories", ugc_stories);
     s.add_route("channel_tabs", channel_tabs);
     s.add_route("series_feed", series_feed);
     s.add_route("series_related", series_related);
