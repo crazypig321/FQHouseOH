@@ -197,6 +197,8 @@ const FQ_CACHE_PAGE_SIZE: number = 30;
 
 /** 红果弹幕源连续失败上限（达到后整场回退番茄源，避免每次请求都白等超时）。 */
 const FQ_HONGGUO_MAX_FAILS: number = 2;
+/** 弹幕首批补拉上限（起播时 duration 未知被跳过，时长就绪后心跳限次补拉）。 */
+const FQ_DANMAKU_FIRST_TRIES: number = 3;
 /** 红果取流连续降级集数上限（达到后本场播放不再尝试红果取流，直接走番茄）。 */
 const FQ_HONGGUO_STREAM_FALLBACK_MAX: number = 3;
 /** eof 判定播完的最低进度占比（不足视为播放中断出重试卡，不误跳下一集）。 */
@@ -393,9 +395,14 @@ export struct PlayerPage {
   private hongguoMap: FqHongguoMap | null = null;
   /** 红果映射请求令牌（离页/重进作废）。 */
   private hongguoMapToken: number = 0;
+  /** 红果弹幕映射已发起（仅番茄会话需要，一次进页只发一次）。 */
+  private hongguoMapRequested: boolean = false;
+  /** 弹幕首批补拉次数（起播时 duration 未知被跳过，时长就绪后限次补拉）。 */
+  private danmakuFirstTries: number = 0;
   /** 红果弹幕连续失败计数（达到上限整场弃用红果源，回退番茄）。 */
   private hongguoFailCount: number = 0;
-  /** 红果原生会话（目录取自红果 detail）：取流同源贯穿走 hongguoEpisodeSource。 */
+  /** 红果原生会话（目录取自红果 detail）：取流同源贯穿走 hongguoEpisodeSource；
+   * 弹幕直连红果（contentId 即 series id、itemId 即 vid），不经 map 标题搜索。 */
   private hongguoSession: boolean = false;
   /** 红果会话原始章节串（集序号 → detail 原始 chapter JSON，红果取流必带参数）。 */
   private hongguoRawChapters: Map<number, string> = new Map();
@@ -583,8 +590,6 @@ export struct PlayerPage {
     this.applyDanmakuCfg();
     // 清晰度偏好：跨进页持久化记忆（fqapp download_preference；空 = 跟默认最高档）
     this.qualityPreference = FqAppSettingsStore.getVideoQualityPref();
-    // 红果弹幕源映射：异步发起，不阻塞起播；到达/失败均不影响播放流（方案 A）
-    this.tryLoadHongguoMap();
     // 实际播放 guard：position 走表（非加载期）才视为看过（对齐 fqapp 首帧不标）
     this.player.stream.position.listen((pos: number): void => {
       if (pos > 0 && !this.loading) {
@@ -691,6 +696,8 @@ export struct PlayerPage {
       if (resumeIndex >= 0) {
         this.index = resumeIndex;
       }
+      // 番茄会话：弹幕走 map 标题搜索映射红果（hg源会话在 loadEpisodes 里直连，不发 map）
+      this.tryLoadHongguoMap();
       this.loadEpisode(this.index);
     }
     // 关联原著（官方 _loadBandExtras：装饰性数据，失败静默不影响播放）
@@ -4017,6 +4024,10 @@ export struct PlayerPage {
       if (this.explicitStartIndex >= 0) {
         target = this.explicitStartIndex < episodes.length ? this.explicitStartIndex : 0;
       }
+      // 番茄会话：弹幕经 map 标题搜索映射红果（hg源会话直连，见 fetchDanmaku，不发 map）
+      if (!this.hongguoSession) {
+        this.tryLoadHongguoMap();
+      }
       this.loadEpisode(target);
     } catch (error) {
       if (token !== this.loadToken) {
@@ -4933,6 +4944,7 @@ export struct PlayerPage {
     this.danmakuCursor = '';
     this.danmakuHasMore = false;
     this.danmakuLoadedToMs = 0;
+    this.danmakuFirstTries = 0;
     this.danmakuItems = [];
     this.danmakuResetToken += 1;
     this.fetchDanmaku(0);
@@ -4942,11 +4954,13 @@ export struct PlayerPage {
   private seekDanmaku(targetMs: number): void {
     this.danmakuCursor = '';
     this.danmakuHasMore = false;
+    this.danmakuFirstTries = 0;
     this.danmakuResetToken += 1;
     this.fetchDanmaku(Math.max(0, targetMs));
   }
 
-  /** 弹幕进度心跳：接近已加载右界时按 cursor 续拉下一批。 */
+  /** 弹幕进度心跳：接近已加载右界时按 cursor 续拉下一批；
+   * 起播时 duration 未知导致首批被跳过的，时长就绪后限次补拉首批。 */
   private danmakuTick(): void {
     if (this.errorMsg.length > 0 || this.episodes.length === 0 || !this.danmakuOn) {
       return;
@@ -4954,6 +4968,17 @@ export struct PlayerPage {
     const posMs: number = Math.floor(this.player.state.position * 1000);
     if (this.danmakuHasMore && posMs + 4000 >= this.danmakuLoadedToMs) {
       this.fetchDanmaku(this.danmakuLoadedToMs);
+      return;
+    }
+    if (this.danmakuItems.length === 0 && this.danmakuFirstTries < FQ_DANMAKU_FIRST_TRIES
+      && this.player.state.duration > 0 && !this.loading) {
+      // 弹幕池仍空（起播早于时长就绪被跳过 / 空页把游标带进死胡同）：
+      // 清游标限次重拉首批（对齐 hongguoTV：时长一就绪立刻拉，失败限次重试）
+      this.danmakuFirstTries += 1;
+      this.danmakuCursor = '';
+      this.danmakuHasMore = false;
+      this.danmakuLoadedToMs = 0;
+      this.fetchDanmaku(0);
     }
   }
 
@@ -4966,8 +4991,13 @@ export struct PlayerPage {
     return this.index >= 0 && this.index < map.vids.length ? map.vids[this.index] : '';
   }
 
-  /** 尝试映射红果弹幕源（进页异步发起，不阻塞起播；失败静默保持番茄源）。 */
+  /** 尝试映射红果弹幕源（仅番茄会话；hg源会话直连红果弹幕，见 fetchDanmaku）。
+   * 一次进页只发一次；异步发起，不阻塞起播；失败静默保持番茄源。 */
   private async tryLoadHongguoMap(): Promise<void> {
+    if (this.hongguoMapRequested) {
+      return;
+    }
+    this.hongguoMapRequested = true;
     const token: number = ++this.hongguoMapToken;
     const seriesId: string = PlayerNavParams.contentId;
     if (seriesId.length === 0 || this.title.length === 0) {
@@ -4992,7 +5022,9 @@ export struct PlayerPage {
     }
   }
 
-  /** 取弹幕一页：红果源优先（映射成功），失败/未映射回退番茄源；按 id 去重合并、offsetMs 升序。 */
+  /** 取弹幕一页：hg源会话直连红果（contentId 即 series id、itemId 即 vid，
+   * 不经 map 标题搜索——搜索偶发空/失败会让整集没弹幕）；番茄会话经 map
+   * 映射走红果；失败/未映射回退番茄源；按 id 去重合并、offsetMs 升序。 */
   private async fetchDanmaku(startMs: number): Promise<void> {
     const episode: FqChapter | undefined = this.episodes[this.index];
     if (episode === undefined || episode.itemId.length === 0) {
@@ -5000,13 +5032,30 @@ export struct PlayerPage {
     }
     const token: number = ++this.danmakuLoadToken;
     const durationSec: number = Math.floor(this.player.state.duration);
-    const map: FqHongguoMap | null = this.hongguoMap;
-    const hongguoVid: string = this.hongguoVidForIndex();
-    if (map !== null && hongguoVid.length > 0 && this.hongguoFailCount < FQ_HONGGUO_MAX_FAILS
-      && durationSec > 0) {
+    // hg源会话：时长未知（流未就绪）红果弹幕拉不了（后端窗口校验要求时长），
+    // 番茄端点也不认红果 vid、会拿「成功但空」的页把游标带进死胡同——不发请求，
+    // 留给 danmakuTick 在时长就绪后马上补拉首批
+    if (this.hongguoSession && durationSec === 0) {
+      return;
+    }
+    // 红果弹幕目标：hg源会话直连；番茄会话经 map 标题搜索对位
+    let hongguoSeriesId: string = '';
+    let hongguoVid: string = '';
+    if (this.hongguoSession) {
+      hongguoSeriesId = PlayerNavParams.contentId;
+      hongguoVid = episode.itemId;
+    } else {
+      const map: FqHongguoMap | null = this.hongguoMap;
+      hongguoVid = this.hongguoVidForIndex();
+      if (map !== null && hongguoVid.length > 0) {
+        hongguoSeriesId = map.hongguoSeriesId;
+      }
+    }
+    if (hongguoSeriesId.length > 0 && hongguoVid.length > 0
+      && this.hongguoFailCount < FQ_HONGGUO_MAX_FAILS && durationSec > 0) {
       try {
         const page: FqDanmakuPage = await FqBackend.get().hongguoDanmaku(
-          map.hongguoSeriesId, hongguoVid, startMs, durationSec, this.danmakuCursor);
+          hongguoSeriesId, hongguoVid, startMs, durationSec, this.danmakuCursor);
         if (token !== this.danmakuLoadToken) {
           return;
         }
