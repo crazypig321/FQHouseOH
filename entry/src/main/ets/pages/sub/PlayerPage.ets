@@ -5006,7 +5006,7 @@ export struct PlayerPage {
       && durationSec > 0) {
       try {
         const page: FqDanmakuPage = await FqBackend.get().hongguoDanmaku(
-          map.hongguoSeriesId, hongguoVid, startMs, durationSec);
+          map.hongguoSeriesId, hongguoVid, startMs, durationSec, this.danmakuCursor);
         if (token !== this.danmakuLoadToken) {
           return;
         }

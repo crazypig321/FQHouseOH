@@ -322,17 +322,14 @@ fn match_hongguo(parts: &[&str], q: &Params) -> Option<RouteMatch> {
     })
 }
 
-/// 红果原生内容源（Go 核心，endpoints/hongguo_native.rs）：
-/// `/api/v1/hongguo/native/{boards|catalog|categories|rankings|
-/// recommendations|suggestions|detail|media}`。
+/// 红果原生内容源（Rust 原生实现，endpoints/hongguo/native.rs）：
+/// `/api/v1/hongguo/native/{catalog|detail|media}`。
+///
+/// Go 核心时代的 boards/categories/rankings/recommendations/suggestions
+/// 五个端点没有 ArkTS 调用方，随 Go 核心一并退役不再路由。
 fn match_hongguo_native(parts: &[&str], q: &Params) -> Option<RouteMatch> {
     let api = match parts.first().copied()? {
-        "boards" => "hongguo_native_boards",
         "catalog" => "hongguo_native_catalog",
-        "categories" => "hongguo_native_categories",
-        "rankings" => "hongguo_native_rankings",
-        "recommendations" => "hongguo_native_recommendations",
-        "suggestions" => "hongguo_native_suggestions",
         "detail" => "hongguo_native_detail",
         "media" => "hongguo_native_media",
         _ => return None,

@@ -2,8 +2,6 @@
 //!
 //! Mirrors the Go router's two error classes: a client error maps to HTTP 400
 //! with `{"success":false,"error":...}`, anything else to HTTP 500.
-//! The hongguo_native endpoints add gateway statuses for the bridged Go core
-//! (502 call failure, 503 core not loaded, 504 bridge timeout).
 
 use std::fmt;
 
@@ -61,9 +59,8 @@ impl ApiError {
     ///
     /// Client errors are deterministic (bad input) and must never be retried.
     /// Internal errors come from an upstream call or the parsing of its
-    /// response, so they can be transient upstream jitter. The gateway
-    /// statuses (hongguo_native) follow the same rule: the bridged core can
-    /// recover once loaded or once the upstream jitter passes.
+    /// response, so they can be transient upstream jitter. Gateway statuses
+    /// follow the same rule: the upstream can recover once jitter passes.
     pub fn is_retryable(&self) -> bool {
         matches!(
             self,

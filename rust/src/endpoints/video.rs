@@ -1687,7 +1687,7 @@ fn scan_i64(s: &str) -> i64 {
     }
 }
 
-fn audio_b64_decode(s: &str) -> Result<Vec<u8>, base64::DecodeError> {
+pub(crate) fn audio_b64_decode(s: &str) -> Result<Vec<u8>, base64::DecodeError> {
     let trimmed = s.trim();
     let pad = (4 - trimmed.len() % 4) % 4;
     let mut padded = trimmed.to_string();
@@ -1701,7 +1701,7 @@ fn audio_b64_decode(s: &str) -> Result<Vec<u8>, base64::DecodeError> {
     base64::engine::general_purpose::STANDARD.decode(cleaned)
 }
 
-fn decrypt_spade_url(value: &str, key_seed: &[u8]) -> String {
+pub(crate) fn decrypt_spade_url(value: &str, key_seed: &[u8]) -> String {
     if value.is_empty() {
         return String::new();
     }

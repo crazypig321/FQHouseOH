@@ -595,14 +595,16 @@ export class FqBackend {
   /**
    * 红果弹幕一页（/api/v1/hongguo/danmaku，响应结构与番茄弹幕同构，
    * fqParseDanmaku 直接解析）：seriesId/vid 为 hongguoMap 映射出的红果 id，
-   * 时间单位与番茄弹幕一致（start 毫秒 / duration 秒）。
+   * 时间单位与番茄弹幕一致（start 毫秒 / duration 秒），
+   * cursor 为上页 common_list_info.cursor 续拉串（首页空串，不传则弹幕稀疏）。
    */
   public async hongguoDanmaku(seriesId: string, vid: string, startOffsetMs: number,
-    itemDurationSec: number): Promise<FqDanmakuPage> {
+    itemDurationSec: number, cursor: string = ''): Promise<FqDanmakuPage> {
     const query: string = `series_id=${encodeURIComponent(seriesId)}`
       + `&vid=${encodeURIComponent(vid)}`
       + `&start_offset_time=${startOffsetMs < 0 ? 0 : startOffsetMs}`
-      + `&playlet_item_duration=${itemDurationSec < 0 ? 0 : itemDurationSec}`;
+      + `&playlet_item_duration=${itemDurationSec < 0 ? 0 : itemDurationSec}`
+      + (cursor.length > 0 ? `&cursor=${encodeURIComponent(cursor)}` : '');
     const payload: Record<string, Object> =
       await this.getJson('/api/v1/hongguo/danmaku', query, FQ_SHORT_TIMEOUT_MS);
     return fqParseDanmaku(payload);
