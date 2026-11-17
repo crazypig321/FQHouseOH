@@ -4,7 +4,10 @@
  *   animateTo——暂停顶帧依赖动画打断语义，onFinish 误触发会连回收一起出错）；
  *   官方时长制：竖屏 10000ms / 横屏 12000ms 基准 ÷（弹幕速度档 × 播放倍速），
  *   时长恒定、文本越长像素速度越快（container/l.java:782-784,1371-1373）；
- * - 车道避让：每条车道记录下一次可复用的墙钟时刻，满道丢弃（官方同语义）；
+ * - 车道密集调度：弹道不整程独占——上一条尾部入屏即可复用，新弹幕像素更快时
+ *   按追尾校验补足安全间距，同弹道并行多条错开飞行；显示区域只决定弹道数、
+ *   不削减吞吐（区域调小后弹幕改在剩余弹道内加密，而非大量丢弃）；
+ *   全弹道安全间距内都满时才丢弃；
  *   暂停期间车道占用计时同步冻结顺延，长暂停后不串道；
  * - 车道数 = maxLanes 与层实际高度按行高自适应的较小者；
  * - 播放位置喂入驱动出现时机，超过追补窗口的旧弹幕静默跳过；
@@ -27,6 +30,8 @@ const FQ_DANMAKU_FLIGHT_MS_LANDSCAPE: number = 12000;
 const FQ_DANMAKU_CATCHUP_MS: number = 1500;
 /** 片尾压缩飞行的最短墙钟时长（毫秒）：再短就看不清，宁可在最后 2 秒内被切集截断。 */
 const FQ_DANMAKU_TAIL_MIN_MS: number = 2000;
+/** 弹道复用安全间距之外的固定余量（毫秒）：避免相邻弹幕贴字。 */
+const FQ_DANMAKU_LANE_GAP_MS: number = 150;
 /** 帧时钟步进间隔（毫秒）：约 60fps，弹幕低速匀移足够顺滑。 */
 const FQ_DANMAKU_FRAME_MS: number = 16;
 /** 单帧最大步进（毫秒）：后台/卡顿的长帧按上限折算，防止恢复瞬间弹幕瞬移。 */
@@ -83,6 +88,16 @@ class FqFlyingDanmaku {
   }
 }
 
+/** 弹道占用（密集调度）：记录最近一次起飞信息，按需计算安全复用间距。 */
+class FqDanmakuLane {
+  /** 最近一次起飞墙钟时刻（0 = 未使用/已重置）。 */
+  launchAt: number = 0;
+  /** 最近一次弹幕文本宽（px）。 */
+  width: number = 0;
+  /** 最近一次飞行墙钟时长（毫秒）。 */
+  durationMs: number = 0;
+}
+
 @ComponentV2
 export struct FqDanmakuView {
   /** 已加载弹幕（offsetMs 升序；由宿主按集加载/续拉/去重）。 */
@@ -105,7 +120,7 @@ export struct FqDanmakuView {
   @Param durationMs: number = 0;
   @Local flying: FqFlyingDanmaku[] = [];
   private spawned: Set<string> = new Set<string>();
-  private laneFreeAt: number[] = [];
+  private lanes: FqDanmakuLane[] = [];
   private viewWidth: number = 0;
   private viewHeight: number = 0;
   /** 帧时钟定时器 id（-1 未运行）。 */
@@ -170,25 +185,39 @@ export struct FqDanmakuView {
     }
   }
 
-  /** 起飞：挑空闲车道，按文本宽度定时长，右缘外入场 → 全出左缘后回收。 */
+  /** 起飞：挑安全间距最大的弹道，按文本宽度定时长，右缘外入场 → 全出左缘后回收。 */
   private launch(item: FqDanmaku): void {
     this.rebuildLanes();
-    if (this.laneFreeAt.length === 0) {
+    if (this.lanes.length === 0) {
       return;
     }
     const now: number = Date.now();
+    const textWidth: number = this.estimateTextWidth(item.text);
+    const width: number = this.viewWidth > 0 ? this.viewWidth : 360;
+    const durationMs: number = this.flightDurationMs();
+    // 密集调度：上一条尾部入屏即复用（+追尾校验），同弹道并行多条错开飞行；
+    // 全弹道安全间距内都满才丢弃（超密兜底，避免叠字）
     let lane: number = -1;
-    for (let i: number = 0; i < this.laneFreeAt.length; i++) {
-      if (this.laneFreeAt[i] <= now) {
+    let bestGap: number = -1;
+    for (let i: number = 0; i < this.lanes.length; i++) {
+      const gap: number = now - this.lanes[i].launchAt;
+      if (gap >= this.requiredHeadway(this.lanes[i], textWidth, durationMs, width) && gap > bestGap) {
         lane = i;
-        break;
+        bestGap = gap;
       }
     }
     if (lane < 0) {
       return;
     }
-    const textWidth: number = this.estimateTextWidth(item.text);
-    const width: number = this.viewWidth > 0 ? this.viewWidth : 360;
+    this.lanes[lane].launchAt = now;
+    this.lanes[lane].width = textWidth;
+    this.lanes[lane].durationMs = durationMs;
+    this.flying.push(new FqFlyingDanmaku(
+      item.id, item.text, lane, width, -textWidth, durationMs));
+  }
+
+  /** 飞行墙钟时长：官方基准 ÷（速度档 × 倍速），片尾压缩赶在片尾前完整飞出。 */
+  private flightDurationMs(): number {
     // 官方时长制：基准 ÷（速度档 × 倍速），时长恒定、长文本像素速度更快
     const speed: number = Math.max(0.1, this.config.speedMultiplier);
     const rate: number = Math.max(0.1, this.playbackRate);
@@ -202,9 +231,28 @@ export struct FqDanmakuView {
         durationMs = Math.max(FQ_DANMAKU_TAIL_MIN_MS, Math.round(remainWallMs));
       }
     }
-    this.laneFreeAt[lane] = now + durationMs;
-    this.flying.push(new FqFlyingDanmaku(
-      item.id, item.text, lane, width, -textWidth, durationMs));
+    return durationMs;
+  }
+
+  /**
+   * 弹道安全复用间距（毫秒）：上一条尾部入屏（尾巴离开右缘）即可复用；
+   * 新弹幕像素更快时按追尾校验补足（保证全程追不上前一条），外加固定贴字余量。
+   * 等价于 bilibili 式车道复用：间距只看两条中较长者，与后续弹幕无关。
+   */
+  private requiredHeadway(lane: FqDanmakuLane, nextWidth: number,
+    nextDurationMs: number, width: number): number {
+    if (lane.launchAt === 0 || lane.durationMs <= 0) {
+      return 0;
+    }
+    const prevSpeed: number = (width + lane.width) / lane.durationMs;
+    const nextSpeed: number = (width + nextWidth) / nextDurationMs;
+    // 尾部入屏：上一条尾巴飞过右缘的时刻
+    let headway: number = lane.width * lane.durationMs / (width + lane.width);
+    if (nextSpeed > prevSpeed) {
+      // 追尾校验：新弹幕更快，须等上一条在被追上前先飞出屏幕
+      headway = Math.max(headway, lane.durationMs - width / nextSpeed);
+    }
+    return headway + FQ_DANMAKU_LANE_GAP_MS;
   }
 
   /** 启动帧时钟（幂等）：恢复时先按暂停时长顺延仍在占用的车道释放时刻。 */
@@ -215,10 +263,11 @@ export struct FqDanmakuView {
     const now: number = Date.now();
     if (this.pausedAt > 0) {
       const pausedMs: number = now - this.pausedAt;
-      for (let i: number = 0; i < this.laneFreeAt.length; i++) {
-        // 只顺延暂停时仍被冻结弹幕占用的车道，空闲车道保持原状
-        if (this.laneFreeAt[i] > this.pausedAt) {
-          this.laneFreeAt[i] += pausedMs;
+      for (let i: number = 0; i < this.lanes.length; i++) {
+        // 只顺延暂停时仍有弹幕冻结占用的弹道，空闲弹道保持原状
+        const lane: FqDanmakuLane = this.lanes[i];
+        if (lane.launchAt > 0 && lane.launchAt + lane.durationMs > this.pausedAt) {
+          lane.launchAt += pausedMs;
         }
       }
       this.pausedAt = 0;
@@ -276,18 +325,18 @@ export struct FqDanmakuView {
       count = Math.min(count, Math.floor(this.viewHeight / this.laneHeight()));
     }
     count = Math.max(1, count);
-    if (count !== this.laneFreeAt.length) {
-      const lanes: number[] = [];
+    if (count !== this.lanes.length) {
+      const lanes: FqDanmakuLane[] = [];
       for (let i: number = 0; i < count; i++) {
-        lanes.push(0);
+        lanes.push(new FqDanmakuLane());
       }
-      this.laneFreeAt = lanes;
+      this.lanes = lanes;
     }
   }
 
   private releaseAllLanes(): void {
-    for (let i: number = 0; i < this.laneFreeAt.length; i++) {
-      this.laneFreeAt[i] = 0;
+    for (let i: number = 0; i < this.lanes.length; i++) {
+      this.lanes[i] = new FqDanmakuLane();
     }
   }
 
