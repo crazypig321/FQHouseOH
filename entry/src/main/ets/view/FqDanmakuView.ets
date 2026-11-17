@@ -330,6 +330,21 @@ export struct FqDanmakuView {
       for (let i: number = 0; i < count; i++) {
         lanes.push(new FqDanmakuLane());
       }
+      // 车道数变化（全屏切换/层高变化）：用仍在飞的弹幕回填新车道占用，
+      // 否则新车道全「空闲」，下一条弹幕会立刻叠进还挂着字的弹道（同排叠字）
+      const now: number = Date.now();
+      for (const flyer of this.flying) {
+        if (flyer.lane >= 0 && flyer.lane < count) {
+          const lane: FqDanmakuLane = lanes[flyer.lane];
+          // elapsedMs 即距起飞的墙钟时差（暂停时冻结，暂停中也不会有新起飞）
+          const launchedAt: number = now - flyer.elapsedMs;
+          if (lane.launchAt === 0 || launchedAt > lane.launchAt) {
+            lane.launchAt = launchedAt;
+            lane.width = this.estimateTextWidth(flyer.text);
+            lane.durationMs = flyer.totalMs;
+          }
+        }
+      }
       this.lanes = lanes;
     }
   }
