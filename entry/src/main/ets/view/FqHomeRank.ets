@@ -1,7 +1,9 @@
 /**
  * 首页排行榜卡片（原生 ArkUI 实现，替代 Canvas 立体书架）：
- * - 大封面 + 名次角标 + 书名/作者/简介/在读人数的 Swiper 卡片，左右滑动切换；
- * - 底部行对齐今日焦点同款：标语 + 指示点 + 页码；
+ * - 手机布局：大封面 + 名次角标 + 书名/作者/简介/在读人数的 Swiper 卡片，左右滑动切换；
+ *   底部行对齐今日焦点同款：标语 + 指示点 + 页码；
+ * - PC 侧边栏布局：卡片改多列网格（按实测宽度自适应 2~4 列、至多两行，
+ *   每列约一张手机卡宽，不再单行拉满整屏；更多进「完整榜单」）；
  * - 榜单只随首页频道切换（短剧/漫剧 → 同名剧集榜，其余 → 默认榜）；
  * - 头部「完整榜单」入口；
  * - 数据链路：FqBackend.rankCatalog（30s TTL）→ rankBoard（首页榜单）→ FqRankEntry[]；
@@ -20,6 +22,7 @@ import {
 } from '../model/FqModels';
 import { fqPushBookOrDetail, ROUTE_RANK } from '../model/FqNavModels';
 import { NavPathUtils } from '../utils/NavPathUtils';
+import { useSidebarLayout } from '../utils/BreakpointUtils';
 import { CommonLoading } from './CommonCom';
 import { appState } from '../entryability/AppState';
 import { FqColorUtils } from '../utils/FqColorUtils';
@@ -29,6 +32,14 @@ const FQ_RANK_COVER_WIDTH: number = 106;
 const FQ_RANK_COVER_HEIGHT: number = 148;
 /** 底部指示点最多渲染数（超出走以当前页为锚的滑动窗口，防止溢出屏幕）。 */
 const FQ_RANK_MAX_DOTS: number = 7;
+/** PC 多列网格：列间/行间距（vp）。 */
+const FQ_RANK_GRID_GAP_X: number = 16;
+const FQ_RANK_GRID_GAP_Y: number = 14;
+/** PC 多列网格：单列目标宽度（≈ 手机卡宽，vp）。 */
+const FQ_RANK_GRID_COLUMN_WIDTH: number = 360;
+/** PC 多列网格：启用多列的最小实测宽度与列数上限（左右留白 20×2 计入）。 */
+const FQ_RANK_GRID_MIN_WIDTH: number = 760;
+const FQ_RANK_GRID_MAX_COLUMNS: number = 4;
 
 @ComponentV2
 export struct FqHomeRank {
@@ -40,6 +51,8 @@ export struct FqHomeRank {
   @Local current: number = 0;
   @Local loading: boolean = true;
   @Local errorMsg: string = '';
+  /** 实测内容宽（vp，onAreaChange 捕获；0 = 未测量）。PC 多列列数据此自适应。 */
+  @Local areaWidthVp: number = 0;
   private catalog: FqRankCatalog = fqEmptyRankCatalog();
   private loadToken: number = 0;
 
@@ -95,12 +108,24 @@ export struct FqHomeRank {
         .padding({ top: 36, bottom: 36 })
         .alignItems(HorizontalAlign.Center)
       } else if (this.entries.length > 0) {
-        this.SwiperCard()
-        this.FooterRow()
+        if (this.rankColumns() >= 2) {
+          // PC 侧边栏布局：多列网格（宽屏不再单行拉满；无翻页/指示点）
+          this.RankGrid()
+        } else {
+          this.SwiperCard()
+          this.FooterRow()
+        }
       }
     }
     .width('100%')
     .alignItems(HorizontalAlign.Center)
+    .onAreaChange((_oldArea: Area, newArea: Area): void => {
+      // Area.width 运行时为 vp 数值，先归一化
+      const widthVp: number = typeof newArea.width === 'number' ? newArea.width : 0;
+      if (widthVp > 0) {
+        this.areaWidthVp = widthVp;
+      }
+    })
   }
 
   /** 区块头：accent 竖条 + 排行榜 + 当前榜单名 + 「完整榜单」入口。 */
@@ -141,76 +166,86 @@ export struct FqHomeRank {
     .alignItems(VerticalAlign.Center)
   }
 
-  /** 排行榜卡片：Swiper 每页一本（大封面 + 信息列），点击直达详情。 */
+  /** 排行榜卡片：大封面 + 信息列（手机 Swiper 单页与 PC 多列网格共用），点击直达详情。 */
+  @Builder
+  private RankCard(entry: FqRankEntry, index: number) {
+    Row({ space: 13 }) {
+      this.CoverImage(entry)
+      Column({ space: 7 }) {
+        Row({ space: 8 }) {
+          Text(`NO.${this.pad2(index + 1)}`)
+            .fontSize(10.5)
+            .fontWeight(600)
+            .fontColor(appState.accentColor)
+            .padding({ left: 8, right: 8, top: 3, bottom: 3 })
+            .borderRadius(999)
+            .backgroundColor(FqColorUtils.withOpacity(appState.accentColor, 0.14))
+          if (entry.readCount > 0) {
+            Text(`${fqFormatCountInt(entry.readCount)}人在读`)
+              .fontSize(11)
+              .fontColor($r('sys.color.font_tertiary'))
+              .maxLines(1)
+          }
+        }
+        .alignItems(VerticalAlign.Center)
+
+        Text(entry.title)
+          .fontSize(16.5)
+          .fontWeight(700)
+          .fontColor($r('sys.color.font_primary'))
+          .maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+        Text(entry.metaLabel)
+          .fontSize(11.5)
+          .fontColor($r('sys.color.font_secondary'))
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+        if (entry.abstractText.length > 0) {
+          Text(entry.abstractText)
+            .fontSize(11.5)
+            .fontColor($r('sys.color.font_tertiary'))
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .lineHeight(17)
+            .layoutWeight(1)
+        } else {
+          Blank()
+        }
+
+        Row({ space: 2 }) {
+          Text('查看详情')
+            .fontSize(11)
+            .fontColor(appState.accentColor)
+          SymbolGlyph($r('sys.symbol.arrow_up_right'))
+            .fontSize(12)
+            .fontColor([appState.accentColor])
+        }
+        .alignItems(VerticalAlign.Center)
+      }
+      .layoutWeight(1)
+      .height(FQ_RANK_COVER_HEIGHT)
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .height(FQ_RANK_COVER_HEIGHT)
+    .alignItems(VerticalAlign.Center)
+    .onClick((): void => {
+      this.openEntry(index);
+    })
+  }
+
+  /** 手机布局：Swiper 每页一卡（左右滑动切换）。 */
   @Builder
   private SwiperCard() {
     Swiper() {
       ForEach(this.entries, (entry: FqRankEntry, index: number) => {
-        Row({ space: 13 }) {
-          this.CoverImage(entry)
-          Column({ space: 7 }) {
-            Row({ space: 8 }) {
-              Text(`NO.${this.pad2(index + 1)}`)
-                .fontSize(10.5)
-                .fontWeight(600)
-                .fontColor(appState.accentColor)
-                .padding({ left: 8, right: 8, top: 3, bottom: 3 })
-                .borderRadius(999)
-                .backgroundColor(FqColorUtils.withOpacity(appState.accentColor, 0.14))
-              if (entry.readCount > 0) {
-                Text(`${fqFormatCountInt(entry.readCount)}人在读`)
-                  .fontSize(11)
-                  .fontColor($r('sys.color.font_tertiary'))
-                  .maxLines(1)
-              }
-            }
-            .alignItems(VerticalAlign.Center)
-
-            Text(entry.title)
-              .fontSize(16.5)
-              .fontWeight(700)
-              .fontColor($r('sys.color.font_primary'))
-              .maxLines(2)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-
-            Text(entry.metaLabel)
-              .fontSize(11.5)
-              .fontColor($r('sys.color.font_secondary'))
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-
-            if (entry.abstractText.length > 0) {
-              Text(entry.abstractText)
-                .fontSize(11.5)
-                .fontColor($r('sys.color.font_tertiary'))
-                .maxLines(2)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .lineHeight(17)
-                .layoutWeight(1)
-            } else {
-              Blank()
-            }
-
-            Row({ space: 2 }) {
-              Text('查看详情')
-                .fontSize(11)
-                .fontColor(appState.accentColor)
-              SymbolGlyph($r('sys.symbol.arrow_up_right'))
-                .fontSize(12)
-                .fontColor([appState.accentColor])
-            }
-            .alignItems(VerticalAlign.Center)
-          }
-          .layoutWeight(1)
-          .height(FQ_RANK_COVER_HEIGHT)
-          .alignItems(HorizontalAlign.Start)
+        Column() {
+          this.RankCard(entry, index)
         }
         .width('100%')
         .padding({ left: 20, right: 20 })
-        .alignItems(VerticalAlign.Center)
-        .onClick((): void => {
-          this.openEntry(index);
-        })
       }, (entry: FqRankEntry, index: number): string => `${entry.id}:${index}`)
     }
     .width('100%')
@@ -226,6 +261,61 @@ export struct FqHomeRank {
         this.current = targetIndex;
       });
     })
+  }
+
+  /** PC 侧边栏布局：排行榜多列网格（列数按实测宽自适应，至多两行，更多进「完整榜单」）。 */
+  @Builder
+  private RankGrid() {
+    Grid() {
+      ForEach(this.gridEntries(), (entry: FqRankEntry, index: number) => {
+        GridItem() {
+          this.RankCard(entry, index)
+        }
+      }, (entry: FqRankEntry, index: number): string => `${entry.id}:${index}`)
+    }
+    .columnsTemplate(this.repeatFr(this.rankColumns()))
+    .rowsTemplate(this.repeatFr(this.gridRowCount()))
+    .columnsGap(FQ_RANK_GRID_GAP_X)
+    .rowsGap(FQ_RANK_GRID_GAP_Y)
+    .width('100%')
+    .height(this.gridRowCount() * FQ_RANK_COVER_HEIGHT
+      + (this.gridRowCount() - 1) * FQ_RANK_GRID_GAP_Y)
+    .padding({ left: 20, right: 20 })
+  }
+
+  /** PC 多列列数：仅侧边栏布局且实测够宽时启用（每列 ≈ 手机卡宽），2~4 列；
+   *  手机/窄窗口恒 1 列 → 保持原单卡 Swiper。
+   *  列数推导：n 列需 n×360 + (n-1)×16 ≤ 实测宽 - 40（网格左右留白 20×2）。 */
+  private rankColumns(): number {
+    if (!useSidebarLayout(appState.WidthBp, appState.windowWidthVp, appState.displayWidthVp)
+      || this.areaWidthVp < FQ_RANK_GRID_MIN_WIDTH) {
+      return 1;
+    }
+    const usable: number = this.areaWidthVp - 40 + FQ_RANK_GRID_GAP_X;
+    const columns: number =
+      Math.floor(usable / (FQ_RANK_GRID_COLUMN_WIDTH + FQ_RANK_GRID_GAP_X));
+    return Math.max(2, Math.min(FQ_RANK_GRID_MAX_COLUMNS, columns));
+  }
+
+  /** PC 网格展示条目：列数 × 至多两行。 */
+  private gridEntries(): FqRankEntry[] {
+    return this.entries.slice(0, this.rankColumns() * 2);
+  }
+
+  /** PC 网格行数：条目不足整行时收成单行，不留空行占位。 */
+  private gridRowCount(): number {
+    const columns: number = this.rankColumns();
+    const count: number = Math.min(this.entries.length, columns * 2);
+    return Math.max(1, Math.ceil(count / columns));
+  }
+
+  /** '1fr 1fr …' 模板串（Grid columnsTemplate/rowsTemplate 用）。 */
+  private repeatFr(count: number): string {
+    const parts: string[] = [];
+    for (let index: number = 0; index < count; index++) {
+      parts.push('1fr');
+    }
+    return parts.join(' ');
   }
 
   /** 封面（无图时 kind 图标占位），系统级柔和阴影。 */
