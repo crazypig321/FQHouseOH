@@ -23,6 +23,9 @@ export class FqChangelogEntry {
 
 /** 全部版本更新日志（新版本在前）。 */
 const FQ_CHANGELOGS: FqChangelogEntry[] = [
+  new FqChangelogEntry('1.1.9', '2026-11-18', [
+    '书旗小说支持听书：离线朗读正文，详情页「听书」、阅读页标题栏耳机图标均可进入，支持边听边读',
+  ]),
   new FqChangelogEntry('1.1.8', '2026-11-17', [
     'hg源目录、详情、搜索与取流整体切换为新版签名方案，更稳定；旧内置播放核心退役，安装包缩小约 8MB',
     '优化弹幕调度：调小显示区域或行数后弹幕不再明显变稀，会在剩余弹道内错开飞行',

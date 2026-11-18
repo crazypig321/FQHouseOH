@@ -27,6 +27,7 @@ import { FqBackend } from '../../core/FqBackend';
 import { fqAudioSession, FqChapterOpenOptions, FqTtsVoice } from '../../core/FqAudioSession';
 import { FqAudioTone, FqRelatedWork, FqSubtitleTrack, fqSubtitleStartSec } from '../../model/FqAudioModels';
 import { FqChapter, FqCacheTaskView } from '../../model/FqModels';
+import { fqIsShuqiBookId, fqShuqiRawBookId } from '../../model/FqShuqiModels';
 import { FqShelfItem, FqShelfStore } from '../../core/FqShelfStore';
 import { FqLocalBookStore } from '../../core/FqLocalBookStore';
 import { FqAudioCacheStore } from '../../core/FqAudioCacheStore';
@@ -173,10 +174,11 @@ export struct ListenPage {
     return tick >= 0 && FqShelfStore.contains(fqAudioSession.bookId);
   }
 
-  /** 本地导入书：仅离线朗读（无在线音源/段评/缓存）。 */
+  /** 仅离线朗读来源（本地导入书 / 书旗）：无在线音源/书架/下载/章评，不可切回在线。 */
   @Computed
-  get isLocalBook(): boolean {
-    return FqLocalBookStore.isLocalBookId(fqAudioSession.bookId);
+  get ttsOnly(): boolean {
+    return FqLocalBookStore.isLocalBookId(fqAudioSession.bookId)
+      || fqIsShuqiBookId(fqAudioSession.bookId);
   }
 
   /** 播放中（控制排图标）。 */
@@ -448,14 +450,14 @@ export struct ListenPage {
     })
   }
 
-  /** 动作排：语速 / 书架 / 下载 / 章评 / 更多（本地书：语速 / 更多）。 */
+  /** 动作排：语速 / 书架 / 下载 / 章评 / 更多（本地书/书旗：语速 / 更多）。 */
   @Builder
   private ActionRow() {
     Row() {
       this.ActionItem($r('sys.symbol.timer'), '语速', false, (): void => {
         this.openSheet(FqListenSheetKind.rates);
       })
-      if (!this.isLocalBook) {
+      if (!this.ttsOnly) {
         this.ShelfActionItem()
         this.ActionItem($r('sys.symbol.download'), '下载', false, (): void => {
           this.openCacheSheet();
@@ -827,7 +829,7 @@ export struct ListenPage {
       },
     }) {
       List({ space: 16 }) {
-        if (!this.isLocalBook) {
+        if (!this.ttsOnly) {
           ListItem() {
             Column({ space: 10 }) {
               Row({ space: 12 }) {
@@ -1546,6 +1548,23 @@ export struct ListenPage {
   /** 边听边读：进阅读页跟读（播放不停，阅读页高亮朗读段落并自动翻页/跟章）。 */
   private openReadAlong(): void {
     if (fqAudioSession.bookId.length === 0) {
+      return;
+    }
+    if (fqIsShuqiBookId(fqAudioSession.bookId)) {
+      // 书旗：只读阅读页跟读（shuqi 前缀 id + 预载目录 + 注入正文加载器）
+      const rawBookId: string = fqShuqiRawBookId(fqAudioSession.bookId);
+      ReaderNavParams.id = fqAudioSession.bookId;
+      ReaderNavParams.kind = 'book';
+      ReaderNavParams.title = fqAudioSession.title;
+      ReaderNavParams.cover = fqAudioSession.cover;
+      ReaderNavParams.chapterIndex = fqAudioSession.index;
+      ReaderNavParams.listenAlong = true;
+      ReaderNavParams.readOnly = true;
+      ReaderNavParams.presetChapters = fqAudioSession.chapters;
+      ReaderNavParams.chapterLoader = (chapter: FqChapter): Promise<string> => {
+        return FqBackend.get().shuqiChapterText(rawBookId, chapter.itemId);
+      };
+      NavPathUtils.push(ROUTE_READER2);
       return;
     }
     ReaderNavParams.id = fqAudioSession.bookId;

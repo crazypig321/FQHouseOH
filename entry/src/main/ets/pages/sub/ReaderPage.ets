@@ -381,11 +381,20 @@ export struct ReaderPage {
     // 预载本书书签：右上角色带标识（已收藏页）渲染依赖 bookmarkItems
     this.reloadBookmarkItems();
     // 本地导入书籍无段评数据：隐藏段评入口（听书走离线朗读，照常显示）；
-    // 书旗只读来源无番茄书评/在线听书：两者都隐藏
+    // 书旗只读来源无番茄书评：隐藏段评；听书走离线朗读，照常显示
     const isLocalBook: boolean = FqLocalBookStore.isLocalBookId(this.bookId);
     if (this.readOnly) {
-      // 书旗只读来源：书签 + 分享（链接直达）+ 应用流转接续
+      // 书旗只读来源：听书（离线朗读）+ 书签 + 分享（链接直达）+ 应用流转接续
       const roMenus: Array<HdsNavigationMenuItemOptions> = [];
+      roMenus.push({
+        content: {
+          icon: $r('sys.symbol.waveform_headphones'),
+          label: 'listen',
+          action: (): void => {
+            this.openListenFromReader();
+          },
+        },
+      });
       roMenus.push({
         content: {
           icon: $r('sys.symbol.bookmark'),

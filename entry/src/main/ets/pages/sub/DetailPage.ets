@@ -904,10 +904,14 @@ export struct DetailPage {
   /** 底部操作栏：小说"阅读"进阅读器、"听书"/听书详情"收听"进听书页、
    *  短剧/漫剧"观看"进播放页；小说"下载"整本缓存，其余下载占位。 */
   private onReadBarAction(key: string): void {
-    // 书旗只读来源：仅支持阅读，其余功能toast提示
+    // 书旗只读来源：阅读进只读阅读器，听书走离线朗读，其余功能toast提示
     if (this.shuqiMode) {
       if (key === '阅读') {
         this.openReader(-1);
+        return;
+      }
+      if (key === '听书') {
+        this.openShuqiListen();
         return;
       }
       promptAction.showToast({ message: '书旗来源暂不支持该功能', duration: 1500 });
@@ -1046,6 +1050,24 @@ export struct DetailPage {
       return FqBackend.get().shuqiChapterText(rawBookId, chapter.itemId);
     };
     NavPathUtils.push(ROUTE_READER2);
+  }
+
+  /** 书旗进听书页（离线朗读）：shuqi 前缀 id + 预载目录，听书页强制 TTS，
+   *  正文 shuqiChapterText + 章节缓存回退（'shuqi:' 键与阅读页共享）。 */
+  private openShuqiListen(): void {
+    const chapters: FqChapter[] = this.chapters;
+    if (chapters.length === 0) {
+      promptAction.showToast({ message: '目录加载中，请稍后再试', duration: 1500 });
+      return;
+    }
+    ListenNavParams.bookId = `shuqi:${this.itemId}`;
+    ListenNavParams.tab = fqKindToTab(this.itemKind);
+    ListenNavParams.title = this.detail.title;
+    ListenNavParams.cover = this.itemCover.length > 0 ? this.itemCover : this.detail.cover;
+    ListenNavParams.chapters = chapters;
+    ListenNavParams.chapterIndex = -1;
+    ListenNavParams.startCueText = '';
+    NavPathUtils.push(ROUTE_LISTEN);
   }
 
   /** 书旗详情加载（只读来源）：详情 + 目录顺序拉取，目录失败不阻断详情（章节区为空，

@@ -48,6 +48,7 @@ import {
   fqEmptyToneSet,
 } from '../model/FqAudioModels';
 import { fqMergeToneVoices, fqUniqueTones } from './FqAudioParser';
+import { FqShuqiToc, fqIsShuqiBookId, fqShuqiRawBookId } from '../model/FqShuqiModels';
 
 const TAG: string = 'FqAudioSession';
 
@@ -306,6 +307,8 @@ export class FqAudioSession {
     const gen: number = this.generation;
     // 本地导入书：无在线音源/装饰数据，强制走离线朗读（TTS 正文按导入偏移切片）
     const isLocalBook: boolean = FqLocalBookStore.isLocalBookId(bookId);
+    // 书旗只读来源：无在线音源/装饰数据，强制走离线朗读（正文 shuqiChapterText + 章节缓存回退）
+    const isShuqiBook: boolean = fqIsShuqiBookId(bookId);
     this.hasSession = true;
     this.bookId = bookId;
     this.tab = tab;
@@ -348,6 +351,10 @@ export class FqAudioSession {
       let chapters: FqChapter[] = [];
       if (presetChapters !== undefined && presetChapters.length > 0) {
         chapters = presetChapters.slice();
+      } else if (isShuqiBook) {
+        // 书旗分享/流转目标端直达：无预载目录时拉书旗目录兜底
+        const toc: FqShuqiToc = await FqBackend.get().shuqiToc(fqShuqiRawBookId(bookId));
+        chapters = toc.toReaderChapters();
       } else {
         chapters = await FqBackend.get().directoryChapters(bookId, tab);
       }
@@ -390,8 +397,8 @@ export class FqAudioSession {
       }
       autoplay = !completed;
     }
-    if (isLocalBook) {
-      // 本地书：跳过在线装饰（音色/相关作品），只装封面像素；强制离线朗读续读
+    if (isLocalBook || isShuqiBook) {
+      // 本地书/书旗：跳过在线装饰（音色/相关作品），只装封面像素；强制离线朗读续读
       this.ttsMode = true;
       this.ttsVoicePerson = FqAppSettingsStore.getTtsPerson();
       this.rate = FqAppSettingsStore.getTtsRate();
@@ -840,8 +847,8 @@ export class FqAudioSession {
     if (!this.hasSession || !this.ttsMode) {
       return;
     }
-    // 本地书无在线音源：不切回在线
-    if (FqLocalBookStore.isLocalBookId(this.bookId)) {
+    // 本地书/书旗无在线音源：不切回在线
+    if (FqLocalBookStore.isLocalBookId(this.bookId) || fqIsShuqiBookId(this.bookId)) {
       return;
     }
     this.stopTtsSpeak();
@@ -1037,6 +1044,24 @@ export class FqAudioSession {
     }
     if (FqLocalBookStore.isLocalBookId(this.bookId)) {
       return FqLocalBookStore.chapterText(this.bookId, index);
+    }
+    if (fqIsShuqiBookId(this.bookId)) {
+      // 书旗：正文 shuqiChapterText，成功写章节缓存（'shuqi:' 键与阅读页共享），失败回退缓存
+      try {
+        const text: string = await FqBackend.get().shuqiChapterText(
+          fqShuqiRawBookId(this.bookId), chapter.itemId);
+        if (text.trim().length === 0) {
+          throw new Error('本章暂无正文，无法离线朗读');
+        }
+        FqChapterCacheStore.write(this.bookId, chapter.itemId, chapter.title, text);
+        return text;
+      } catch (error) {
+        const cached: string = FqChapterCacheStore.read(this.bookId, chapter.itemId);
+        if (cached.trim().length > 0) {
+          return cached;
+        }
+        throw new Error(fqErrorMessage(error));
+      }
     }
     try {
       const normalized: FqNormalizedChapter =

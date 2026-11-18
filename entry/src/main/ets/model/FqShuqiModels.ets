@@ -10,6 +10,20 @@ import { fqAsArray, fqAsInt, fqAsRecord, fqBool, fqStr } from '../core/FqJson';
 /** FqMediaItem.source 的书旗取值（fqapp shuqiSourceId）。 */
 export const FQ_SHUQI_SOURCE_ID: string = 'shuqi';
 
+/** 书旗统一键前缀（阅读进度/章节缓存/听书会话键隔离，防纯数字 bookId 与番茄撞号）。 */
+export const FQ_SHUQI_BOOK_ID_PREFIX: string = 'shuqi:';
+
+/** 书旗统一键判据（'shuqi:xxx'）。 */
+export function fqIsShuqiBookId(bookId: string): boolean {
+  return bookId.startsWith(FQ_SHUQI_BOOK_ID_PREFIX);
+}
+
+/** 'shuqi:xxx' → 上游原始 bookId；非书旗键原样返回。 */
+export function fqShuqiRawBookId(bookId: string): string {
+  return fqIsShuqiBookId(bookId)
+    ? bookId.substring(FQ_SHUQI_BOOK_ID_PREFIX.length) : bookId;
+}
+
 /** 书旗条目判据（fqapp isShuqiItem）。 */
 export function fqIsShuqiItem(item: FqMediaItem): boolean {
   return item.source === FQ_SHUQI_SOURCE_ID;
