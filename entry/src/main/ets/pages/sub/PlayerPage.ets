@@ -872,7 +872,7 @@ export struct PlayerPage {
         // 长按屏幕右侧 2 倍速快进（锁定态全部吞掉，只唤出锁按钮）；
         // 全屏竖滑：左三分之一调亮度、右三分之一调音量（滑过 1.2 倍屏高走完全量程）、
         // 中三分之一切集；横滑：快进/快退（滑过一屏走 90s，复用中央时间浮层与进度条预览）；
-        // 非全屏：单击切播放，整个视频区竖滑切集
+        // 非全屏：单击切播放，整个视频区竖滑切集；PC 布局双击进全屏（与全屏按钮同款回调）
         .gesture(
           GestureGroup(GestureMode.Exclusive,
             TapGesture({ count: 2 })
@@ -883,6 +883,8 @@ export struct PlayerPage {
                     return;
                   }
                   this.syncFsControls(this.togglePlay());
+                } else if (useSidebarLayout(appState.WidthBp, appState.windowWidthVp, appState.displayWidthVp)) {
+                  this.enterFullscreen();
                 }
               }),
             TapGesture({ count: 1 })
@@ -1047,6 +1049,10 @@ export struct PlayerPage {
         .onAreaChange((_oldArea: Area, newArea: Area): void => {
           this.layoutW = Number(newArea.width);
           this.layoutH = Number(newArea.height);
+        })
+        // PC 全屏鼠标移动视为操作中（亮出控制条并重计 3s；完全不操作才隐藏）
+        .onMouse((event: MouseEvent): void => {
+          this.onFsMouseMove(event);
         })
 
         // PC 大窗口右侧详情侧边栏（对齐 fqapp 桌面停靠目录）：非全屏常驻；
@@ -1598,6 +1604,16 @@ export struct PlayerPage {
           .onClick((): void => {
             this.openCatalog();
           })
+
+        // PC 布局：选集右侧「缩小」图标按钮，点击退出全屏（还原窗口形态）
+        if (useSidebarLayout(appState.WidthBp, appState.windowWidthVp, appState.displayWidthVp)) {
+          SymbolGlyph($r('sys.symbol.arrow_down_right_and_arrow_up_left'))
+            .fontSize(18)
+            .fontColor([Color.White])
+            .onClick((): void => {
+              this.exitFullscreen();
+            })
+        }
       }
       .width('100%')
       .height(36)
@@ -3859,6 +3875,23 @@ export struct PlayerPage {
       event.type === TouchType.Cancel) {
       this.scheduleFsHide();
     }
+  }
+
+  /**
+   * 全屏播放区鼠标移动（PC）：视为操作中——亮出控制条并重计 3s 空闲隐藏，
+   * 完全不操作才倒计时隐藏。鼠标事件冒泡，控制条/锁按钮上的移动同样到达这里
+   * （onHover 进出不可靠：容器与子组件间移动会产生伪进出，不用）。
+   */
+  private onFsMouseMove(event: MouseEvent): void {
+    if (!this.fullScreen || this.fsLocked || this.fsMenuOpen ||
+      this.sheetVisible || this.sidePanel.length > 0) {
+      return;
+    }
+    if (event.action !== MouseAction.Hover && event.action !== MouseAction.Move) {
+      return;
+    }
+    this.fsControlsVisible = true;
+    this.scheduleFsHide();
   }
 
   /** 进入全屏沉浸：横屏片源锁横屏并隐藏系统栏（官方 _enterFullscreen）。 */
