@@ -490,13 +490,21 @@ export class FqChapterCacheStore {
   /**
    * 整本缓存（详情页「下载」）：顺序拉取目录章节正文写入缓存，
    * 已缓存章节跳过；onProgress 汇报累计完成/总数。
+   * presetChapters/chapterTextLoader：书旗来源注入（预载目录 + 书旗正文加载器，
+   * 缺省走番茄 directoryChapters/chapterText）。
    */
   public static async downloadBook(context: common.Context, bookId: string, title: string,
     cover: string, kind: string, tab: string,
-    onProgress: (done: number, total: number) => void): Promise<void> {
+    onProgress: (done: number, total: number) => void,
+    presetChapters?: FqChapter[],
+    chapterTextLoader?: (chapter: FqChapter) => Promise<string>): Promise<void> {
     await FqBackend.get().start(context);
-    const chapters: FqChapter[] =
-      await FqBackend.get().directoryChapters(bookId, tab);
+    let chapters: FqChapter[] = [];
+    if (presetChapters !== undefined && presetChapters.length > 0) {
+      chapters = presetChapters.slice();
+    } else {
+      chapters = await FqBackend.get().directoryChapters(bookId, tab);
+    }
     if (chapters.length === 0) {
       throw new Error('未获取到目录章节');
     }
@@ -511,7 +519,12 @@ export class FqChapterCacheStore {
         continue;
       }
       try {
-        const text: string = await FqBackend.get().chapterText(chapter.itemId, chapter.title);
+        let text: string = '';
+        if (chapterTextLoader !== undefined) {
+          text = await chapterTextLoader(chapter);
+        } else {
+          text = await FqBackend.get().chapterText(chapter.itemId, chapter.title);
+        }
         if (text.trim().length > 0) {
           FqChapterCacheStore.write(bookId, chapter.itemId, chapter.title, text);
         }

@@ -25,6 +25,7 @@ export class FqChangelogEntry {
 const FQ_CHANGELOGS: FqChangelogEntry[] = [
   new FqChangelogEntry('1.1.9', '2026-11-18', [
     '书旗小说支持听书：离线朗读正文，详情页「听书」、阅读页标题栏耳机图标均可进入，支持边听边读',
+    '书旗小说支持整本缓存：详情页点「下载」逐章保存正文，离线也能读和听，可在「章节缓存」中管理与导出',
   ]),
   new FqChangelogEntry('1.1.8', '2026-11-17', [
     'hg源目录、详情、搜索与取流整体切换为新版签名方案，更稳定；旧内置播放核心退役，安装包缩小约 8MB',

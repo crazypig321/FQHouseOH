@@ -904,7 +904,7 @@ export struct DetailPage {
   /** 底部操作栏：小说"阅读"进阅读器、"听书"/听书详情"收听"进听书页、
    *  短剧/漫剧"观看"进播放页；小说"下载"整本缓存，其余下载占位。 */
   private onReadBarAction(key: string): void {
-    // 书旗只读来源：阅读进只读阅读器，听书走离线朗读，其余功能toast提示
+    // 书旗只读来源：阅读进只读阅读器，听书走离线朗读，下载整本缓存；其余功能toast提示
     if (this.shuqiMode) {
       if (key === '阅读') {
         this.openReader(-1);
@@ -912,6 +912,10 @@ export struct DetailPage {
       }
       if (key === '听书') {
         this.openShuqiListen();
+        return;
+      }
+      if (key === '下载') {
+        this.confirmDownloadWholeBook();
         return;
       }
       promptAction.showToast({ message: '书旗来源暂不支持该功能', duration: 1500 });
@@ -956,8 +960,22 @@ export struct DetailPage {
       promptAction.showToast({ message: '正在缓存中，请稍候', duration: 1500 });
       return;
     }
+    // 书旗：目录未就绪不启动（整本缓存依赖预载目录 + 书旗正文加载器）
+    if (this.shuqiMode && this.chapters.length === 0) {
+      promptAction.showToast({ message: '目录加载中，请稍后再试', duration: 1500 });
+      return;
+    }
     this.downloadingBook = true;
-    const bookId: string = this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId;
+    // 书旗：'shuqi:' 前缀键缓存（与阅读/听书章节缓存回退共享），注入书旗正文加载器
+    const rawBookId: string = this.itemId;
+    const shuqiLoader: ((chapter: FqChapter) => Promise<string>) | undefined = this.shuqiMode
+      ? (chapter: FqChapter): Promise<string> => {
+        return FqBackend.get().shuqiChapterText(rawBookId, chapter.itemId);
+      }
+      : undefined;
+    const bookId: string = this.shuqiMode
+      ? `shuqi:${this.itemId}`
+      : (this.detail.bookId.length > 0 ? this.detail.bookId : this.itemId);
     let lastReport: number = 0;
     try {
       await FqChapterCacheStore.downloadBook(getContext(this), bookId, this.detail.title,
@@ -968,7 +986,8 @@ export struct DetailPage {
             lastReport = done;
             promptAction.showToast({ message: `整本缓存中… ${done}/${total}`, duration: 1500 });
           }
-        });
+        },
+        this.shuqiMode ? this.chapters : undefined, shuqiLoader);
       promptAction.showToast({ message: '整本缓存完成', duration: 1500 });
     } catch (error) {
       promptAction.showToast({ message: fqErrorMessage(error), duration: 2000 });
