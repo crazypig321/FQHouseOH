@@ -9,6 +9,10 @@
  *   不削减吞吐（区域调小后弹幕改在剩余弹道内加密，而非大量丢弃）；
  *   全弹道安全间距内都满时才丢弃；
  *   暂停期间车道占用计时同步冻结顺延，长暂停后不串道；
+ * - 相同弹幕合并（hongguoTV DanmakuLayout group-start 语义）：items 变化时按
+ *   「距组首 5 秒内同文本」离线预合成，组首起飞即带「文字 ×N」计数，被并成员
+ *   不再单独起飞；组首被丢弃时成员接力起飞（不丢弹幕）；续拉使计数增长时
+ *   原位刷新在飞组文本，不打断飞行；
  * - 车道数 = maxLanes 与层实际高度按行高自适应的较小者；
  * - 播放位置喂入驱动出现时机，超过追补窗口的旧弹幕静默跳过；
  * - 暂停时停帧冻结在当前像素位置，恢复播放后按剩余时长续飞；
@@ -32,6 +36,8 @@ const FQ_DANMAKU_CATCHUP_MS: number = 1500;
 const FQ_DANMAKU_TAIL_MIN_MS: number = 2000;
 /** 弹道复用安全间距之外的固定余量（毫秒）：避免相邻弹幕贴字。 */
 const FQ_DANMAKU_LANE_GAP_MS: number = 150;
+/** 相同弹幕合并窗口（毫秒）：同文本距其组首条 ≤ 该值时并组「 ×N」，超窗另起一组。 */
+const FQ_DANMAKU_MERGE_WINDOW_MS: number = 5000;
 /** 帧时钟步进间隔（毫秒）：约 60fps，弹幕低速匀移足够顺滑。 */
 const FQ_DANMAKU_FRAME_MS: number = 16;
 /** 单帧最大步进（毫秒）：后台/卡顿的长帧按上限折算，防止恢复瞬间弹幕瞬移。 */
@@ -59,30 +65,37 @@ export class FqDanmakuViewConfig {
   }
 }
 
-/** 飞行中的弹幕（@Trace x 由帧时钟推进；墙钟已飞时长支持暂停冻结）。 */
+/** 飞行中的弹幕（@Trace x/text 驱动飞行与合并计数重渲染；墙钟已飞时长支持暂停冻结）。 */
 @ObservedV2
 class FqFlyingDanmaku {
   readonly key: string;
-  readonly text: string;
+  /** 文本（并组合并时更新为「文字 ×N」）。 */
+  @Trace text: string;
   readonly lane: number;
   /** 入场 x（层宽，右缘外）。 */
   readonly startX: number;
-  /** 终点 x（-文本宽，全出左缘）。 */
-  readonly endX: number;
+  /** 终点 x（-文本宽，全出左缘；合并加宽时同步更新，保证完整飞出）。 */
+  endX: number;
   /** 飞行总时长（墙钟毫秒）。 */
   readonly totalMs: number;
+  /** 已并入条数（含首条；>1 时文本拼「 ×N」）。 */
+  count: number;
+  /** 本组首条弹幕的播放位置（毫秒）：后续同文本与其比较合并窗口。 */
+  groupOffsetMs: number;
   /** 已飞行时长（墙钟毫秒；暂停时停帧自然冻结）。 */
   elapsedMs: number;
   @Trace x: number;
 
   constructor(key: string, text: string, lane: number, startX: number, endX: number,
-    totalMs: number) {
+    totalMs: number, count: number, groupOffsetMs: number) {
     this.key = key;
     this.text = text;
     this.lane = lane;
     this.startX = startX;
     this.endX = endX;
     this.totalMs = totalMs;
+    this.count = count;
+    this.groupOffsetMs = groupOffsetMs;
     this.elapsedMs = 0;
     this.x = startX;
   }
@@ -96,6 +109,34 @@ class FqDanmakuLane {
   width: number = 0;
   /** 最近一次飞行墙钟时长（毫秒）。 */
   durationMs: number = 0;
+}
+
+/** 相同弹幕合并组（items 变化时离线重算的预合成计划）：组首起飞即显示 composedText。 */
+class FqDanmakuMergeGroup {
+  /** 组首弹幕 id。 */
+  readonly headId: string;
+  /** 组内原文（同文本）。 */
+  readonly text: string;
+  /** 组首播放位置（毫秒）：并组窗口基准。 */
+  readonly startOffsetMs: number;
+  /** 已并入条数（含组首）。 */
+  count: number;
+  /** 合成显示文本（count > 1 时「原文 ×N」）。 */
+  composedText: string;
+
+  constructor(headId: string, text: string, startOffsetMs: number) {
+    this.headId = headId;
+    this.text = text;
+    this.startOffsetMs = startOffsetMs;
+    this.count = 1;
+    this.composedText = text;
+  }
+
+  /** 并入一条：计数 +1，重合成显示文本。 */
+  absorb(): void {
+    this.count += 1;
+    this.composedText = `${this.text} ×${this.count}`;
+  }
 }
 
 @ComponentV2
@@ -120,6 +161,14 @@ export struct FqDanmakuView {
   @Param durationMs: number = 0;
   @Local flying: FqFlyingDanmaku[] = [];
   private spawned: Set<string> = new Set<string>();
+  /** 在飞合并组：文本 → 组引用（运行时兜底并组用；超窗或飞完的下一条同文本另起）。 */
+  private mergeGroups: Map<string, FqFlyingDanmaku> = new Map();
+  /** 合并计划（items 变化时重算）：组首 id → 合并组。 */
+  private mergePlanById: Map<string, FqDanmakuMergeGroup> = new Map();
+  /** 被并成员 id → 组首 id：组首起飞后成员不再单独起飞。 */
+  private absorbedMemberHead: Map<string, string> = new Map();
+  /** 已真正起飞的组首 id：丢弃的组首不入内，成员据此接力兜底。 */
+  private launchedHeads: Set<string> = new Set();
   private lanes: FqDanmakuLane[] = [];
   private viewWidth: number = 0;
   private viewHeight: number = 0;
@@ -130,6 +179,7 @@ export struct FqDanmakuView {
   private pausedAt: number = 0;
 
   aboutToAppear(): void {
+    this.rebuildMergePlan();
     if (this.playing) {
       this.startTicker();
     }
@@ -144,10 +194,17 @@ export struct FqDanmakuView {
     this.feed(this.positionMs);
   }
 
+  @Monitor('items')
+  private onItemsChange(): void {
+    this.rebuildMergePlan();
+  }
+
   @Monitor('resetToken')
   private onReset(): void {
     this.flying = [];
     this.spawned.clear();
+    this.mergeGroups.clear();
+    this.launchedHeads.clear();
     this.releaseAllLanes();
   }
 
@@ -179,20 +236,40 @@ export struct FqDanmakuView {
         continue;
       }
       this.spawned.add(item.id);
+      const headId: string | undefined = this.absorbedMemberHead.get(item.id);
+      if (headId !== undefined && this.launchedHeads.has(headId)) {
+        // 已并入在飞合并组（组首起飞即带「 ×N」），不再单独起飞；
+        // 组首被丢弃时落到下方照常接力起飞，不丢弹幕
+        continue;
+      }
       if (posMs - item.offsetMs <= FQ_DANMAKU_CATCHUP_MS) {
         this.launch(item);
       }
     }
   }
 
-  /** 起飞：挑安全间距最大的弹道，按文本宽度定时长，右缘外入场 → 全出左缘后回收。 */
+  /** 起飞：预合成「文字 ×N」整组起飞；兜底并组见方法内运行时分支。 */
   private launch(item: FqDanmaku): void {
+    // 运行时兜底并组：组首被丢弃、成员接力起飞后，后续同文本成员并入接力的在飞组
+    // （距接力组首 ≤ 5 秒且未飞完，只改文本与终点，不打断飞行）
+    const group: FqFlyingDanmaku | undefined = this.mergeGroups.get(item.text);
+    if (group !== undefined && group.elapsedMs < group.totalMs &&
+      item.offsetMs - group.groupOffsetMs <= FQ_DANMAKU_MERGE_WINDOW_MS) {
+      group.count += 1;
+      group.text = `${item.text} ×${group.count}`;
+      group.endX = -this.estimateTextWidth(group.text);
+      return;
+    }
     this.rebuildLanes();
     if (this.lanes.length === 0) {
       return;
     }
     const now: number = Date.now();
-    const textWidth: number = this.estimateTextWidth(item.text);
+    // 预合成：组首起飞即显示整组「文字 ×N」（计划在 rebuildMergePlan 里离线算好）
+    const plan: FqDanmakuMergeGroup | undefined = this.mergePlanById.get(item.id);
+    const text: string = plan !== undefined ? plan.composedText : item.text;
+    const count: number = plan !== undefined ? plan.count : 1;
+    const textWidth: number = this.estimateTextWidth(text);
     const width: number = this.viewWidth > 0 ? this.viewWidth : 360;
     const durationMs: number = this.flightDurationMs();
     // 密集调度：上一条尾部入屏即复用（+追尾校验），同弹道并行多条错开飞行；
@@ -212,8 +289,42 @@ export struct FqDanmakuView {
     this.lanes[lane].launchAt = now;
     this.lanes[lane].width = textWidth;
     this.lanes[lane].durationMs = durationMs;
-    this.flying.push(new FqFlyingDanmaku(
-      item.id, item.text, lane, width, -textWidth, durationMs));
+    const flyer: FqFlyingDanmaku = new FqFlyingDanmaku(
+      item.id, text, lane, width, -textWidth, durationMs, count, item.offsetMs);
+    this.flying.push(flyer);
+    this.mergeGroups.set(item.text, flyer);
+    this.launchedHeads.add(item.id);
+  }
+
+  /**
+   * 重算合并计划（初载/续拉）：距组首 5 秒内的同文本并组（group-start 链），
+   * 组首起飞即带整组「文字 ×N」；续拉使在飞组计数增长时原位刷新其文本与终点。
+   */
+  private rebuildMergePlan(): void {
+    this.mergePlanById.clear();
+    this.absorbedMemberHead.clear();
+    const groupByText: Map<string, FqDanmakuMergeGroup> = new Map();
+    for (const item of this.items) {
+      const group: FqDanmakuMergeGroup | undefined = groupByText.get(item.text);
+      if (group !== undefined && item.offsetMs - group.startOffsetMs <= FQ_DANMAKU_MERGE_WINDOW_MS) {
+        group.absorb();
+        this.absorbedMemberHead.set(item.id, group.headId);
+      } else {
+        const head: FqDanmakuMergeGroup =
+          new FqDanmakuMergeGroup(item.id, item.text, item.offsetMs);
+        this.mergePlanById.set(item.id, head);
+        groupByText.set(item.text, head);
+      }
+    }
+    // 续拉边界：组首已按旧计数起飞、新页又并入成员 → 原位刷新在飞组，不打断飞行
+    for (const flyer of this.flying) {
+      const plan: FqDanmakuMergeGroup | undefined = this.mergePlanById.get(flyer.key);
+      if (plan !== undefined && plan.count > flyer.count && flyer.elapsedMs < flyer.totalMs) {
+        flyer.count = plan.count;
+        flyer.text = plan.composedText;
+        flyer.endX = -this.estimateTextWidth(plan.composedText);
+      }
+    }
   }
 
   /** 飞行墙钟时长：官方基准 ÷（速度档 × 倍速），片尾压缩赶在片尾前完整飞出。 */
