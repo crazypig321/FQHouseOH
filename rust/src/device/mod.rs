@@ -357,6 +357,26 @@ impl DevicePool {
         }))
     }
 
+    /// Picks a pooled identity other than [device_id] without registering.
+    ///
+    /// Playback rotation uses this to spend an already-registered standby
+    /// identity before paying for a fresh registration. A pool that only holds
+    /// the failing device returns an error so the caller can decide whether a
+    /// registration round trip still fits its deadline. Usage counters are
+    /// deliberately left alone: a standby handed out here is not evidence the
+    /// identity was spent.
+    pub async fn get_excluding(&self, device_id: &str) -> Result<Device, String> {
+        let picked = {
+            let mut s = self.state.lock().await;
+            s.devices.sort_by(|a, b| a.last_used.cmp(&b.last_used));
+            s.devices
+                .iter()
+                .find(|device| device.device_id != device_id && !device.secret_key.is_empty())
+                .cloned()
+        };
+        picked.ok_or_else(|| format!("no alternate device besides {device_id}"))
+    }
+
     /// Least-recently-used device, refilling the pool when needed.
     ///
     /// Only an empty pool waits for a registration. A pool that still has a

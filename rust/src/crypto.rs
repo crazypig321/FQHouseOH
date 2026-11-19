@@ -159,12 +159,13 @@ impl std::fmt::Display for GunzipError {
     }
 }
 
-/// gzip inflate with a hard output cap. `Take(limit + 1)` proves an
-/// over-limit output after reading at most one byte past the cap, without
-/// ever materializing the full bomb.
+/// gzip file inflate with a hard output cap. A gzip file is a sequence of
+/// members, so later members must not be silently dropped. `Take(limit + 1)`
+/// proves an over-limit output after reading at most one byte past the cap,
+/// without ever materializing the full bomb.
 pub fn gunzip_capped(data: &[u8], limit: usize) -> Result<Vec<u8>, GunzipError> {
     use std::io::Read;
-    let mut decoder = flate2::read::GzDecoder::new(data);
+    let mut decoder = flate2::read::MultiGzDecoder::new(data);
     let mut out = Vec::new();
     decoder
         .by_ref()

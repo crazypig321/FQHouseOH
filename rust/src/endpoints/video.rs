@@ -45,6 +45,27 @@ static STREAM_TRACE_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::
 const V5_PLAYER_URL: &str =
     "https://api5-normal-sinfonlinea.fqnovel.com/novel/player/multi_video_model/player/v1";
 
+/// The official app's `GET` playback-model door carrying the model list, used
+/// as the second attempt when the v5 player door answers an empty body.
+const VIDEO_TAB_PLAYER_PATH: &str = "/reading/bookapi/video_tab/multi_video_model/v1/";
+
+/// Hard cap on playback-door attempts per request, re-probe and rotation round
+/// included.
+const MAX_PLAYBACK_ATTEMPTS: usize = 8;
+
+/// A door that answers an empty body is probed once more after this pause: the
+/// refusal is transient per request far more often than it is a verdict about
+/// the identity, and the same door recovers by itself in a few hundred ms.
+const SAME_DOOR_REPROBE_DELAY: Duration = Duration::from_millis(250);
+
+/// The re-probe needs this much caller budget left: another round trip is not
+/// worth starting when the caller is nearly out of time.
+const REPROBE_MIN_BUDGET: Duration = Duration::from_millis(1_000);
+
+/// A rotation needs this much caller budget left to be worth attempting: a
+/// replacement registration is several round trips.
+const ROTATION_MIN_BUDGET: Duration = Duration::from_millis(1_500);
+
 /// Reading directory endpoint used as the primary pseries directory source.
 const DIRECTORY_READING_URL: &str =
     "https://api5-normal-sinfonlineb.fqnovel.com/reading/bookapi/directory/all_items/v?";
@@ -140,6 +161,8 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
         let quality = sanitize_quality(&params.get_str("quality"));
         let source_trace_id =
             STREAM_TRACE_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        let purpose =
+            crate::upstream::playback_trace::purpose(&params.get_str("_playback_purpose"));
         let work_started = Instant::now();
         let work_budget = crate::upstream::budget::remaining()
             .map(|left| left.saturating_sub(VIDEO_RESPONSE_RESERVE))
@@ -154,11 +177,18 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
         let work_deadline = work_started + work_budget;
         let fetch_deadline = work_started + fetch_budget;
         let resolution_deadline = work_started + resolution_budget;
-        let parsed = fetch_parsed_video_response("v5", &video_id, fetch_deadline, async {
-            fetch_v5_video_model(ctx, &video_id).await
-        })
+        let parsed = crate::upstream::playback_trace::within(
+            source_trace_id,
+            purpose,
+            fetch_parsed_video_response(
+                "v5",
+                &video_id,
+                fetch_deadline,
+                fetch_playback_model(ctx, &video_id, fetch_deadline, purpose),
+            ),
+        )
         .await
-        .ok_or_else(|| ApiError::Internal("视频取流失败，请稍后重试".to_string()))?;
+        .ok_or_else(|| ApiError::Internal("视频取流失败,请稍后重试".to_string()))?;
         let fallback_bodies = new_fallback_body_cache();
         let resolved = resolve_video_source_until(
             ctx,
@@ -180,7 +210,7 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
             && legacy_raw_response_has_playable_url(&parsed)
         {
             log::info!(
-                "stream trace request={source_trace_id} event=final mode={} selected_source=v5 bodies=1 quality_count=0 result=legacy_raw",
+                "stream trace request={source_trace_id} purpose={purpose} event=final mode={} selected_source=v5 bodies=1 quality_count=0 result=legacy_raw",
                 if stream_mode { "stream" } else { "single" },
             );
             return Ok(parsed.root);
@@ -189,14 +219,20 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
         let (mut video_url, mut content_key) = match resolved {
             VideoSourceResolution::Found(url, key) => (url, key),
             VideoSourceResolution::CodecRejected => {
+                log::warn!(
+                    "stream trace request={source_trace_id} purpose={purpose} event=final result=codec_rejected"
+                );
                 return Err(ApiError::Internal("该视频暂不支持播放".to_string()));
             }
             VideoSourceResolution::NotFound => {
+                log::warn!(
+                    "stream trace request={source_trace_id} purpose={purpose} event=final result=not_found"
+                );
                 return Err(ApiError::Internal("视频取流失败，请稍后重试".to_string()));
             }
         };
         let variant_deadline = (Instant::now() + variant_budget).min(work_deadline);
-        let variants = extract_stream_variants(
+        let (variants, variant_counts) = extract_stream_variants(
             ctx,
             &video_id,
             &parsed,
@@ -206,6 +242,11 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
             variant_deadline,
         )
         .await;
+        debug_assert_eq!(
+            variants.len(),
+            variant_counts.kept,
+            "kept must stay the same number the panel shows"
+        );
         let primary_in_variants = variants
             .iter()
             .any(|variant| variant.get("url").and_then(Value::as_str) == Some(video_url.as_str()));
@@ -221,13 +262,16 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
             .collect::<Vec<_>>()
             .join(",");
         log::info!(
-            "stream trace request={source_trace_id} event=final mode={} selected_source=v5 bodies=1 fallback_bodies={} quality_count={} qualities=[{quality_trace}] primary_in_variants={primary_in_variants}",
+            "stream trace request={source_trace_id} purpose={purpose} event=final mode={} selected_source=v5 bodies=1 fallback_bodies={} quality_count={} raw_entries={} kept={} dropped=[{}] qualities=[{quality_trace}] primary_in_variants={primary_in_variants}",
             if stream_mode { "stream" } else { "single" },
             fallback_bodies
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
                 .len(),
             variants.len(),
+            variant_counts.raw_entries,
+            variant_counts.kept,
+            variant_counts.dropped.summary(),
         );
 
         // 请求档命中：直接改用该档流（url + 内容密钥）。未请求档时默认档
@@ -290,7 +334,7 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
                     "v5",
                     &video_id,
                     retry_fetch_deadline,
-                    fetch_v5_video_model(ctx, &video_id),
+                    fetch_playback_model(ctx, &video_id, retry_fetch_deadline, purpose),
                 )
                 .await;
                 let Some(reparsed) = reparsed else {
@@ -309,7 +353,7 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
                     VideoSourceResolution::Found(url, key) => (url, key),
                     _ => break,
                 };
-                let revariants = extract_stream_variants(
+                let (revariants, _) = extract_stream_variants(
                     ctx,
                     &video_id,
                     &reparsed,
@@ -473,11 +517,341 @@ fn v5_playback_body(video_id: &str) -> ApiResult<Vec<u8>> {
         .map_err(|e| ApiError::Internal(format!("gzip v5 playback body: {e}")))
 }
 
-async fn fetch_v5_video_model(ctx: &Ctx, video_id: &str) -> ApiResult<Vec<u8>> {
-    let body = v5_playback_body(video_id)?;
-    Upstream::new(ctx.up.clone())
-        .v5_playback(V5_PLAYER_URL, &body)
+/// What one playback-door attempt produced.
+enum DoorOutcome {
+    /// A non-empty 200 body.
+    Body(Vec<u8>),
+    /// `HTTP 200` with zero bytes: the door refused without saying why.
+    Empty,
+    /// Transport error, unusable status or a body without a usable model.
+    Failed,
+    /// The caller's deadline passed before the door answered.
+    Deadline,
+}
+
+struct PlaybackAttempt {
+    outcome: DoorOutcome,
+    /// Identity that produced this outcome, when the transport revealed it.
+    device_id: Option<String>,
+}
+
+/// The `video_tab` door's own query fields: the official app's snake_case
+/// `GetVideoModelRequest` parameters.
+fn video_tab_query(video_id: &str) -> Vec<(&str, &str)> {
+    vec![
+        ("video_id", video_id),
+        ("video_id_type", "0"),
+        ("device_level", "1"),
+        ("need_all_video_definition", "1"),
+        ("need_mp4_align", "0"),
+        ("use_os_player", "0"),
+        ("video_platform", "1024"),
+        ("source", "0"),
+        ("from_video_id", ""),
+    ]
+}
+
+/// Hands a `video_tab` payload to the endpoint parser unchanged.
+///
+/// The parser already walks `data.video_model_data.<id>`, `data.<id>` and the
+/// grouped shapes, so this only validates the envelope and re-wraps `data`.
+/// A business code or a payload without `data` is a failed door, never an empty
+/// one; the envelope line records keys, `data` type, code and message only, so a
+/// shape drift stays diagnosable without logging a URL or a body.
+fn video_tab_player_shape(raw: &[u8]) -> Option<Vec<u8>> {
+    let root: Value = match serde_json::from_slice(raw) {
+        Ok(root) => root,
+        Err(_) => {
+            log::warn!(
+                "v5 trace event=tab result=failed reason=json body_len={}",
+                raw.len()
+            );
+            return None;
+        }
+    };
+    let code = root
+        .get("code")
+        .or_else(|| root.get("Code"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    if code != 0 {
+        log::warn!("v5 trace event=tab result=failed reason=business code={code}");
+        return None;
+    }
+    let Some(data) = root.get("data") else {
+        log::warn!(
+            "v5 trace event=tab result=failed reason=data envelope={}",
+            body_envelope(&root)
+        );
+        return None;
+    };
+    match serde_json::to_vec(&json!({ "data": data })) {
+        Ok(shaped) => Some(shaped),
+        Err(_) => {
+            log::warn!("v5 trace event=tab result=failed reason=remarshal");
+            None
+        }
+    }
+}
+
+async fn attempt_playback_route(
+    ctx: &Ctx,
+    video_id: &str,
+    body: &[u8],
+    route: crate::upstream::playback_routes::Route,
+    pin: Option<&str>,
+    deadline: Instant,
+) -> PlaybackAttempt {
+    use crate::upstream::playback_routes::Door;
+    match route.door {
+        Door::V5Player => match tokio::time::timeout_at(
+            deadline,
+            ctx.up.v5_playback_with_device(V5_PLAYER_URL, body, pin),
+        )
         .await
+        {
+            Err(_) => PlaybackAttempt {
+                outcome: DoorOutcome::Deadline,
+                device_id: None,
+            },
+            Ok(Ok((data, device))) => PlaybackAttempt {
+                outcome: if data.is_empty() {
+                    DoorOutcome::Empty
+                } else {
+                    DoorOutcome::Body(data)
+                },
+                device_id: Some(device.device_id),
+            },
+            Ok(Err(_)) => PlaybackAttempt {
+                outcome: DoorOutcome::Failed,
+                device_id: None,
+            },
+        },
+        Door::VideoTab => {
+            let base = format!("{}{}", route.host(), VIDEO_TAB_PLAYER_PATH);
+            let extra = video_tab_query(video_id);
+            match tokio::time::timeout_at(deadline, ctx.up.v5_get_with_device(&base, &extra, pin))
+                .await
+            {
+                Err(_) => PlaybackAttempt {
+                    outcome: DoorOutcome::Deadline,
+                    device_id: None,
+                },
+                Ok(Ok((raw, device))) => {
+                    let device_id = Some(device.device_id);
+                    if raw.is_empty() {
+                        return PlaybackAttempt {
+                            outcome: DoorOutcome::Empty,
+                            device_id,
+                        };
+                    }
+                    match video_tab_player_shape(&raw) {
+                        Some(shaped) => PlaybackAttempt {
+                            outcome: DoorOutcome::Body(shaped),
+                            device_id,
+                        },
+                        None => PlaybackAttempt {
+                            outcome: DoorOutcome::Failed,
+                            device_id,
+                        },
+                    }
+                }
+                Ok(Err(_)) => PlaybackAttempt {
+                    outcome: DoorOutcome::Failed,
+                    device_id: None,
+                },
+            }
+        }
+    }
+}
+
+/// One bounded, foreground-only identity rotation.
+async fn rotate_playback_identity(
+    ctx: &Ctx,
+    deadline: Instant,
+    failed: Option<&str>,
+) -> Option<String> {
+    let trace = crate::upstream::playback_trace::current();
+    let (request_id, purpose) = trace
+        .as_ref()
+        .map_or((0, "other"), |trace| (trace.request_id, trace.purpose));
+    match tokio::time::timeout_at(deadline, ctx.up.rotate_playback_identity(failed)).await {
+        Ok(Ok(device)) => {
+            log::info!("v5 trace request={request_id} purpose={purpose} event=rotate result=ok");
+            Some(device.device_id)
+        }
+        Ok(Err(error)) => {
+            log::warn!(
+                "v5 trace request={request_id} purpose={purpose} event=rotate result=unavailable error={error}"
+            );
+            None
+        }
+        Err(_) => {
+            log::warn!(
+                "v5 trace request={request_id} purpose={purpose} event=rotate result=deadline"
+            );
+            None
+        }
+    }
+}
+
+/// Fetches the playback model through every playback door.
+///
+/// Ported from `N3urda/hongguoTV`'s `streamLadderWithCompatibility`: a single
+/// v5 attempt, then the signed `video_tab` doors under the same identity, with
+/// per-door cooldowns (30 s after an empty body, 5 s after any other failure)
+/// and at most one identity rotation per request. Prefetch callers never probe
+/// a cooling door and never rotate.
+async fn fetch_playback_model(
+    ctx: &Ctx,
+    video_id: &str,
+    deadline: Instant,
+    purpose: &'static str,
+) -> ApiResult<Vec<u8>> {
+    use crate::upstream::playback_routes;
+
+    let speculative = purpose == "prefetch";
+    let request_id = crate::upstream::playback_trace::current().map_or(0, |trace| trace.request_id);
+    let body = v5_playback_body(video_id)?;
+    let mut pin: Option<String> = None;
+    let mut all_empty = true;
+    let mut attempts = 0usize;
+    // One same-door re-probe per request: an empty body is usually a transient
+    // per-request refusal, and the same door answers again a moment later.
+    let mut reprobed = false;
+
+    // A long empty streak rotates the identity before the next attempt, which is
+    // what recovered live playback for the reference implementation.
+    if playback_routes::with_state(|state| state.rotate_due(playback_routes::now_ms(), speculative))
+        && crate::upstream::budget::remaining().is_none_or(|left| left > ROTATION_MIN_BUDGET)
+    {
+        pin = rotate_playback_identity(ctx, deadline, None).await;
+        playback_routes::with_state(|state| {
+            state.note_rotate(playback_routes::now_ms(), pin.is_some())
+        });
+    }
+
+    for round in 0..2u8 {
+        let now = playback_routes::now_ms();
+        let plan = playback_routes::with_state(|state| state.plan(now, speculative));
+        for route in plan {
+            if attempts >= MAX_PLAYBACK_ATTEMPTS || Instant::now() >= deadline {
+                break;
+            }
+            attempts += 1;
+            let started = Instant::now();
+            // Decided before the attempt: a door that is already parked is being
+            // probed deliberately, not freshly refused, so it earns no re-probe.
+            let route_parked = playback_routes::with_state(|state| state.parked(route, now));
+            let mut attempt =
+                attempt_playback_route(ctx, video_id, &body, route, pin.as_deref(), deadline).await;
+            let can_reprobe = matches!(attempt.outcome, DoorOutcome::Empty)
+                && !reprobed
+                && !route_parked
+                && !speculative
+                && route.door == crate::upstream::playback_routes::Door::V5Player
+                && attempts < MAX_PLAYBACK_ATTEMPTS
+                && Instant::now() + REPROBE_MIN_BUDGET < deadline
+                && crate::upstream::budget::remaining()
+                    .is_none_or(|left| left > REPROBE_MIN_BUDGET);
+            if can_reprobe && crate::upstream::budget::retry_pause(SAME_DOOR_REPROBE_DELAY).await {
+                reprobed = true;
+                attempts += 1;
+                log::info!(
+                    "v5 trace request={request_id} purpose={purpose} event=door route={} result=reprobe",
+                    route.tag(),
+                );
+                attempt = attempt_playback_route(
+                    ctx,
+                    video_id,
+                    &body,
+                    route,
+                    attempt.device_id.as_deref(),
+                    deadline,
+                )
+                .await;
+            }
+            let elapsed = started.elapsed().as_millis();
+            let outcome = match attempt.outcome {
+                DoorOutcome::Body(raw) => {
+                    log::info!(
+                        "v5 trace request={request_id} purpose={purpose} event=door route={} result=ok elapsed_ms={elapsed} body_len={}",
+                        route.tag(),
+                        raw.len(),
+                    );
+                    playback_routes::with_state(|state| {
+                        state.success(route, playback_routes::now_ms());
+                        state.note_round(false);
+                    });
+                    return Ok(raw);
+                }
+                DoorOutcome::Empty => {
+                    log::info!(
+                        "v5 trace request={request_id} purpose={purpose} event=door route={} result=empty elapsed_ms={elapsed}",
+                        route.tag(),
+                    );
+                    playback_routes::with_state(|state| state.failed(route, now, true));
+                    DoorOutcome::Empty
+                }
+                DoorOutcome::Failed => {
+                    log::warn!(
+                        "v5 trace request={request_id} purpose={purpose} event=door route={} result=failed elapsed_ms={elapsed}",
+                        route.tag(),
+                    );
+                    playback_routes::with_state(|state| state.failed(route, now, false));
+                    DoorOutcome::Failed
+                }
+                DoorOutcome::Deadline => {
+                    playback_routes::with_state(|state| state.failed(route, now, false));
+                    DoorOutcome::Deadline
+                }
+            };
+            if !matches!(outcome, DoorOutcome::Empty) {
+                all_empty = false;
+            }
+            if let Some(device_id) = attempt.device_id {
+                pin = Some(device_id);
+            }
+            if matches!(outcome, DoorOutcome::Deadline) {
+                break;
+            }
+        }
+
+        // A round that ended with every door parked may still buy one rotation,
+        // but only while pacing allows it: the device pool is bounded.
+        let parked =
+            playback_routes::with_state(|state| state.exhausted(playback_routes::now_ms()));
+        let now_after = playback_routes::now_ms();
+        let paced =
+            playback_routes::with_state(|state| state.rotation_paced(now_after, speculative));
+        let due = playback_routes::with_state(|state| state.rotate_due(now_after, speculative));
+        let can_rotate = round == 0
+            && paced
+            && (parked || due)
+            && crate::upstream::budget::remaining().is_none_or(|left| left > ROTATION_MIN_BUDGET);
+        if !can_rotate {
+            break;
+        }
+        let rotated = rotate_playback_identity(ctx, deadline, pin.as_deref()).await;
+        playback_routes::with_state(|state| {
+            state.note_rotate(playback_routes::now_ms(), rotated.is_some())
+        });
+        match rotated {
+            Some(device_id) => {
+                pin = Some(device_id);
+                continue;
+            }
+            None => break,
+        }
+    }
+
+    playback_routes::with_state(|state| state.note_round(all_empty));
+    let (empty_rounds, rotations) =
+        playback_routes::with_state(|state| (state.empty_rounds(), state.rotations()));
+    log::warn!(
+        "v5 trace request={request_id} purpose={purpose} event=final result=empty attempts={attempts} empty_rounds={empty_rounds} rotations={rotations}"
+    );
+    Err(ApiError::Internal("视频取流失败,请稍后重试".to_string()))
 }
 
 async fn fetch_parsed_video_response(
@@ -486,38 +860,44 @@ async fn fetch_parsed_video_response(
     deadline: Instant,
     request: impl std::future::Future<Output = ApiResult<Vec<u8>>>,
 ) -> Option<ParsedVideoResponse> {
+    let trace = crate::upstream::playback_trace::current();
+    let request_id = trace.as_ref().map_or(0, |trace| trace.request_id);
+    let purpose = trace.as_ref().map_or("other", |trace| trace.purpose);
     let raw = match tokio::time::timeout_at(deadline, request).await {
         Ok(Ok(raw)) => raw,
-        Ok(Err(error)) => {
+        Ok(Err(_)) => {
             log::warn!(
-                "video {video_id}: {source} request failed: {}",
-                error.message()
+                "v5 trace request={request_id} purpose={purpose} source={source} event=fetch error=request"
             );
             return None;
         }
         Err(_) => {
-            log::warn!("video {video_id}: {source} request deadline exceeded");
+            log::warn!(
+                "v5 trace request={request_id} purpose={purpose} source={source} event=fetch error=deadline"
+            );
             return None;
         }
     };
     if raw.is_empty() {
-        log::warn!("video {video_id}: {source} empty response body; body_len=0");
+        log::warn!(
+            "v5 trace request={request_id} purpose={purpose} source={source} event=fetch error=empty body_len=0"
+        );
         return None;
     }
     let parsed = match ParsedVideoResponse::parse(&raw, Some(video_id)) {
         Ok(parsed) => parsed,
-        Err(error) => {
+        Err(_) => {
             log::warn!(
-                "video {video_id}: {source} response unusable: {}",
-                error.message()
+                "v5 trace request={request_id} purpose={purpose} source={source} event=fetch error=json body_len={}",
+                raw.len(),
             );
             return None;
         }
     };
     if upstream_response_is_failure(&parsed.root) {
         log::warn!(
-            "video {video_id}: {source} business rejection: {}",
-            body_envelope(&parsed.root)
+            "v5 trace request={request_id} purpose={purpose} source={source} event=fetch error=business body_len={}",
+            raw.len(),
         );
         return None;
     }
@@ -528,10 +908,15 @@ async fn fetch_parsed_video_response(
             .is_some_and(|data| has_compatible_playable_url(data, 0))
     {
         log::warn!(
-            "video {video_id}: {source} body has no video payload: {}",
-            body_envelope(&parsed.root)
+            "v5 trace request={request_id} purpose={purpose} source={source} event=fetch error=no_model body_len={}",
+            raw.len(),
         );
     }
+    log::info!(
+        "v5 trace request={request_id} purpose={purpose} source={source} event=fetch body_len={} model_count={}",
+        raw.len(),
+        parsed.models.len(),
+    );
     Some(parsed)
 }
 
@@ -1030,7 +1415,9 @@ fn variant_display_name(height: i64) -> String {
 ///
 /// The model's own `video_list` and `fallback_api` list are merged. Returns
 /// `[]` when neither yields a playable variant; the client then hides the
-/// quality row (official `oi3/k.P()` gate).
+/// quality row (official `oi3/k.P()` gate). The counters ride alongside so a
+/// log line can say whether upstream sent one entry or sent five and our gates
+/// kept one (`quality_count` alone has no denominator).
 async fn extract_stream_variants(
     ctx: &Ctx,
     video_id: &str,
@@ -1039,18 +1426,19 @@ async fn extract_stream_variants(
     primary_url: &str,
     source_trace_id: u64,
     deadline: Instant,
-) -> Vec<Value> {
+) -> (Vec<Value>, VariantCounts) {
     let trace_started = Instant::now();
     let mut scored = Vec::new();
+    let mut batches: Vec<VariantCounts> = Vec::new();
     let mut fallback_requests = Vec::new();
     let mut seen_fallback_urls = HashSet::new();
     let mut local_tiers = 0;
     let mut fallback_models = 0;
     for (model_id, model) in parsed.models.iter().enumerate() {
         // NOTE: 不用 video_model_encrypted() 做前置——它只认数组形状的
-        // video_list；实测漫剧（series 7686494169098898456）的 video_list 是
-        // object 且未标 encrypt，但每档照常带 spade_a/kid，选流门照常适用。
-        let rows = variant_rows_scored_any(
+        // video_list;实测漫剧(series 7686494169098898456)的 video_list 是
+        // object 且未标 encrypt,但每档照常带 spade_a/kid,选流门照常适用。
+        let batch = variant_rows_scored_any(
             model.get("video_list"),
             model
                 .get("key_seed")
@@ -1058,17 +1446,18 @@ async fn extract_stream_variants(
                 .filter(|s| !s.is_empty())
                 .and_then(|s| audio_b64_decode(s).ok()),
         );
-        local_tiers += playable_variant_tier_count(&rows);
-        scored.extend(rows);
+        local_tiers += playable_variant_tier_count(&batch.rows);
+        batches.push(batch.counts);
+        scored.extend(batch.rows);
         let fallback_url = fallback_api_url(model);
         if !fallback_url.is_empty() && seen_fallback_urls.insert(fallback_url) {
             fallback_models += 1;
             let fallback_cache = fallback_bodies.clone();
             fallback_requests.push(Box::pin(async move {
-                let (rows, from_cache) =
+                let (batch, from_cache) =
                     fallback_variant_rows(ctx, video_id, "v5", model, &fallback_cache, deadline)
                         .await;
-                (model_id, from_cache, rows)
+                (model_id, from_cache, batch)
             }));
         }
     }
@@ -1076,16 +1465,17 @@ async fn extract_stream_variants(
         "stream trace request={source_trace_id} source=v5 event=variants_body elapsed_ms={} playable_tiers={local_tiers} fallback_models={fallback_models}",
         trace_started.elapsed().as_millis(),
     );
-    for (model_id, from_cache, rows) in futures::future::join_all(fallback_requests).await {
+    for (model_id, from_cache, batch) in futures::future::join_all(fallback_requests).await {
         log::info!(
             "stream trace request={source_trace_id} source=v5 model={model_id} event=variants_fallback elapsed_ms={} from_cache={from_cache} playable_tiers={}",
             trace_started.elapsed().as_millis(),
-            playable_variant_tier_count(&rows),
+            playable_variant_tier_count(&batch.rows),
         );
-        scored.extend(rows);
+        batches.push(batch.counts);
+        scored.extend(batch.rows);
     }
     prioritize_primary_variant(&mut scored, primary_url);
-    merge_variant_rows(scored)
+    tally_variants(scored, &batches)
 }
 
 /// The model's `fallback_api` list as scored rows; empty when the model has no
@@ -1097,11 +1487,11 @@ async fn fallback_variant_rows(
     model: &Map<String, Value>,
     cache: &FallbackBodyCache,
     deadline: Instant,
-) -> (Vec<(i64, Value)>, bool) {
+) -> (VariantBatch, bool) {
     let fallback_url = fallback_api_url(model);
     if fallback_url.is_empty() {
-        // 多数模型本来就没有这一条，不是异常。
-        return (Vec::new(), false);
+        // 多数模型本来就没有这一条,不是异常。
+        return (VariantBatch::default(), false);
     }
     let cached = {
         let cache = cache.lock().unwrap_or_else(|error| error.into_inner());
@@ -1111,31 +1501,31 @@ async fn fallback_variant_rows(
         return (fallback_rows_from_body(fallback_data.as_ref()), true);
     }
     if Instant::now() >= deadline {
-        return (Vec::new(), false);
+        return (VariantBatch::default(), false);
     }
     let fallback_data =
         match fetch_fallback_video_info(ctx, video_id, source, &fallback_url, deadline).await {
             Ok(fallback_data) => fallback_data,
             Err(_) => {
-                // 有地址却拉不到，是这一档列表整片消失的另一种静默路径。
+                // 有地址却拉不到,是这一档列表整片消失的另一种静默路径。
                 log::warn!(
                     "video {video_id}: {source} fallback_api fetch failed (quality tiers lost)"
                 );
-                return (Vec::new(), false);
+                return (VariantBatch::default(), false);
             }
         };
     let fallback_data = Arc::new(fallback_data);
-    let rows = fallback_rows_from_body(fallback_data.as_ref());
-    if playable_variant_tier_count(&rows) > 0 {
+    let batch = fallback_rows_from_body(fallback_data.as_ref());
+    if playable_variant_tier_count(&batch.rows) > 0 {
         let mut cache = cache.lock().unwrap_or_else(|error| error.into_inner());
         cache
             .entry(fallback_url)
             .or_insert_with(|| fallback_data.clone());
     }
-    (rows, false)
+    (batch, false)
 }
 
-fn fallback_rows_from_body(fallback_data: &Map<String, Value>) -> Vec<(i64, Value)> {
+fn fallback_rows_from_body(fallback_data: &Map<String, Value>) -> VariantBatch {
     let list = fallback_data
         .get("video_info")
         .and_then(|v| v.get("data"))
@@ -1147,6 +1537,84 @@ fn fallback_rows_from_body(fallback_data: &Map<String, Value>) -> Vec<(i64, Valu
         .and_then(|s| audio_b64_decode(s).ok());
     let list = list.and_then(|d| d.get("video_list"));
     variant_rows_scored_any(list, key_seed)
+}
+
+/// Why an entry in an upstream variant list never became a playable tier.
+/// Counts only: this rides in a log line that gets pasted around, so it must
+/// never carry a url, a body, a signature, a key or a device identifier.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct VariantDropCounts {
+    /// `video_quality_score` returned `None`; bytevc2 is the only such codec
+    /// (`CRIT-004`: no decoder on the playback path).
+    bytevc2: usize,
+    /// `decrypt_variant_entry` found no playable url in any url field.
+    no_url: usize,
+    /// No usable width/height pair, so no quality name exists to show.
+    no_meta: usize,
+    /// Folded away by the merge: the resolution name or the url was already
+    /// claimed by an earlier row.
+    duplicate: usize,
+}
+
+impl VariantDropCounts {
+    fn total(&self) -> usize {
+        self.bytevc2 + self.no_url + self.no_meta + self.duplicate
+    }
+
+    /// Compact `bytevc2:3,no_url:0,no_meta:0,dup:1` for the trace line.
+    fn summary(&self) -> String {
+        format!(
+            "bytevc2:{},no_url:{},no_meta:{},dup:{}",
+            self.bytevc2, self.no_url, self.no_meta, self.duplicate
+        )
+    }
+}
+
+/// What the variant extraction did with a request's entries. `kept + dropped`
+/// must equal `raw_entries`, which is the denominator `quality_count` lacked:
+/// without it a log cannot tell "upstream sent one entry" from "upstream sent
+/// five and our codec/metadata gates kept one".
+///
+/// For a single list batch `kept` is pre-merge; `tally_variants` recomputes it
+/// for the whole request, so a batch's `kept` is informational only.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct VariantCounts {
+    raw_entries: usize,
+    kept: usize,
+    dropped: VariantDropCounts,
+}
+
+/// One upstream `video_list` / `fallback_api` list: the rows it yielded plus
+/// the counters that explain every entry it was handed.
+#[derive(Debug, Default)]
+struct VariantBatch {
+    rows: Vec<(i64, Value)>,
+    counts: VariantCounts,
+}
+
+/// Folds the per-list counters into one request-level tally and returns the
+/// final rows. Pure: no network, no `Ctx`, so the async path only reports what
+/// this returns and a test can drive the same code with fixtures.
+fn tally_variants(
+    scored: Vec<(i64, Value)>,
+    batches: &[VariantCounts],
+) -> (Vec<Value>, VariantCounts) {
+    let mut counts = VariantCounts::default();
+    for batch in batches {
+        counts.raw_entries += batch.raw_entries;
+        counts.dropped.bytevc2 += batch.dropped.bytevc2;
+        counts.dropped.no_url += batch.dropped.no_url;
+        counts.dropped.no_meta += batch.dropped.no_meta;
+    }
+    let (rows, duplicates) = merge_variant_rows_counted(scored);
+    counts.dropped.duplicate = duplicates;
+    counts.kept = rows.len();
+    debug_assert_eq!(
+        counts.kept + counts.dropped.total(),
+        counts.raw_entries,
+        "every upstream variant entry must be kept or explained: {counts:?}"
+    );
+    (rows, counts)
 }
 
 fn playable_variant_tier_count(rows: &[(i64, Value)]) -> usize {
@@ -1174,16 +1642,35 @@ fn prioritize_primary_variant(scored: &mut Vec<(i64, Value)>, primary_url: &str)
 /// passes both checks claims both keys; rejected aliases must not consume a key
 /// needed by a later real stream. The panel matches the current tier by URL, so
 /// duplicate URLs would highlight multiple rows.
+/// Test-facing face of the counted merge. The production path needs the
+/// duplicate count, so only the tests keep the bare-row form.
+#[cfg(test)]
 fn merge_variant_rows(scored: Vec<(i64, Value)>) -> Vec<Value> {
+    merge_variant_rows_counted(scored).0
+}
+
+/// Ranks rows best-first and keeps one row per resolution and URL. A row that
+/// passes both checks claims both keys; rejected aliases must not consume a key
+/// needed by a later real stream. The panel matches the current tier by URL, so
+/// duplicate URLs would highlight multiple rows.
+///
+/// Also reports how many rows it folded away so the trace can account for every
+/// entry. Every fold-away is counted as a duplicate, which keeps
+/// `kept + dropped == raw_entries` exact: `variant_rows_from_entries` already
+/// drops nameless and url-less entries, so a row that cannot claim both keys can
+/// only be a repeat of an earlier one.
+fn merge_variant_rows_counted(scored: Vec<(i64, Value)>) -> (Vec<Value>, usize) {
     let mut seen_names: HashSet<String> = HashSet::new();
     let mut seen_urls: HashSet<String> = HashSet::new();
     let mut out: Vec<(i64, Value)> = Vec::with_capacity(scored.len());
+    let mut duplicates = 0;
     for (score, row) in scored {
         let Some(name) = row
             .get("name")
             .and_then(Value::as_str)
             .filter(|name| !name.is_empty())
         else {
+            duplicates += 1;
             continue;
         };
         let Some(url) = row
@@ -1191,11 +1678,13 @@ fn merge_variant_rows(scored: Vec<(i64, Value)>) -> Vec<Value> {
             .and_then(Value::as_str)
             .filter(|url| !url.is_empty())
         else {
+            duplicates += 1;
             continue;
         };
         let name = name.to_string();
         let url = url.to_string();
         if seen_names.contains(&name) || seen_urls.contains(&url) {
+            duplicates += 1;
             continue;
         }
         seen_names.insert(name);
@@ -1203,7 +1692,10 @@ fn merge_variant_rows(scored: Vec<(i64, Value)>) -> Vec<Value> {
         out.push((score, row));
     }
     out.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
-    out.into_iter().map(|(_, row)| row).collect()
+    (
+        out.into_iter().map(|(_, row)| row).collect(),
+        duplicates,
+    )
 }
 
 /// 把一份响应的**外壳**压成一行：顶层键名、`data` 的类型、`code`/`Code`、
@@ -1271,6 +1763,16 @@ fn variant_rows_scored(
     video_list: Option<&Map<String, Value>>,
     key_seed: Option<Vec<u8>>,
 ) -> Vec<(i64, Value)> {
+    variant_rows_scored_with_counts(video_list, key_seed).rows
+}
+
+/// Counting face of [`variant_rows_scored`]: same rows, plus the counters that
+/// explain every entry the list handed us.
+#[cfg(test)]
+fn variant_rows_scored_with_counts(
+    video_list: Option<&Map<String, Value>>,
+    key_seed: Option<Vec<u8>>,
+) -> VariantBatch {
     let entries: Vec<(String, &Map<String, Value>)> = video_list
         .into_iter()
         .flat_map(|list| {
@@ -1281,10 +1783,7 @@ fn variant_rows_scored(
     variant_rows_from_entries(entries, key_seed)
 }
 
-fn variant_rows_scored_any(
-    video_list: Option<&Value>,
-    key_seed: Option<Vec<u8>>,
-) -> Vec<(i64, Value)> {
+fn variant_rows_scored_any(video_list: Option<&Value>, key_seed: Option<Vec<u8>>) -> VariantBatch {
     let entries: Vec<(String, &Map<String, Value>)> = match video_list {
         Some(Value::Object(list)) => list
             .iter()
@@ -1295,7 +1794,7 @@ fn variant_rows_scored_any(
             .enumerate()
             .filter_map(|(index, value)| value.as_object().map(|info| (index.to_string(), info)))
             .collect(),
-        _ => return Vec::new(),
+        _ => return VariantBatch::default(),
     };
     variant_rows_from_entries(entries, key_seed)
 }
@@ -1303,41 +1802,52 @@ fn variant_rows_scored_any(
 fn variant_rows_from_entries(
     entries: Vec<(String, &Map<String, Value>)>,
     key_seed: Option<Vec<u8>>,
-) -> Vec<(i64, Value)> {
-    if entries.is_empty() {
-        return Vec::new();
+) -> VariantBatch {
+    let mut counts = VariantCounts {
+        raw_entries: entries.len(),
+        ..Default::default()
+    };
+    let mut rows: Vec<(i64, Value)> = Vec::with_capacity(entries.len());
+    for (slot, info) in entries {
+        let w = video_quality_metric(info, &["vwidth"]);
+        let h = video_quality_metric(info, &["vheight"]);
+        // 档位语义按**短边**:竖屏剧 1280×720 是 720P 而非 2K
+        // (官方 Resolution 枚举同样以短边为准)。缺任一边时不能宣称画质。
+        let short_edge = if w > 0 && h > 0 { w.min(h) } else { 0 };
+        let name = variant_display_name(short_edge);
+        // 编码门丢 bytevc2 是**预期行为**(`CRIT-004`:该编码没有解码器),不打点。
+        let Some(score) = video_quality_score(info) else {
+            counts.dropped.bytevc2 += 1;
+            continue;
+        };
+        let Some((url, key)) = decrypt_variant_entry(info, key_seed.as_deref()) else {
+            // 地址解不出来是静默丢**整档**的一类——`4e85437` 修过同款缺陷,且
+            // 实测夹具的 `main_url` 形态一向比线上少,缺陷容易被盖住,所以留告警。
+            log::warn!("variant {slot} dropped, url undecodable ({w}x{h} {name})");
+            counts.dropped.no_url += 1;
+            continue;
+        };
+        if short_edge == 0 {
+            // 缺任一边就拼不出画质名,`merge_variant_rows` 只会把它当无名行丢掉。
+            // 在入口就归类,`kept + dropped == raw_entries` 才对得上。
+            counts.dropped.no_meta += 1;
+            continue;
+        }
+        rows.push((
+            score,
+            json!({
+                "name": name,
+                "width": w,
+                "height": h,
+                "quality_height": short_edge,
+                "url": url,
+                "key_hex": hex::encode(&key),
+            }),
+        ));
     }
-    let mut rows: Vec<(i64, Value)> = entries
-        .into_iter()
-        .filter_map(|(slot, info)| {
-            let w = video_quality_metric(info, &["vwidth"]);
-            let h = video_quality_metric(info, &["vheight"]);
-            // 档位语义按**短边**：竖屏剧 1280×720 是 720P 而非 2K
-            // （官方 Resolution 枚举同样以短边为准）。缺任一边时不能宣称画质。
-            let short_edge = if w > 0 && h > 0 { w.min(h) } else { 0 };
-            let name = variant_display_name(short_edge);
-            let score = video_quality_score(info)?;
-            let Some((url, key)) = decrypt_variant_entry(info, key_seed.as_deref()) else {
-                // 地址解不出来是静默丢**整档**的一类——`4e85437` 修过同款缺陷，且
-                // 实测夹具的 `main_url` 形态一向比线上少，缺陷容易被盖住，所以留告警。
-                log::warn!("variant {slot} dropped, url undecodable ({w}x{h} {name})");
-                return None;
-            };
-            Some((
-                score,
-                json!({
-                    "name": name,
-                    "width": w,
-                    "height": h,
-                    "quality_height": short_edge,
-                    "url": url,
-                    "key_hex": hex::encode(&key),
-                }),
-            ))
-        })
-        .collect();
     rows.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
-    rows
+    counts.kept = rows.len();
+    VariantBatch { rows, counts }
 }
 
 pub(crate) fn decode_video_model_str(s: &str) -> Option<Map<String, Value>> {

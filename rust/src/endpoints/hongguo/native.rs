@@ -23,7 +23,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 use futures::future::BoxFuture;
 use serde_json::{json, Map, Value};
 
-use crate::endpoints::base::{Upstream, UpstreamMode, UpstreamRequestSpec};
+use crate::device::Device;
+use crate::endpoints::base::{
+    map_client_error, Upstream, UpstreamMode, UpstreamRequestSpec,
+};
 use crate::endpoints::hongguo::client::HOST_HONGGUO_WEB;
 use crate::endpoints::hongguo::vsign::{self, AppSearchCursor};
 use crate::endpoints::hongguo::web;
@@ -53,6 +56,10 @@ const VIDEO_INFO_CAP: usize = 32;
 /// gzip body，设备池匿名身份）。番茄侧 `endpoints::video` 同接口在用。
 const V5_PLAYER_URL: &str =
     "https://api5-normal-sinfonlinea.fqnovel.com/novel/player/multi_video_model/player/v1";
+/// kotlin-tv 0.16.10（#72 修复）`tabVideoModel(strict = true)`：POST v5 空正文时
+/// pin 同一设备身份兜底重查当前集的 `video_tab` GET 接口。
+const V5_VIDEO_TAB_URL: &str =
+    "https://api5-normal-sinfonlineb.fqnovel.com/reading/bookapi/video_tab/multi_video_model/v1/";
 
 pub fn register(s: &mut Server) {
     s.add_route("hongguo_native_catalog", handle_catalog);
@@ -915,19 +922,47 @@ fn v5_playback_body(video_id: &str) -> ApiResult<Vec<u8>> {
 
 /// kotlin-tv `fetchVideoInfo`：V5 签名 POST `multi_video_model/player/v1`
 /// （设备池匿名身份，`sign::v5`）→ `data["1004"][vid].video_model` 档位
-/// （5 分钟缓存）。
+/// （5 分钟缓存）。上游对该接口间歇性回 200+空正文（hongguoTV #72）：
+/// 空正文时 pin 刚才应答的设备，经 `video_tab` GET 重查当前集一次
+/// （kotlin-tv 0.16.10），兜底失败保留原空正文错误。
 async fn fetch_video_info(up: &Arc<UpstreamClient>, vid: &str) -> ApiResult<Arc<VideoInfo>> {
     if let Some(cached) = cache_get(video_info_cache(), vid) {
         return Ok(cached);
     }
     let body = v5_playback_body(vid)?;
-    let raw = Upstream::new(up.clone())
-        .v5_playback(V5_PLAYER_URL, &body)
-        .await?;
-    if raw.is_empty() {
-        return Err(ApiError::internal("hq取流失败：video_model 接口返回为空"));
-    }
-    let root = raw_json(&raw)?;
+    let (raw, device) = Upstream::new(up.clone())
+        .v5_playback_with_device(V5_PLAYER_URL, &body, None)
+        .await
+        .map_err(map_client_error)?;
+    let rows = if raw.is_empty() {
+        let empty_err = ApiError::internal("hq取流失败：video_model 接口返回为空");
+        match fetch_video_tab_model(up, vid, &device).await {
+            Some(model) => {
+                let rows = rendition_rows(&model);
+                if rows.is_empty() {
+                    return Err(empty_err);
+                }
+                rows
+            }
+            None => return Err(empty_err),
+        }
+    } else {
+        video_model_rows(&raw, vid)?
+    };
+    let value = Arc::new(VideoInfo { rows });
+    cache_put(
+        video_info_cache(),
+        vid,
+        value.clone(),
+        VIDEO_INFO_TTL_MS,
+        VIDEO_INFO_CAP,
+    );
+    Ok(value)
+}
+
+/// v5 POST 响应 → 档位表（kotlin-tv `MobilePlayback` 的解析段）。
+fn video_model_rows(raw: &[u8], vid: &str) -> ApiResult<Vec<QualityRow>> {
+    let root = raw_json(raw)?;
     let root_obj = root.as_object().cloned().unwrap_or_default();
     let code = field_int(&root_obj, &["Code", "code", "status_code"]);
     if code != 0 {
@@ -955,15 +990,58 @@ async fn fetch_video_info(up: &Arc<UpstreamClient>, vid: &str) -> ApiResult<Arc<
     if rows.is_empty() {
         return Err(ApiError::internal("hq取流失败：没有可用清晰度"));
     }
-    let value = Arc::new(VideoInfo { rows });
-    cache_put(
-        video_info_cache(),
-        vid,
-        value.clone(),
-        VIDEO_INFO_TTL_MS,
-        VIDEO_INFO_CAP,
-    );
-    Ok(value)
+    Ok(rows)
+}
+
+/// kotlin-tv `tabVideoModel(strict = true)`：pin 刚才 POST 的设备（同一注册
+/// 身份）经 `video_tab` GET 重查当前集；任何失败返回 None，调用方保留原错误。
+async fn fetch_video_tab_model(
+    up: &Arc<UpstreamClient>,
+    vid: &str,
+    device: &Device,
+) -> Option<Value> {
+    let extra = [
+        ("video_id", vid),
+        ("video_id_type", "0"),
+        ("device_level", "1"),
+        ("need_all_video_definition", "1"),
+        ("need_mp4_align", "0"),
+        ("use_os_player", "0"),
+        ("video_platform", "1024"),
+        ("source", "0"),
+        ("from_video_id", ""),
+    ];
+    let (raw, _) = up
+        .v5_get_with_device(V5_VIDEO_TAB_URL, &extra, Some(&device.device_id))
+        .await
+        .ok()?;
+    tab_video_model(&raw, vid)
+}
+
+/// `video_tab` GET 响应的 strict 解析（kotlin-tv `tabVideoModel`）：空正文、
+/// 非 0 code、结构不符一律 None；`data.video_model_data` 只认当前集 vid，
+/// 不借用其它集的模型；`video_model` 兼容字符串 JSON / 内联对象。
+fn tab_video_model(raw: &[u8], vid: &str) -> Option<Value> {
+    if raw.is_empty() {
+        return None;
+    }
+    let root = raw_json(raw).ok()?;
+    let root_obj = root.as_object()?;
+    let code = field_int(root_obj, &["Code", "code", "status_code"]);
+    if code != 0 {
+        return None;
+    }
+    let data = root.get("data")?.as_object()?;
+    let entries = data
+        .get("video_model_data")
+        .and_then(Value::as_object)
+        .unwrap_or(data);
+    let entry = entries.get(vid)?.as_object()?;
+    match entry.get("video_model") {
+        Some(Value::String(s)) => raw_json(s.as_bytes()).ok(),
+        Some(v) if v.is_object() => Some(v.clone()),
+        _ => None,
+    }
 }
 
 /// cjs `resolveStream` 的档位选择：`quality > 0` 选对应高度档，否则最高档。
@@ -1368,6 +1446,87 @@ mod tests {
         assert_eq!(chapter_vid(chapter.as_object().unwrap()), "777");
         // 全空。
         assert_eq!(chapter_vid(json!({ "title": "x" }).as_object().unwrap()), "");
+    }
+
+    // ---------- video_tab 兜底（kotlin-tv 0.16.10 / #72） ----------
+
+    fn sample_model() -> Value {
+        json!({
+            "video_list": [
+                { "height": "480", "main_url": "aHR0cHM6Ly94LzQ4MA==" },
+            ]
+        })
+    }
+
+    #[test]
+    fn video_model_rows_maps_post_response() {
+        let raw = json!({
+            "code": 0,
+            "data": { "1004": { "111": { "video_model": sample_model() } } }
+        })
+        .to_string();
+        let rows = video_model_rows(raw.as_bytes(), "111").unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].number, 480);
+        // video_model 为字符串 JSON 时同样可解。
+        let raw = json!({
+            "code": 0,
+            "data": { "1004": { "111": { "video_model": sample_model().to_string() } } }
+        })
+        .to_string();
+        assert_eq!(video_model_rows(raw.as_bytes(), "111").unwrap().len(), 1);
+        // 非 0 code / 当前集缺失 / 空档位。
+        let bad_code = json!({ "code": 10001, "data": {} }).to_string();
+        assert!(video_model_rows(bad_code.as_bytes(), "111").is_err());
+        let no_entry = json!({ "code": 0, "data": { "1004": { "222": {} } } }).to_string();
+        assert!(video_model_rows(no_entry.as_bytes(), "111").is_err());
+        let no_rows = json!({
+            "code": 0,
+            "data": { "1004": { "111": { "video_model": { "video_list": [] } } } }
+        })
+        .to_string();
+        assert!(video_model_rows(no_rows.as_bytes(), "111").is_err());
+    }
+
+    #[test]
+    fn tab_video_model_reads_current_episode_only() {
+        let raw = json!({
+            "code": 0,
+            "data": { "video_model_data": { "111": { "video_model": sample_model() } } }
+        })
+        .to_string();
+        let model = tab_video_model(raw.as_bytes(), "111").unwrap();
+        assert!(model.get("video_list").is_some());
+        // strict：只认当前集，不借用其它集的模型。
+        assert!(tab_video_model(raw.as_bytes(), "222").is_none());
+        // video_model 为字符串 JSON 时同样可解。
+        let raw = json!({
+            "code": 0,
+            "data": { "video_model_data": { "111": { "video_model": sample_model().to_string() } } }
+        })
+        .to_string();
+        assert!(tab_video_model(raw.as_bytes(), "111").is_some());
+    }
+
+    #[test]
+    fn tab_video_model_rejects_empty_bad_code_and_shape() {
+        // 空正文（kotlin-tv EmptyPlaybackResponseException 场景）。
+        assert!(tab_video_model(b"", "111").is_none());
+        // 非 0 code。
+        let bad_code = json!({ "code": 100103, "data": {} }).to_string();
+        assert!(tab_video_model(bad_code.as_bytes(), "111").is_none());
+        // 无 data / 无当前集 / video_model 既非字符串也非对象。
+        let no_data = json!({ "code": 0 }).to_string();
+        assert!(tab_video_model(no_data.as_bytes(), "111").is_none());
+        let no_entry = json!({ "code": 0, "data": { "video_model_data": { "222": {} } } })
+            .to_string();
+        assert!(tab_video_model(no_entry.as_bytes(), "111").is_none());
+        let bad_model = json!({
+            "code": 0,
+            "data": { "video_model_data": { "111": { "video_model": 3 } } }
+        })
+        .to_string();
+        assert!(tab_video_model(bad_model.as_bytes(), "111").is_none());
     }
 
     // ---------- 路由 ----------

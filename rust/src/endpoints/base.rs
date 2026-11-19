@@ -104,6 +104,17 @@ impl Upstream {
             .map_err(map_client_error)
     }
 
+    /// v5 playback plus the pooled identity that answered it, so a fallback
+    /// door can be requested under the very same identity.
+    pub async fn v5_playback_with_device(
+        &self,
+        base: &str,
+        body: &[u8],
+        pin: Option<&str>,
+    ) -> Result<(Vec<u8>, Device), ClientError> {
+        self.up.v5_playback_with_device(base, body, pin).await
+    }
+
     pub async fn raw_with_device(
         &self,
         spec: &UpstreamRequestSpec,
@@ -149,6 +160,9 @@ pub fn map_client_error(err: ClientError) -> ApiError {
     match err {
         ClientError::DeviceFailed(m) => ApiError::Internal(format!("device failed: {m}")),
         ClientError::Transient { message, .. } => ApiError::Internal(message),
+        ClientError::EmptyPlaybackBody => {
+            ApiError::Internal("empty playback response body".to_string())
+        }
         ClientError::Http(m) => ApiError::Internal(m),
         ClientError::Other(m) => ApiError::Internal(m),
     }
