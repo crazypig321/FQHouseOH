@@ -1,8 +1,10 @@
 /**
  * 导入红果云端收藏页（备份与恢复-其他来源）：
- * - 登录：扫码弹窗（DialogManager.ShowHongguoQrLogin，自包含取码/倒计时/轮询 +
- *   底部刷新，确认回传 cookie）；手机验证码登录暂被红果滑块风控拦截，UI 未开放
- *   （协议与服务层保留，修复后另行恢复）；
+ * - 登录：未登录时点「从红果账号读取」弹出菜单二选一——扫码弹窗
+ *   （DialogManager.ShowHongguoQrLogin，自包含取码/倒计时/轮询 + 底部刷新，
+ *   确认回传 cookie）或手机验证码弹窗（DialogManager.ShowHongguoSmsLogin，
+ *   自包含发送/倒计时/校验）；验证码接口可能被红果滑块风控拦截（1105），
+ *   失败时弹窗就地提示并引导改用扫码；
  * - 读取：POST /api/v1/account/hongguo/favorites（本地签名请求云端收藏，归一化返回）；
  * - 持久化：登录 cookie 与最近一次收藏预览存 filesDir（FqHongguoSessionStore），
  *   重进页面不丢登录态与预览；
@@ -17,6 +19,7 @@ import { TitleBarContentOptions } from '@kit.UIDesignKit';
 import { fileIo, picker } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { CommonNav } from '../../view/CommonNav';
+import { FqMenu, FqMenuItem } from '../../view/CommonMenu';
 import { FqTitleBarMenuOptions } from '../../model/FqNavModels';
 import { FqColorUtils } from '../../utils/FqColorUtils';
 import { DialogManager } from '../../utils/DialogUtils';
@@ -104,8 +107,9 @@ export struct HongguoImportPage {
   }
 
   aboutToDisappear(): void {
-    // 扫码弹窗未关先关（弹窗自含轮询，宿主页面销毁即无回调对象）
-    if (DialogManager.dialogChangeKey === '红果扫码登录') {
+    // 扫码/验证码弹窗未关先关（弹窗自含轮询/倒计时，宿主页面销毁即无回调对象）
+    if (DialogManager.dialogChangeKey === '红果扫码登录'
+      || DialogManager.dialogChangeKey === '红果验证码登录') {
       DialogManager.CloseDialog();
     }
     this.service.cancel();
@@ -124,6 +128,7 @@ export struct HongguoImportPage {
   build() {
     CommonNav({
       titleBarOp: this.titleBarOp(),
+      menuIconColor: this.loggedIn ? appState.accentColor : undefined,
       scroller: this.scroller,
       backPressed: (): boolean => this.handleBack(),
     }) {
@@ -133,17 +138,18 @@ export struct HongguoImportPage {
         }
         ListItem() {
           FqHongguoImportCard() {
-            this.ActionRow($r('sys.symbol.person_crop_circle_fill'), '#FF3B82F6', '从红果账号读取',
+            this.ActionRow('fq-hongguo-read-row', $r('sys.symbol.person_crop_circle_fill'), '#FF3B82F6',
+              '从红果账号读取',
               this.loggedIn ? '已登录红果账号，点此重新读取云端收藏'
-                : '扫码登录红果账号，读取云端收藏的短剧与漫剧', (): void => {
+                : '扫码或验证码登录红果账号，读取云端收藏的短剧与漫剧', (): void => {
                   if (this.loggedIn) {
                     this.runFetch(this.cookie);
                   } else {
-                    this.openQrLogin();
+                    this.openLoginMenu();
                   }
                 })
             this.RowDivider()
-            this.ActionRow($r('sys.symbol.doc_plaintext'), '#FF10B981', '从历史文件导入',
+            this.ActionRow('fq-hongguo-file-row', $r('sys.symbol.doc_plaintext'), '#FF10B981', '从历史文件导入',
               '选择本页导出的红果收藏 JSON 文件', (): void => {
                 this.runFileImport();
               })
@@ -215,7 +221,7 @@ export struct HongguoImportPage {
                 .fontWeight(FontWeight.Medium)
                 .fontColor($r('sys.color.font_primary'))
                 .width('100%')
-              Text('点「从红果账号读取」，在弹窗中扫码登录红果账号，' +
+              Text('点「从红果账号读取」，选择扫码或手机验证码方式登录红果账号，' +
                 '登录成功后会自动读取云端收藏的短剧与漫剧；\n\n' +
                 '也可点「从历史文件导入」，选择本页「导出收藏文件」生成的 JSON 文件，' +
                 '把收藏传到其他设备导入。\n\n' +
@@ -245,6 +251,24 @@ export struct HongguoImportPage {
   // 流程
   // ---------------------------------------------------------------------------
 
+  /** 未登录时读取行点击：弹出登录方式菜单（扫码 / 手机验证码）。 */
+  private openLoginMenu(): void {
+    if (this.busy.length > 0) {
+      return;
+    }
+    const qrItem: FqMenuItem = new FqMenuItem();
+    qrItem.label = '扫码登录';
+    qrItem.onAction = (): void => {
+      this.openQrLogin();
+    };
+    const smsItem: FqMenuItem = new FqMenuItem();
+    smsItem.label = '验证码登录';
+    smsItem.onAction = (): void => {
+      this.openSmsLogin();
+    };
+    FqMenu.open(this.getUIContext(), 'fq-hongguo-read-row', [qrItem, smsItem]);
+  }
+
   /** 打开扫码登录弹窗（自包含取码/轮询，确认后回传 cookie 并自动读取收藏）。 */
   private openQrLogin(): void {
     if (this.busy.length > 0) {
@@ -253,11 +277,28 @@ export struct HongguoImportPage {
     this.message = '';
     this.messageIsError = false;
     DialogManager.ShowHongguoQrLogin((cookie: string): void => {
-      this.cookie = cookie;
-      this.loggedIn = true;
-      this.persistSession();
-      this.runFetch(cookie);
+      this.onLoginSuccess(cookie);
     });
+  }
+
+  /** 打开手机验证码登录弹窗（自包含发送/倒计时/校验，登录后自动读取收藏）。 */
+  private openSmsLogin(): void {
+    if (this.busy.length > 0) {
+      return;
+    }
+    this.message = '';
+    this.messageIsError = false;
+    DialogManager.ShowHongguoSmsLogin((cookie: string): void => {
+      this.onLoginSuccess(cookie);
+    });
+  }
+
+  /** 登录成功（扫码/验证码共用）：落登录态并自动读取云端收藏。 */
+  private onLoginSuccess(cookie: string): void {
+    this.cookie = cookie;
+    this.loggedIn = true;
+    this.persistSession();
+    this.runFetch(cookie);
   }
 
   /** 读取云端收藏 → 预览。 */
@@ -413,8 +454,12 @@ export struct HongguoImportPage {
     this.busy = '正在取消…';
   }
 
-  /** 退出登录：清除本机登录态与收藏预览（不影响已导入数据）。 */
+  /** 退出登录：清除本机登录态与收藏预览（不影响已导入数据）；未登录时点击提示未登录。 */
   private confirmLogout(): void {
+    if (!this.loggedIn) {
+      this.getUIContext().getPromptAction().showToast({ message: '当前未登录', duration: 1500 });
+      return;
+    }
     if (this.busy.length > 0) {
       return;
     }
@@ -469,9 +514,9 @@ export struct HongguoImportPage {
       .margin({ left: 60, right: 12 })
   }
 
-  /** 操作行（彩色图标块 + 标题/副标题 + 箭头；busy 期间禁用）。 */
+  /** 操作行（彩色图标块 + 标题/副标题 + 箭头；busy 期间禁用；rowId 供菜单锚点）。 */
   @Builder
-  private ActionRow(icon: Resource, tint: string, title: string, subtitle: string, onTap: () => void) {
+  private ActionRow(rowId: string, icon: Resource, tint: string, title: string, subtitle: string, onTap: () => void) {
     Row({ space: 12 }) {
       Stack() {
         SymbolGlyph(icon)
@@ -502,6 +547,7 @@ export struct HongguoImportPage {
         .fontColor([$r('sys.color.font_tertiary')])
     }
     .padding({ left: 14, right: 14, top: 11, bottom: 11 })
+    .id(rowId)
     .width('100%')
     .enabled(this.busy.length === 0)
     .onClick(onTap)

@@ -160,6 +160,7 @@ export struct FanqieImportPage {
   build() {
     CommonNav({
       titleBarOp: this.titleBarOp(),
+      menuIconColor: this.loggedIn ? appState.accentColor : undefined,
       scroller: this.scroller,
       backPressed: (): boolean => this.handleBack(),
     }) {
@@ -549,8 +550,12 @@ export struct FanqieImportPage {
     }
   }
 
-  /** 退出网页登录：清 Cookie（不影响已导入数据）。 */
+  /** 退出网页登录：清 Cookie（不影响已导入数据）；未登录时点击提示未登录。 */
   private confirmLogout(): void {
+    if (!this.loggedIn) {
+      this.getUIContext().getPromptAction().showToast({ message: '当前未登录', duration: 1500 });
+      return;
+    }
     if (this.busy.length > 0) {
       return;
     }
