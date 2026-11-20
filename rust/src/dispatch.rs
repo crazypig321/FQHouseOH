@@ -150,6 +150,11 @@ async fn read_range(path: &Path, offset: u64, length: u64) -> Result<Vec<u8>, St
 /// Routes whose handler reads the POST body rather than URL/query arguments.
 const ACCOUNT_HISTORY_PATH: &str = "/api/v1/account/fanqie/history";
 const ACCOUNT_LIBRARY_PATH: &str = "/api/v1/account/fanqie/library";
+const ACCOUNT_HONGGUO_FAVORITES_PATH: &str = "/api/v1/account/hongguo/favorites";
+const ACCOUNT_HONGGUO_LOGIN_QR_PATH: &str = "/api/v1/account/hongguo/login/qr";
+const ACCOUNT_HONGGUO_LOGIN_POLL_PATH: &str = "/api/v1/account/hongguo/login/poll";
+const ACCOUNT_HONGGUO_LOGIN_SEND_PATH: &str = "/api/v1/account/hongguo/login/send";
+const ACCOUNT_HONGGUO_LOGIN_VERIFY_PATH: &str = "/api/v1/account/hongguo/login/verify";
 
 /// Largest body the account routes accept. Both handlers reject anything
 /// above this, so the loopback adapter refuses it before buffering.
@@ -160,7 +165,13 @@ pub const ACCOUNT_REQUEST_BODY_LIMIT: usize = 16 * 1024;
 /// bodies, so draining them is enough.
 pub fn request_body_limit(path: &str) -> Option<usize> {
     match path {
-        ACCOUNT_HISTORY_PATH | ACCOUNT_LIBRARY_PATH => Some(ACCOUNT_REQUEST_BODY_LIMIT),
+        ACCOUNT_HISTORY_PATH
+        | ACCOUNT_LIBRARY_PATH
+        | ACCOUNT_HONGGUO_FAVORITES_PATH
+        | ACCOUNT_HONGGUO_LOGIN_QR_PATH
+        | ACCOUNT_HONGGUO_LOGIN_POLL_PATH
+        | ACCOUNT_HONGGUO_LOGIN_SEND_PATH
+        | ACCOUNT_HONGGUO_LOGIN_VERIFY_PATH => Some(ACCOUNT_REQUEST_BODY_LIMIT),
         _ => None,
     }
 }
@@ -205,6 +216,28 @@ pub async fn dispatch(server: &Server, req: &Request) -> Response {
     }
     if path == ACCOUNT_LIBRARY_PATH {
         return crate::endpoints::account_library::handle(ctx, req).await;
+    }
+    if path == ACCOUNT_HONGGUO_FAVORITES_PATH {
+        return crate::endpoints::account_hongguo::handle(ctx, req).await;
+    }
+    if path == ACCOUNT_HONGGUO_LOGIN_QR_PATH
+        || path == ACCOUNT_HONGGUO_LOGIN_POLL_PATH
+        || path == ACCOUNT_HONGGUO_LOGIN_SEND_PATH
+        || path == ACCOUNT_HONGGUO_LOGIN_VERIFY_PATH
+    {
+        let action = match path {
+            p if p == ACCOUNT_HONGGUO_LOGIN_QR_PATH => {
+                crate::endpoints::account_hongguo::LoginAction::Qr
+            }
+            p if p == ACCOUNT_HONGGUO_LOGIN_POLL_PATH => {
+                crate::endpoints::account_hongguo::LoginAction::Poll
+            }
+            p if p == ACCOUNT_HONGGUO_LOGIN_SEND_PATH => {
+                crate::endpoints::account_hongguo::LoginAction::Send
+            }
+            _ => crate::endpoints::account_hongguo::LoginAction::Verify,
+        };
+        return crate::endpoints::account_hongguo::handle_login(ctx, req, action).await;
     }
 
     // Legacy `/api/*` Web bridge (fqapp 9132732 removed the built-in Web UI

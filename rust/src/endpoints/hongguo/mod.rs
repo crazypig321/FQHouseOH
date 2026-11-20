@@ -22,8 +22,9 @@ mod client;
 mod mapping;
 mod native;
 mod sign;
-mod vsign;
+pub(crate) mod vsign;
 mod web;
+pub(crate) mod web_login;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};

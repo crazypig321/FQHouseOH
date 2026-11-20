@@ -80,44 +80,57 @@ async fn auth_statuses_are_device_failures_and_500_is_not() {
 #[tokio::test]
 async fn gzip_responses_are_inflated_with_and_without_the_header() {
     let payload = br#"{"code":0,"data":{"ok":true}}"#.to_vec();
+    let split = payload.len() / 2;
     for with_header in [true, false] {
-        let body_for_reply = payload.clone();
-        let upstream = MockUpstream::start(move |_| {
-            let gz = fqapi_core::crypto::gzip(&body_for_reply);
-            let mut reply = MockReply {
-                status: 200,
-                headers: Vec::new(),
-                body: gz,
-            };
-            if with_header {
+        for multi_member in [false, true] {
+            let body_for_reply = payload.clone();
+            let upstream = MockUpstream::start(move |_| {
+                let gz = if multi_member {
+                    // A gzip file is a sequence of members; the transport must
+                    // inflate the complete file, including an empty first
+                    // member and JSON split across later members.
+                    let mut gz = fqapi_core::crypto::gzip(b"");
+                    gz.extend_from_slice(&fqapi_core::crypto::gzip(&body_for_reply[..split]));
+                    gz.extend_from_slice(&fqapi_core::crypto::gzip(&body_for_reply[split..]));
+                    gz
+                } else {
+                    fqapi_core::crypto::gzip(&body_for_reply)
+                };
+                let mut reply = MockReply {
+                    status: 200,
+                    headers: Vec::new(),
+                    body: gz,
+                };
+                if with_header {
+                    reply
+                        .headers
+                        .push(("content-encoding".to_string(), "gzip".to_string()));
+                }
                 reply
-                    .headers
-                    .push(("content-encoding".to_string(), "gzip".to_string()));
-            }
-            reply
-        })
-        .await;
-        let dir = TempDir::new("gzip");
-        let origin = upstream.origin.clone();
-        let pool = fqapi_core::device::DevicePool::new(dir.join("pool.json"))
-            .await
-            .expect("pool");
-        let client =
-            UpstreamClient::with_mock_origin(pool, Manager::new(), origin.clone()).expect("client");
-
-        let (bytes, _) = client
-            .do_request(&UpstreamRequest {
-                method: Some("GET".to_string()),
-                url: format!("{origin}/gzip"),
-                ..Default::default()
             })
-            .await
-            .expect("inflated body");
-        assert_eq!(
-            bytes, payload,
-            "gzip (header={with_header}) must be inflated"
-        );
-        upstream.shutdown();
+            .await;
+            let dir = TempDir::new("gzip");
+            let origin = upstream.origin.clone();
+            let pool = fqapi_core::device::DevicePool::new(dir.join("pool.json"))
+                .await
+                .expect("pool");
+            let client = UpstreamClient::with_mock_origin(pool, Manager::new(), origin.clone())
+                .expect("client");
+
+            let (bytes, _) = client
+                .do_request(&UpstreamRequest {
+                    method: Some("GET".to_string()),
+                    url: format!("{origin}/gzip"),
+                    ..Default::default()
+                })
+                .await
+                .expect("inflated body");
+            assert_eq!(
+                bytes, payload,
+                "gzip (header={with_header}, multi_member={multi_member}) must be inflated completely"
+            );
+            upstream.shutdown();
+        }
     }
 }
 

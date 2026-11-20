@@ -1198,13 +1198,23 @@ pub(crate) struct SignedAppGet {
 
 /// cjs `signedAppGet`：`bookapi` 搜索 GET 签名请求（body 为空）。
 fn signed_app_get_with(values: &[(String, String)], now_ms: i64, rand: &SignRand) -> SignedAppGet {
+    signed_bookapi_get_with(APP_SEARCH_API, values, now_ms, rand)
+}
+
+/// 同一签名套件签任意 `bookapi` GET 基址（搜索 / 云端收藏共用）。
+fn signed_bookapi_get_with(
+    base: &str,
+    values: &[(String, String)],
+    now_ms: i64,
+    rand: &SignRand,
+) -> SignedAppGet {
     let khronos = (now_ms / 1000) as u32;
     let ticket = now_ms;
     let mut v = values.to_vec();
     v.push(("ts".into(), khronos.to_string()));
     v.push(("_rticket".into(), ticket.to_string()));
     let query = python_url_encode(&v);
-    let url = format!("{}?{}", APP_SEARCH_API, query);
+    let url = format!("{}?{}", base, query);
     let headers = vec![
         ("User-Agent".into(), APP_UA.into()),
         (
@@ -1243,6 +1253,16 @@ fn signed_app_get_with(values: &[(String, String)], now_ms: i64, rand: &SignRand
 pub(crate) fn signed_app_get(values: &[(String, String)], now_ms: i64) -> SignedAppGet {
     let rand = SignRand::new();
     signed_app_get_with(values, now_ms, &rand)
+}
+
+/// 生产入口（内部随机）：按指定 `bookapi` 基址签名 GET。
+pub(crate) fn signed_bookapi_get(
+    base: &str,
+    values: &[(String, String)],
+    now_ms: i64,
+) -> SignedAppGet {
+    let rand = SignRand::new();
+    signed_bookapi_get_with(base, values, now_ms, &rand)
 }
 
 /// App 搜索游标（cjs `appSearchPage` 的 page>1 时从上一页带出）。

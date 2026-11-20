@@ -5,6 +5,7 @@
 //! identical across both dispatch paths.
 
 pub mod account_history;
+pub mod account_hongguo;
 pub mod account_library;
 pub mod audio;
 pub mod audio_text;

@@ -287,19 +287,42 @@ async fn loopback_adapter_forwards_account_post_bodies() {
     let lb = start_loopback(server).await;
     let client = reqwest::Client::builder().build().expect("client");
 
-    // Both bodies parse; they fail only the cookie check, which proves the
-    // handler saw the body instead of an empty one.
+    // Every body parses and fails only the handler's own validation, which
+    // proves the handler saw the body instead of an empty one. The login
+    // routes fail on local parameter checks, so no request leaves the box.
     let cases = [
         (
             "/api/v1/account/fanqie/history",
             r#"{"cookie":"not-a-session","offset":0,"last_min_read_timestamp_ms":0,"is_first_load":true}"#,
+            "未取得有效登录态",
         ),
         (
             "/api/v1/account/fanqie/library",
             r#"{"cookie":"not-a-session","resource":"history"}"#,
+            "未取得有效登录态",
+        ),
+        (
+            "/api/v1/account/hongguo/favorites",
+            r#"{"cookie":"not-a-session"}"#,
+            "未取得有效登录态",
+        ),
+        (
+            "/api/v1/account/hongguo/login/send",
+            r#"{"mobile":"123"}"#,
+            "大陆手机号是 1 开头的 11 位数字",
+        ),
+        (
+            "/api/v1/account/hongguo/login/poll",
+            "{}",
+            "请先获取二维码",
+        ),
+        (
+            "/api/v1/account/hongguo/login/verify",
+            r#"{"code":"12a"}"#,
+            "验证码是 4—8 位数字",
         ),
     ];
-    for (path, body) in cases {
+    for (path, body, expected) in cases {
         let resp = client
             .post(lb.bare_url(path))
             .body(body)
@@ -309,7 +332,7 @@ async fn loopback_adapter_forwards_account_post_bodies() {
         assert_eq!(resp.status().as_u16(), 400, "path {path}");
         let text = resp.text().await.expect("response body");
         assert!(
-            text.contains("未取得有效登录态"),
+            text.contains(expected),
             "path {path}: handler did not see the POST body: {text}"
         );
     }

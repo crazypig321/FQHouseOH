@@ -48,6 +48,8 @@ export const ROUTE_BACKUP: string = 'backup';
 export const ROUTE_WEBDAV: string = 'webdav';
 /** 导入番茄书架页（备份与恢复-其他来源，网页登录采集后合并到本机）。 */
 export const ROUTE_FANQIE_IMPORT: string = 'fanqieImport';
+/** 导入红果云端收藏页（备份与恢复-其他来源，扫码/验证码登录读取云端收藏后合并到本机）。 */
+export const ROUTE_HONGGUO_IMPORT: string = 'hongguoImport';
 /** 离线朗读设置页（设置-阅读与播放-离线朗读，音色下载/语速）。 */
 export const ROUTE_TTS_SETTINGS: string = 'ttsSettings';
 /** 本地接口页（设置-服务-本地接口，接口地址/局域网共享/可用端点，对齐 fqapp ApiServicePage）。 */

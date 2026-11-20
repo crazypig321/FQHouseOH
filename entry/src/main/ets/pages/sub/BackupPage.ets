@@ -8,7 +8,7 @@
  */
 
 import { CommonNav } from '../../view/CommonNav';
-import { FqTitleBarOptions, ROUTE_WEBDAV, ROUTE_FANQIE_IMPORT } from '../../model/FqNavModels';
+import { FqTitleBarOptions, ROUTE_WEBDAV, ROUTE_FANQIE_IMPORT, ROUTE_HONGGUO_IMPORT } from '../../model/FqNavModels';
 import { FqColorUtils } from '../../utils/FqColorUtils';
 import { DialogManager } from '../../utils/DialogUtils';
 import { NavPathUtils } from '../../utils/NavPathUtils';
@@ -118,6 +118,11 @@ export struct BackupPage {
             this.ActionRow($r('sys.symbol.book_pages'), '#FFF97316', '导入番茄书架',
               '从番茄账号读取书架与阅读进度，合并到本机', (): void => {
                 NavPathUtils.push(ROUTE_FANQIE_IMPORT);
+              })
+            this.RowDivider()
+            this.ActionRow($r('sys.symbol.film'), '#FFEF4444', '导入红果收藏',
+              '扫码、验证码或网页登录红果账号，把云端收藏的短剧/漫剧合并到本机书架', (): void => {
+                NavPathUtils.push(ROUTE_HONGGUO_IMPORT);
               })
           }
         }
