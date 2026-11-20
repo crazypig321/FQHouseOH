@@ -950,6 +950,18 @@ pub(crate) struct MedusaRand {
 
 /// cjs `buildMedusa`：hashF13 + protobuf + AesV3 + xmxor 封装，base64 输出。
 fn build_medusa(url: &str, body: Option<&[u8]>, khronos: u32, rand: &MedusaRand) -> String {
+    build_medusa_with_version(url, body, khronos, rand, device_field("version_name"))
+}
+
+/// 带版本覆盖的 `buildMedusa`：passport（hongguoTV `PhoneLogin`）把设备表
+/// 版本字段覆盖为 73932 / 7.3.9.32，medusa 明文里的版本必须与 query 一致。
+fn build_medusa_with_version(
+    url: &str,
+    body: Option<&[u8]>,
+    khronos: u32,
+    rand: &MedusaRand,
+    version_name: &str,
+) -> String {
     let query = url.split_once('?').expect("medusa url 需带 query").1;
     let body_md5: Vec<u8> = match body {
         Some(b) => md5_digest(b).to_vec(),
@@ -981,7 +993,7 @@ fn build_medusa(url: &str, body: Option<&[u8]>, khronos: u32, rand: &MedusaRand)
             ProtoVal::Msg(device_proto(device_field("device_id"))),
         ),
         (13, ProtoVal::Msg(env_inner)),
-        (14, ProtoVal::Str(device_field("version_name").into())),
+        (14, ProtoVal::Str(version_name.to_string())),
     ]);
     let mut qh_input = query.as_bytes().to_vec();
     qh_input.extend_from_slice(&body_md5);
@@ -999,7 +1011,7 @@ fn build_medusa(url: &str, body: Option<&[u8]>, khronos: u32, rand: &MedusaRand)
         (4, ProtoVal::Str("8662".into())),
         (5, ProtoVal::Str(device_field("device_id").into())),
         (6, ProtoVal::Str("1588093228".into())),
-        (7, ProtoVal::Str(device_field("version_name").into())),
+        (7, ProtoVal::Str(version_name.to_string())),
         (8, ProtoVal::Str("v04.06.04-ml-android".into())),
         (9, ProtoVal::Sint(67_503_104)),
         (
@@ -1263,6 +1275,86 @@ pub(crate) fn signed_bookapi_get(
 ) -> SignedAppGet {
     let rand = SignRand::new();
     signed_bookapi_get_with(base, values, now_ms, &rand)
+}
+
+/// hongguoTV `Signer.sign`（passport mobile 形态，`PhoneLogin.call`）。
+/// `_rticket` 0..=127 抖动取 branch 0（Signer.kt 同款）；表单 body 由调用方
+/// 按 x-www-form-urlencoded 编好传入（None = GET）；`version_name` 覆盖
+/// medusa 明文版本（7.3.9.32），与 query 设备表版本保持一致。
+pub(crate) struct SignedPassportRequest {
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+    pub body: Option<Vec<u8>>,
+}
+
+pub(crate) fn signed_passport_request(
+    base: &str,
+    query_values: &[(String, String)],
+    form_body: Option<&[u8]>,
+    version_name: &str,
+    now_ms: i64,
+) -> SignedPassportRequest {
+    let khronos = (now_ms / 1000) as u32;
+    let mut ticket = now_ms;
+    let mut query = String::new();
+    for offset in 0..=127 {
+        ticket = now_ms + offset;
+        let mut values = query_values.to_vec();
+        values.push(("ts".into(), khronos.to_string()));
+        values.push(("_rticket".into(), ticket.to_string()));
+        query = python_url_encode(&values);
+        let url = format!("{}?{}", base, query);
+        if branch_of(&url, form_body, khronos) == 0 {
+            break;
+        }
+    }
+    let url = format!("{}?{}", base, query);
+    let rand = SignRand::new();
+    let headers = vec![
+        (
+            "User-Agent".into(),
+            if form_body.is_some() { VIDEO_UA } else { APP_UA }.into(),
+        ),
+        (
+            "Accept".into(),
+            "application/json; charset=utf-8,application/x-protobuf".into(),
+        ),
+        ("x-ss-req-ticket".into(), ticket.to_string()),
+        ("x-tt-request-tag".into(), "t=0;n=0".into()),
+        ("passport-sdk-version".into(), "50561".into()),
+        ("sdk-version".into(), "2".into()),
+        ("x-xs-from-web".into(), "0".into()),
+        ("x-khronos".into(), khronos.to_string()),
+        (
+            "x-ladon".into(),
+            base64::engine::general_purpose::STANDARD.encode(khronos.to_be_bytes()),
+        ),
+        (
+            "x-argus".into(),
+            base64::engine::general_purpose::STANDARD.encode(khronos.to_le_bytes()),
+        ),
+        (
+            "x-gorgon".into(),
+            x_gorgon(&query, form_body, khronos, rand.gorgon),
+        ),
+        ("x-helios".into(), helios(khronos, rand.helios)),
+        (
+            "x-medusa".into(),
+            build_medusa_with_version(&url, form_body, khronos, &rand.medusa, version_name),
+        ),
+        ("x-tt-dt".into(), String::new()),
+    ];
+    let mut headers = headers;
+    if let Some(body) = form_body {
+        headers.push(("Content-Type".into(), "application/x-www-form-urlencoded".into()));
+        headers.push(("x-vc-bdturing-sdk-version".into(), "3.7.2.cn".into()));
+        headers.push(("x-ss-stub".into(), md5_upper_hex(body)));
+    }
+    SignedPassportRequest {
+        url,
+        headers,
+        body: form_body.map(|b| b.to_vec()),
+    }
 }
 
 /// App 搜索游标（cjs `appSearchPage` 的 page>1 时从上一页带出）。

@@ -113,8 +113,63 @@ $env:CXX_aarch64_unknown_linux_ohos = $CxxCmd
 $env:AR_aarch64_unknown_linux_ohos = $Ar
 $env:CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER = $CcCmd
 
+# --- btls-sys (wreq / BoringSSL) cross-build environment ---
+# btls-sys builds vendored BoringSSL with cmake and runs bindgen against the
+# patched headers, so the OHOS build additionally needs:
+#   - cmake + ninja on PATH (DevEco ships both under build-tools\cmake\bin)
+#   - CMAKE_TOOLCHAIN_FILE pointing at ohos.toolchain.cmake; cmake-rs picks the
+#     env var up and btls-sys's build script early-returns its own cross logic
+#     when it is set (see btls-sys build/main.rs get_boringssl_cmake_config)
+#   - LIBCLANG_PATH so bindgen finds DevEco's libclang.dll
+#   - BORING_BSSL_RUST_CPPLIB=c++_static: btls-sys would otherwise default to
+#     -lstdc++ on linux targets (OHOS has none). The static libc++ is only a
+#     linker placeholder (BoringSSL references no C++ runtime symbols), so the
+#     final .so gains no DT_NEEDED and the HAP does not need libc++_shared.so.
+#   - BINDGEN_EXTRA_CLANG_ARGS with the sysroot and clang's own resource
+#     include dir: DevEco's libclang does not search its resource dir and has
+#     no MSVC integration, so freestanding headers (stddef.h etc.) must be
+#     passed explicitly. bindgen inserts --target=aarch64-unknown-linux-ohos by
+#     itself for cross builds. Paths are double-quoted because the variable is
+#     shlex-parsed and unquoted backslashes get eaten.
+$CmakeBin = Join-Path $NativeRoot 'build-tools\cmake\bin'
+$OhosToolchain = Join-Path $NativeRoot 'build\cmake\ohos.toolchain.cmake'
+$ClangResourceInclude = $null
+$ClangResourceRoot = Join-Path $NativeRoot 'llvm\lib\clang'
+if (Test-Path -LiteralPath $ClangResourceRoot) {
+    $ClangResourceInclude = Get-ChildItem -LiteralPath $ClangResourceRoot -Directory |
+        Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'include\stddef.h') } |
+        Select-Object -First 1
+}
+if ($ClangResourceInclude) {
+    $ClangResourceInclude = Join-Path $ClangResourceInclude.FullName 'include'
+} else {
+    Write-Error "clang resource include dir (with stddef.h) not found under $ClangResourceRoot"
+    exit 1
+}
+foreach ($p in @(
+        (Join-Path $CmakeBin 'cmake.exe'),
+        (Join-Path $CmakeBin 'ninja.exe'),
+        (Join-Path $LlvmBin 'libclang.dll'),
+        $OhosToolchain,
+        (Join-Path $ClangResourceInclude 'stddef.h')
+    )) {
+    if (-not (Test-Path -LiteralPath $p)) {
+        Write-Error "btls-sys cross-build component not found: $p"
+        exit 1
+    }
+}
+
+$env:PATH = "$CmakeBin;$env:PATH"
+$env:CMAKE_GENERATOR = 'Ninja'
+$env:CMAKE_TOOLCHAIN_FILE = $OhosToolchain
+$env:LIBCLANG_PATH = $LlvmBin
+$env:BORING_BSSL_RUST_CPPLIB = 'c++_static'
+$env:BINDGEN_EXTRA_CLANG_ARGS = "--sysroot=`"$Sysroot`" -isystem `"$ClangResourceInclude`""
+
 Write-Host "==> CC: $CcCmd"
 Write-Host "==> sysroot: $Sysroot"
+Write-Host "==> cmake toolchain: $OhosToolchain"
+Write-Host "==> clang resource include: $ClangResourceInclude"
 
 $Target = 'aarch64-unknown-linux-ohos'
 $LibsDir = Join-Path $RepoRoot 'entry\libs\arm64-v8a'

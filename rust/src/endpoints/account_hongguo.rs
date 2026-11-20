@@ -1,14 +1,16 @@
-//! 红果云端收藏只读采集 + 官网登录（扫码 / 手机验证码）。
+//! 红果云端收藏只读采集 + 账号登录（扫码 / 手机验证码）。
 //! 协议参考 hongguoTV（GPL-3.0）：收藏走 cookie 有界 POST body +
 //! 生产验证的 vsign GET 签名套件（`CloudAccountClient.favorites` /
-//! `parseFavorites`）；登录走免签名的 Web passport 协议（`WebLogin` /
-//! `PhoneLogin.parse`，见 [`hongguo::web_login`]）。
+//! `parseFavorites`）；扫码走免签名的 Web passport 协议（`WebLogin`，
+//! 见 [`hongguo::web_login`]）；验证码走官方签名移动端点
+//! `security.snssdk.com`（`PhoneLogin`，见 [`hongguo::phone_login`]）。
 //! cookie 是凭据：不进日志、不进设备池、不跟随重定向。
 
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::dispatch::{Request, Response};
+use crate::endpoints::hongguo::phone_login::PhoneLoginSession;
 use crate::endpoints::hongguo::vsign;
 use crate::endpoints::hongguo::web_login::{self, WebLoginSession};
 use crate::endpoints::Ctx;
@@ -281,9 +283,14 @@ pub async fn handle(_ctx: &Ctx, req: &Request) -> Response {
 
 // --- 官网登录（扫码 / 手机验证码） ----------------------------------------
 
-/// 登录子路由：一次登录共用一个 [`WebLoginSession`]（进程内存，
+/// 登录子路由：扫码共用一个 [`WebLoginSession`]（进程内存，
 /// tokio 异步锁；单用户本地服务，登录操作天然串行）。
 static LOGIN_SESSION: tokio::sync::Mutex<Option<WebLoginSession>> =
+    tokio::sync::Mutex::const_new(None);
+
+/// 验证码登录会话（hongguoTV `PhoneLogin` 签名移动端点）；
+/// RetryGate（error_code 7 退避）是 phone_login 内的进程级状态。
+static PHONE_LOGIN: tokio::sync::Mutex<Option<PhoneLoginSession>> =
     tokio::sync::Mutex::const_new(None);
 
 pub enum LoginAction {
@@ -308,7 +315,7 @@ struct LoginVerifyRequest {
 /// `/api/v1/account/hongguo/login/{qr|poll|send|verify}`：
 /// qr 新开会话返回 data URL 二维码；poll 返回 waiting/confirmed
 ///（confirmed 时完成官方确认跳转并打包 cookie 返回，随后清会话）；
-/// send 发短信（无 csrf cookie 时先取二维码补 cookie）；
+/// send 走官方签名移动端点（security.snssdk.com）发短信；
 /// verify 验码登录。本地参数校验回 400，上游业务失败按消息回 502。
 pub async fn handle_login(_ctx: &Ctx, req: &Request, action: LoginAction) -> Response {
     if req.method != "POST" {
@@ -319,9 +326,9 @@ pub async fn handle_login(_ctx: &Ctx, req: &Request, action: LoginAction) -> Res
     if req.body.len() > crate::dispatch::ACCOUNT_REQUEST_BODY_LIMIT || !req.query.is_empty() {
         return failure(400, "登录参数无效或过长");
     }
-    let mut guard = LOGIN_SESSION.lock().await;
     match action {
         LoginAction::Qr => {
+            let mut guard = LOGIN_SESSION.lock().await;
             let mut session = WebLoginSession::new();
             match session.qr().await {
                 Ok(qr) => {
@@ -335,6 +342,7 @@ pub async fn handle_login(_ctx: &Ctx, req: &Request, action: LoginAction) -> Res
             }
         }
         LoginAction::Poll => {
+            let mut guard = LOGIN_SESSION.lock().await;
             let Some(session) = guard.as_mut() else {
                 return failure(400, "请先获取二维码");
             };
@@ -367,27 +375,22 @@ pub async fn handle_login(_ctx: &Ctx, req: &Request, action: LoginAction) -> Res
                 Ok(mobile) => mobile,
                 Err(message) => return failure(400, &message),
             };
-            // 无会话或缺 csrf cookie：先取二维码补 cookie（WebLogin.send 同款）。
-            if guard.as_ref().is_none_or(|session| !session.has_csrf()) {
-                let mut session = guard.take().unwrap_or_else(WebLoginSession::new);
-                if let Err(message) = session.qr().await {
-                    *guard = Some(session);
-                    return failure(502, &message);
-                }
-                *guard = Some(session);
-            }
-            let Some(session) = guard.as_mut() else {
-                return failure(502, "红果登录会话初始化失败");
-            };
+            // 官方 App 的签名移动端点（security.snssdk.com）：一次发码一个新会话，
+            // RetryGate（error_code 7 退避）进程级共享。
+            let mut guard = PHONE_LOGIN.lock().await;
+            let mut session = PhoneLoginSession::new();
             match session.send(&mobile).await {
-                Ok(sent) => response(
-                    200,
-                    json!({
-                        "code": 0,
-                        "maskedMobile": sent.masked_mobile,
-                        "retrySeconds": sent.retry_seconds,
-                    }),
-                ),
+                Ok(sent) => {
+                    *guard = Some(session);
+                    response(
+                        200,
+                        json!({
+                            "code": 0,
+                            "maskedMobile": sent.masked_mobile,
+                            "retrySeconds": sent.retry_seconds,
+                        }),
+                    )
+                }
                 Err(message) => failure(502, &message),
             }
         }
@@ -401,18 +404,16 @@ pub async fn handle_login(_ctx: &Ctx, req: &Request, action: LoginAction) -> Res
             if code.len() < 4 || code.len() > 8 || !code.bytes().all(|b| b.is_ascii_digit()) {
                 return failure(400, "验证码是 4—8 位数字");
             }
+            let mut guard = PHONE_LOGIN.lock().await;
             let Some(session) = guard.as_mut() else {
                 return failure(400, "请先发送验证码");
             };
             if !session.has_sent() {
                 return failure(400, "请先发送验证码");
             }
-            match session.verify(code).await {
-                Ok(()) => {
-                    let cookie = match session.credentials().await {
-                        Ok(cookie) => cookie,
-                        Err(message) => return failure(502, &message),
-                    };
+            let result = session.verify(code).await;
+            match result {
+                Ok(cookie) => {
                     *guard = None;
                     response(200, json!({ "code": 0, "cookie": cookie }))
                 }

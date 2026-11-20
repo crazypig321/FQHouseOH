@@ -4,7 +4,6 @@
  * 自包含扫码登录流程：进入取码 + 过期倒计时 + 2 秒轮询，底部「刷新二维码」按钮；
  * 轮询确认经 DialogManager.ConfirmHongguoQrLogin 回调打开页（回传 cookie）并关弹窗；
  * 关闭/点外部取消：停止轮询并中断在途请求（aboutToDisappear 清理）。
- * （手机验证码登录暂被红果滑块风控拦截，UI 未开放，恢复时另做对应弹窗。）
  */
 
 import { BusinessError } from '@kit.BasicServicesKit';

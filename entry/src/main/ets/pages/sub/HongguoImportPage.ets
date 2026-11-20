@@ -3,8 +3,7 @@
  * - 登录：未登录时点「从红果账号读取」弹出菜单二选一——扫码弹窗
  *   （DialogManager.ShowHongguoQrLogin，自包含取码/倒计时/轮询 + 底部刷新，
  *   确认回传 cookie）或手机验证码弹窗（DialogManager.ShowHongguoSmsLogin，
- *   自包含发送/倒计时/校验）；验证码接口可能被红果滑块风控拦截（1105），
- *   失败时弹窗就地提示并引导改用扫码；
+ *   自包含发送/倒计时/校验，走官方签名移动端点）；失败时弹窗就地提示并引导改用另一种方式；
  * - 读取：POST /api/v1/account/hongguo/favorites（本地签名请求云端收藏，归一化返回）；
  * - 持久化：登录 cookie 与最近一次收藏预览存 filesDir（FqHongguoSessionStore），
  *   重进页面不丢登录态与预览；

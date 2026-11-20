@@ -5,6 +5,7 @@ pub mod client;
 pub mod cm;
 pub mod dh;
 pub mod http;
+pub mod okhttp;
 pub(crate) mod playback_routes;
 pub(crate) mod playback_trace;
 
