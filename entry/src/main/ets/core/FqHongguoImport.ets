@@ -5,6 +5,8 @@
  * - 采集：POST /api/v1/account/hongguo/favorites 读取云端收藏短剧/漫剧
  *   （本地 Rust 端用生产验证的签名套件请求并解析，返回归一化列表）；
  * - 合并：书架只补缺失（已有条目回填空封面），重复导入不产生重复条目；
+ * - 文件：收藏列表可导出 JSON（encodeFavoritesFile）/ 从历史文件导入
+ *   （parseFavoritesFileText），导出不含登录凭证，可跨设备传输；
  * - 持久化：登录 cookie + 最近一次收藏预览存 filesDir（FqHongguoSessionStore），
  *   重进页面不丢登录态；cookie 是凭据，只存应用私有目录，不进备份链路；
  * - kind 启发式：标签含「漫剧/漫画」归为漫剧（manju），其余为短剧（video）。
@@ -206,6 +208,50 @@ export class FqHongguoImportService {
       favorite.collectedAt = fqAsInt(rec['collectedAt'], 0);
       seen.add(id);
       favorites.push(favorite);
+    }
+    return favorites;
+  }
+
+  /** 收藏导出文件编码（type/version 元信息 + 收藏列表，不含登录凭证，可跨设备导入）。 */
+  public static encodeFavoritesFile(favorites: FqHongguoFavorite[]): string {
+    const encoded: Object[] = [];
+    for (const favorite of favorites) {
+      const record: Record<string, Object> = {};
+      record['id'] = favorite.id;
+      record['title'] = favorite.title;
+      record['cover'] = favorite.cover;
+      record['intro'] = favorite.intro;
+      record['episodes'] = favorite.episodes;
+      record['tags'] = favorite.tags;
+      record['collectedAt'] = favorite.collectedAt;
+      encoded.push(record);
+    }
+    const root: Record<string, Object> = {};
+    root['type'] = 'hongguo-favorites';
+    root['version'] = 1;
+    root['exportedAt'] = new Date().toISOString();
+    root['favorites'] = encoded;
+    return JSON.stringify(root);
+  }
+
+  /** 解析收藏导出文件文本（「从历史文件导入」；类型不符/无有效条目报错）。 */
+  public static parseFavoritesFileText(text: string): FqHongguoFavorite[] {
+    let root: Record<string, Object> | null = null;
+    try {
+      root = fqAsRecord(JSON.parse(text));
+    } catch (error) {
+      root = null;
+    }
+    if (root === null || fqHongguoText(root['type'], 64) !== 'hongguo-favorites') {
+      throw new Error('不是红果收藏导出文件');
+    }
+    const rawFavorites: Object[] | null = fqAsArray(root['favorites']);
+    if (rawFavorites === null) {
+      throw new Error('不是红果收藏导出文件');
+    }
+    const favorites: FqHongguoFavorite[] = FqHongguoImportService.decodeFavorites(rawFavorites);
+    if (favorites.length === 0) {
+      throw new Error('文件中没有可导入的收藏');
     }
     return favorites;
   }

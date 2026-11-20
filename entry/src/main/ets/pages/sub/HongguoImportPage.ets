@@ -1,22 +1,28 @@
 /**
  * 导入红果云端收藏页（备份与恢复-其他来源）：
- * - 登录：扫码（轮询确认）；手机验证码登录暂被红果滑块风控拦截，UI 已注释
- *   （协议实现保留，见 LoginContent，待指纹对齐后恢复）；
+ * - 登录：扫码弹窗（DialogManager.ShowHongguoQrLogin，自包含取码/倒计时/轮询 +
+ *   底部刷新，确认回传 cookie）；手机验证码登录暂被红果滑块风控拦截，UI 未开放
+ *   （协议与服务层保留，修复后另行恢复）；
  * - 读取：POST /api/v1/account/hongguo/favorites（本地签名请求云端收藏，归一化返回）；
  * - 持久化：登录 cookie 与最近一次收藏预览存 filesDir（FqHongguoSessionStore），
  *   重进页面不丢登录态与预览；
+ * - 从历史文件导入：选择本页导出的收藏 JSON 解析预览；「导出收藏文件」把
+ *   当前收藏列表存到 Download 目录（不含登录凭证），可传其他设备导入；
  * - 结果就地预览（统计 + 前 6 部），确认后合并到本机书架（只补缺失，可重复导入）；
  * - busy 期间禁用操作，读取可取消；标题栏菜单可退出登录（清除本机登录态，不影响已导入数据）。
  */
 
 import { BusinessError } from '@kit.BasicServicesKit';
 import { TitleBarContentOptions } from '@kit.UIDesignKit';
+import { fileIo, picker } from '@kit.CoreFileKit';
+import { util } from '@kit.ArkTS';
 import { CommonNav } from '../../view/CommonNav';
 import { FqTitleBarMenuOptions } from '../../model/FqNavModels';
 import { FqColorUtils } from '../../utils/FqColorUtils';
 import { DialogManager } from '../../utils/DialogUtils';
 import { appState } from '../../entryability/AppState';
 import { FqShelfStore } from '../../core/FqShelfStore';
+import { fqExportDirName, fqExportTextFile } from '../../core/FqCacheExport';
 import {
   FqHongguoFavorite,
   FqHongguoImportService,
@@ -27,10 +33,8 @@ import {
 
 /** 顶部内容起始偏移（标题栏下方）。 */
 const FQ_HONGGUO_IMPORT_TOP_INSET: number = 56;
-/** 扫码状态轮询间隔（ms，hongguoTV 同款节奏）。 */
-const FQ_HONGGUO_LOGIN_POLL_MS: number = 2000;
-/** 二维码展示尺寸。 */
-const FQ_HONGGUO_QR_SIZE: number = 200;
+/** 导入文件大小上限（与番茄导入页一致）。 */
+const FQ_HONGGUO_IMPORT_MAX_BYTES: number = 16 * 1024 * 1024;
 
 /** 两位补零。 */
 function fqHongguoImportPad(value: number): string {
@@ -41,6 +45,12 @@ function fqHongguoImportPad(value: number): string {
 function fqHongguoImportDate(ms: number): string {
   const date: Date = new Date(ms);
   return `${date.getFullYear()}-${fqHongguoImportPad(date.getMonth() + 1)}-${fqHongguoImportPad(date.getDate())}`;
+}
+
+/** 导出文件名时间戳（yyyyMMdd_HHmmss，与番茄导入页一致）。 */
+function fqHongguoImportFileStamp(now: Date): string {
+  return `${now.getFullYear()}${fqHongguoImportPad(now.getMonth() + 1)}${fqHongguoImportPad(now.getDate())}` +
+    `_${fqHongguoImportPad(now.getHours())}${fqHongguoImportPad(now.getMinutes())}${fqHongguoImportPad(now.getSeconds())}`;
 }
 
 @Builder
@@ -67,12 +77,6 @@ struct FqHongguoImportCard {
 export struct HongguoImportPage {
   private scroller: Scroller = new Scroller();
   private readonly service: FqHongguoImportService = new FqHongguoImportService();
-  /** 扫码轮询定时器（-1 = 未启动）。 */
-  private qrPollTimer: number = -1;
-  /** 二维码过期倒计时定时器（-1 = 未启动）。 */
-  private qrCountdownTimer: number = -1;
-  /** 短信重发倒计时定时器（-1 = 未启动）。 */
-  private smsCountdownTimer: number = -1;
   /** 登录 cookie（内存持有，filesDir 持久化）。 */
   private cookie: string = '';
   /** 非空 = 进行中（登录/读取），期间禁用全部操作。 */
@@ -82,27 +86,8 @@ export struct HongguoImportPage {
   /** 就地结果/错误消息。 */
   @Local message: string = '';
   @Local messageIsError: boolean = false;
-  /** 登录面板显隐。 */
-  @Local loginVisible: boolean = false;
-  /** 登录方式：'qr' 扫码 | 'sms' 验证码。 */
-  @Local loginMode: string = 'qr';
   /** 红果账号登录态（标题栏图标区分）。 */
   @Local loggedIn: boolean = false;
-  /** 扫码登录：二维码 data URL（空 = 未获取）。 */
-  @Local qrImage: string = '';
-  /** 二维码剩余有效秒数。 */
-  @Local qrExpiresIn: number = 0;
-  /** 二维码已失效（过期/轮询出错，展示刷新按钮）。 */
-  @Local qrExpired: boolean = false;
-  /** 验证码登录：手机号输入。 */
-  @Local mobileInput: string = '';
-  /** 验证码登录：验证码输入。 */
-  @Local codeInput: string = '';
-  /** 验证码已发送（平台回显的打码号码）。 */
-  @Local smsSent: boolean = false;
-  @Local smsMaskedMobile: string = '';
-  /** 短信重发倒计时（秒，0 = 可重发）。 */
-  @Local smsCountdown: number = 0;
   /** 读取成功的云端收藏（待确认合并）。 */
   @Local favorites: FqHongguoFavorite[] | null = null;
 
@@ -119,8 +104,10 @@ export struct HongguoImportPage {
   }
 
   aboutToDisappear(): void {
-    this.stopQrTimers();
-    this.stopSmsCountdown();
+    // 扫码弹窗未关先关（弹窗自含轮询，宿主页面销毁即无回调对象）
+    if (DialogManager.dialogChangeKey === '红果扫码登录') {
+      DialogManager.CloseDialog();
+    }
     this.service.cancel();
   }
 
@@ -146,22 +133,20 @@ export struct HongguoImportPage {
         }
         ListItem() {
           FqHongguoImportCard() {
-            Column() {
-              this.ActionRow($r('sys.symbol.person_crop_circle_fill'), '#FF3B82F6', '从红果账号读取',
-                this.loggedIn ? '已登录红果账号，点此重新读取云端收藏'
-                  : '扫码登录红果账号，读取云端收藏的短剧与漫剧', (): void => {
+            this.ActionRow($r('sys.symbol.person_crop_circle_fill'), '#FF3B82F6', '从红果账号读取',
+              this.loggedIn ? '已登录红果账号，点此重新读取云端收藏'
+                : '扫码登录红果账号，读取云端收藏的短剧与漫剧', (): void => {
                   if (this.loggedIn) {
                     this.runFetch(this.cookie);
                   } else {
-                    this.openLogin();
+                    this.openQrLogin();
                   }
                 })
-              if (this.loginVisible) {
-                this.CardDivider()
-                this.LoginContent()
-              }
-            }
-            .width('100%')
+            this.RowDivider()
+            this.ActionRow($r('sys.symbol.doc_plaintext'), '#FF10B981', '从历史文件导入',
+              '选择本页导出的红果收藏 JSON 文件', (): void => {
+                this.runFileImport();
+              })
           }
         }
 
@@ -230,8 +215,10 @@ export struct HongguoImportPage {
                 .fontWeight(FontWeight.Medium)
                 .fontColor($r('sys.color.font_primary'))
                 .width('100%')
-              Text('点「从红果账号读取」，扫码登录红果账号，' +
-                '登录成功后会自动读取云端收藏的短剧与漫剧。\n\n' +
+              Text('点「从红果账号读取」，在弹窗中扫码登录红果账号，' +
+                '登录成功后会自动读取云端收藏的短剧与漫剧；\n\n' +
+                '也可点「从历史文件导入」，选择本页「导出收藏文件」生成的 JSON 文件，' +
+                '把收藏传到其他设备导入。\n\n' +
                 '导入采用合并方式：书架只补充本机缺少的内容，不改动本机已有的观看记录，' +
                 '可重复导入。云端接口为只读，不会修改红果账号里的数据。')
                 .fontSize(13)
@@ -258,192 +245,19 @@ export struct HongguoImportPage {
   // 流程
   // ---------------------------------------------------------------------------
 
-  /** 打开登录面板（默认扫码，进入即取二维码）。 */
-  private openLogin(): void {
+  /** 打开扫码登录弹窗（自包含取码/轮询，确认后回传 cookie 并自动读取收藏）。 */
+  private openQrLogin(): void {
     if (this.busy.length > 0) {
       return;
     }
     this.message = '';
     this.messageIsError = false;
-    this.loginVisible = true;
-    if (this.loginMode === 'qr') {
-      this.startQrLogin();
-    }
-  }
-
-  /** 收起登录面板（不影响已发送的短信倒计时状态）。 */
-  private closeLogin(): void {
-    if (this.busy.length > 0) {
-      return;
-    }
-    this.stopQrTimers();
-    this.loginVisible = false;
-  }
-
-  /** 切换登录方式：离开扫码停轮询，切回扫码重新取码。 */
-  private switchMode(mode: string): void {
-    if (this.busy.length > 0 || mode === this.loginMode) {
-      return;
-    }
-    this.loginMode = mode;
-    this.message = '';
-    this.messageIsError = false;
-    if (mode === 'qr') {
-      this.stopQrTimers();
-      this.qrImage = '';
-      this.qrExpired = false;
-      this.startQrLogin();
-    } else {
-      this.stopQrTimers();
-    }
-  }
-
-  /** 获取登录二维码并启动轮询 + 过期倒计时。 */
-  private async startQrLogin(): Promise<void> {
-    if (this.busy.length > 0) {
-      return;
-    }
-    this.stopQrTimers();
-    this.busy = '正在获取二维码…';
-    this.message = '';
-    this.messageIsError = false;
-    this.qrExpired = false;
-    try {
-      const qr = await this.service.requestQr();
-      this.qrImage = qr.image;
-      this.qrExpiresIn = qr.expiresIn;
-      this.qrCountdownTimer = setInterval((): void => {
-        this.qrExpiresIn--;
-        if (this.qrExpiresIn <= 0) {
-          this.stopQrTimers();
-          this.qrExpired = true;
-        }
-      }, 1000);
-      this.qrPollTimer = setInterval((): void => {
-        this.pollQrOnce();
-      }, FQ_HONGGUO_LOGIN_POLL_MS);
-    } catch (error) {
-      const err = error as BusinessError;
-      this.messageIsError = true;
-      this.message = err.message.length > 0 ? err.message : '获取二维码失败，请重试';
-    } finally {
-      this.busy = '';
-    }
-  }
-
-  /** 轮询扫码状态：确认后自动登录并读取收藏。 */
-  private async pollQrOnce(): Promise<void> {
-    if (this.busy.length > 0 || this.qrExpired || !this.loginVisible) {
-      return;
-    }
-    try {
-      const cookie: string = await this.service.pollQr();
-      if (cookie.length === 0) {
-        return;
-      }
-      this.stopQrTimers();
+    DialogManager.ShowHongguoQrLogin((cookie: string): void => {
       this.cookie = cookie;
       this.loggedIn = true;
-      this.loginVisible = false;
       this.persistSession();
       this.runFetch(cookie);
-    } catch (error) {
-      const err = error as BusinessError;
-      this.stopQrTimers();
-      this.qrExpired = true;
-      this.messageIsError = true;
-      this.message = err.message.length > 0 ? err.message : '扫码登录失败，请刷新二维码重试';
-    }
-  }
-
-  private stopQrTimers(): void {
-    if (this.qrPollTimer >= 0) {
-      clearInterval(this.qrPollTimer);
-      this.qrPollTimer = -1;
-    }
-    if (this.qrCountdownTimer >= 0) {
-      clearInterval(this.qrCountdownTimer);
-      this.qrCountdownTimer = -1;
-    }
-  }
-
-  /** 发送短信验证码（后端校验手机号并回传打码号码与重发倒计时）。 */
-  private async requestSms(): Promise<void> {
-    if (this.busy.length > 0) {
-      return;
-    }
-    const mobile: string = this.mobileInput.trim();
-    if (mobile.length === 0) {
-      this.messageIsError = true;
-      this.message = '请输入手机号';
-      return;
-    }
-    this.busy = '正在发送验证码…';
-    this.message = '';
-    this.messageIsError = false;
-    try {
-      const sent = await this.service.sendSms(mobile);
-      this.smsSent = true;
-      this.smsMaskedMobile = sent.maskedMobile;
-      this.smsCountdown = sent.retrySeconds;
-      this.codeInput = '';
-      this.startSmsCountdown();
-    } catch (error) {
-      const err = error as BusinessError;
-      this.messageIsError = true;
-      this.message = err.message.length > 0 ? err.message : '发送验证码失败，请重试';
-    } finally {
-      this.busy = '';
-    }
-  }
-
-  private startSmsCountdown(): void {
-    this.stopSmsCountdown();
-    this.smsCountdownTimer = setInterval((): void => {
-      this.smsCountdown--;
-      if (this.smsCountdown <= 0) {
-        this.stopSmsCountdown();
-        this.smsCountdown = 0;
-      }
-    }, 1000);
-  }
-
-  private stopSmsCountdown(): void {
-    if (this.smsCountdownTimer >= 0) {
-      clearInterval(this.smsCountdownTimer);
-      this.smsCountdownTimer = -1;
-    }
-  }
-
-  /** 验证码登录：成功后关闭面板并读取收藏。 */
-  private async loginWithSms(): Promise<void> {
-    if (this.busy.length > 0) {
-      return;
-    }
-    const code: string = this.codeInput.trim();
-    if (!/^[0-9]{4,8}$/.test(code)) {
-      this.messageIsError = true;
-      this.message = '请输入 4—8 位数字验证码';
-      return;
-    }
-    this.busy = '正在登录…';
-    this.message = '';
-    this.messageIsError = false;
-    try {
-      const cookie: string = await this.service.verifySms(code);
-      this.stopSmsCountdown();
-      this.cookie = cookie;
-      this.loggedIn = true;
-      this.loginVisible = false;
-      this.persistSession();
-      this.runFetch(cookie);
-    } catch (error) {
-      const err = error as BusinessError;
-      this.messageIsError = true;
-      this.message = err.message.length > 0 ? err.message : '登录失败，请重试';
-    } finally {
-      this.busy = '';
-    }
+    });
   }
 
   /** 读取云端收藏 → 预览。 */
@@ -474,6 +288,99 @@ export struct HongguoImportPage {
     } finally {
       this.cancellable = false;
       this.busy = '';
+    }
+  }
+
+  /** 文件导入：系统选择器 → 读取 → 解析 → 预览。 */
+  private async runFileImport(): Promise<void> {
+    if (this.busy.length > 0) {
+      return;
+    }
+    this.busy = '请选择导入文件…';
+    this.message = '';
+    this.messageIsError = false;
+    try {
+      const docPicker: picker.DocumentViewPicker = new picker.DocumentViewPicker();
+      const uris: string[] = await docPicker.select({
+        maxSelectNumber: 1,
+        fileSuffixFilters: ['json'],
+      });
+      if (uris.length === 0) {
+        this.message = '已取消选择';
+        return;
+      }
+      this.busy = '正在读取文件…';
+      const text: string = this.readImportFile(uris[0]);
+      const favorites: FqHongguoFavorite[] = FqHongguoImportService.parseFavoritesFileText(text);
+      this.favorites = favorites;
+      if (this.cookie.length > 0) {
+        this.persistSession();
+      }
+      this.messageIsError = false;
+      this.message = `已从文件读取 ${favorites.length} 部收藏，确认后点「合并到本机书架」。`;
+    } catch (error) {
+      const err = error as BusinessError;
+      this.messageIsError = true;
+      this.message = err.message.length > 0 ? err.message : '读取文件失败，请重试';
+    } finally {
+      this.busy = '';
+    }
+  }
+
+  /** 导出前弹窗确认。 */
+  private confirmExportFavorites(): void {
+    const favorites: FqHongguoFavorite[] | null = this.favorites;
+    if (this.busy.length > 0 || favorites === null || favorites.length === 0) {
+      return;
+    }
+    DialogManager.ShowConfirm('导出收藏文件',
+      `当前收藏列表将导出为 JSON 文件（不含登录凭证），保存到 Download/${fqExportDirName()} 目录；` +
+        '传到其他设备后，可在本页通过「从历史文件导入」解析合并。',
+      '导出', (): void => {
+        this.runExportFavorites();
+      });
+  }
+
+  /** 导出收藏列表 JSON 到下载目录（与番茄导入页导出采集文件同款）。 */
+  private async runExportFavorites(): Promise<void> {
+    const favorites: FqHongguoFavorite[] | null = this.favorites;
+    if (favorites === null || favorites.length === 0 || this.busy.length > 0) {
+      return;
+    }
+    this.busy = '正在导出收藏文件…';
+    try {
+      const name: string = `hongguo-favorites-${fqHongguoImportFileStamp(new Date())}.json`;
+      await fqExportTextFile(getContext(this), name,
+        FqHongguoImportService.encodeFavoritesFile(favorites));
+      this.messageIsError = false;
+      this.message = `收藏文件已保存到 Download/${fqExportDirName()}/${name}`;
+    } catch (error) {
+      const err = error as BusinessError;
+      this.messageIsError = true;
+      this.message = err.message.length > 0 ? err.message : '导出失败，请重试';
+    } finally {
+      this.busy = '';
+    }
+  }
+
+  /** 读取导入文件（≤16MB），UTF-8 解码为文本。 */
+  private readImportFile(uri: string): string {
+    const file: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
+    try {
+      const stat: fileIo.Stat = fileIo.statSync(file.fd);
+      if (stat.size <= 0 || stat.size > FQ_HONGGUO_IMPORT_MAX_BYTES) {
+        throw new Error('导入文件超过 16 MB 或不可读');
+      }
+      const buffer: ArrayBuffer = new ArrayBuffer(stat.size);
+      fileIo.readSync(file.fd, buffer);
+      const decoder: util.TextDecoder = util.TextDecoder.create('utf-8', { fatal: false });
+      return decoder.decodeWithStream(new Uint8Array(buffer), { stream: false });
+    } finally {
+      try {
+        fileIo.closeSync(file);
+      } catch (error) {
+        // 关闭失败忽略
+      }
     }
   }
 
@@ -514,32 +421,18 @@ export struct HongguoImportPage {
     DialogManager.ShowConfirm('退出红果账号',
       '将清除本机保留的登录状态与收藏预览，不影响已导入本机的数据。',
       '退出', (): void => {
-        this.stopQrTimers();
-        this.stopSmsCountdown();
         this.service.cancel();
         FqHongguoSessionStore.clear(getContext(this));
         this.cookie = '';
         this.loggedIn = false;
-        this.loginVisible = false;
         this.favorites = null;
-        this.qrImage = '';
-        this.qrExpired = false;
-        this.mobileInput = '';
-        this.codeInput = '';
-        this.smsSent = false;
-        this.smsMaskedMobile = '';
-        this.smsCountdown = 0;
         this.messageIsError = false;
         this.message = '已退出红果账号，下次导入需重新登录。';
       });
   }
 
-  /** 返回拦截：优先关登录面板；可取消的 busy 先取消。 */
+  /** 返回拦截：可取消的 busy 先取消。 */
   private handleBack(): boolean {
-    if (this.loginVisible) {
-      this.closeLogin();
-      return true;
-    }
     if (this.cancellable) {
       this.requestCancel();
       return true;
@@ -567,13 +460,13 @@ export struct HongguoImportPage {
     .width('100%')
   }
 
-  /** 卡片内分割线。 */
+  /** 操作行间分割线（与番茄导入页一致）。 */
   @Builder
-  private CardDivider() {
+  private RowDivider() {
     Divider()
       .strokeWidth(0.6)
       .color($r('sys.color.comp_divider'))
-      .margin({ left: 14, right: 14 })
+      .margin({ left: 60, right: 12 })
   }
 
   /** 操作行（彩色图标块 + 标题/副标题 + 箭头；busy 期间禁用）。 */
@@ -614,164 +507,7 @@ export struct HongguoImportPage {
     .onClick(onTap)
   }
 
-  /** 登录面板：暂仅扫码（验证码登录被红果滑块风控拦截，UI 注释保留，修好后恢复）。 */
-  @Builder
-  private LoginContent() {
-    Column({ space: 14 }) {
-      // TODO 验证码登录恢复点：红果 send_code 命中 1105 滑块风控（换流量也复现，
-      //  待传输层指纹（TLS/HTTP-2）与官方客户端对齐后去掉注释即可恢复。
-      // Row({ space: 8 }) {
-      //   this.ModePill('扫码登录', 'qr')
-      //   this.ModePill('验证码登录', 'sms')
-      // }
-      // .justifyContent(FlexAlign.Center)
-      // .width('100%')
-      //
-      // if (this.loginMode === 'qr') {
-      //   this.QrLoginContent()
-      // } else {
-      //   this.SmsLoginContent()
-      // }
-      this.QrLoginContent()
-    }
-    .padding({ left: 16, right: 16, top: 14, bottom: 16 })
-    .width('100%')
-  }
-
-  /** 登录方式切换胶囊。 */
-  @Builder
-  private ModePill(label: string, mode: string) {
-    Text(label)
-      .fontSize(13.5)
-      .fontWeight(this.loginMode === mode ? FontWeight.Medium : FontWeight.Normal)
-      .fontColor(this.loginMode === mode ? Color.White : $r('sys.color.font_secondary'))
-      .backgroundColor(this.loginMode === mode
-        ? appState.accentColor
-        : $r('sys.color.comp_background_tertiary'))
-      .height(32)
-      .padding({ left: 18, right: 18 })
-      .borderRadius(16)
-      .enabled(this.busy.length === 0)
-      .onClick((): void => {
-        this.switchMode(mode);
-      })
-  }
-
-  /** 扫码登录：二维码 + 提示 + 过期倒计时/刷新。 */
-  @Builder
-  private QrLoginContent() {
-    Column({ space: 12 }) {
-      if (this.qrImage.length > 0) {
-        Image(this.qrImage)
-          .width(FQ_HONGGUO_QR_SIZE)
-          .height(FQ_HONGGUO_QR_SIZE)
-          .backgroundColor(Color.White)
-          .borderRadius(12)
-          .draggable(false)
-      } else {
-        Column() {
-          SymbolGlyph($r('sys.symbol.person'))
-            .fontSize(64)
-            .fontColor([$r('sys.color.font_tertiary')])
-        }
-        .width(FQ_HONGGUO_QR_SIZE)
-        .height(FQ_HONGGUO_QR_SIZE)
-        .borderRadius(12)
-        .backgroundColor($r('sys.color.comp_background_tertiary'))
-        .justifyContent(FlexAlign.Center)
-      }
-
-      Text(this.qrExpired
-        ? '二维码已失效，请刷新后重新扫码'
-        : (this.qrExpiresIn > 0 ? `打开红果 App 扫码登录（${this.qrExpiresIn} 秒后过期）`
-          : '打开红果 App 扫码登录'))
-        .fontSize(12.5)
-        .fontColor(this.qrExpired ? '#FFF43F5E' : $r('sys.color.font_secondary'))
-
-      Button(this.qrExpired ? '刷新二维码' : '刷新')
-        .fontSize(13.5)
-        .height(34)
-        .padding({ left: 20, right: 20 })
-        .fontColor(appState.accentColor)
-        .backgroundColor(FqColorUtils.withOpacity(appState.accentColor, 0.12))
-        .borderRadius(17)
-        .enabled(this.busy.length === 0 && this.qrImage.length > 0)
-        .onClick((): void => {
-          this.startQrLogin();
-        })
-    }
-    .alignItems(HorizontalAlign.Center)
-    .width('100%')
-  }
-
-  /** 验证码登录：手机号 + 验证码 + 登录按钮。 */
-  @Builder
-  private SmsLoginContent() {
-    Column({ space: 12 }) {
-      TextInput({ text: this.mobileInput, placeholder: '手机号（境外号码如 +886 0912…）' })
-        .width('100%')
-        .fontSize(14)
-        .fontColor($r('sys.color.font_primary'))
-        .placeholderColor($r('sys.color.font_tertiary'))
-        .backgroundColor($r('sys.color.comp_background_tertiary'))
-        .type(InputType.PhoneNumber)
-        .maxLength(32)
-        .enabled(this.busy.length === 0)
-        .onChange((value: string): void => {
-          this.mobileInput = value;
-        })
-
-      Row({ space: 10 }) {
-        TextInput({ text: this.codeInput, placeholder: '验证码' })
-          .layoutWeight(1)
-          .fontSize(14)
-          .fontColor($r('sys.color.font_primary'))
-          .placeholderColor($r('sys.color.font_tertiary'))
-          .backgroundColor($r('sys.color.comp_background_tertiary'))
-          .type(InputType.Number)
-          .maxLength(8)
-          .enabled(this.busy.length === 0)
-          .onChange((value: string): void => {
-            this.codeInput = value;
-          })
-        Button(this.smsCountdown > 0 ? `重新发送(${this.smsCountdown}s)` : '获取验证码')
-          .fontSize(13)
-          .height(40)
-          .padding({ left: 14, right: 14 })
-          .fontColor(appState.accentColor)
-          .backgroundColor(FqColorUtils.withOpacity(appState.accentColor, 0.12))
-          .borderRadius(12)
-          .enabled(this.busy.length === 0 && this.smsCountdown === 0 && this.mobileInput.trim().length > 0)
-          .onClick((): void => {
-            this.requestSms();
-          })
-      }
-      .width('100%')
-
-      if (this.smsSent) {
-        Text(`验证码已发送至 ${this.smsMaskedMobile}`)
-          .fontSize(11.5)
-          .fontColor($r('sys.color.font_secondary'))
-          .width('100%')
-      }
-
-      Button('登录')
-        .fontSize(15)
-        .fontWeight(FontWeight.Medium)
-        .fontColor(Color.White)
-        .backgroundColor(appState.accentColor)
-        .height(42)
-        .borderRadius(12)
-        .width('100%')
-        .enabled(this.busy.length === 0 && this.smsSent && /^[0-9]{4,8}$/.test(this.codeInput.trim()))
-        .onClick((): void => {
-          this.loginWithSms();
-        })
-    }
-    .width('100%')
-  }
-
-  /** 导入预览卡内容：统计 + 前 6 部 + 说明 + 合并按钮。 */
+  /** 导入预览卡内容：统计 + 前 6 部 + 说明 + 合并/导出按钮。 */
   @Builder
   private PreviewContent() {
     Column({ space: 14 }) {
@@ -809,6 +545,19 @@ export struct HongguoImportPage {
         .enabled(this.busy.length === 0)
         .onClick((): void => {
           this.runMerge();
+        })
+
+      Button('导出收藏文件')
+        .fontSize(14)
+        .fontColor(appState.accentColor)
+        .backgroundColor(Color.Transparent)
+        .border({ width: 1, color: FqColorUtils.withOpacity(appState.accentColor, 0.5) })
+        .height(38)
+        .borderRadius(12)
+        .width('100%')
+        .enabled(this.busy.length === 0)
+        .onClick((): void => {
+          this.confirmExportFavorites();
         })
     }
     .padding(16)

@@ -121,7 +121,7 @@ export struct BackupPage {
               })
             this.RowDivider()
             this.ActionRow($r('sys.symbol.film'), '#FFEF4444', '导入红果收藏',
-              '扫码或验证码登录红果账号，把云端收藏的短剧/漫剧合并到本机书架', (): void => {
+              '扫码登录红果账号，把云端收藏的短剧/漫剧合并到本机书架', (): void => {
                 NavPathUtils.push(ROUTE_HONGGUO_IMPORT);
               })
           }

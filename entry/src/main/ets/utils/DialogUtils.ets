@@ -135,6 +135,10 @@ export class DialogManager {
   /** 本次编辑会话新导入、尚未随保存落账的背景图文件（取消/关闭时删除清理）。 */
   private static readerThemeImportedFiles: string[] = [];
 
+  // ===== 红果扫码登录弹窗参数（打开前由调用方赋值，弹窗关闭后自动清空） =====
+  /** 扫码成功回调（回传登录 cookie；取消/关闭不触发）。 */
+  private static hongguoQrSuccess: ((cookie: string) => void) | null = null;
+
   // ===== 宿主注册动作（由持有 CustomDialogController 的页面注入） =====
   private static opener: (() => void) | null = null;
   private static toaster: ((message: string) => void) | null = null;
@@ -268,6 +272,21 @@ export class DialogManager {
     DialogManager.CloseDialog();
     if (cb !== null) {
       cb(channel, l1, group, word);
+    }
+  }
+
+  /** 红果扫码登录弹窗（导入红果收藏页「从红果账号读取」）：onSuccess 扫码确认后回传登录 cookie。 */
+  public static ShowHongguoQrLogin(onSuccess: (cookie: string) => void): void {
+    DialogManager.hongguoQrSuccess = onSuccess;
+    DialogManager.OpenDialog('红果扫码登录');
+  }
+
+  /** 扫码确认（弹窗内容组件轮询到 confirmed 后调用）：关弹窗并回调打开页。 */
+  public static ConfirmHongguoQrLogin(cookie: string): void {
+    const cb: ((cookie: string) => void) | null = DialogManager.hongguoQrSuccess;
+    DialogManager.CloseDialog();
+    if (cb !== null) {
+      cb(cookie);
     }
   }
 
@@ -440,6 +459,9 @@ export class DialogManager {
     }
     if (key === '跳转排序') {
       return '跳转排序';
+    }
+    if (key === '红果扫码登录') {
+      return '扫码登录红果';
     }
     return '';
   }
@@ -635,6 +657,10 @@ export class DialogManager {
       DialogManager.homeCategoryGroup = 0;
       DialogManager.homeCategoryWord = 0;
       DialogManager.homeCategoryPick = null;
+    }
+    // 红果扫码登录弹窗参数一次性，关闭后清理（取消/关闭不触发成功回调）
+    if (key === '红果扫码登录') {
+      DialogManager.hongguoQrSuccess = null;
     }
     const cb: (() => void) | null = DialogManager.onDialogClosed;
     DialogManager.onDialogClosed = null;
