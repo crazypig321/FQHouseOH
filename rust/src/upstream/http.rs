@@ -133,17 +133,25 @@ pub struct HttpTransport {
 
 impl HttpTransport {
     pub fn new(timeout_secs: u64) -> Result<Self, String> {
-        Self::build(timeout_secs, false)
+        Self::build(timeout_secs, false, false)
     }
 
     /// Account cookies must never follow a redirect to a different origin.
     pub fn without_redirects(timeout_secs: u64) -> Result<Self, String> {
-        Self::build(timeout_secs, true)
+        Self::build(timeout_secs, true, false)
     }
 
-    fn build(timeout_secs: u64, no_redirects: bool) -> Result<Self, String> {
+    /// Account cookies must never follow a redirect to a different origin,
+    /// and the TLS handshake offers HTTP/2 via ALPN (hongguo web login:
+    /// the reference client, OkHttp, always negotiates h2; risk control
+    /// flags a Chrome UA that cannot).
+    pub fn without_redirects_h2(timeout_secs: u64) -> Result<Self, String> {
+        Self::build(timeout_secs, true, true)
+    }
+
+    fn build(timeout_secs: u64, no_redirects: bool, alpn_h2: bool) -> Result<Self, String> {
         ensure_crypto_provider();
-        let tls = build_tls_config()?;
+        let tls = build_tls_config(alpn_h2)?;
         let mut builder = reqwest::Client::builder().tls_backend_preconfigured(tls);
         if no_redirects {
             builder = builder.redirect(reqwest::redirect::Policy::none());
@@ -612,6 +620,16 @@ pub fn account_transport() -> Result<&'static HttpTransport, String> {
     ACCOUNT_TRANSPORT.get_or_try_init(|| HttpTransport::without_redirects(20))
 }
 
+/// Process-wide transport for the hongguo web-login endpoints. Identical to
+/// [`account_transport`] except the TLS config advertises `h2` in ALPN, so
+/// reqwest negotiates HTTP/2 like the reference OkHttp client does. A Chrome
+/// UA over plain HTTP/1.1 reads as a bot to the passport risk control and
+/// triggers slider challenges (1105) on `send_code`.
+pub fn web_login_transport() -> Result<&'static HttpTransport, String> {
+    static WEB_LOGIN_TRANSPORT: OnceCell<HttpTransport> = OnceCell::new();
+    WEB_LOGIN_TRANSPORT.get_or_try_init(|| HttpTransport::without_redirects_h2(20))
+}
+
 /// reqwest is built with `rustls-no-provider` so exactly one TLS backend is
 /// linked; that means the process-wide crypto provider has to be installed
 /// before any client is constructed. Installing it here keeps the requirement
@@ -624,15 +642,18 @@ fn ensure_crypto_provider() {
     });
 }
 
-fn build_tls_config() -> Result<rustls::ClientConfig, String> {
+fn build_tls_config(alpn_h2: bool) -> Result<rustls::ClientConfig, String> {
     let mut roots = rustls::RootCertStore::empty();
     roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
-    let config = rustls::ClientConfig::builder_with_provider(provider)
+    let mut config = rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
         .map_err(|e| format!("tls protocol versions: {e}"))?
         .with_root_certificates(roots)
         .with_no_client_auth();
+    if alpn_h2 {
+        config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    }
     Ok(config)
 }
 
