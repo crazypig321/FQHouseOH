@@ -64,6 +64,8 @@ export struct CommonNav {
 
   /** 工具栏强制前景色（漫画页纯黑底固定白色，不随深浅模式；不传走系统色）。 */
   @Param barForegroundColor: ResourceColor | undefined = undefined
+  /** 标题栏右侧菜单图标强制颜色（导入页登录态按钮登录后显示主题色）；不传沿用 barForegroundColor。 */
+  @Param menuIconColor: ResourceColor | undefined = undefined
   /** 双击标题栏区域时列表回滚到顶部 */
   @Param doubleTapToTop: boolean = false
   @Param scrollToTopYOffset: number = 0
@@ -196,7 +198,7 @@ export struct CommonNav {
             },
             backIconStyle: { iconColor: this.barForegroundColor ?? themeUtils.textColor },
             menuStyle: {
-              iconColor: this.barForegroundColor ?? themeUtils.textColor
+              iconColor: this.menuIconColor ?? this.barForegroundColor ?? themeUtils.textColor
             },
             subIconStyle: {
               iconColor: this.barForegroundColor ?? themeUtils.textColor

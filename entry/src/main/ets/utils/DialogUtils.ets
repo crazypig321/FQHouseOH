@@ -139,6 +139,10 @@ export class DialogManager {
   /** 扫码成功回调（回传登录 cookie；取消/关闭不触发）。 */
   private static hongguoQrSuccess: ((cookie: string) => void) | null = null;
 
+  // ===== 红果验证码登录弹窗参数（打开前由调用方赋值，弹窗关闭后自动清空） =====
+  /** 验证码登录成功回调（回传登录 cookie；取消/关闭不触发）。 */
+  private static hongguoSmsSuccess: ((cookie: string) => void) | null = null;
+
   // ===== 宿主注册动作（由持有 CustomDialogController 的页面注入） =====
   private static opener: (() => void) | null = null;
   private static toaster: ((message: string) => void) | null = null;
@@ -284,6 +288,21 @@ export class DialogManager {
   /** 扫码确认（弹窗内容组件轮询到 confirmed 后调用）：关弹窗并回调打开页。 */
   public static ConfirmHongguoQrLogin(cookie: string): void {
     const cb: ((cookie: string) => void) | null = DialogManager.hongguoQrSuccess;
+    DialogManager.CloseDialog();
+    if (cb !== null) {
+      cb(cookie);
+    }
+  }
+
+  /** 红果验证码登录弹窗（导入红果收藏页菜单「验证码登录」）：onSuccess 验证通过后回传登录 cookie。 */
+  public static ShowHongguoSmsLogin(onSuccess: (cookie: string) => void): void {
+    DialogManager.hongguoSmsSuccess = onSuccess;
+    DialogManager.OpenDialog('红果验证码登录');
+  }
+
+  /** 验证码登录成功（弹窗内容组件校验通过后调用）：关弹窗并回调。 */
+  public static ConfirmHongguoSmsLogin(cookie: string): void {
+    const cb: ((cookie: string) => void) | null = DialogManager.hongguoSmsSuccess;
     DialogManager.CloseDialog();
     if (cb !== null) {
       cb(cookie);
@@ -462,6 +481,9 @@ export class DialogManager {
     }
     if (key === '红果扫码登录') {
       return '扫码登录红果';
+    }
+    if (key === '红果验证码登录') {
+      return '验证码登录红果';
     }
     return '';
   }
@@ -661,6 +683,10 @@ export class DialogManager {
     // 红果扫码登录弹窗参数一次性，关闭后清理（取消/关闭不触发成功回调）
     if (key === '红果扫码登录') {
       DialogManager.hongguoQrSuccess = null;
+    }
+    // 红果验证码登录弹窗参数一次性，关闭后清理（取消/关闭不触发成功回调）
+    if (key === '红果验证码登录') {
+      DialogManager.hongguoSmsSuccess = null;
     }
     const cb: (() => void) | null = DialogManager.onDialogClosed;
     DialogManager.onDialogClosed = null;

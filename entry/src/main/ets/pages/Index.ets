@@ -22,6 +22,7 @@ import { GroupNameDialogContent } from '../view/dialog/GroupNameDialogContent';
 import { SortJumpDialogContent } from '../view/dialog/SortJumpDialogContent';
 import { HomeCategoryDialogContent } from '../view/dialog/HomeCategoryDialogContent';
 import { HongguoQrDialogContent } from '../view/dialog/HongguoQrDialogContent';
+import { HongguoSmsLoginDialogContent } from '../view/dialog/HongguoSmsLoginDialogContent';
 import { FqPlaybackBall } from '../view/FqPlaybackBall';
 import { FqSheetOptions } from '../view/sheet/CommonSheet';
 import { FqChangelogSheet } from '../view/sheet/FqChangelogSheet';
@@ -555,6 +556,8 @@ struct Index {
       SortJumpDialogContent()
     } else if (key === '红果扫码登录') {
       HongguoQrDialogContent()
+    } else if (key === '红果验证码登录') {
+      HongguoSmsLoginDialogContent()
     }
   }
 }

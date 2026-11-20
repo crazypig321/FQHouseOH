@@ -82,6 +82,10 @@ export struct HongguoQrDialogContent {
         .fontSize(12.5)
         .fontColor(this.qrExpired ? '#FFF43F5E' : $r('sys.color.font_secondary'))
 
+      Text('请使用安卓或 iOS 端红果 App 扫码，鸿蒙端红果 App 暂不支持扫码登录')
+        .fontSize(11.5)
+        .fontColor($r('sys.color.font_tertiary'))
+
       Button('刷新二维码')
         .fontSize(14)
         .fontColor(appState.accentColor)
