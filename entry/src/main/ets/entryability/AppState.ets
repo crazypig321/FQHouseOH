@@ -22,6 +22,8 @@ export class AppState {
   @Trace screenHeight: number = 0;
   /** 当前窗口宽度（vp，EntryAbility 跟踪；PC 侧边栏布局判定用） */
   @Trace windowWidthVp: number = 0;
+  /** 当前窗口高度（vp，EntryAbility 跟踪；播控球 Y 轴拖动钳制用） */
+  @Trace windowHeightVp: number = 0;
   /** 物理屏宽度（vp，与窗口宽度差值判定是否以自由窗口方式运行） */
   @Trace displayWidthVp: number = 0;
   /** 2in1 系统三键（最小化/最大化/关闭）避让宽度（vp；0 = 无窗口三键形态） */

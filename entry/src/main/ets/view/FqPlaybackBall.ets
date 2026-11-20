@@ -7,6 +7,8 @@
  * - 左侧停靠（智感握姿左手握持）时展开态整体镜像：
  *   封面在最左，按钮组反序（关闭 + 停止 + 下一曲 + 播放），向右展开
  * - 展开态 7s 无操作自动收回
+ * - 圆形态闲置 8s 自动吸边：滑向停靠侧屏幕边缘半隐藏（只露一小截），点击回原位
+ * - 长按球体进入 Y 轴拖动：上下调整悬浮高度（会话内有效，不持久化）
  * - 会话关闭（fqAudioSession.close / hasSession=false）后整体消失
  * - 悬于底部悬浮栏（tabbar/工具栏）上方；左右侧由「智感握姿」决定——
  *   Index 传入 ballAtRight（appState.holdingHand !== 'left'），左手握持时换到左下角；
@@ -40,6 +42,14 @@ const FQ_BOTTOM_BAR_INSET: number = 84;
 const FQ_BALL_SIDE_MARGIN: number = 16;
 /** 智感握姿换侧滑动动画时长（ms）。 */
 const FQ_SIDE_SWITCH_MS: number = 250;
+/** 圆形态闲置自动吸边时长（ms）。 */
+const FQ_IDLE_DOCK_MS: number = 8000;
+/** 吸边半隐藏后仍露出屏幕的宽度（vp，即可点击的边条）。 */
+const FQ_BALL_PEEK: number = 20;
+/** 长按判定时长（ms）：识别后进入 Y 轴拖动。 */
+const FQ_DRAG_LONG_PRESS_MS: number = 350;
+/** Y 轴拖动时球体与窗口顶部的最小间隙（vp）。 */
+const FQ_DRAG_TOP_GAP: number = 8;
 
 @ComponentV2
 export struct FqPlaybackBall {
@@ -51,6 +61,18 @@ export struct FqPlaybackBall {
   @Local expanded: boolean = false;
   /** 展开态无操作自动收回的定时器句柄。 */
   private autoCollapseId: number = -1;
+  /** 吸边半隐藏态：滑向停靠侧屏幕边缘，只露 FQ_BALL_PEEK 宽边条。 */
+  @Local edgeDocked: boolean = false;
+  /** 用户 Y 轴偏移（vp，正值向上；长按拖动调整，会话内有效不持久化）。 */
+  @Local yOffset: number = 0;
+  /** 闲置自动吸边的定时器句柄。 */
+  private idleDockId: number = -1;
+  /** Y 轴拖动起始偏移（onActionStart 快照）。 */
+  private dragStartYOffset: number = 0;
+  /** Y 轴拖动事件基线（onActionStart 时 pan 已产生的 offsetY）。 */
+  private dragBaseOffsetY: number = 0;
+  /** 长按已识别标志：松手后的 click 会被吞掉，防止误触发展开/跳页。 */
+  private longPressActive: boolean = false;
 
   aboutToAppear(): void {
     this.atRightAnim = this.ballAtRight;
@@ -58,6 +80,7 @@ export struct FqPlaybackBall {
 
   aboutToDisappear(): void {
     this.cancelAutoCollapse();
+    this.cancelIdleDock();
   }
 
   /** 智感握姿换侧：包裹镜像值变化驱动水平 margin 过渡（球体平滑滑到另一侧）。 */
@@ -112,6 +135,51 @@ export struct FqPlaybackBall {
       illuminatedType: hdsEffect.PointLightIlluminatedType.BORDER,
     }).buildEffect())
     .attributeModifier(rowImmersiveModifier)
+    // 会话开始：复位吸边态并重新计时闲置吸边；会话结束：清全部定时器
+    .onAppear((): void => {
+      this.edgeDocked = false;
+      this.yOffset = this.clampYOffset(this.yOffset);
+      this.armIdleDock();
+    })
+    .onDisAppear((): void => {
+      this.cancelAutoCollapse();
+      this.cancelIdleDock();
+    })
+    .onTouch((event: TouchEvent): void => {
+      if (event.type === TouchType.Down) {
+        this.longPressActive = false;
+      }
+    })
+    // 长按 350ms 进入 Y 轴拖动（垂直方向）；拖动即时生效，松手后重新计时闲置吸边
+    .gesture(
+      GestureGroup(GestureMode.Sequence,
+        LongPressGesture({ repeat: false, duration: FQ_DRAG_LONG_PRESS_MS })
+          .onAction((): void => {
+            this.longPressActive = true;
+          }),
+        PanGesture({ fingers: 1, direction: PanDirection.Vertical })
+          .onActionStart((event?: GestureEvent): void => {
+            if (!event) {
+              return;
+            }
+            this.dragStartYOffset = this.yOffset;
+            this.dragBaseOffsetY = event.offsetY;
+            this.cancelIdleDock();
+          })
+          .onActionUpdate((event?: GestureEvent): void => {
+            if (!event) {
+              return;
+            }
+            this.yOffset = this.clampYOffset(this.dragStartYOffset - (event.offsetY - this.dragBaseOffsetY));
+          })
+          .onActionEnd((): void => {
+            this.armIdleDock();
+          })
+          .onActionCancel((): void => {
+            this.armIdleDock();
+          })
+      )
+    )
   }
 
   /** 控制排（展开态）：右侧停靠顺序 播放/下一曲/停止/关闭；左侧停靠整体反序。 */
@@ -160,6 +228,9 @@ export struct FqPlaybackBall {
     .height(44)
     .borderRadius(22)
     .onClick(() => {
+      if (this.swallowLongPressClick()) {
+        return;
+      }
       fqAudioSession.togglePlayPause();
       this.armAutoCollapse();
     })
@@ -178,6 +249,9 @@ export struct FqPlaybackBall {
     .borderRadius(22)
     .opacity(fqAudioSession.hasNextChapter ? 1 : 0.35)
     .onClick(() => {
+      if (this.swallowLongPressClick()) {
+        return;
+      }
       if (fqAudioSession.hasNextChapter) {
         fqAudioSession.next();
         this.armAutoCollapse();
@@ -193,6 +267,13 @@ export struct FqPlaybackBall {
     }
     .margin(this.coverWrapMargin())
     .onClick(() => {
+      if (this.swallowLongPressClick()) {
+        return;
+      }
+      if (this.edgeDocked) {
+        this.undock();
+        return;
+      }
       if (this.expanded) {
         this.openPlayingPage();
       } else {
@@ -260,6 +341,9 @@ export struct FqPlaybackBall {
     .borderRadius(22)
     .opacity(enabled ? 1 : 0.35)
     .onClick(() => {
+      if (this.swallowLongPressClick()) {
+        return;
+      }
       if (enabled) {
         onTap();
       }
@@ -284,11 +368,17 @@ export struct FqPlaybackBall {
     this.setExpanded(false);
   }
 
-  /** 展开/收回切换：animateTo 驱动宽度等属性动画（封面随布局一镜到底）。 */
+  /** 展开/收回切换：animateTo 驱动宽度等属性动画（封面随布局一镜到底）；
+   *  展开取消闲置吸边计时，收回续接闲置吸边计时。 */
   private setExpanded(value: boolean): void {
     this.getUIContext().animateTo({ duration: FQ_TOGGLE_MS, curve: Curve.EaseOut }, () => {
       this.expanded = value;
     });
+    if (value) {
+      this.cancelIdleDock();
+    } else {
+      this.armIdleDock();
+    }
   }
 
   /** 展开/交互后续接 7s 无操作自动收回。 */
@@ -307,6 +397,56 @@ export struct FqPlaybackBall {
       clearTimeout(this.autoCollapseId);
       this.autoCollapseId = -1;
     }
+  }
+
+  /** 长按拖动后的松手 click 吞掉（返回 true 表示已吞，本次点击不生效）。 */
+  private swallowLongPressClick(): boolean {
+    if (this.longPressActive) {
+      this.longPressActive = false;
+      return true;
+    }
+    return false;
+  }
+
+  /** 闲置 8s 自动吸边计时：仅圆形态且会话存活时武装；到期滑向停靠侧边缘半隐藏。 */
+  private armIdleDock(): void {
+    this.cancelIdleDock();
+    if (!this.expanded && !this.edgeDocked && fqAudioSession.hasSession) {
+      this.idleDockId = setTimeout(() => {
+        this.idleDockId = -1;
+        if (fqAudioSession.hasSession && !this.expanded && !this.edgeDocked) {
+          this.getUIContext().animateTo({ duration: FQ_SIDE_SWITCH_MS, curve: Curve.Smooth }, (): void => {
+            this.edgeDocked = true;
+          });
+        }
+      }, FQ_IDLE_DOCK_MS);
+    }
+  }
+
+  private cancelIdleDock(): void {
+    if (this.idleDockId >= 0) {
+      clearTimeout(this.idleDockId);
+      this.idleDockId = -1;
+    }
+  }
+
+  /** 点击露出的边条：滑回原位并重新计时闲置吸边。 */
+  private undock(): void {
+    this.getUIContext().animateTo({ duration: FQ_SIDE_SWITCH_MS, curve: Curve.Smooth }, (): void => {
+      this.edgeDocked = false;
+    });
+    this.armIdleDock();
+  }
+
+  /** Y 轴拖动钳制：下限 0（默认位，底栏上方），上限窗口顶部留 FQ_DRAG_TOP_GAP。 */
+  private clampYOffset(value: number): number {
+    const height: number = appState.windowHeightVp;
+    const defaultBottom: number = appState.bottomRect + FQ_BOTTOM_BAR_INSET + FQ_BALL_BOTTOM_GAP;
+    const maxUp: number = height - defaultBottom - FQ_BALL_SIZE - appState.topRect - FQ_DRAG_TOP_GAP;
+    if (maxUp <= 0) {
+      return 0;
+    }
+    return Math.min(Math.max(value, 0), maxUp);
   }
 
   /** 容器宽：圆 64 ↔ 胶囊 248（宽度属性动画主体）。 */
@@ -340,15 +480,20 @@ export struct FqPlaybackBall {
     return atLeft ? { left: 6, right: 8 } : { left: 8, right: 6 };
   }
 
-  /** 悬浮位置：底栏上沿再抬高；水平恒用 margin left 定位——
-   *  右侧 = 窗口宽 - 球宽 - 边距（右缘贴边），左侧 = 边距；
-   *  换侧与展开/收起时 left 随 atRightAnim/expanded 在 animateTo 内重算，平滑过渡。 */
+  /** 悬浮位置：底栏上沿再抬高（叠加用户 Y 偏移）；水平恒用 margin left 定位——
+   *  吸边态滑至停靠侧边缘只露 FQ_BALL_PEEK 宽；常态右侧 = 窗口宽 - 球宽 - 边距（右缘贴边），
+   *  左侧 = 边距；换侧/展开/吸边时 left 在 animateTo 内重算，平滑过渡。 */
   private ballMargin(): Margin {
-    const bottom: number = appState.bottomRect + FQ_BOTTOM_BAR_INSET + FQ_BALL_BOTTOM_GAP;
+    const bottom: number = appState.bottomRect + FQ_BOTTOM_BAR_INSET + FQ_BALL_BOTTOM_GAP + this.yOffset;
     const width: number = appState.windowWidthVp > 0 ? appState.windowWidthVp : appState.displayWidthVp;
-    const left: number = this.atRightAnim
-      ? Math.max(width - FQ_BALL_SIDE_MARGIN - this.ballPanelWidth(), FQ_BALL_SIDE_MARGIN)
-      : FQ_BALL_SIDE_MARGIN;
+    let left: number;
+    if (this.edgeDocked) {
+      left = this.atRightAnim ? width - FQ_BALL_PEEK : FQ_BALL_PEEK - FQ_BALL_SIZE;
+    } else if (this.atRightAnim) {
+      left = Math.max(width - FQ_BALL_SIDE_MARGIN - this.ballPanelWidth(), FQ_BALL_SIDE_MARGIN);
+    } else {
+      left = FQ_BALL_SIDE_MARGIN;
+    }
     return { bottom: bottom, left: left };
   }
 

@@ -280,6 +280,7 @@ export default class EntryAbility extends UIAbility {
           appState.displayWidthVp = uiContext.px2vp(displayData.width);
           const windowRect: window.Rect = data.getWindowProperties().windowRect;
           appState.windowWidthVp = uiContext.px2vp(windowRect.width);
+          appState.windowHeightVp = uiContext.px2vp(windowRect.height);
           appState.WidthBp = uiContext.getWindowWidthBreakpoint();
           appState.HeightBp = uiContext.getWindowHeightBreakpoint();
 
@@ -289,6 +290,7 @@ export default class EntryAbility extends UIAbility {
             appState.screenWidth = data.width
             appState.screenHeight = data.height
             appState.windowWidthVp = uiContext!.px2vp(data.width)
+            appState.windowHeightVp = uiContext!.px2vp(data.height)
             //获取横屏断点
             const widthBp: WidthBreakpoint = uiContext!.getWindowWidthBreakpoint()
             const heightBp: HeightBreakpoint = uiContext!.getWindowHeightBreakpoint()
