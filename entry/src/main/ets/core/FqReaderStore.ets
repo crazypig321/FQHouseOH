@@ -48,6 +48,9 @@ export class FqReaderSettings {
   themeIndex: number = -1;
   /** 0 仿真翻页 / 1 横滑翻页 / 2 上下滚动。 */
   flipIndex: number = 0;
+  /** 双页栏布局：0 自动（≥840vp 横屏双栏）/ 1 单栏（默认）/ 2 双栏（≥420vp）。
+   *  默认单栏保证旧用户分页零变化；仅分页阅读生效（上下滚动恒单栏）。 */
+  columnMode: number = 1;
   /** 漫画翻页方式：0 仿真 / 1 覆盖 / 2 上下滚动。 */
   comicFlipIndex: number = 0;
   /** 字体档位（FQ_FONT_OPTIONS 下标）：0 系统（跟随系统字体设置）/ 1 书宋 / 2 黑体。 */
@@ -244,6 +247,11 @@ export class FqReaderStore {
       if (typeof flipIndex === 'number') {
         FqReaderStore.settings.flipIndex = Math.min(2, Math.max(0, Math.trunc(flipIndex)));
       }
+      // 双页栏布局（旧配置无此字段保持默认单栏，分页行为不变）
+      const columnMode: Object | undefined = rec['columnMode'];
+      if (typeof columnMode === 'number') {
+        FqReaderStore.settings.columnMode = Math.min(2, Math.max(0, Math.trunc(columnMode)));
+      }
       const comicFlipIndex: Object | undefined = rec['comicFlipIndex'];
       if (typeof comicFlipIndex === 'number') {
         FqReaderStore.settings.comicFlipIndex = Math.min(2, Math.max(0, Math.trunc(comicFlipIndex)));
@@ -414,6 +422,12 @@ export class FqReaderStore {
   /** 漫画翻页方式单独保存（不动小说设置）。 */
   public static saveComicFlip(comicFlipIndex: number): void {
     FqReaderStore.settings.comicFlipIndex = Math.min(2, Math.max(0, Math.trunc(comicFlipIndex)));
+    FqReaderStore.persistSettings();
+  }
+
+  /** 双页栏布局单独保存（0 自动 / 1 单栏 / 2 双栏；触发阅读页保位重排）。 */
+  public static saveColumnMode(columnMode: number): void {
+    FqReaderStore.settings.columnMode = Math.min(2, Math.max(0, Math.trunc(columnMode)));
     FqReaderStore.persistSettings();
   }
 
@@ -1151,6 +1165,7 @@ export class FqReaderStore {
     rec['lineHeight'] = FqReaderStore.settings.lineHeight;
     rec['themeIndex'] = FqReaderStore.settings.themeIndex;
     rec['flipIndex'] = FqReaderStore.settings.flipIndex;
+    rec['columnMode'] = FqReaderStore.settings.columnMode;
     rec['comicFlipIndex'] = FqReaderStore.settings.comicFlipIndex;
     rec['fontIndex'] = FqReaderStore.settings.fontIndex;
     rec['showParagraphComment'] = FqReaderStore.settings.showParagraphComment;

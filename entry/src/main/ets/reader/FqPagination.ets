@@ -112,7 +112,7 @@ export class FqPaginationEngine {
     return lines;
   }
 
-  /** 行尾拉伸（fp）：满行（非段末末行）按「内容宽 - 6px 防裁切余量」补齐行尾空隙，
+  /** 行尾拉伸（fp）：满行（非段末末行）按「栏宽 - 6px 防裁切余量」补齐行尾空隙，
    *  上限两个全角字宽（禁则回退至多 2 字，防拉伸过疏）；段末末行/超宽行返回 0。 */
   private lineStretchFp(metrics: FqReaderLayoutMetrics, line: string,
     fontFp: number, weight: string, stretch: boolean): number {
@@ -120,7 +120,9 @@ export class FqPaginationEngine {
       return 0;
     }
     const charW: number = this.measureFn('汉', fontFp, weight);
-    const slack: number = Math.min(metrics.contentWidthPx - 6
+    const lineWidth: number = metrics.columnWidthPx > 0
+      ? metrics.columnWidthPx : metrics.contentWidthPx;
+    const slack: number = Math.min(lineWidth - 6
       - this.measureFn(line, fontFp, weight), charW * 2);
     if (slack <= 0) {
       return 0;
@@ -153,7 +155,8 @@ export class FqPaginationEngine {
     return metrics.bubbleIconFp * metrics.density + 2 * metrics.density;
   }
 
-  /** 章节装页：返回带片段/行/页首位置的完整分页结果。 */
+  /** 章节装页：返回带片段/行/页首位置的完整分页结果（双页模式按栏装页：
+   *  一栏装满切同页下一栏，末栏装满才收页；跨栏段落拆多片段，片段记所属栏）。 */
   public layout(chapterIndex: number, paragraphs: string[], metrics: FqReaderLayoutMetrics,
     commentCounts: number[]): FqChapterLayout {
     const result: FqChapterLayout = new FqChapterLayout(chapterIndex);
@@ -162,8 +165,11 @@ export class FqPaginationEngine {
     const pages: FqReaderPageData[] = [];
     let page: FqReaderPageData = new FqReaderPageData();
     let used: number = 0;
+    let column: number = 0;
     let frag: FqPageFragment | null = null;
     const contentH: number = metrics.contentHeightPx;
+    const lineWidth: number = metrics.columnWidthPx > 0
+      ? metrics.columnWidthPx : metrics.contentWidthPx;
     for (let para: number = 0; para < paragraphs.length; para++) {
       const text: string = paragraphs[para];
       if (text.length === 0) {
@@ -173,23 +179,32 @@ export class FqPaginationEngine {
       const fontFp: number = isTitle ? metrics.titleFontFp : metrics.fontSizeFp;
       const weight: string = isTitle ? 'bold' : '400';
       const lineH: number = isTitle ? metrics.titleLinePx : metrics.lineHeightPx;
-      // 段落文本已含 '\u3000\u3000' 缩进前缀：首行预算即内容区全宽。
+      // 段落文本已含 '\u3000\u3000' 缩进前缀：首行预算即栏宽。
       // 再扣 indentPx 属双扣缩进，会导致每段首行提前 ~2 字换行、整页文字挤向左侧。
-      const lines: string[] = this.splitLines(text, metrics.contentWidthPx, metrics.contentWidthPx,
+      const lines: string[] = this.splitLines(text, lineWidth, lineWidth,
         fontFp, weight);
       let charIdx: number = 0;
       for (let li: number = 0; li < lines.length; li++) {
         const blockTop: number = li === 0 ? (isTitle ? metrics.titleTopPx : metrics.paraGapPx) : 0;
         const need: number = blockTop + lineH;
-        if (page.fragments.length > 0 && used + need > contentH) {
-          // 收页：页片段已满，开新页继续装当前段剩余行
-          pages.push(page);
-          page = new FqReaderPageData();
-          used = 0;
-          frag = null;
+        if (used > 0 && used + need > contentH) {
+          // 装不下：双页先切同页下一栏，末栏才收页开新页（重置栏位）；
+          // used > 0 ≡ 原单栏 page.fragments.length > 0 保护（栏非空才切，防空栏/空页）
+          if (column + 1 < metrics.columns) {
+            column += 1;
+            used = 0;
+            frag = null;
+          } else {
+            pages.push(page);
+            page = new FqReaderPageData();
+            used = 0;
+            column = 0;
+            frag = null;
+          }
         }
-        if (frag === null || frag.paraIndex !== para) {
+        if (frag === null || frag.paraIndex !== para || frag.column !== column) {
           frag = new FqPageFragment(para, isTitle);
+          frag.column = column;
           frag.startChar = charIdx;
           page.fragments.push(frag);
           if (page.startPara < 0) {
@@ -216,23 +231,46 @@ export class FqPaginationEngine {
       } else if (commentCounts.length > para && commentCounts[para] > 0) {
         // 段评气泡行内渲染在段尾 Text 内（FqPageCanvas：ImageSpan 图标拼在末行后）：
         // 末行剩余宽度放得下 → 0 额外行高；放不下气泡随 Text 换行 → 计一行行高；
-        // 连该行也放不下 → 收页，气泡独立片段开新页（同计一行行高）。
+        // 连该行也放不下 → 双页先切下一栏，末栏收页，气泡独立片段开新栏/新页（同计一行行高）。
         // bubbleWidthPx 与渲染同为纯图标宽：inline 判定须与实际渲染宽一致，
         // 虚报会每段多记一行幻影行高（页底大片空白的根因）。
         const count: number = commentCounts[para];
         const bubbleW: number = this.bubbleWidthPx(metrics);
         const lastLineW: number = this.measureFn(lines[lines.length - 1], fontFp, weight);
-        // inline 判定：末行 + 图标宽 + 小安全余量 ≤ 内容宽（测量与渲染同源，余量只需吸收
+        // inline 判定：末行 + 图标宽 + 小安全余量 ≤ 栏宽（测量与渲染同源，余量只需吸收
         // 字体度量误差，不再扣整字宽）。判「放不下」时图标独立成行渲染（bubbleOwnRow），
         // 收一行行高、渲染一行行高——判定偏差不再产生幻影行高（页底空白）或行溢出。
         const inline: boolean = lastLineW + bubbleW
-          <= metrics.contentWidthPx - 4 * metrics.density;
+          <= lineWidth - 4 * metrics.density;
         const charge: number = inline ? 0 : lineH;
-        if (!inline && page.fragments.length > 0 && used + charge > contentH) {
+        if (!inline && used + charge > contentH && column + 1 < metrics.columns) {
+          // 本栏放不下独立气泡行：气泡独立片段开下一栏
+          column += 1;
+          used = 0;
+          const bubbleFrag: FqPageFragment = new FqPageFragment(para, false);
+          bubbleFrag.column = column;
+          bubbleFrag.startChar = text.length;
+          bubbleFrag.endChar = text.length;
+          bubbleFrag.isParaEnd = true;
+          bubbleFrag.showBubble = true;
+          bubbleFrag.lines.push('');
+          bubbleFrag.lineSpaceFp.push(0);
+          page.fragments.push(bubbleFrag);
+          page.startPara = page.startPara < 0 ? para : page.startPara;
+          frag = bubbleFrag;
+          page.bubbles.push(new FqPageBubble(para,
+            metrics.headerZoneVp + metrics.contentTopVp,
+            metrics.bubbleRowPx / metrics.density,
+            this.bubbleXVp(metrics, column),
+            bubbleW / metrics.density));
+          used += charge;
+        } else if (!inline && page.fragments.length > 0 && used + charge > contentH) {
           pages.push(page);
           page = new FqReaderPageData();
           used = 0;
+          column = 0;
           const bubbleFrag: FqPageFragment = new FqPageFragment(para, false);
+          bubbleFrag.column = column;
           bubbleFrag.startChar = text.length;
           bubbleFrag.endChar = text.length;
           bubbleFrag.isParaEnd = true;
@@ -246,18 +284,19 @@ export class FqPaginationEngine {
           page.bubbles.push(new FqPageBubble(para,
             metrics.headerZoneVp + metrics.contentTopVp,
             metrics.bubbleRowPx / metrics.density,
-            metrics.sidePaddingVp,
+            this.bubbleXVp(metrics, column),
             bubbleW / metrics.density));
+          used += charge;
         } else if (frag !== null) {
           frag.showBubble = true;
           frag.bubbleOwnRow = !inline;
           page.bubbles.push(new FqPageBubble(para,
             metrics.headerZoneVp + metrics.contentTopVp + (used - (inline ? lineH : 0)) / metrics.density,
             metrics.bubbleRowPx / metrics.density,
-            metrics.sidePaddingVp,
+            this.bubbleXVp(metrics, column),
             bubbleW / metrics.density));
+          used += charge;
         }
-        used += charge;
       }
     }
     if (page.fragments.length > 0) {
@@ -265,6 +304,12 @@ export class FqPaginationEngine {
     }
     result.pages = pages;
     return result;
+  }
+
+  /** 气泡左缘 x（vp，相对页容器）：单栏 = 左右边距；双栏含栏偏移。 */
+  private bubbleXVp(metrics: FqReaderLayoutMetrics, column: number): number {
+    return metrics.sidePaddingVp
+      + column * (metrics.columnWidthPx + metrics.columnGapPx) / metrics.density;
   }
 }
 

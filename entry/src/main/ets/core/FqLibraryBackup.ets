@@ -351,6 +351,8 @@ export class FqBackupAppSettings {
   readonly mineSettingsStyle: number;
   /** 启用短剧页开关（旧备份缺省 null，恢复时跳过不重置本机）。 */
   readonly dramaPageEnabled: boolean | null;
+  /** 双页栏布局（0 自动 / 1 单栏 / 2 双栏；旧备份缺省 -1，恢复时跳过不重置本机）。 */
+  readonly readerColumnMode: number;
   /** 播放设置段（旧备份无此段时为 null，恢复时跳过播放设置）。 */
   readonly playback: FqBackupPlaybackSettings | null;
 
@@ -366,7 +368,8 @@ export class FqBackupAppSettings {
     readerDialogueHighlightColor: string | null = null,
     readerCustomDialogueColors: string[] | null = null,
     mineSettingsStyle: number = -1,
-    dramaPageEnabled: boolean | null = null) {
+    dramaPageEnabled: boolean | null = null,
+    readerColumnMode: number = -1) {
     this.themeMode = themeMode;
     this.themeColor = themeColor;
     this.themeCustomColor = themeCustomColor;
@@ -387,6 +390,7 @@ export class FqBackupAppSettings {
     this.readerCustomDialogueColors = readerCustomDialogueColors;
     this.mineSettingsStyle = mineSettingsStyle;
     this.dramaPageEnabled = dramaPageEnabled;
+    this.readerColumnMode = readerColumnMode;
     this.playback = playback;
   }
 }
@@ -631,7 +635,8 @@ export class FqLibraryBackup {
       readerSettings.dialogueHighlightColor,
       readerSettings.customDialogueColors,
       FqAppSettingsStore.getMineSettingsStyle(),
-      FqAppSettingsStore.getDramaPageEnabled());
+      FqAppSettingsStore.getDramaPageEnabled(),
+      readerSettings.columnMode);
     // 短剧观看历史段（短剧页「最近」频道）：local_ 排除，封面可移植化
     const watchHistory: FqWatchHistoryRecord[] = [];
     for (const record of FqWatchedStore.historyAll()) {
@@ -822,6 +827,7 @@ export class FqLibraryBackup {
       settings['readerLineHeight'] = data.settings.readerLineHeight;
       settings['readerThemeIndex'] = data.settings.readerThemeIndex;
       settings['readerFlipIndex'] = data.settings.readerFlipIndex;
+      settings['readerColumnMode'] = data.settings.readerColumnMode;
       settings['readerComicFlipIndex'] = data.settings.readerComicFlipIndex;
       settings['readerFontIndex'] = data.settings.readerFontIndex;
       settings['readerShowParagraphComment'] = data.settings.readerShowParagraphComment;
@@ -1360,6 +1366,9 @@ export class FqLibraryBackup {
       // 启用短剧页开关（旧备份无此字段：null，恢复时跳过不重置本机）
       const dramaPageEnabled: boolean | null = settingsRec['dramaPageEnabled'] === undefined ? null
         : fqBackupCheckBool(settingsRec, 'dramaPageEnabled');
+      // 双页栏布局（旧备份无此字段：-1，恢复时跳过不重置本机）
+      const readerColumnMode: number = settingsRec['readerColumnMode'] === undefined ? -1
+        : fqBackupCheckRange(settingsRec, 'readerColumnMode', 0, 2);
       // 播放设置段（旧备份无此段：null，恢复时跳过播放设置；存在则全量白名单校验）
       let playback: FqBackupPlaybackSettings | null = null;
       const playbackRaw: Object | undefined = settingsRec['playback'];
@@ -1417,8 +1426,7 @@ export class FqLibraryBackup {
         readerLineHeight,
         readerThemeIndex,
         fqBackupCheckRange(settingsRec, 'readerFlipIndex', 0, 2),
-        fqBackupCheckRange(settingsRec, 'readerComicFlipIndex', 0, 2),
-        fqBackupCheckRange(settingsRec, 'readerFontIndex', 0, 8),
+        fqBackupCheckRange(settingsRec, 'readerComicFlipIndex', 0, 2),        fqBackupCheckRange(settingsRec, 'readerFontIndex', 0, 8),
         typeof showParaRaw === 'boolean' ? showParaRaw : true,
         typeof volumeKeyRaw === 'boolean' ? volumeKeyRaw : false,
         customThemes,
@@ -1429,7 +1437,8 @@ export class FqLibraryBackup {
         readerDialogueHighlightColor,
         readerCustomDialogueColors,
         mineSettingsStyle,
-        dramaPageEnabled);
+        dramaPageEnabled,
+        readerColumnMode);
     }
     return new FqLibraryBackupData(createdAt, appVersion, shelf, browse, listen,
       watched, reader, excluded, settings, groups, watchHistory, bookmarks);
@@ -1556,6 +1565,10 @@ export class FqLibraryBackup {
         settings.readerThemeIndex, settings.readerFlipIndex, settings.readerFontIndex,
         settings.readerShowParagraphComment);
       FqReaderStore.saveComicFlip(settings.readerComicFlipIndex);
+      // 双页栏布局（旧备份无此字段跳过，不重置本机已有设置）
+      if (settings.readerColumnMode >= 0) {
+        FqReaderStore.saveColumnMode(settings.readerColumnMode);
+      }
       FqReaderStore.saveVolumeKeyPaging(settings.readerVolumeKeyPaging);
       // 对话高亮色（旧备份无此字段跳过，不重置本机已有设置）
       if (settings.readerDialogueHighlightColor !== null) {

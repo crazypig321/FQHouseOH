@@ -424,6 +424,7 @@ struct Index {
         lineHeight: fqReaderSettingsBus.lineHeight,
         themeIndex: fqReaderSettingsBus.themeIndex,
         flipIndex: fqReaderSettingsBus.flipIndex,
+        columnMode: fqReaderSettingsBus.columnMode,
         fontIndex: fqReaderSettingsBus.fontIndex,
         showParagraphComment: fqReaderSettingsBus.showParagraphComment,
         dialogueHighlightColor: fqReaderSettingsBus.dialogueHighlightColor,
@@ -462,6 +463,12 @@ struct Index {
           const handler: FqReaderSettingsHandler | null = fqReaderSettingsBus.handler;
           if (handler !== null) {
             handler.changeFlip(index);
+          }
+        },
+        columnModeChange: (mode: number): void => {
+          const handler: FqReaderSettingsHandler | null = fqReaderSettingsBus.handler;
+          if (handler !== null) {
+            handler.changeColumnMode(mode);
           }
         },
         showParagraphCommentChange: (on: boolean): void => {

@@ -283,6 +283,8 @@ export struct ReaderPage {
   @Local lineHeight: number = 1.9;
   @Local themeIndex: number = 0;
   @Local flipIndex: number = 0;
+  /** 双页栏布局：0 自动 / 1 单栏（默认）/ 2 双栏；仅分页模式生效（上下滚动恒单栏）。 */
+  @Local columnMode: number = 1;
   @Local fontIndex: number = 0;
   @Local showParagraphComment: boolean = true;
   /** 对话高亮色（空 = 关闭；#RRGGBB / #AARRGGBB，引号内文本底色）。 */
@@ -493,6 +495,7 @@ export struct ReaderPage {
     this.lineHeight = settings.lineHeight;
     this.themeIndex = settings.themeIndex;
     this.flipIndex = settings.flipIndex;
+    this.columnMode = settings.columnMode;
     this.fontIndex = settings.fontIndex;
     this.showParagraphComment = settings.showParagraphComment;
     this.dialogueHighlightColor = settings.dialogueHighlightColor;
@@ -1343,8 +1346,41 @@ export struct ReaderPage {
     metrics.contentWidthPx = screenW - sideVp * 2 * density;
     metrics.contentHeightPx = screenH
       - (headerZoneVp + contentTopVp + contentBottomVp + footerZoneVp) * density;
+    // 双页栏布局（仅分页模式生效，上下滚动恒单栏）
+    const columns: number = this.resolvePagedColumns();
+    metrics.columns = columns;
+    if (columns > 1) {
+      // 栏间距（对齐 fqapp）：clamp(24, 边距×2, 内容宽×0.25)；栏宽 = (内容宽 - 间距) / 栏数
+      const columnGapVp: number = Math.min(Math.max(24, sideVp * 2),
+        metrics.contentWidthPx / density * 0.25);
+      metrics.columnGapPx = columnGapVp * density;
+      metrics.columnWidthPx = (metrics.contentWidthPx - metrics.columnGapPx) / columns;
+    } else {
+      metrics.columnGapPx = 0;
+      metrics.columnWidthPx = metrics.contentWidthPx;
+    }
     hilog.info(0x0001, 'FqM', `buildMetrics footer=${metrics.footerZoneVp} header=${metrics.headerZoneVp} contentH=${metrics.contentHeightPx} lineH=${metrics.lineHeightPx} fontSize=${this.fontSize}`);
     return metrics;
+  }
+
+  /** 分页模式栏数解析（无副作用，供 buildMetrics 与 changeFlip 出滚动比对共用）：
+   *  0 自动（≥840vp 且横屏双栏）/ 1 单栏 / 2 双栏（≥420vp）；上下滚动恒 1；阈值对齐 fqapp。 */
+  private resolvePagedColumns(): number {
+    if (this.flipIndex === 2 || this.columnMode === 1) {
+      return 1;
+    }
+    const displayData: display.Display = display.getDefaultDisplaySync();
+    const density: number = displayData.densityPixels > 0 ? displayData.densityPixels : 1;
+    const screenW: number = appState.screenWidth > 0 ? appState.screenWidth : displayData.width;
+    const screenH: number = appState.screenHeight > 0 ? appState.screenHeight : displayData.height;
+    const viewportWVp: number = screenW / density;
+    if (viewportWVp < 420) {
+      return 1;
+    }
+    if (this.columnMode === 2) {
+      return 2;
+    }
+    return viewportWVp >= 840 && viewportWVp > screenH / density ? 2 : 1;
   }
 
   /** 章节文本 → 段落数组（首段章题不加缩进，其余段加 '\u3000\u3000' 前缀，幂等）。 */
@@ -3055,6 +3091,10 @@ export struct ReaderPage {
         this.changeFlip(index);
         fqReaderSettingsBus.flipIndex = this.flipIndex;
       },
+      changeColumnMode: (mode: number): void => {
+        this.changeColumnMode(mode);
+        fqReaderSettingsBus.columnMode = this.columnMode;
+      },
       changeShowParagraphComment: (on: boolean): void => {
         this.changeShowParagraphComment(on);
         fqReaderSettingsBus.showParagraphComment = this.showParagraphComment;
@@ -3291,7 +3331,25 @@ export struct ReaderPage {
     } else if (prevMode === 2) {
       // 上下 → 仿真/横滑：当前章/页已由滚动回调同步，还原邻章预载分页态
       this.shownPageOffset = this.pageIndex;
+      // 双页：滚动期几何恒单栏，目标栏数不一致时保位重排（单栏用户保持原路径不变）
+      if (this.resolvePagedColumns() !== this.cachedMetrics.columns) {
+        this.relayoutKeepPosition();
+        return;
+      }
       this.preloadNeighbors(this.loadToken);
+    }
+  }
+
+  /** 切换双页栏布局（0 自动 / 1 单栏 / 2 双栏）：分页模式栏数实际变化才保位重排；
+   *  上下滚动不渲染栏不重排，回分页时经 changeFlip 比对校正。 */
+  private changeColumnMode(mode: number): void {
+    if (mode === this.columnMode || mode < 0 || mode > 2) {
+      return;
+    }
+    this.columnMode = mode;
+    FqReaderStore.saveColumnMode(mode);
+    if (this.flipIndex !== 2 && this.resolvePagedColumns() !== this.cachedMetrics.columns) {
+      this.relayoutKeepPosition();
     }
   }
 

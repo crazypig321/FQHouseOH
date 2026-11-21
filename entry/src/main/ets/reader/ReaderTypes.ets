@@ -32,6 +32,8 @@ export class FqPageFragment {
   showBubble: boolean = false;
   /** 气泡独立成行（引擎判定末行放不下：图标不拼末行，单独一行渲染，行数与装页记账一致）。 */
   bubbleOwnRow: boolean = false;
+  /** 所属栏（0 左栏 / 1 右栏；双页模式跨栏段落拆多片段，单栏恒 0）。 */
+  column: number = 0;
 
   constructor(paraIndex: number, isTitle: boolean) {
     this.paraIndex = paraIndex;
@@ -159,6 +161,12 @@ export class FqReaderLayoutMetrics {
   /** 眉页 / 眉脚区高（vp，FqReaderFlip 槽位三区布局用）。 */
   headerZoneVp: number = 20;
   footerZoneVp: number = 20;
+  /** 双页栏数（1 单栏 / 2 双栏；上下滚动模式恒 1）。 */
+  columns: number = 1;
+  /** 栏间距（px，双栏时 > 0）。 */
+  columnGapPx: number = 0;
+  /** 单栏宽（px；单栏时 = contentWidthPx）。 */
+  columnWidthPx: number = 0;
 }
 
 /** 段评条目（/api/v1/books/{bookId}/reviews 段评配方：data.data_list[i].comment）。 */

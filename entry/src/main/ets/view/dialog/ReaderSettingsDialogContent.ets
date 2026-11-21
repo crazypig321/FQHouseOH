@@ -33,6 +33,9 @@ export const FQ_READER_THEMES: FqReaderTheme[] = [
 /** 翻页模式标签（下标与 flipIndex 对应）。 */
 export const FQ_READER_FLIP_LABELS: string[] = ['仿真', '横滑', '上下'];
 
+/** 双页栏布局标签（下标与 columnMode 对应；仅分页阅读生效，上下滚动恒单栏）。 */
+export const FQ_READER_COLUMN_LABELS: string[] = ['自动', '单栏', '双栏'];
+
 /** 对话高亮预设底色（半透明标记色，跨深浅主题可读；标签与色值一一对应）。 */
 const FQ_DIALOGUE_COLORS: string[] = ['#4DFFD54F', '#4D81C784', '#4D64B5F6', '#4D4DD0E1', '#4DF06292', '#4DBA68C8'];
 const FQ_DIALOGUE_COLOR_LABELS: string[] = ['黄色', '绿色', '蓝色', '青色', '粉色', '紫色'];
@@ -59,6 +62,8 @@ export struct ReaderSettingsDialogContent {
   @Param lineHeight: number = 1.9;
   @Param themeIndex: number = 0;
   @Param flipIndex: number = 0;
+  /** 双页栏布局（0 自动 / 1 单栏 / 2 双栏；仅分页阅读生效）。 */
+  @Param columnMode: number = 1;
   @Param fontIndex: number = 0;
   /** 段评显示开关（关闭后不显示段评气泡与计数）。 */
   @Param showParagraphComment: boolean = true;
@@ -83,6 +88,7 @@ export struct ReaderSettingsDialogContent {
   @Event themeChange: (index: number) => void = (_index: number): void => {};
   @Event fontChange: (index: number) => void = (_index: number): void => {};
   @Event flipChange: (index: number) => void = (_index: number): void => {};
+  @Event columnModeChange: (mode: number) => void = (_mode: number): void => {};
   @Event showParagraphCommentChange: (on: boolean) => void = (_on: boolean): void => {};
   /** 对话高亮选色（空串 = 关闭高亮）。 */
   @Event dialogueHighlightColorChange: (color: string) => void = (_color: string): void => {};
@@ -109,6 +115,17 @@ export struct ReaderSettingsDialogContent {
 
   aboutToAppear(): void {
     this.customColors = FqReaderStore.getCustomDialogueColors();
+  }
+
+  /** 双页行说明文案（按当前选中模式，简短说明生效条件）。 */
+  private columnModeHint(): string {
+    if (this.columnMode === 0) {
+      return '宽屏横屏时自动双栏';
+    }
+    if (this.columnMode === 2) {
+      return '屏幕够宽时左右双栏';
+    }
+    return '始终单栏';
   }
 
   /** 选中项变化：主题列表滚到选中项（已在可视区时 AUTO 不动）。 */
@@ -274,6 +291,32 @@ export struct ReaderSettingsDialogContent {
               this.flipChange(index);
             })
         }, (label: string): string => label)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      Row({ space: 12 }) {
+        Text('双页')
+          .fontSize(14)
+          .fontColor(themeUtils.textColor)
+          .width(36)
+        ForEach(FQ_READER_COLUMN_LABELS, (label: string, index: number) => {
+          Text(label)
+            .fontSize(12)
+            .fontColor(this.columnMode === index ? '#FFFFFF' : themeUtils.textColor)
+            .backgroundColor(this.columnMode === index ? appState.accentColor : 'transparent')
+            .borderRadius(13)
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .onClick((): void => {
+              this.columnModeChange(index);
+            })
+        }, (label: string): string => label)
+        Text(this.columnModeHint())
+          .fontSize(11)
+          .fontColor(themeUtils.terTextColor)
+          .layoutWeight(1)
+          .maxLines(1)
+          .textAlign(TextAlign.End)
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)

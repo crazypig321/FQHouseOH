@@ -11,6 +11,8 @@ export class FqReaderSettingsBus {
   @Trace lineHeight: number = 1.9;
   @Trace themeIndex: number = 0;
   @Trace flipIndex: number = 0;
+  /** 双页栏布局（0 自动 / 1 单栏 / 2 双栏）。 */
+  @Trace columnMode: number = 1;
   @Trace fontIndex: number = 0;
   @Trace showParagraphComment: boolean = true;
   /** 对话高亮色（空 = 关闭；#RRGGBB / #AARRGGBB）。 */
@@ -35,6 +37,8 @@ export interface FqReaderSettingsHandler {
   changeTheme: (index: number) => void;
   changeFont: (index: number) => void;
   changeFlip: (index: number) => void;
+  /** 切换双页栏布局（0 自动 / 1 单栏 / 2 双栏；阅读页保位重排）。 */
+  changeColumnMode: (mode: number) => void;
   changeShowParagraphComment: (on: boolean) => void;
   /** 对话高亮选色（空串 = 关闭高亮）。 */
   changeDialogueHighlightColor: (color: string) => void;
