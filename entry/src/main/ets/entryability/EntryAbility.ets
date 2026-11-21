@@ -250,6 +250,19 @@ export default class EntryAbility extends UIAbility {
         } catch (error) {
           // 不支持窗口三键区的设备忽略
         }
+        // 主窗口形态跟踪：平板 PcTitleBar 仅在自由多窗形态（浮动/最大化）显示
+        try {
+          appState.windowStatus = mainWindow.getWindowStatus();
+        } catch (error) {
+          // 不支持窗口形态查询的设备保持默认
+        }
+        try {
+          mainWindow.on('windowStatusChange', (status: window.WindowStatusType): void => {
+            appState.windowStatus = status;
+          });
+        } catch (error) {
+          // 不支持窗口形态监听的设备忽略
+        }
         const syncAvoidArea = (): void => {
           const topRectVp: number = uiContext.px2vp(
             mainWindow.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM).topRect.height);

@@ -37,6 +37,7 @@ import { FqChapterCacheStore, FqCachedCatalog } from '../../core/FqChapterCacheS
 import { FqAudioHistory, FqListenRecord } from '../../core/FqAudioHistory';
 import { ReaderNavParams, ListenNavParams, ROUTE_LISTEN } from '../../model/FqNavModels';
 import { CommonNav, titleBarOf } from '../../view/CommonNav';
+import { useSidebarLayout } from '../../utils/BreakpointUtils';
 import { CommonLoading } from '../../view/CommonCom';
 import { FqBookmarkRibbon } from '../../view/FqBookmarkRibbon';
 import { CommonSheet, FqSheetOptions } from '../../view/sheet/CommonSheet';
@@ -339,7 +340,10 @@ export struct ReaderPage {
   private filesDir: string = '';
   private loadToken: number = 0;
   private clockTimer: number = -1;
-  private titleBarOp: TitleBarContentOptions | undefined = undefined;
+  /** 标题栏菜单（@Local：PC 全屏切换后整体重赋值，驱动右上角全屏按钮图标刷新）。 */
+  @Local titleBarOp: TitleBarContentOptions | undefined = undefined;
+  /** 进入 PC 沉浸全屏前窗口已是系统全屏（平板全屏形态）：退出时不 recover，保持系统全屏。 */
+  private pcFsWasFullScreen: boolean = false;
   /** 排版几何缓存（重排/开章时重建，渲染期间引用稳定）。
    *  @Local：重赋值驱动眉页/眉脚区高、FqPageCanvas metrics、上下滚动条目字号等
    *  读取处即时重渲染（普通字段不建依赖，避让区/字号变化曾不传播）。 */
@@ -382,103 +386,9 @@ export struct ReaderPage {
     ReaderNavParams.chapterLoader = null;
     // 预载本书书签：右上角色带标识（已收藏页）渲染依赖 bookmarkItems
     this.reloadBookmarkItems();
-    // 本地导入书籍无段评数据：隐藏段评入口（听书走离线朗读，照常显示）；
-    // 书旗只读来源无番茄书评：隐藏段评；听书走离线朗读，照常显示
-    const isLocalBook: boolean = FqLocalBookStore.isLocalBookId(this.bookId);
-    if (this.readOnly) {
-      // 书旗只读来源：听书（离线朗读）+ 书签 + 分享（链接直达）+ 应用流转接续
-      const roMenus: Array<HdsNavigationMenuItemOptions> = [];
-      roMenus.push({
-        content: {
-          icon: $r('sys.symbol.waveform_headphones'),
-          label: 'listen',
-          action: (): void => {
-            this.openListenFromReader();
-          },
-        },
-      });
-      roMenus.push({
-        content: {
-          icon: $r('sys.symbol.bookmark'),
-          label: '书签',
-          action: (): void => {
-            this.openBookmarkSheet();
-          },
-        },
-      });
-      roMenus.push({
-        content: {
-          icon: $r('sys.symbol.share'),
-            label: '分享',
-          action: (): void => {
-            FqShareKit.shareRead();
-          },
-        },
-      });
-      roMenus.push({
-        content: {
-          icon: $r('sys.symbol.superdevice'),
-            label: '流转',
-          action: (): void => {
-            FqContinueKit.startInAppContinuation();
-          },
-        },
-      });
-      this.titleBarOp = titleBarOf(this.bookTitle, undefined, roMenus);
-    } else {
-      const menus: Array<HdsNavigationMenuItemOptions> = [];
-      if (!isLocalBook) {
-        menus.push({
-          content: {
-            icon: $r('sys.symbol.message'),
-            label: 'comments',
-            action: (): void => {
-              this.openCommentSheet();
-            },
-          },
-        });
-      }
-      menus.push({
-        content: {
-          icon: $r('sys.symbol.waveform_headphones'),
-          label: 'listen',
-          action: (): void => {
-            this.openListenFromReader();
-          },
-        },
-      });
-      // 书签：当前位置收藏/列表跳转（半模态）
-      menus.push({
-        content: {
-          icon: $r('sys.symbol.bookmark'),
-          label: '书签',
-          action: (): void => {
-            this.openBookmarkSheet();
-          },
-        },
-      });
-      // 分享：拉起系统分享面板（书旗走链接直达，本地导入书分享正文文件本体）
-      menus.push({
-        content: {
-          icon: $r('sys.symbol.share'),
-            label: '分享',
-          action: (): void => {
-            FqShareKit.shareRead();
-          },
-        },
-      });
-      // 应用流转：拉起系统设备选择面板（接续到其他设备续读）
-      menus.push({
-        content: {
-          icon: $r('sys.symbol.superdevice'),
-            label: '流转',
-          action: (): void => {
-            FqContinueKit.startInAppContinuation();
-          },
-        },
-      });
-      this.titleBarOp = titleBarOf(this.bookTitle, undefined, menus);
-    }
+    // PC 布局：进入阅读页隐藏左侧主导航，内容区铺满（PlayerPage 同款）
+    appState.hidePcSideNav = true;
+    this.rebuildTitleBar();
     this.startChapterIndex = ReaderNavParams.chapterIndex;
     ReaderNavParams.chapterIndex = -1;
     this.initialDomPos = ReaderNavParams.initialDomPos;
@@ -534,6 +444,164 @@ export struct ReaderPage {
       clearInterval(this.clockTimer);
       this.clockTimer = -1;
     }
+    // 离页退出 PC 沉浸全屏并恢复左侧主导航可见
+    this.exitPcFullscreenOnLeave();
+    appState.hidePcSideNav = false;
+  }
+
+  /** 重建标题栏菜单（aboutToAppear 初建 + PC 全屏切换后刷新右上角全屏按钮图标）。 */
+  private rebuildTitleBar(): void {
+    // 本地导入书籍无段评数据：隐藏段评入口（听书走离线朗读，照常显示）；
+    // 书旗只读来源无番茄书评：隐藏段评；听书走离线朗读，照常显示
+    const isLocalBook: boolean = FqLocalBookStore.isLocalBookId(this.bookId);
+    if (this.readOnly) {
+      // 书旗只读来源：听书（离线朗读）+ 书签 + 分享（链接直达）+ 应用流转接续
+      const roMenus: Array<HdsNavigationMenuItemOptions> = [];
+      roMenus.push({
+        content: {
+          icon: $r('sys.symbol.waveform_headphones'),
+          label: 'listen',
+          action: (): void => {
+            this.openListenFromReader();
+          },
+        },
+      });
+      roMenus.push({
+        content: {
+          icon: $r('sys.symbol.bookmark'),
+          label: '书签',
+          action: (): void => {
+            this.openBookmarkSheet();
+          },
+        },
+      });
+      roMenus.push({
+        content: {
+          icon: $r('sys.symbol.share'),
+            label: '分享',
+          action: (): void => {
+            FqShareKit.shareRead();
+          },
+        },
+      });
+      roMenus.push({
+        content: {
+          icon: $r('sys.symbol.superdevice'),
+            label: '流转',
+          action: (): void => {
+            FqContinueKit.startInAppContinuation();
+          },
+        },
+      });
+      this.appendPcFullscreenMenu(roMenus);
+      this.titleBarOp = titleBarOf(this.bookTitle, undefined, roMenus);
+    } else {
+      const menus: Array<HdsNavigationMenuItemOptions> = [];
+      if (!isLocalBook) {
+        menus.push({
+          content: {
+            icon: $r('sys.symbol.message'),
+            label: 'comments',
+            action: (): void => {
+              this.openCommentSheet();
+            },
+          },
+        });
+      }
+      menus.push({
+        content: {
+          icon: $r('sys.symbol.waveform_headphones'),
+          label: 'listen',
+          action: (): void => {
+            this.openListenFromReader();
+          },
+        },
+      });
+      // 书签：当前位置收藏/列表跳转（半模态）
+      menus.push({
+        content: {
+          icon: $r('sys.symbol.bookmark'),
+          label: '书签',
+          action: (): void => {
+            this.openBookmarkSheet();
+          },
+        },
+      });
+      // 分享：拉起系统分享面板（书旗走链接直达，本地导入书分享正文文件本体）
+      menus.push({
+        content: {
+          icon: $r('sys.symbol.share'),
+            label: '分享',
+          action: (): void => {
+            FqShareKit.shareRead();
+          },
+        },
+      });
+      // 应用流转：拉起系统设备选择面板（接续到其他设备续读）
+      menus.push({
+        content: {
+          icon: $r('sys.symbol.superdevice'),
+            label: '流转',
+          action: (): void => {
+            FqContinueKit.startInAppContinuation();
+          },
+        },
+      });
+      this.appendPcFullscreenMenu(menus);
+      this.titleBarOp = titleBarOf(this.bookTitle, undefined, menus);
+    }
+  }
+
+  /** PC 布局：标题栏右上角末尾追加全屏/窗口切换菜单项（手机 useSidebarLayout 为 false 不追加）。 */
+  private appendPcFullscreenMenu(menus: Array<HdsNavigationMenuItemOptions>): void {
+    if (!useSidebarLayout(appState.WidthBp, appState.windowWidthVp, appState.displayWidthVp)) {
+      return;
+    }
+    menus.push({
+      content: {
+        icon: appState.pcImmersiveFullscreen
+          ? $r('sys.symbol.arrow_down_right_and_arrow_up_left')
+          : $r('sys.symbol.arrow_up_left_and_arrow_down_right'),
+        label: appState.pcImmersiveFullscreen ? '窗口' : '全屏',
+        action: (): void => {
+          this.togglePcFullscreen();
+        },
+      },
+    });
+  }
+
+  /** PC 沉浸全屏切换：进入时 maximize(ENTER_IMMERSIVE) 窗口铺满；退出时 recover 还原窗口形态。 */
+  private togglePcFullscreen(): void {
+    const entering: boolean = !appState.pcImmersiveFullscreen;
+    appState.pcImmersiveFullscreen = entering;
+    this.rebuildTitleBar();
+    window.getLastWindow(getContext(this)).then((win: window.Window): void => {
+      if (entering) {
+        // 记录进入前形态：已是系统全屏（平板全屏形态）则退出时不 recover
+        this.pcFsWasFullScreen = win.getWindowStatus() === window.WindowStatusType.FULL_SCREEN;
+        win.maximize(window.MaximizePresentation.ENTER_IMMERSIVE).catch((): void => {
+        });
+      } else if (!this.pcFsWasFullScreen) {
+        win.recover().catch((): void => {
+        });
+      }
+    }).catch((): void => {
+    });
+  }
+
+  /** 离页退出 PC 沉浸全屏（还原窗口形态与全局标记，避免 PcMainLayout 残留沉浸态）。 */
+  private exitPcFullscreenOnLeave(): void {
+    if (!appState.pcImmersiveFullscreen) {
+      return;
+    }
+    appState.pcImmersiveFullscreen = false;
+    window.getLastWindow(getContext(this)).then((win: window.Window): void => {
+      if (!this.pcFsWasFullScreen) {
+        win.recover().catch((): void => {
+        });
+      }
+    }).catch((): void => {
+    });
   }
 
   /** 标题栏听书：携当前章进入听书页，从当前正在看的段落开始听（字幕定位失败回退章首）。 */
@@ -589,10 +657,14 @@ export struct ReaderPage {
       onShown: (): void => {
         this.pageShown = true;
         this.syncVolumeKeyConsumer();
+        // PC 布局：页面可见时隐藏左侧主导航（onHidden 时被压栈页面可能已改值）
+        appState.hidePcSideNav = true;
       },
       onHidden: (): void => {
         this.pageShown = false;
         this.syncVolumeKeyConsumer();
+        // PC 布局：被压栈隐藏时恢复左侧主导航，覆盖页正常展示
+        appState.hidePcSideNav = false;
       },
     }) {
       Stack() {

@@ -18,7 +18,7 @@ import { http } from '@kit.NetworkKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { batteryInfo, BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { TitleBarContentOptions } from '@kit.UIDesignKit';
+import { HdsNavigationMenuItemOptions, TitleBarContentOptions } from '@kit.UIDesignKit';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { FqChapter, FqCacheTaskView, fqKindToTab } from '../../model/FqModels';
 import { FqReaderProgress, FqReaderStore } from '../../core/FqReaderStore';
@@ -26,6 +26,7 @@ import { FqReadStatsStore } from '../../core/FqReadStatsStore';
 import { ComicNavParams, ROUTE_CACHED_COMICS } from '../../model/FqNavModels';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { CommonNav, titleBarOf } from '../../view/CommonNav';
+import { useSidebarLayout } from '../../utils/BreakpointUtils';
 import { CommonLoading } from '../../view/CommonCom';
 import { FqBookmarkRibbon } from '../../view/FqBookmarkRibbon';
 import { FqSheetOptions } from '../../view/sheet/CommonSheet';
@@ -192,7 +193,10 @@ export struct ComicPage {
   private chapters: FqChapter[] = [];
   private loadToken: number = 0;
   private clockTimer: number = -1;
-  private titleBarOp: TitleBarContentOptions | undefined = undefined;
+  /** 标题栏菜单（@Local：PC 全屏切换后整体重赋值，驱动右上角全屏按钮图标刷新）。 */
+  @Local titleBarOp: TitleBarContentOptions | undefined = undefined;
+  /** 进入 PC 沉浸全屏前窗口已是系统全屏（平板全屏形态）：退出时不 recover，保持系统全屏。 */
+  private pcFsWasFullScreen: boolean = false;
   /** 各章图片缓存（跨章翻页/上下追加复用，会话内有效）。 */
   private chapterImageCache: Map<number, string[]> = new Map();
   /** 已读章节集合（翻过章末/下一话/上下滚动进后章时标记，目录进度用；目录跳转不标记）。 */
@@ -231,56 +235,9 @@ export struct ComicPage {
     ComicNavParams.previewNoSave = false;
     // 预载本书书签：右上角色带标识（已收藏页）渲染依赖 bookmarkItems
     this.reloadBookmarkItems();
-    this.titleBarOp = titleBarOf(this.bookTitle, undefined, [
-      {
-        content: {
-          icon: $r('sys.symbol.message'),
-          label: 'comments',
-          action: (): void => {
-            this.openCommentSheet();
-          },
-        },
-      },
-      {
-        content: {
-          icon: $r('sys.symbol.download'),
-          label: 'cache',
-          action: (): void => {
-            this.openCacheSheet();
-          },
-        },
-      },
-      // 书签：当前页收藏/列表跳转（半模态）
-      {
-        content: {
-          icon: $r('sys.symbol.bookmark'),
-          label: '书签',
-          action: (): void => {
-            this.openBookmarkSheet();
-          },
-        },
-      },
-      // 分享：直达链接拉起系统分享面板（目标端按 id 拉目录图片、跟随本机进度）
-      {
-        content: {
-          icon: $r('sys.symbol.share'),
-          label: '分享',
-          action: (): void => {
-            FqShareKit.shareComic();
-          },
-        },
-      },
-      // 应用流转：拉起系统设备选择面板（接续到其他设备续读）
-      {
-        content: {
-          icon: $r('sys.symbol.superdevice'),
-          label: '流转',
-          action: (): void => {
-            FqContinueKit.startInAppContinuation();
-          },
-        },
-      },
-    ]);
+    // PC 布局：进入漫画页隐藏左侧主导航，内容区铺满（PlayerPage 同款）
+    appState.hidePcSideNav = true;
+    this.rebuildTitleBar();
     FqReaderStore.init(getContext(this));
     FqReadStatsStore.init(getContext(this));
     this.comicFlipIndex = FqReaderStore.getSettings().comicFlipIndex;
@@ -310,6 +267,116 @@ export struct ComicPage {
       clearInterval(this.clockTimer);
       this.clockTimer = -1;
     }
+    // 离页退出 PC 沉浸全屏并恢复左侧主导航可见
+    this.exitPcFullscreenOnLeave();
+    appState.hidePcSideNav = false;
+  }
+
+  /** 重建标题栏菜单（aboutToAppear 初建 + PC 全屏切换后刷新右上角全屏按钮图标）。 */
+  private rebuildTitleBar(): void {
+    const menus: Array<HdsNavigationMenuItemOptions> = [];
+    menus.push({
+      content: {
+        icon: $r('sys.symbol.message'),
+        label: 'comments',
+        action: (): void => {
+          this.openCommentSheet();
+        },
+      },
+    });
+    menus.push({
+      content: {
+        icon: $r('sys.symbol.download'),
+        label: 'cache',
+        action: (): void => {
+          this.openCacheSheet();
+        },
+      },
+    });
+    // 书签：当前页收藏/列表跳转（半模态）
+    menus.push({
+      content: {
+        icon: $r('sys.symbol.bookmark'),
+        label: '书签',
+        action: (): void => {
+          this.openBookmarkSheet();
+        },
+      },
+    });
+    // 分享：直达链接拉起系统分享面板（目标端按 id 拉目录图片、跟随本机进度）
+    menus.push({
+      content: {
+        icon: $r('sys.symbol.share'),
+        label: '分享',
+        action: (): void => {
+          FqShareKit.shareComic();
+        },
+      },
+    });
+    // 应用流转：拉起系统设备选择面板（接续到其他设备续读）
+    menus.push({
+      content: {
+        icon: $r('sys.symbol.superdevice'),
+        label: '流转',
+        action: (): void => {
+          FqContinueKit.startInAppContinuation();
+        },
+      },
+    });
+    this.appendPcFullscreenMenu(menus);
+    this.titleBarOp = titleBarOf(this.bookTitle, undefined, menus);
+  }
+
+  /** PC 布局：标题栏右上角末尾追加全屏/窗口切换菜单项（手机 useSidebarLayout 为 false 不追加）。 */
+  private appendPcFullscreenMenu(menus: Array<HdsNavigationMenuItemOptions>): void {
+    if (!useSidebarLayout(appState.WidthBp, appState.windowWidthVp, appState.displayWidthVp)) {
+      return;
+    }
+    menus.push({
+      content: {
+        icon: appState.pcImmersiveFullscreen
+          ? $r('sys.symbol.arrow_down_right_and_arrow_up_left')
+          : $r('sys.symbol.arrow_up_left_and_arrow_down_right'),
+        label: appState.pcImmersiveFullscreen ? '窗口' : '全屏',
+        action: (): void => {
+          this.togglePcFullscreen();
+        },
+      },
+    });
+  }
+
+  /** PC 沉浸全屏切换：进入时 maximize(ENTER_IMMERSIVE) 窗口铺满；退出时 recover 还原窗口形态。 */
+  private togglePcFullscreen(): void {
+    const entering: boolean = !appState.pcImmersiveFullscreen;
+    appState.pcImmersiveFullscreen = entering;
+    this.rebuildTitleBar();
+    window.getLastWindow(getContext(this)).then((win: window.Window): void => {
+      if (entering) {
+        // 记录进入前形态：已是系统全屏（平板全屏形态）则退出时不 recover
+        this.pcFsWasFullScreen = win.getWindowStatus() === window.WindowStatusType.FULL_SCREEN;
+        win.maximize(window.MaximizePresentation.ENTER_IMMERSIVE).catch((): void => {
+        });
+      } else if (!this.pcFsWasFullScreen) {
+        win.recover().catch((): void => {
+        });
+      }
+    }).catch((): void => {
+    });
+  }
+
+  /** 离页退出 PC 沉浸全屏（还原窗口形态与全局标记，避免 PcMainLayout 残留沉浸态）。 */
+  private exitPcFullscreenOnLeave(): void {
+    if (!appState.pcImmersiveFullscreen) {
+      return;
+    }
+    appState.pcImmersiveFullscreen = false;
+    window.getLastWindow(getContext(this)).then((win: window.Window): void => {
+      if (!this.pcFsWasFullScreen) {
+        win.recover().catch((): void => {
+        });
+      }
+    }).catch((): void => {
+    });
   }
 
   build() {
@@ -332,10 +399,14 @@ export struct ComicPage {
       onShown: (): void => {
         this.pageShown = true;
         this.syncVolumeKeyConsumer();
+        // PC 布局：页面可见时隐藏左侧主导航（onHidden 时被压栈页面可能已改值）
+        appState.hidePcSideNav = true;
       },
       onHidden: (): void => {
         this.pageShown = false;
         this.syncVolumeKeyConsumer();
+        // PC 布局：被压栈隐藏时恢复左侧主导航，覆盖页正常展示
+        appState.hidePcSideNav = false;
       },
     }) {
       // 外层：跟随容器（呼出菜单时被标题栏压缩，实测下压量）

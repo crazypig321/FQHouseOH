@@ -3,6 +3,7 @@
  * （对齐 musicfreeOH AppState 模式，页面通过 appState.pageInfos 路由）。
  */
 import { hdsMaterial } from "@kit.UIDesignKit";
+import { window } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 
 @ObservedV2
@@ -28,6 +29,8 @@ export class AppState {
   @Trace displayWidthVp: number = 0;
   /** 2in1 系统三键（最小化/最大化/关闭）避让宽度（vp；0 = 无窗口三键形态） */
   @Trace decorButtonWidth: number = 0;
+  /** 主窗口形态（EntryAbility 经 windowStatusChange 跟踪；平板 PcTitleBar 仅自由多窗形态显示） */
+  @Trace windowStatus: window.WindowStatusType = window.WindowStatusType.UNDEFINED;
   /** PC 侧边栏展开/收起（PcSideBar 宽度切换） */
   @Trace sidebarExpanded: boolean = true;
   // 是否开启模糊

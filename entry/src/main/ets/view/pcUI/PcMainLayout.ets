@@ -1,4 +1,6 @@
 import { HdsNavigation, HdsNavigationTitleMode } from '@kit.UIDesignKit';
+import { window } from '@kit.ArkUI';
+import { deviceInfo } from '@kit.BasicServicesKit';
 import { appState, AppState } from '../../entryability/AppState';
 import { MainTabPagesBuilder, PageMapBuilder } from '../FqAppPages';
 import { PcTitleBar } from './PcTitleBar';
@@ -68,10 +70,25 @@ export struct PcMainLayout {
     PageMapBuilder(name)
   }
 
+  /**
+   * PcTitleBar 可见性：
+   * - 2in1 恒显示（自由窗口始终有标题栏三键形态）；
+   * - 平板仅自由多窗形态（浮动/最大化）显示，系统全屏/分屏等无窗口标题栏形态隐藏，
+   *   避免出现应用顶栏与系统形态不符的双重标题。
+   */
+  private pcTitleBarVisible(): boolean {
+    if (deviceInfo.deviceType !== 'tablet') {
+      return true;
+    }
+    const status: window.WindowStatusType = appState.windowStatus;
+    return status === window.WindowStatusType.FLOATING || status === window.WindowStatusType.MAXIMIZE;
+  }
+
   build() {
     Column() {
-      // 视频「全屏观看」沉浸全屏（appState.pcImmersiveFullscreen）：隐藏应用标题栏与左侧导航栏，内容区铺满
-      if (!appState.pcImmersiveFullscreen) {
+      // 视频「全屏观看」沉浸全屏（appState.pcImmersiveFullscreen）隐藏应用标题栏与左侧导航栏，内容区铺满；
+      // 平板系统全屏/分屏形态（windowStatus）也无窗口标题栏，隐藏 PcTitleBar
+      if (!appState.pcImmersiveFullscreen && this.pcTitleBarVisible()) {
         PcTitleBar()
       }
 
