@@ -56,7 +56,8 @@
  *   （5s 自隐，任意触摸重新唤出）；解锁立即恢复控件。
  * - 清屏播放（非全屏选集行「清屏」按钮，缓存右侧/PC 全屏按钮左侧）：隐藏
  *   顶栏、底部信息区与 PC 详情侧栏等全部非播放组件，仅留画面与右下角
- *   「恢复」按钮；只控显隐、不拦手势（单击切播放、竖滑切集等照常可用）。
+ *   「恢复」按钮（5s 自隐，任意触摸/PC 鼠标移动唤出）；只控显隐、不拦手势
+ *   （单击切播放、竖滑切集等照常可用）。
  * - 已看集标记与续播（fqapp watched_episodes.dart / video_progress 一族）：
  *   已看按集 itemId 持久化（FqWatchedStore），实际播放过（position > 0）才标记，
  *   跳集观看绝不误标中间集；续播进度（集 + 位置）暂停/切集/周期 5s/退出保存，
@@ -458,6 +459,10 @@ export struct PlayerPage {
   /** 非全屏清屏播放：隐藏全部非播放组件仅留画面，右下角常驻「恢复」按钮；
    *  只控组件显隐、不拦手势（区别于全屏防误触锁）。 */
   @Local cleanScreen: boolean = false;
+  /** 清屏「恢复」按钮可见（清屏后 5s 自隐，任意触摸/PC 鼠标移动唤出，同全屏锁按钮语义）。 */
+  @Local cleanRestoreVisible: boolean = true;
+  /** 清屏「恢复」按钮自隐定时器（0 无任务）。 */
+  private cleanRestoreHideTimer: number = 0;
   /** 全屏手势调节目标（'' 无 | 'brightness' 亮度 | 'volume' 音量）。 */
   @Local gestureAdjust: string = '';
   /** 手势调节当前百分比（0-100，浮层显示）。 */
@@ -729,6 +734,7 @@ export struct PlayerPage {
     this.cancelFsHide();
     this.cancelCenterHide();
     this.cancelLockHide();
+    this.cancelCleanRestoreHide();
     this.cancelAdjustHide();
     this.resetEpisodeSwipeState();
     // 作废划走动画进行中的延时回调（离页不再换集/复位位移）
@@ -981,8 +987,8 @@ export struct PlayerPage {
           this.CatalogBar()
         }
 
-        // 清屏恢复按钮：清屏态右下角常驻，点按退出清屏（只控显隐，不拦手势）
-        if (!this.fullScreen && this.cleanScreen) {
+        // 清屏恢复按钮：清屏态右下角显示，5s 自隐，任意触摸/鼠标移动唤出（不拦手势）
+        if (!this.fullScreen && this.cleanScreen && this.cleanRestoreVisible) {
           this.CleanRestoreButton()
         }
 
@@ -1061,6 +1067,12 @@ export struct PlayerPage {
         .onAreaChange((_oldArea: Area, newArea: Area): void => {
           this.layoutW = Number(newArea.width);
           this.layoutH = Number(newArea.height);
+        })
+        // 清屏态任意触摸唤出「恢复」按钮（触摸事件冒泡，画面/空白区均可达；非清屏态忽略）
+        .onTouch((event: TouchEvent): void => {
+          if (this.cleanScreen && !this.fullScreen && event.type === TouchType.Down) {
+            this.refreshCleanRestore();
+          }
         })
         // PC 全屏鼠标移动视为操作中（亮出控制条并重计 3s；完全不操作才隐藏）
         .onMouse((event: MouseEvent): void => {
@@ -1450,7 +1462,7 @@ export struct PlayerPage {
         .alignItems(HorizontalAlign.Center)
         .justifyContent(FlexAlign.Center)
         .onClick((): void => {
-          this.cleanScreen = true;
+          this.enterCleanScreen();
         })
 
         // 全屏入口（PC 布局）：缓存按钮右侧按钮，替代「全屏观看」药丸
@@ -1485,8 +1497,8 @@ export struct PlayerPage {
   }
 
   /**
-   * 清屏播放恢复按钮（非全屏清屏态右下角常驻，44×40 深底圆角与选集行按钮同款）：
-   * 点按退出清屏，恢复顶栏/底部信息区/PC 详情侧栏等全部非播放组件；
+   * 清屏播放恢复按钮（非全屏清屏态右下角，44×40 深底圆角与选集行按钮同款）：
+   * 点按退出清屏；显示 5s 自隐，任意触摸/PC 鼠标移动重新唤出（同全屏锁按钮语义）；
    * 清屏只控组件显隐、不拦手势（区别于全屏防误触锁）。
    */
   @Builder
@@ -1513,8 +1525,47 @@ export struct PlayerPage {
     .offset({ bottom: appState.bottomRect + (this.pcSidebarOn() ? FQ_PC_BOTTOM_LIFT_VP : 0) })
     .transition(TransitionEffect.OPACITY)
     .onClick((): void => {
-      this.cleanScreen = false;
+      this.exitCleanScreen();
     })
+  }
+
+  /** 进入清屏播放：隐藏非播放组件，「恢复」按钮显示并 5s 自隐（任意触摸唤出）。 */
+  private enterCleanScreen(): void {
+    this.cleanScreen = true;
+    this.cleanRestoreVisible = true;
+    this.scheduleCleanRestoreHide();
+  }
+
+  /** 退出清屏播放：恢复全部非播放组件，注销自隐计时。 */
+  private exitCleanScreen(): void {
+    this.cleanScreen = false;
+    this.cancelCleanRestoreHide();
+    this.cleanRestoreVisible = true;
+  }
+
+  /** 唤出清屏「恢复」按钮并重新计时自隐（清屏态任意触摸/PC 鼠标移动调用）。 */
+  private refreshCleanRestore(): void {
+    if (!this.cleanScreen || this.fullScreen) {
+      return;
+    }
+    this.cleanRestoreVisible = true;
+    this.scheduleCleanRestoreHide();
+  }
+
+  /** 清屏「恢复」按钮 5s 自隐计时（同全屏锁按钮 FQ_LOCK_HIDE_MS）。 */
+  private scheduleCleanRestoreHide(): void {
+    this.cancelCleanRestoreHide();
+    this.cleanRestoreHideTimer = setTimeout((): void => {
+      this.cleanRestoreHideTimer = 0;
+      this.cleanRestoreVisible = false;
+    }, FQ_LOCK_HIDE_MS);
+  }
+
+  private cancelCleanRestoreHide(): void {
+    if (this.cleanRestoreHideTimer !== 0) {
+      clearTimeout(this.cleanRestoreHideTimer);
+      this.cleanRestoreHideTimer = 0;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -3951,7 +4002,15 @@ export struct PlayerPage {
    * （onHover 进出不可靠：容器与子组件间移动会产生伪进出，不用）。
    */
   private onFsMouseMove(event: MouseEvent): void {
-    if (!this.fullScreen || this.fsLocked || this.fsMenuOpen ||
+    // 非全屏清屏态：鼠标移动唤出「恢复」按钮并重计自隐（其余非全屏态忽略）
+    if (!this.fullScreen) {
+      if (this.cleanScreen &&
+        (event.action === MouseAction.Hover || event.action === MouseAction.Move)) {
+        this.refreshCleanRestore();
+      }
+      return;
+    }
+    if (this.fsLocked || this.fsMenuOpen ||
       this.sheetVisible || this.sidePanel.length > 0) {
       return;
     }
@@ -3965,6 +4024,8 @@ export struct PlayerPage {
   /** 进入全屏沉浸：横屏片源锁横屏并隐藏系统栏（官方 _enterFullscreen）。 */
   private enterFullscreen(): void {
     this.fullScreen = true;
+    // 清屏「恢复」按钮全屏态不渲染，挂起自隐计时（退全屏回来重显重计）
+    this.cancelCleanRestoreHide();
     this.fsControlsVisible = true;
     this.scheduleFsHide();
     this.applyImmersive(true);
@@ -3981,6 +4042,10 @@ export struct PlayerPage {
     this.cancelLockHide();
     this.fsControlsVisible = true;
     this.applyImmersive(false, windowFormSettled);
+    // 仍处清屏态：重显「恢复」按钮并重计自隐
+    if (this.cleanScreen) {
+      this.refreshCleanRestore();
+    }
   }
 
   /** 沉浸全屏：进入隐藏系统栏（横屏片源同时锁 AUTO_ROTATION_LANDSCAPE），退出恢复。
