@@ -54,6 +54,9 @@
  *   半透明黑底），竖屏片源最底部左边（无底色）；锁定后上下工具不可呼出、
  *   画面操作与返回手势全吞（禁止手势退出全屏），仅锁按钮可唤出
  *   （5s 自隐，任意触摸重新唤出）；解锁立即恢复控件。
+ * - 清屏播放（非全屏选集行「清屏」按钮，缓存右侧/PC 全屏按钮左侧）：隐藏
+ *   顶栏、底部信息区与 PC 详情侧栏等全部非播放组件，仅留画面与右下角
+ *   「恢复」按钮；只控显隐、不拦手势（单击切播放、竖滑切集等照常可用）。
  * - 已看集标记与续播（fqapp watched_episodes.dart / video_progress 一族）：
  *   已看按集 itemId 持久化（FqWatchedStore），实际播放过（position > 0）才标记，
  *   跳集观看绝不误标中间集；续播进度（集 + 位置）暂停/切集/周期 5s/退出保存，
@@ -452,6 +455,9 @@ export struct PlayerPage {
   @Local lockVisible: boolean = false;
   /** 锁定按钮自动隐藏定时器（0 无任务）。 */
   private lockHideTimer: number = 0;
+  /** 非全屏清屏播放：隐藏全部非播放组件仅留画面，右下角常驻「恢复」按钮；
+   *  只控组件显隐、不拦手势（区别于全屏防误触锁）。 */
+  @Local cleanScreen: boolean = false;
   /** 全屏手势调节目标（'' 无 | 'brightness' 亮度 | 'volume' 音量）。 */
   @Local gestureAdjust: string = '';
   /** 手势调节当前百分比（0-100，浮层显示）。 */
@@ -969,9 +975,15 @@ export struct PlayerPage {
             .hitTestBehavior(HitTestMode.None)
         }
 
-        if (!this.fullScreen) {
+        // 清屏播放：隐藏非全屏全部非播放组件（顶栏/底部信息区），仅留画面 + 恢复按钮
+        if (!this.fullScreen && !this.cleanScreen) {
           this.TopBar()
           this.CatalogBar()
+        }
+
+        // 清屏恢复按钮：清屏态右下角常驻，点按退出清屏（只控显隐，不拦手势）
+        if (!this.fullScreen && this.cleanScreen) {
+          this.CleanRestoreButton()
         }
 
         if (this.fullScreen && !this.sheetVisible && this.sidePanel.length === 0 && this.fsControlsVisible) {
@@ -1058,7 +1070,7 @@ export struct PlayerPage {
         // PC 大窗口右侧详情侧边栏（对齐 fqapp 桌面停靠目录）：非全屏常驻；
         // 全屏随控件层显隐同步消失/出现（含收起窄轨：3s 自隐、单击唤出、sheet/横屏侧栏打开让位），
         // 播放区缩窄让位（几何走 pageW()/pageH()），面板本身不遮挡画面
-        if (this.pcSidebarOn() && (!this.fullScreen ||
+        if (this.pcSidebarOn() && !this.cleanScreen && (!this.fullScreen ||
           (!this.sheetVisible && this.sidePanel.length === 0 && this.fsControlsVisible))) {
           this.PcDetailSidebar()
         }
@@ -1418,6 +1430,29 @@ export struct PlayerPage {
           this.openCacheSheet();
         })
 
+        // 清屏播放入口：缓存按钮右侧（PC 布局位于全屏按钮左侧），
+        // 隐藏全部非播放组件，仅留画面与右下角恢复按钮
+        Column({ space: 1 }) {
+          SymbolGlyph($r('sys.symbol.eye_slash'))
+            .fontSize(22)
+            .fontColor([Color.White])
+            .opacity(0.9)
+          Text('清屏')
+            .fontSize(11)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('rgba(255,255,255,0.9)')
+        }
+        .width(44)
+        .height(40)
+        .margin({ left: 8 })
+        .borderRadius(8)
+        .backgroundColor('#E6222222')
+        .alignItems(HorizontalAlign.Center)
+        .justifyContent(FlexAlign.Center)
+        .onClick((): void => {
+          this.cleanScreen = true;
+        })
+
         // 全屏入口（PC 布局）：缓存按钮右侧按钮，替代「全屏观看」药丸
         if (this.pcSidebarOn()) {
           Column({ space: 1 }) {
@@ -1447,6 +1482,39 @@ export struct PlayerPage {
     }.layoutGravity(LocalizedAlignment.BOTTOM_END)// stack组件中子组件对齐位置
     // PC 窗口无底部手势区（bottomRect 为 0），底部组件整体抬高留出下边距
     .offset({ bottom: appState.bottomRect + (this.pcSidebarOn() ? FQ_PC_BOTTOM_LIFT_VP : 0) })
+  }
+
+  /**
+   * 清屏播放恢复按钮（非全屏清屏态右下角常驻，44×40 深底圆角与选集行按钮同款）：
+   * 点按退出清屏，恢复顶栏/底部信息区/PC 详情侧栏等全部非播放组件；
+   * 清屏只控组件显隐、不拦手势（区别于全屏防误触锁）。
+   */
+  @Builder
+  private CleanRestoreButton() {
+    Column({ space: 1 }) {
+      SymbolGlyph($r('sys.symbol.eye'))
+        .fontSize(22)
+        .fontColor([Color.White])
+        .opacity(0.9)
+      Text('恢复')
+        .fontSize(11)
+        .fontWeight(FontWeight.Bold)
+        .fontColor('rgba(255,255,255,0.9)')
+    }
+    .width(44)
+    .height(40)
+    .borderRadius(8)
+    .backgroundColor('#E6222222')
+    .alignItems(HorizontalAlign.Center)
+    .justifyContent(FlexAlign.Center)
+    .margin({ right: 16 })
+    .layoutGravity(LocalizedAlignment.BOTTOM_END)
+    // 与选集行同款底部避让：底部手势区 + PC 窗口整体抬升
+    .offset({ bottom: appState.bottomRect + (this.pcSidebarOn() ? FQ_PC_BOTTOM_LIFT_VP : 0) })
+    .transition(TransitionEffect.OPACITY)
+    .onClick((): void => {
+      this.cleanScreen = false;
+    })
   }
 
   // ---------------------------------------------------------------------------
