@@ -498,8 +498,13 @@ export struct FanqieImportPage {
     const result: FqFanqieMergeResult = service.merge(preview);
     this.preview = null;
     this.messageIsError = false;
-    this.message = `导入完成：新增书架 ${result.shelfAdded} 本、补全封面 ${result.coverFilled} 本、` +
-      `写入阅读进度 ${result.progressAdded} 本。\n本机已有记录保持不变，可重复导入。`;
+    if (result.shelfAdded > 0 || result.coverFilled > 0) {
+      this.message = `导入完成：新增书架 ${result.shelfAdded} 本、补全封面 ${result.coverFilled} 本、` +
+        `写入阅读进度 ${result.progressAdded} 本。\n本机已有记录保持不变，可重复导入。`;
+    } else {
+      this.message = `导入完成：本次未新增书架（仅番茄书架上的书加入本机书架），` +
+        `写入阅读进度 ${result.progressAdded} 本。\n本机已有记录保持不变，可重复导入。`;
+    }
   }
 
   /** 导出前弹窗确认（DialogManager 公共确认弹窗）。 */
@@ -737,10 +742,10 @@ export struct FanqieImportPage {
     }
   }
 
-  /** 预览前 6 本（最近阅读优先）。 */
+  /** 预览前 6 本（书架上的书优先，各自保持最近阅读顺序）。 */
   private topRecords(): FqFanqieBook[] {
     const preview: FqFanqieImportPreview | null = this.preview;
-    return preview === null ? [] : preview.records.slice(0, 6);
+    return preview === null ? [] : preview.displayRecords().slice(0, 6);
   }
 
   /** 预览行副标题：作者 · 阅读位置。 */
@@ -753,6 +758,31 @@ export struct FanqieImportPage {
       parts.push(book.epText);
     } else if (book.chapterId.length > 0) {
       parts.push('进度未定位');
+    }
+    return parts.join(' · ');
+  }
+
+  /** 预览说明文案（书架范围 + 进度语义；对齐 fqapp #400 口径）。 */
+  private previewNote(preview: FqFanqieImportPreview): string {
+    const shelfCount: number = preview.shelfCount();
+    let note: string = '';
+    if (shelfCount === 0 && preview.shelfSourceFailed) {
+      note = '书架接口未能采集成功，本次不会把书写入本机书架；已采集的阅读记录仍可合并进度。\n';
+    } else if (shelfCount === 0) {
+      note = '采集内容里没有书架上的小说，本次不会把书写入本机书架；阅读记录仅合并阅读进度。\n';
+    } else {
+      note = `仅番茄书架上的 ${shelfCount} 本会加入本机书架，` +
+        `其余 ${preview.records.length - shelfCount} 本只保留阅读进度，不占用书架。\n`;
+    }
+    return note + '阅读进度仅在本机没有记录时写入，进度未定位的书从第 1 章开始阅读。';
+  }
+
+  /** 预览行完整副标题：书架/仅进度 · 作者 · 阅读位置。 */
+  private rowSubtitle(book: FqFanqieBook, shelved: boolean): string {
+    const parts: string[] = [shelved ? '书架' : '仅进度'];
+    const rest: string = this.bookSubtitle(book);
+    if (rest.length > 0) {
+      parts.push(rest);
     }
     return parts.join(' · ');
   }
@@ -856,30 +886,31 @@ export struct FanqieImportPage {
         .width('100%')
 
       Flex({ wrap: FlexWrap.Wrap }) {
-        this.StatCell(`${preview.records.length}`, '小说')
+        this.StatCell(`${preview.shelfCount()}`, '加入书架')
+        this.StatCell(`${preview.records.length - preview.shelfCount()}`, '仅保留进度')
         this.StatCell(`${preview.matched}`, '进度已定位')
         this.StatCell(`${preview.unresolved}`, '进度未定位')
-        this.StatCell(`${preview.skipped}`, '已跳过')
       }
       .width('100%')
 
       if (this.topRecords().length > 0) {
         Column() {
           ForEach(this.topRecords(), (book: FqFanqieBook) => {
-            this.BookRow(book)
+            this.BookRow(book, preview.shelfIds.has(book.id))
           }, (book: FqFanqieBook) => book.id)
         }
         .width('100%')
       }
 
-      Text('合并只补充本机缺少的书籍；阅读进度仅在本机没有记录时写入，' +
-        '进度未定位的书从第 1 章开始阅读。')
+      Text(this.previewNote(preview))
         .fontSize(13)
         .lineHeight(20)
         .fontColor($r('sys.color.font_secondary'))
         .width('100%')
 
-      Button('合并到本机书架')
+      Button(preview.shelfCount() > 0
+        ? `合并到本机书架（${preview.shelfCount()} 本）`
+        : `合并阅读进度（${preview.records.length} 本）`)
         .fontSize(15)
         .fontWeight(FontWeight.Medium)
         .fontColor(Color.White)
@@ -912,9 +943,9 @@ export struct FanqieImportPage {
     .padding({ top: 4, bottom: 4 })
   }
 
-  /** 预览书籍行（书名 + 作者 · 阅读位置）。 */
+  /** 预览书籍行（书名 + 书架/仅进度 · 作者 · 阅读位置）。 */
   @Builder
-  private BookRow(book: FqFanqieBook) {
+  private BookRow(book: FqFanqieBook, shelved: boolean) {
     Row({ space: 10 }) {
       Stack() {
         SymbolGlyph($r('sys.symbol.book'))
@@ -933,7 +964,7 @@ export struct FanqieImportPage {
           .fontColor($r('sys.color.font_primary'))
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(this.bookSubtitle(book))
+        Text(this.rowSubtitle(book, shelved))
           .fontSize(11.5)
           .fontColor($r('sys.color.font_secondary'))
           .maxLines(1)

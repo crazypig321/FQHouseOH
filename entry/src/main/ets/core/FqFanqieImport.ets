@@ -6,7 +6,8 @@
  * - 解析：只导入小说（book_type=0）；书架/文件夹递归识别、历史/进度逐条收敛，
  *   阅读位置保留官方章节 ID 原样证据（不换算官方段落偏移）；
  * - 章节定位：官方章节 ID 对本应用目录匹配 → 阅读进度从对应章节开头续读；
- * - 合并：书架只补缺失（已有条目回填空封面），进度仅本机无记录时写入；
+ * - 合并：仅书架来源的书加入书架（只补缺失，已有条目回填空封面；对齐 fqapp #400
+ *   只导入书架上的书），历史/进度来源的书只写阅读进度，进度仅本机无记录时写入；
  *   重复导入不产生重复书籍；
  * - 文件导入兼容：fqapp 采集 JSON（单文件）或官方 read_history 单页响应（须 has_more=false）。
  */
@@ -550,32 +551,71 @@ class FqFanqiePosition {
   }
 }
 
-/** 采集响应解析器：只收敛小说（book_type=0）记录与最新阅读位置。 */
+/** 书架来源资源（对齐 fqapp _isShelfResource：shelf_list / shelf_info / folder_detail）。 */
+function fqFanqieIsShelfResource(resource: Object | undefined): boolean {
+  return resource === 'shelf_list' || resource === 'shelf_info' || resource === 'folder_detail';
+}
+
+/** 采集响应解析器：只收敛小说（book_type=0）记录与最新阅读位置；
+ *  追踪书架来源命中的书（shelfIds）与书架来源采集状态（对齐 fqapp #400）。 */
 export class FqFanqieImportParser {
   private readonly books: Map<string, FqFanqieBook> = new Map();
   private readonly positions: Map<string, FqFanqiePosition> = new Map();
   private skippedCount: number = 0;
+  private readonly shelfIds: Set<string> = new Set<string>();
+  private readonly deletedShelfIds: Set<string> = new Set<string>();
+  private hasShelfSourceValue: boolean = false;
+  private shelfSourceFailedValue: boolean = false;
 
   public get skipped(): number {
     return this.skippedCount;
   }
 
+  /** 是否有书架来源响应参与解析。 */
+  public get hasShelfSource(): boolean {
+    return this.hasShelfSourceValue;
+  }
+
+  /** 书架来源响应是否采集失败（未收到响应或业务 code 非法）。 */
+  public get shelfSourceFailed(): boolean {
+    return this.shelfSourceFailedValue;
+  }
+
+  /** 书架来源命中的书 ID 快照（对齐 fqapp shelfIds）。 */
+  public shelvedIds(): Set<string> {
+    const copy: Set<string> = new Set<string>();
+    this.shelfIds.forEach((id: string): void => {
+      copy.add(id);
+    });
+    return copy;
+  }
+
   public addSource(source: Record<string, Object>): void {
+    const resource: Object | undefined = source['resource'];
     if (source['status'] !== 'received') {
+      if (fqFanqieIsShelfResource(resource)) {
+        this.shelfSourceFailedValue = true;
+      }
       return;
     }
     const payload: Record<string, Object> | null = fqAsRecord(source['payload']);
     if (payload === null) {
+      if (fqFanqieIsShelfResource(resource)) {
+        this.shelfSourceFailedValue = true;
+      }
       return;
     }
     const code: Object | undefined = payload['code'];
     if (code !== 0 && code !== '0') {
+      if (fqFanqieIsShelfResource(resource)) {
+        this.shelfSourceFailedValue = true;
+      }
       return;
     }
-    const resource: Object | undefined = source['resource'];
     if (resource === 'history') {
       this.addHistorySource(payload);
-    } else if (resource === 'shelf_list' || resource === 'shelf_info' || resource === 'folder_detail') {
+    } else if (fqFanqieIsShelfResource(resource)) {
+      this.hasShelfSourceValue = true;
       this.visit(payload['data'], 0);
     } else if (resource === 'progress_list' || resource === 'progress_batch') {
       this.addProgressSource(payload);
@@ -637,7 +677,8 @@ export class FqFanqieImportParser {
     }
   }
 
-  /** 书架/文件夹来源：递归遍历；命中小说记录即停（其嵌套是自身字段，不再下钻）。 */
+  /** 书架/文件夹来源：递归遍历；命中小说记录即停（其嵌套是自身字段，不再下钻）。
+   *  命中的书计入书架集合；已删除的书从书架集合剔除并不再收录（对齐 fqapp #400）。 */
   private visit(value: Object | undefined, depth: number): void {
     if (depth > 24 || value === undefined || value === null) {
       return;
@@ -654,7 +695,19 @@ export class FqFanqieImportParser {
       return;
     }
     if (this.isNovel(rec)) {
-      this.include(rec);
+      if (rec['is_delete'] === true || rec['is_delete'] === 1) {
+        this.skippedCount++;
+        const deletedId: string | null = fqFanqieId(rec['book_id_str']) ?? fqFanqieId(rec['book_id']);
+        if (deletedId !== null) {
+          this.deletedShelfIds.add(deletedId);
+          this.shelfIds.delete(deletedId);
+        }
+        return;
+      }
+      const book: FqFanqieBook | null = this.include(rec);
+      if (book !== null && !this.deletedShelfIds.has(book.id)) {
+        this.shelfIds.add(book.id);
+      }
       return;
     }
     for (const key of Object.keys(rec)) {
@@ -725,14 +778,47 @@ export class FqFanqieImportPreview {
   readonly unresolved: number;
   readonly skipped: number;
   readonly sourceLabel: string;
+  /** 书架来源命中的书 ID（仅这些书会加入本机书架）。 */
+  readonly shelfIds: Set<string>;
+  readonly hasShelfSource: boolean;
+  readonly shelfSourceFailed: boolean;
 
   constructor(records: FqFanqieBook[], matched: number, unresolved: number,
-    skipped: number, sourceLabel: string) {
+    skipped: number, sourceLabel: string, shelfIds: Set<string>,
+    hasShelfSource: boolean, shelfSourceFailed: boolean) {
     this.records = records;
     this.matched = matched;
     this.unresolved = unresolved;
     this.skipped = skipped;
     this.sourceLabel = sourceLabel;
+    this.shelfIds = shelfIds;
+    this.hasShelfSource = hasShelfSource;
+    this.shelfSourceFailed = shelfSourceFailed;
+  }
+
+  /** 将加入书架的书数量。 */
+  public shelfCount(): number {
+    let count: number = 0;
+    for (const record of this.records) {
+      if (this.shelfIds.has(record.id)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /** 预览排序：书架上的书在前，各自保持最近阅读顺序。 */
+  public displayRecords(): FqFanqieBook[] {
+    const shelved: FqFanqieBook[] = [];
+    const rest: FqFanqieBook[] = [];
+    for (const record of this.records) {
+      if (this.shelfIds.has(record.id)) {
+        shelved.push(record);
+      } else {
+        rest.push(record);
+      }
+    }
+    return shelved.concat(rest);
   }
 }
 
@@ -802,22 +888,26 @@ export class FqFanqieImportService {
         unresolved++;
       }
     }
-    return new FqFanqieImportPreview(records, matched, unresolved, parser.skipped, sourceLabel);
+    return new FqFanqieImportPreview(records, matched, unresolved, parser.skipped, sourceLabel,
+      parser.shelvedIds(), parser.hasShelfSource, parser.shelfSourceFailed);
   }
 
-  /** 合并到本机：书架只补缺失（已有条目回填空封面），进度仅本机无记录时写入；
+  /** 合并到本机：仅书架来源的书加入书架（只补缺失，已有条目回填空封面；
+   *  对齐 fqapp #400 只导入书架上的书），阅读进度对全部记录仅本机无记录时写入；
    *  旧导入（已有进度但无整书百分比）按本次定位结果回填百分比，不改动本机阅读位置。 */
   public merge(preview: FqFanqieImportPreview): FqFanqieMergeResult {
     let shelfAdded: number = 0;
     let coverFilled: number = 0;
     let progressAdded: number = 0;
     for (const record of preview.records) {
-      const title: string = record.title.length > 0 ? record.title : '未知作品';
-      const item: FqShelfItem = new FqShelfItem(record.id, 'book', title, record.cover);
-      if (FqShelfStore.addIfAbsent(item)) {
-        shelfAdded++;
-      } else if (record.cover.length > 0 && FqShelfStore.updateCover(record.id, record.cover)) {
-        coverFilled++;
+      if (preview.shelfIds.has(record.id)) {
+        const title: string = record.title.length > 0 ? record.title : '未知作品';
+        const item: FqShelfItem = new FqShelfItem(record.id, 'book', title, record.cover);
+        if (FqShelfStore.addIfAbsent(item)) {
+          shelfAdded++;
+        } else if (record.cover.length > 0 && FqShelfStore.updateCover(record.id, record.cover)) {
+          coverFilled++;
+        }
       }
       const progress: FqReaderProgress = FqReaderStore.getProgress(record.id);
       if (record.episode >= 0 && progress.chapterIndex < 0) {
