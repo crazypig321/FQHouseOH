@@ -172,8 +172,8 @@ export struct FanqieImportPage {
           ListItem() {
             FqFanqieImportCard() {
               this.ActionRow($r('sys.symbol.person_crop_circle_fill'), '#FF3B82F6', '从番茄账号读取',
-                '网页登录番茄账号，采集书架与阅读进度', (): void => {
-                  this.openLogin();
+                this.loggedIn ? '已登录番茄账号，点此重新采集书架与阅读进度' : '网页登录番茄账号，采集书架与阅读进度', (): void => {
+                  this.readAccount();
                 })
               this.RowDivider()
               this.ActionRow($r('sys.symbol.doc_plaintext'), '#FF10B981', '从历史文件导入',
@@ -336,6 +336,19 @@ export struct FanqieImportPage {
     }
     this.message = '';
     this.loginVisible = true;
+  }
+
+  /** 「从番茄账号读取」：已登录用现有 Cookie 直接重新采集；Cookie 失效或未登录走网页登录。 */
+  private readAccount(): void {
+    if (this.loggedIn) {
+      const cookie: string = this.readLoginCookie();
+      if (cookie.length > 0) {
+        this.runCollect(cookie);
+        return;
+      }
+      this.loggedIn = false;
+    }
+    this.openLogin();
   }
 
   /** 关闭登录浮层（未开始采集时允许）。 */
