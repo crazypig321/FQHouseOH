@@ -87,8 +87,9 @@ export struct PcMainLayout {
   build() {
     Column() {
       // 视频「全屏观看」沉浸全屏（appState.pcImmersiveFullscreen）隐藏应用标题栏与左侧导航栏，内容区铺满；
+      // 播放页「清屏播放」（appState.hidePcTitleBar）同样隐藏窗口顶栏，画面占满整个窗口；
       // 平板系统全屏/分屏形态（windowStatus）也无窗口标题栏，隐藏 PcTitleBar
-      if (!appState.pcImmersiveFullscreen && this.pcTitleBarVisible()) {
+      if (!appState.pcImmersiveFullscreen && !appState.hidePcTitleBar && this.pcTitleBarVisible()) {
         PcTitleBar()
       }
 

@@ -55,9 +55,12 @@
  *   画面操作与返回手势全吞（禁止手势退出全屏），仅锁按钮可唤出
  *   （5s 自隐，任意触摸重新唤出）；解锁立即恢复控件。
  * - 清屏播放（非全屏选集行「清屏」按钮，缓存右侧/PC 全屏按钮左侧）：隐藏
- *   顶栏、底部信息区与 PC 详情侧栏等全部非播放组件，仅留画面与右下角
- *   「恢复」按钮（5s 自隐，任意触摸/PC 鼠标移动唤出）；只控显隐、不拦手势
- *   （单击切播放、竖滑切集等照常可用）。
+ *   顶栏、底部信息区与 PC 详情侧栏等全部非播放组件，画面几何改为整页铺满
+ *   （videoTopAbs/videoRegionHeight 同全屏；PC 布局同步隐藏 PcTitleBar 窗口
+ *   顶栏，surface 由 contain 改 cover：横屏撑满高度、竖屏撑满宽度，无黑边），
+ *   仅留画面与右下角「恢复」按钮（5s 自隐，任意触摸/PC 鼠标移动唤出）；
+ *   只控显隐、不拦手势（双击切播放暂停、竖滑切集等照常可用，单击仅唤出
+ *   「恢复」按钮）。
  * - 已看集标记与续播（fqapp watched_episodes.dart / video_progress 一族）：
  *   已看按集 itemId 持久化（FqWatchedStore），实际播放过（position > 0）才标记，
  *   跳集观看绝不误标中间集；续播进度（集 + 位置）暂停/切集/周期 5s/退出保存，
@@ -720,6 +723,8 @@ export struct PlayerPage {
     this.pageGone = true;
     // 复位 PC 左侧主导航显隐（离页交还主导航）
     appState.hidePcSideNav = false;
+    // 复位清屏播放的 PC 窗口顶栏隐藏（离页交还顶栏）
+    appState.hidePcTitleBar = false;
     const bgHandlerIdx: number = appState.backgroundPauseHandlers.indexOf(this.backgroundPause);
     if (bgHandlerIdx >= 0) {
       appState.backgroundPauseHandlers.splice(bgHandlerIdx, 1);
@@ -782,10 +787,14 @@ export struct PlayerPage {
       showPlaybackBall: false,
       onShown: (): void => {
         appState.hidePcSideNav = true;
+        // 清屏态被压栈后返回：重新隐藏 PC 窗口顶栏（画面保持铺满）
+        appState.hidePcTitleBar = this.cleanScreen;
         this.onNavPipShown();
       },
       onHidden: (): void => {
         appState.hidePcSideNav = false;
+        // 被压栈时覆盖页需要窗口顶栏，清屏返回时 onShown 再恢复
+        appState.hidePcTitleBar = false;
         this.onNavPipHidden();
       },
       backPressed: (): boolean => {
@@ -806,7 +815,8 @@ export struct PlayerPage {
         Stack() {
         // 视频区（contain；面板展开时几何不变）
         Stack() {
-          // surface 只取画面 contain 矩形（区域内居中），mpv 填满 surface 即画面居中，黑边交给容器背景；
+          // surface 只取画面矩形（区域内居中，常规 contain；PC 清屏态 cover 撑满裁边），
+          // mpv 填满 surface 即画面居中，黑边交给容器背景；
           // 全屏同样取 contain 矩形不撑满：PiP 小窗比例取自退后台瞬间 surface 布局尺寸，
           // 全屏撑满会让小窗比例变成屏幕比例（横屏片源左右黑边、竖屏片源上下黑边）
           Stack() {
@@ -884,7 +894,8 @@ export struct PlayerPage {
         // 长按屏幕右侧 2 倍速快进（锁定态全部吞掉，只唤出锁按钮）；
         // 全屏竖滑：左三分之一调亮度、右三分之一调音量（滑过 1.2 倍屏高走完全量程）、
         // 中三分之一切集；横滑：快进/快退（滑过一屏走 90s，复用中央时间浮层与进度条预览）；
-        // 非全屏：单击切播放，整个视频区竖滑切集；PC 布局双击进全屏（与全屏按钮同款回调）
+        // 非全屏：单击切播放，整个视频区竖滑切集；PC 布局双击进全屏（与全屏按钮同款回调）；
+        // 清屏态：双击切播放/暂停（同全屏语义），单击仅唤出「恢复」按钮
         .gesture(
           GestureGroup(GestureMode.Exclusive,
             TapGesture({ count: 2 })
@@ -895,6 +906,8 @@ export struct PlayerPage {
                     return;
                   }
                   this.syncFsControls(this.togglePlay());
+                } else if (this.cleanScreen) {
+                  this.togglePlay();
                 } else if (useSidebarLayout(appState.WidthBp, appState.windowWidthVp, appState.displayWidthVp)) {
                   this.enterFullscreen();
                 }
@@ -1529,16 +1542,19 @@ export struct PlayerPage {
     })
   }
 
-  /** 进入清屏播放：隐藏非播放组件，「恢复」按钮显示并 5s 自隐（任意触摸唤出）。 */
+  /** 进入清屏播放：隐藏非播放组件、画面铺满整页（PC 布局同步隐藏窗口顶栏），
+   *  「恢复」按钮显示并 5s 自隐（任意触摸唤出）。 */
   private enterCleanScreen(): void {
     this.cleanScreen = true;
+    appState.hidePcTitleBar = true;
     this.cleanRestoreVisible = true;
     this.scheduleCleanRestoreHide();
   }
 
-  /** 退出清屏播放：恢复全部非播放组件，注销自隐计时。 */
+  /** 退出清屏播放：恢复全部非播放组件与 PC 窗口顶栏，注销自隐计时。 */
   private exitCleanScreen(): void {
     this.cleanScreen = false;
+    appState.hidePcTitleBar = false;
     this.cancelCleanRestoreHide();
     this.cleanRestoreVisible = true;
   }
@@ -1873,6 +1889,10 @@ export struct PlayerPage {
       episodeLabel: this.episodeLabel(),
       onOpenRelatedSeries: (): void => {
         this.openRelatedSeries();
+      },
+      onOpenSeries: (): void => {
+        this.closeSheet();
+        this.openSeriesDetailFromTitle();
       },
       onSelectEpisode: (index: number): void => {
         this.closeSheet();
@@ -3425,17 +3445,17 @@ export struct PlayerPage {
       appState.windowWidthVp >= FQ_PC_DETAIL_SIDEBAR_MIN_W;
   }
 
-  /** 视频区顶：全屏贴顶；常驻态顶栏 44 + 状态栏（与面板展开无关，面板只是覆盖）。 */
+  /** 视频区顶：全屏/清屏铺满贴顶；常驻态顶栏 44 + 状态栏（与面板展开无关，面板只是覆盖）。 */
   private videoTopAbs(): number {
-    if (this.fullScreen) {
+    if (this.fullScreen || this.cleanScreen) {
       return 0;
     }
     return appState.topRect + 44;
   }
 
-  /** 视频区高：全屏撑满；常驻态 = 屏高 − 顶栏 − 底部 163 信息区（与面板展开无关）。 */
+  /** 视频区高：全屏/清屏撑满整页；常驻态 = 屏高 − 顶栏 − 底部 163 信息区（与面板展开无关）。 */
   private videoRegionHeight(): number {
-    if (this.fullScreen) {
+    if (this.fullScreen || this.cleanScreen) {
       return this.pageH();
     }
     return Math.max(0,
@@ -3467,7 +3487,26 @@ export struct PlayerPage {
     return this.videoTopAbs() + (regionH + videoH) / 2;
   }
 
-  /** 非全屏画面（contain 矩形）宽：surface 只取画面比例矩形（区域内居中，mpv 填满无黑边）。 */
+  /**
+   * PC 布局清屏态横屏视频 surface 走 cover 矩形：撑满窗口高度（无上下黑边），
+   * 溢出部分居中裁剪，窗口内只见画面内容。
+   * 竖屏视频不做 cover 裁切（裁完只剩中间一竖条）：按原比例 contain 居中显示。
+   * （contain → cover = 两边约束同取 min 改取 max；手机清屏保持 contain 不变。）
+   */
+  private cleanCoverRect(): boolean {
+    if (!this.cleanScreen || this.fullScreen ||
+      !useSidebarLayout(appState.WidthBp, appState.windowWidthVp, appState.displayWidthVp)) {
+      return false;
+    }
+    const dw: number = this.player.state.videoParams.dw;
+    const dh: number = this.player.state.videoParams.dh;
+    const ratioW: number = dw > 0 && dh > 0 ? dw : 9;
+    const ratioH: number = dw > 0 && dh > 0 ? dh : 16;
+    return ratioW >= ratioH;
+  }
+
+  /** 非全屏画面矩形宽：surface 只取画面比例矩形（区域内居中，mpv 填满无黑边）；
+   *  常规 contain；PC 清屏态 cover（撑满高度裁两侧）。 */
   private videoRectWidth(): number {
     const regionH: number = this.videoRegionHeight();
     const dw: number = this.player.state.videoParams.dw;
@@ -3475,10 +3514,12 @@ export struct PlayerPage {
     const ratioW: number = dw > 0 && dh > 0 ? dw : 9;
     const ratioH: number = dw > 0 && dh > 0 ? dh : 16;
     const byHeight: number = regionH / ratioH * ratioW;
-    return Math.max(1, Math.min(this.pageW(), byHeight));
+    return this.cleanCoverRect()
+      ? Math.max(1, Math.max(this.pageW(), byHeight))
+      : Math.max(1, Math.min(this.pageW(), byHeight));
   }
 
-  /** 非全屏画面（contain 矩形）高：与 videoRectWidth 同一 contain 约束的另一边。 */
+  /** 非全屏画面矩形高：与 videoRectWidth 同一约束的另一边（contain 取 min；PC 清屏 cover 取 max）。 */
   private videoRectHeight(): number {
     const regionH: number = this.videoRegionHeight();
     const dw: number = this.player.state.videoParams.dw;
@@ -3486,7 +3527,9 @@ export struct PlayerPage {
     const ratioW: number = dw > 0 && dh > 0 ? dw : 9;
     const ratioH: number = dw > 0 && dh > 0 ? dh : 16;
     const byWidth: number = this.pageW() / ratioW * ratioH;
-    return Math.max(1, Math.min(regionH, byWidth));
+    return this.cleanCoverRect()
+      ? Math.max(1, Math.max(regionH, byWidth))
+      : Math.max(1, Math.min(regionH, byWidth));
   }
 
   /** 底部信息列内容高：剧名行 22 + 进度线 30 + 选集行 40 + 间距 12×3；原著横幅 +12+44。 */
@@ -3911,6 +3954,9 @@ export struct PlayerPage {
     }
     if (this.fullScreen) {
       this.toggleFsControls();
+    } else if (this.cleanScreen) {
+      // 清屏态单击不切播放（双击切），仅唤出「恢复」按钮
+      this.refreshCleanRestore();
     } else {
       this.togglePlay();
     }
