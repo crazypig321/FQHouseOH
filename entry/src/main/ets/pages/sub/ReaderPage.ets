@@ -475,6 +475,8 @@ export struct ReaderPage {
           },
         },
       });
+      // 全屏/窗口切换按钮紧随书签之后
+      this.appendPcFullscreenMenu(roMenus);
       roMenus.push({
         content: {
           icon: $r('sys.symbol.share'),
@@ -493,7 +495,6 @@ export struct ReaderPage {
           },
         },
       });
-      this.appendPcFullscreenMenu(roMenus);
       this.titleBarOp = titleBarOf(this.bookTitle, undefined, roMenus);
     } else {
       const menus: Array<HdsNavigationMenuItemOptions> = [];
@@ -527,6 +528,8 @@ export struct ReaderPage {
           },
         },
       });
+      // 全屏/窗口切换按钮紧随书签之后
+      this.appendPcFullscreenMenu(menus);
       // 分享：拉起系统分享面板（书旗走链接直达，本地导入书分享正文文件本体）
       menus.push({
         content: {
@@ -547,7 +550,6 @@ export struct ReaderPage {
           },
         },
       });
-      this.appendPcFullscreenMenu(menus);
       this.titleBarOp = titleBarOf(this.bookTitle, undefined, menus);
     }
   }

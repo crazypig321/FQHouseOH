@@ -303,6 +303,8 @@ export struct ComicPage {
         },
       },
     });
+    // 全屏/窗口切换按钮紧随书签之后
+    this.appendPcFullscreenMenu(menus);
     // 分享：直达链接拉起系统分享面板（目标端按 id 拉目录图片、跟随本机进度）
     menus.push({
       content: {
@@ -323,7 +325,6 @@ export struct ComicPage {
         },
       },
     });
-    this.appendPcFullscreenMenu(menus);
     this.titleBarOp = titleBarOf(this.bookTitle, undefined, menus);
   }
 
