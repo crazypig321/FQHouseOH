@@ -308,7 +308,27 @@ fn handle_video<'a>(ctx: &'a Ctx, params: &'a Params) -> BoxFuture<'a, ApiResult
             // 表示单流，客户端隐藏清晰度入口。
             "variants": variants,
         });
-        if stream_mode {
+        // 字节 VVC（bytevc2）档：mpv 的 libavformat 认不出字节私有的 bvc2
+        // 标签（`sinf`→`frma`=`bvc2` + 配置盒 `bv2C`），stream 直连只建音频
+        // 轨、黑屏有声（2026-11-21 实测 7704560470203567129 第十集全档
+        // bvc2，hilog 只有 audio-reconfig 无 video-reconfig）。这类档不返回
+        // 直链，落入下方下载解密链路（代下载 + box 重写 bvc2→vvi1/vvcC +
+        // loopback 供流，mpv FFmpeg 8.0 原生软解 VVC）；普通编码集保持
+        // stream 秒开不变。按最终选中 URL 反查行编码：选档覆盖（请求档/
+        // 默认档）都来自 `variants` 行，主选流命中行时也能查到；老形状
+        // （行里查不到）无编码信息，维持 stream 原行为。
+        let selected_is_vvc = variants
+            .iter()
+            .find(|row| row.get("url").and_then(Value::as_str) == Some(video_url.as_str()))
+            .and_then(|row| row.get("codec"))
+            .and_then(Value::as_str)
+            .is_some_and(|codec| codec.contains("bytevc2") || codec.contains("bvc2"));
+        if stream_mode && selected_is_vvc {
+            log::info!(
+                "stream trace request={source_trace_id} purpose={purpose} event=vvc_fallback_download quality={served_quality}"
+            );
+        }
+        if stream_mode && !selected_is_vvc {
             return Ok(source);
         }
 
@@ -1840,6 +1860,7 @@ fn variant_rows_from_entries(
                 "width": w,
                 "height": h,
                 "quality_height": short_edge,
+                "codec": variant_codec_tag(info),
                 "url": url,
                 "key_hex": hex::encode(&key),
             }),
@@ -2119,6 +2140,24 @@ fn video_quality_metric(info: &Map<String, Value>, names: &[&str]) -> i64 {
         }
     }
     0
+}
+
+/// 行内编码标签（entry 与 `video_meta` 的 `codec_type` 小写拼接）：上游把
+/// 编码放在两处之一。stream 模式的 VVC 回退判定靠它在行级识别 bytevc2。
+fn variant_codec_tag(info: &Map<String, Value>) -> String {
+    let mut value = String::new();
+    if let Some(v) = info.get("codec_type").and_then(Value::as_str) {
+        value.push_str(&v.to_lowercase());
+    }
+    if let Some(meta) = info.get("video_meta").and_then(Value::as_object) {
+        if let Some(v) = meta.get("codec_type").and_then(Value::as_str) {
+            if !value.is_empty() {
+                value.push(' ');
+            }
+            value.push_str(&v.to_lowercase());
+        }
+    }
+    value
 }
 
 fn video_quality_score(info: &Map<String, Value>) -> Option<i64> {
