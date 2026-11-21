@@ -849,14 +849,15 @@ export class FqBackend {
   }
 
   /**
-   * 短剧关联原著（/api/v1/series/{id} 的 data.video_relate_book.book_info，
-   * 官方播放页底部 BottomRelateBookView 数据源）。剧无原著关联返回 null；
-   * 装饰性数据，异常由调用方静默降级。
+   * 短剧关联原著（/api/v1/series/{id}，官方播放页底部 BottomRelateBookView 数据源）。
+   * 上游信封多形态（对齐 fqapp 08ac59ab）：桥接形态 data.video_relate_book 直挂，
+   * 新信封按视频 ID 分桶，fqParseSeriesRelateBook 按 seriesId 定位。剧无原著
+   * 关联返回 null；装饰性数据，异常由调用方静默降级。
    */
   public async seriesRelateBook(seriesId: string): Promise<FqSeriesRelateBook | null> {
     const payload: Record<string, Object> =
       await this.getJson(`/api/v1/series/${encodeURIComponent(seriesId)}`, '', FQ_SHORT_TIMEOUT_MS);
-    return fqParseSeriesRelateBook(payload);
+    return fqParseSeriesRelateBook(payload, seriesId);
   }
 
   /**

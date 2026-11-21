@@ -2257,19 +2257,106 @@ export function fqParseEpisodeComments(payload: Record<string, Object>): FqEpiso
 }
 
 // ---------------------------------------------------------------------------
-// 短剧关联原著（fqapp lib/models/series_detail.dart SeriesRelateBook/_relateBook）
+// 短剧关联原著（fqapp lib/models/series_detail.dart SeriesRelateBook/_relateBook/
+// _seriesVideoData/_selectSeriesRecord/_seriesRelateBook）
 // ---------------------------------------------------------------------------
 
-/**
- * 解析短剧关联原著（/api/v1/series/{id}，data.video_relate_book.book_info：
- * book_id/book_name/thumb_url）。剧无原著关联返回 null。
- */
-export function fqParseSeriesRelateBook(payload: Record<string, Object>): FqSeriesRelateBook | null {
-  const data: Record<string, Object> | null = fqAsRecord(payload['data']);
-  if (data === null) {
-    return null;
+/** 按视频 ID 分桶信封里的系列记录候选（key = 分桶键，record = 系列记录）。 */
+class FqSeriesRecordCandidate {
+  readonly key: string;
+  readonly record: Record<string, Object>;
+
+  constructor(key: string, record: Record<string, Object>) {
+    this.key = key;
+    this.record = record;
   }
-  const relate: Record<string, Object> | null = fqAsRecord(data['video_relate_book']);
+}
+
+/** 系列记录的 series_id（series_id_str 优先，数字转字符串；对齐 _seriesId）。 */
+function fqSeriesRecordId(record: Record<string, Object>): string {
+  const explicit: string = fqStr(record, 'series_id_str').trim();
+  if (explicit.length > 0) {
+    return explicit;
+  }
+  return fqStr(record, 'series_id').trim();
+}
+
+/** 系列记录判定（对齐 _isSeriesRecord）：series_title 或 series_id 任一非空。 */
+function fqIsSeriesRecord(record: Record<string, Object>): boolean {
+  return fqStr(record, 'series_title').trim().length > 0
+    || fqSeriesRecordId(record).length > 0;
+}
+
+/** 在按 ID 分桶的容器里选系列记录（对齐 _selectSeriesRecord）：桶值为桶嵌套
+ * video_data 或字段直挂；先按 series_id 唯一匹配、再按桶键唯一匹配，
+ * 最后仅一条候选时收下；无匹配或多条歧义返回 null。 */
+function fqSelectSeriesRecord(container: Record<string, Object>,
+  requestedSeriesId: string): Record<string, Object> | null {
+  const candidates: FqSeriesRecordCandidate[] = [];
+  const keys: string[] = Object.keys(container);
+  for (const key of keys) {
+    const bucket: Record<string, Object> | null = fqAsRecord(container[key]);
+    if (bucket === null) {
+      continue;
+    }
+    const nested: Record<string, Object> | null = fqAsRecord(bucket['video_data']);
+    const record: Record<string, Object> = nested ?? bucket;
+    if (fqIsSeriesRecord(record)) {
+      candidates.push(new FqSeriesRecordCandidate(key, record));
+    }
+  }
+  if (requestedSeriesId.length > 0) {
+    let seriesMatch: Record<string, Object> | null = null;
+    let seriesCount: number = 0;
+    for (const candidate of candidates) {
+      const id: string = fqSeriesRecordId(candidate.record);
+      if (id.length > 0 && id === requestedSeriesId) {
+        seriesCount++;
+        seriesMatch = candidate.record;
+      }
+    }
+    if (seriesCount === 1) {
+      return seriesMatch;
+    }
+    let keyMatch: Record<string, Object> | null = null;
+    let keyCount: number = 0;
+    for (const candidate of candidates) {
+      if (candidate.key === requestedSeriesId) {
+        keyCount++;
+        keyMatch = candidate.record;
+      }
+    }
+    if (keyCount === 1) {
+      return keyMatch;
+    }
+    if (seriesCount > 1 || keyCount > 1 || candidates.length !== 1) {
+      return null;
+    }
+    return candidates[0].record;
+  }
+  return candidates.length === 1 ? candidates[0].record : null;
+}
+
+/** 定位本次请求命中的系列记录（对齐 _seriesVideoData）：桥接形态 data.video_data
+ * 直挂系列记录；上游新信封按视频 ID 分桶（data 或 data.video_data 键为 ID）。 */
+function fqLocateSeriesRecord(data: Record<string, Object>,
+  requestedSeriesId: string): Record<string, Object> | null {
+  const normalized: Record<string, Object> | null = fqAsRecord(data['video_data']);
+  if (normalized !== null) {
+    if (fqIsSeriesRecord(normalized)) {
+      return normalized;
+    }
+    const nested: Record<string, Object> | null =
+      fqSelectSeriesRecord(normalized, requestedSeriesId);
+    return nested ?? normalized;
+  }
+  return fqSelectSeriesRecord(data, requestedSeriesId);
+}
+
+/** 解析单个关联原著信封（对齐 _relateBook）：book_info.book_id/book_name/thumb_url，
+ * id 或书名缺失返回 null。 */
+function fqRelateBookOf(raw: Object | undefined): FqSeriesRelateBook | null {
+  const relate: Record<string, Object> | null = fqAsRecord(raw);
   if (relate === null) {
     return null;
   }
@@ -2283,6 +2370,83 @@ export function fqParseSeriesRelateBook(payload: Record<string, Object>): FqSeri
     return null;
   }
   return new FqSeriesRelateBook(id, title, fqStr(info, 'thumb_url'));
+}
+
+/** 多形态定位关联原著（对齐 _seriesRelateBook）：直挂 data.video_relate_book 优先；
+ * 否则在 data / data.video_data 的桶值里找（book_info 字段直挂或桶内
+ * video_relate_book），命中本次选中系列记录的桶优先，未命中时按 book_id
+ * 去重后唯一才收下，歧义返回 null。 */
+function fqLocateRelateBook(data: Record<string, Object>,
+  selected: Record<string, Object> | null): FqSeriesRelateBook | null {
+  const direct: FqSeriesRelateBook | null = fqRelateBookOf(data['video_relate_book']);
+  if (direct !== null) {
+    return direct;
+  }
+  const sources: Record<string, Object>[] = [data];
+  const bucketSource: Record<string, Object> | null = fqAsRecord(data['video_data']);
+  if (bucketSource !== null) {
+    sources.push(bucketSource);
+  }
+  let selectedBook: FqSeriesRelateBook | null = null;
+  const books: FqSeriesRelateBook[] = [];
+  for (const source of sources) {
+    const keys: string[] = Object.keys(source);
+    for (const key of keys) {
+      const value: Record<string, Object> | null = fqAsRecord(source[key]);
+      if (value === null) {
+        continue;
+      }
+      const ownBook: FqSeriesRelateBook | null = fqRelateBookOf(value);
+      if (ownBook !== null) {
+        books.push(ownBook);
+      }
+      const related: FqSeriesRelateBook | null = fqRelateBookOf(value['video_relate_book']);
+      if (related === null) {
+        continue;
+      }
+      if (selected !== null && (value === selected || value['video_data'] === selected)) {
+        selectedBook = related;
+      } else {
+        books.push(related);
+      }
+    }
+  }
+  if (selectedBook !== null) {
+    return selectedBook;
+  }
+  const uniqueIds: Set<string> = new Set<string>();
+  let picked: FqSeriesRelateBook | null = null;
+  for (const book of books) {
+    if (book.id.length > 0) {
+      uniqueIds.add(book.id);
+      picked = book;
+    }
+  }
+  return uniqueIds.size === 1 ? picked : null;
+}
+
+/**
+ * 解析短剧关联原著（/api/v1/series/{id}，官方 SaasBookInfo：book_id/book_name/
+ * thumb_url）。信封多形态（对齐 fqapp 08ac59ab）：桥接形态 data.video_relate_book
+ * 直挂；上游新信封按视频 ID 分桶（data / data.video_data 键为 ID，video_relate_book
+ * 挂桶内或 book_info 字段直挂）。业务错误（code 非 0/200）或剧无原著关联返回 null。
+ */
+export function fqParseSeriesRelateBook(payload: Record<string, Object>,
+  requestedSeriesId: string): FqSeriesRelateBook | null {
+  const code: Object | undefined = payload['code'];
+  if (typeof code === 'number' && code !== 0 && code !== 200) {
+    return null;
+  }
+  if (typeof code === 'string' && code !== '0' && code !== '200') {
+    return null;
+  }
+  const data: Record<string, Object> | null = fqAsRecord(payload['data']);
+  if (data === null) {
+    return null;
+  }
+  const selected: Record<string, Object> | null =
+    fqLocateSeriesRecord(data, requestedSeriesId);
+  return fqLocateRelateBook(data, selected);
 }
 
 // ---------------------------------------------------------------------------
