@@ -17,6 +17,7 @@ import {
   FqChapter,
   FqCommentReplyPage,
   FqEpisodeCommentPage,
+  FqSeriesRelateBook,
   fqEmptyBookDetail,
   fqFormatCountInt,
   fqKindToTab,
@@ -27,7 +28,7 @@ import { FqBrowseStore, FqBrowseItem } from '../../core/FqBrowseStore';
 import { FqDetailCacheEntry, fqDetailCacheGet, fqDetailCacheInit, fqDetailCachePut } from '../../core/FqDetailCache';
 import { FqChapterCacheStore } from '../../core/FqChapterCacheStore';
 import { DialogManager } from '../../utils/DialogUtils';
-import { AuthorNavParams, ComicNavParams, DetailNavParams, FqTitleBarOptions, ListenNavParams, PlayerNavParams, ReaderNavParams, ROUTE_AUTHOR, ROUTE_COMIC, ROUTE_LISTEN, ROUTE_PLAYER, ROUTE_READER2 } from '../../model/FqNavModels';
+import { AuthorNavParams, ComicNavParams, DetailNavParams, fqPushBookOrDetail, FqTitleBarOptions, ListenNavParams, PlayerNavParams, ReaderNavParams, ROUTE_AUTHOR, ROUTE_COMIC, ROUTE_LISTEN, ROUTE_PLAYER, ROUTE_READER2 } from '../../model/FqNavModels';
 import { FqShuqiBook, FqShuqiToc, fqShuqiBookToDetail } from '../../model/FqShuqiModels';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { CommonNav } from '../../view/CommonNav';
@@ -73,6 +74,8 @@ export struct DetailPage {
   /** 目录半模态（查看目录行呼出，复用阅读页公共 FqCatalogSheet）。 */
   @Local catalogSheetVisible: boolean = false;
   @Local catalogOpenToken: number = 0;
+  /** 关联原著（/api/v1/series/{id} 的 video_relate_book；仅剧 kind 拉取，无关联为 null）。 */
+  @Local originalBook: FqSeriesRelateBook | null = null;
   private itemId: string = '';
   private itemKind: string = 'book';
   private itemCover: string = '';
@@ -191,6 +194,11 @@ export struct DetailPage {
             if (this.previewComments.length > 0 || this.commentTotal > 0) {
               ListItem(){
                 this.ReviewBlock()
+              }
+            }
+            if (this.originalBook !== null) {
+              ListItem(){
+                this.OriginalBookBanner()
               }
             }
           }
@@ -675,6 +683,59 @@ export struct DetailPage {
   /** 剧 kind（短剧/漫剧）：评论走 series 剧评端点；书籍/漫画走书评端点。 */
   private isDramaKind(): boolean {
     return this.itemKind === 'video' || this.itemKind === 'manju';
+  }
+
+  /** 关联原著横幅（详情列表最底部，仅剧有原著关联时显示；点击进原著详情页）。 */
+  @Builder
+  private OriginalBookBanner() {
+    Row({ space: 8 }) {
+      Row() {
+        SymbolGlyph($r('sys.symbol.book_open_fill'))
+          .fontSize(13)
+          .fontColor([appState.accentColor])
+      }
+      .width(20)
+      .height(20)
+      .borderRadius(5)
+      .backgroundColor(FqColorUtils.withOpacity(appState.accentColor, 0.12))
+      .justifyContent(FlexAlign.Center)
+      .alignItems(VerticalAlign.Center)
+
+      Text(`原著《${this.originalBookTitle()}》`)
+        .fontSize(14)
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('sys.color.font_primary'))
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .layoutWeight(1)
+
+      SymbolGlyph($r('sys.symbol.chevron_right'))
+        .fontSize(14)
+        .fontColor([$r('sys.color.font_tertiary')])
+    }
+    .width('100%')
+    .height(44)
+    .padding({ left: 12, right: 12 })
+    .borderRadius(16)
+    .backgroundColor($r('sys.color.comp_background_primary'))
+    .alignItems(VerticalAlign.Center)
+    .onClick((): void => {
+      this.openOriginalBook();
+    })
+  }
+
+  /** 原著书名（横幅文案；无原著为空）。 */
+  private originalBookTitle(): string {
+    return this.originalBook !== null ? this.originalBook.title : '';
+  }
+
+  /** 原著横幅点击 → 原著详情页（kind=book 跳转链路）。 */
+  private openOriginalBook(): void {
+    const book: FqSeriesRelateBook | null = this.originalBook;
+    if (book === null || book.id.length === 0) {
+      return;
+    }
+    fqPushBookOrDetail(book.id, 'book', book.title, book.cover);
   }
 
   /** 剧评加载器工厂：剧 kind 返回 cursor 分页加载器（cursor 本页自理），
@@ -1262,6 +1323,17 @@ export struct DetailPage {
       } catch (error) {
         this.previewComments = [];
         this.commentTotal = 0;
+      }
+      // 关联原著横幅（仅剧 kind：/api/v1/series/{id}，失败静默不显示横幅）
+      if (this.isDramaKind()) {
+        try {
+          this.originalBook = await FqBackend.get().seriesRelateBook(contentId);
+        } catch (error) {
+          this.originalBook = null;
+        }
+        if (token !== this.loadToken) {
+          return;
+        }
       }
       // 回写详情缓存：下次复进秒开
       fqDetailCachePut(this.itemKind, this.itemId, new FqDetailCacheEntry(

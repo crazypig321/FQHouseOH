@@ -36,6 +36,8 @@ export struct FqStoryPanel {
   };
   /** 同系列入口（选集 tab 行右端「同系列」按钮；null 不显示，官方 StoryPlayerPanel）。 */
   @Param onOpenRelatedSeries: (() => void) | null = null;
+  /** 剧名行点击进剧集详情（官方 onOpenSeries；null 不响应）。 */
+  @Param onOpenSeries: (() => void) | null = null;
 
   /** 分页条选中页（可视区顶部所在段）。 */
   @Local page: number = 0;
@@ -210,6 +212,12 @@ export struct FqStoryPanel {
               .fontColor(['#FF9499A0'])
           }
           .width('100%')
+          .onClick((): void => {
+            const open: (() => void) | null = this.onOpenSeries;
+            if (open !== null) {
+              open();
+            }
+          })
 
           if (this.episodeLabel.length > 0) {
             Text(this.episodeLabel)

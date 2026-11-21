@@ -33,6 +33,8 @@ export class AppState {
   @Trace windowStatus: window.WindowStatusType = window.WindowStatusType.UNDEFINED;
   /** PC 侧边栏展开/收起（PcSideBar 宽度切换） */
   @Trace sidebarExpanded: boolean = true;
+  /** 播放页清屏播放时隐藏 PC 窗口顶栏（PcTitleBar），画面占满整个窗口。 */
+  @Trace hidePcTitleBar: boolean = false;
   // 是否开启模糊
   @Trace isForegroundBlur: boolean = false;
   /** 前景模糊引用计数（sheet/弹窗呼出 push、消失 pop；归零自动关闭，二级弹层互不影响）。 */
