@@ -1516,6 +1516,28 @@ function fqCursorOffset(cursor: string): number {
 const FQ_PREVIEW_MARKER_RE: RegExp = new RegExp('\\{!--[\\s\\S]*?--\\}|<!--[\\s\\S]*?-->|\\{!--[\\s\\S]*$|<!--[\\s\\S]*$', 'g');
 const FQ_PREVIEW_TAG_RE: RegExp = new RegExp('</?[a-zA-Z][^>]*>', 'g');
 const FQ_PREVIEW_SPACE_RE: RegExp = new RegExp('\\s+', 'g');
+const FQ_DEC_ENTITY_RE: RegExp = /&#(\d+);/g;
+const FQ_HEX_ENTITY_RE: RegExp = /&#x([0-9a-fA-F]+);/g;
+
+/** 数字实体解码（&#34;、&#x22; 等十/十六进制形式）：命名实体解码链的补充。
+ *  须在 &amp; 解码之后调用——上游双重转义（&amp;#34;）解码一轮后残留 &#34;。 */
+function fqDecodeNumericEntities(text: string): string {
+  let out: string = text.replace(FQ_DEC_ENTITY_RE, (match: string, code: string): string => {
+    const cp: number = Number.parseInt(code, 10);
+    if (cp > 0 && cp <= 0x10FFFF) {
+      return String.fromCodePoint(cp);
+    }
+    return match;
+  });
+  out = out.replace(FQ_HEX_ENTITY_RE, (match: string, code: string): string => {
+    const cp: number = Number.parseInt(code, 16);
+    if (cp > 0 && cp <= 0x10FFFF) {
+      return String.fromCodePoint(cp);
+    }
+    return match;
+  });
+  return out;
+}
 
 /** 试读正文清洗：剥掉音频标记/HTML 注释/标签与实体，压缩空白。 */
 function fqCleanPreview(raw: string): string {
@@ -1524,6 +1546,7 @@ function fqCleanPreview(raw: string): string {
   text = text.replace('&nbsp;', ' ').replace('&lt;', '<').replace('&gt;', '>')
     .replace('&quot;', '"').replace('&#39;', '\'').replace('&apos;', '\'')
     .replace('&amp;', '&');
+  text = fqDecodeNumericEntities(text);
   return text.replace(FQ_PREVIEW_SPACE_RE, ' ').trim();
 }
 
@@ -2406,6 +2429,7 @@ export function fqNormalizeChapterText(raw: string, chapterTitle: string): strin
     .replace(/&ldquo;/g, '\u201C').replace(/&rdquo;/g, '\u201D')
     .replace(/&mdash;/g, '\u2014').replace(/&hellip;/g, '\u2026')
     .replace(/&amp;/g, '&');
+  text = fqDecodeNumericEntities(text);
   text = text.replace(/\u00A0/g, ' ');
   text = text.replace(FQ_LINE_BREAK_RE, '\n');
 
@@ -2447,6 +2471,7 @@ function fqPushNormalizedLines(buf: string, idx: number, paragraphs: string[], p
     .replace(/&ldquo;/g, '\u201C').replace(/&rdquo;/g, '\u201D')
     .replace(/&mdash;/g, '\u2014').replace(/&hellip;/g, '\u2026')
     .replace(/&amp;/g, '&');
+  text = fqDecodeNumericEntities(text);
   text = text.replace(/\u00A0/g, ' ');
   text = text.replace(FQ_LINE_BREAK_RE, '\n');
   const pieces: string[] = text.split('\n');
