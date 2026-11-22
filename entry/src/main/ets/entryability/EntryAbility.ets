@@ -24,6 +24,7 @@ import { fqAudioSession } from '../core/FqAudioSession';
 import { FqAvArbiter } from '../core/FqAvArbiter';
 import { FqShelfStore } from '../core/FqShelfStore';
 import { FqShelfGroupStore } from '../core/FqShelfGroupStore';
+import { FqGroupLockStore } from '../core/FqGroupLockStore';
 import { FqBrowseStore } from '../core/FqBrowseStore';
 import { FqAudioHistory } from '../core/FqAudioHistory';
 import { FqWatchedStore } from '../core/FqWatchedStore';
@@ -65,6 +66,8 @@ export default class EntryAbility extends UIAbility {
     // 此前仅子页面各自 init，直达备份页导出会因未初始化而漏采）
     FqShelfStore.init(this.context);
     FqShelfGroupStore.init(this.context);
+    // 分组加锁应用内密码（设备无系统锁屏凭据时的兜底验证）：启动即初始化
+    FqGroupLockStore.init(this.context);
     FqBrowseStore.init(this.context);
     FqAudioHistory.init(this.context);
     FqWatchedStore.init(this.context);

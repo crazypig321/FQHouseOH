@@ -13,6 +13,8 @@ import { CommonSheet, FqSheetOptions } from '../view/sheet/CommonSheet';
 import { FqMenu, FqMenuItem } from '../view/CommonMenu';
 import { FqShelfStore, FqShelfItem } from '../core/FqShelfStore';
 import { FqShelfGroupStore, FqShelfGroup } from '../core/FqShelfGroupStore';
+import { FqGroupLockStore } from '../core/FqGroupLockStore';
+import { FqGroupLock } from '../utils/FqGroupLock';
 import { FqBrowseStore } from '../core/FqBrowseStore';
 import { FqReaderStore } from '../core/FqReaderStore';
 import { FqWatchedProgress, FqWatchedStore } from '../core/FqWatchedStore';
@@ -241,8 +243,10 @@ export struct ShelfPage {
         this.filterKind = rawKind;
       }
       const rawGroup: preferences.ValueType = this.layoutPref.getSync(SHELF_PREF_FILTER_GROUP, '');
+      // 加锁分组不随偏好恢复（每次进入都需重新验证），保持「全部」
       if (typeof rawGroup === 'string' && rawGroup.length > 0
-        && FqShelfGroupStore.groupById(rawGroup) !== null) {
+        && FqShelfGroupStore.groupById(rawGroup) !== null
+        && !FqShelfGroupStore.isLocked(rawGroup)) {
         this.filterGroupId = rawGroup;
       }
     } catch (error) {
@@ -489,6 +493,11 @@ export struct ShelfPage {
     } else {
       for (const entry of FqBrowseStore.all()) {
         if (keyword.length === 0 || entry.title.includes(keyword)) {
+          // 加锁分组的作品在浏览历史中隐藏（隐私保护，与书架/搜索一致）
+          const groupId: string = FqShelfGroupStore.groupOf(entry.id);
+          if (groupId.length > 0 && FqShelfGroupStore.isLocked(groupId)) {
+            continue;
+          }
           rows.push(new ShelfRow(entry.id, entry.kind, entry.title, entry.cover,
             this.relativeTime(entry.visitedAt),
             this.entryPercent(entry.id, entry.kind)));
@@ -576,7 +585,13 @@ export struct ShelfPage {
     if (this.filterSource === 2 && isLocal) {
       return false;
     }
-    if (this.filterGroupId.length > 0 && FqShelfGroupStore.groupOf(id) !== this.filterGroupId) {
+    const groupId: string = FqShelfGroupStore.groupOf(id);
+    // 加锁分组的作品：仅在通过验证进入该分组（filterGroupId 命中）时可见，
+    // 「全部」/其他分组/搜索结果中一律隐藏。
+    if (groupId.length > 0 && groupId !== this.filterGroupId && FqShelfGroupStore.isLocked(groupId)) {
+      return false;
+    }
+    if (this.filterGroupId.length > 0 && groupId !== this.filterGroupId) {
       return false;
     }
     return true;
@@ -749,20 +764,25 @@ export struct ShelfPage {
     this.rebuildRows();
   }
 
-  /** 新建分组（筛选菜单 / sheet 内共用）。 */
+  /** 新建分组（筛选菜单 / sheet 内共用）：命名弹窗内可选是否加锁。 */
   private promptCreateGroup(): void {
-    DialogManager.InputShelfGroupName('新建分组', '', (name: string): void => {
+    DialogManager.InputShelfGroupName('新建分组', '', (name: string, locked: boolean): void => {
       const group: FqShelfGroup | null = FqShelfGroupStore.addGroup(name);
       if (group === null) {
         this.showToast('创建失败：名称重复或已达 50 组上限');
         return;
       }
+      if (locked) {
+        this.ensurePasswordAndLock(group);
+      }
       if (this.groupSheetVisible && this.groupSheetMode === 'assign') {
         this.assignSelectedTo(group.id, group.name);
         return;
       }
-      this.showToast(`已创建分组「${group.name}」`);
-    });
+      if (!locked) {
+        this.showToast(`已创建分组「${group.name}」`);
+      }
+    }, true);
   }
 
   /** 打开分组管理 sheet。 */
@@ -884,7 +904,7 @@ export struct ShelfPage {
     return count;
   }
 
-  /** 分组菜单：重命名 / 删除（管理 sheet 行点击、分组标签长按共用）。 */
+  /** 分组菜单：重命名 / 加锁（取消加锁）/ 删除（管理 sheet 行点击、分组标签长按共用）。 */
   private openGroupManageMenu(group: FqShelfGroup, anchorId: string): void {
     const items: Array<FqMenuItem> = [];
     const renameItem = new FqMenuItem();
@@ -894,25 +914,116 @@ export struct ShelfPage {
       this.promptRenameGroup(group.id, group.name);
     };
     items.push(renameItem);
+    const lockItem = new FqMenuItem();
+    lockItem.icon = group.locked ? $r('sys.symbol.lock_open') : $r('sys.symbol.lock');
+    lockItem.label = group.locked ? '取消加锁' : '加锁';
+    lockItem.onAction = (): void => {
+      FqMenu.dismiss();
+      if (group.locked) {
+        this.unlockGroup(group);
+      } else {
+        this.lockGroup(group);
+      }
+    };
+    items.push(lockItem);
     const deleteItem = new FqMenuItem();
     deleteItem.label = '删除分组';
     deleteItem.onAction = (): void => {
       FqMenu.dismiss();
-      DialogManager.ShowConfirm('删除分组', `删除「${group.name}」后，组内作品将回到未分组。`, '删除',
-        (): void => {
-          FqShelfGroupStore.removeGroup(group.id);
-          if (this.filterGroupId === group.id) {
-            this.setFilterGroupId('');
-          }
-          this.showToast('已删除分组');
+      if (group.locked) {
+        // 加锁分组删除需先验证（删除即解锁，未验证删除会绕过隐私保护）
+        FqGroupLock.verifyGroupAccess((): void => {
+          this.confirmDeleteGroup(group);
+        }, (): void => {
+          this.showToast('验证未通过');
         });
+        return;
+      }
+      this.confirmDeleteGroup(group);
     };
     items.push(deleteItem);
     FqMenu.open(this.getUIContext(), anchorId, items);
   }
 
+  /** 删除分组确认弹窗。 */
+  private confirmDeleteGroup(group: FqShelfGroup): void {
+    DialogManager.ShowConfirm('删除分组', `删除「${group.name}」后，组内作品将回到未分组。`, '删除',
+      (): void => {
+        FqShelfGroupStore.removeGroup(group.id);
+        if (this.filterGroupId === group.id) {
+          this.setFilterGroupId('');
+        }
+        this.showToast('已删除分组');
+      });
+  }
+
+  /** 分组加锁：先弹确认弹窗，确认后确保验证手段再加锁。 */
+  private lockGroup(group: FqShelfGroup): void {
+    DialogManager.ShowConfirm('加锁分组',
+      `加锁「${group.name}」后，进入分组需验证身份，组内作品将在书架、搜索和浏览历史中隐藏。需要解锁时长按分组标签，选「取消加锁」并验证即可。`,
+      '加锁', (): void => {
+        this.ensurePasswordAndLock(group);
+      });
+  }
+
+  /** 确保验证手段后加锁：系统凭据可用或已有应用内密码时直接加锁，
+   *  否则等当前弹窗（确认/命名）关闭后再弹设置密码（避免弹窗键冲突）。 */
+  private ensurePasswordAndLock(group: FqShelfGroup): void {
+    if (FqGroupLock.systemAuthAvailable() || FqGroupLockStore.hasPassword()) {
+      this.applyGroupLock(group);
+      return;
+    }
+    DialogManager.onDialogClosed = (): void => {
+      DialogManager.ShowGroupPassword('设置分组密码', (pwd: string): void => {
+        FqGroupLockStore.setPassword(pwd).then((ok: boolean): void => {
+          if (!ok) {
+            this.showToast('设置密码失败，分组暂未加锁');
+            return;
+          }
+          this.applyGroupLock(group);
+        });
+      });
+    };
+  }
+
+  /** 执行加锁：正在查看该分组时立即退出（作品随加锁即刻隐藏）。 */
+  private applyGroupLock(group: FqShelfGroup): void {
+    FqShelfGroupStore.setLocked(group.id, true);
+    if (this.filterGroupId === group.id) {
+      this.setFilterGroupId('');
+    }
+    this.showToast(`已加锁「${group.name}」`);
+  }
+
+  /** 取消分组加锁：先弹确认弹窗，确认后验证（系统凭据优先，应用内密码兜底）。 */
+  private unlockGroup(group: FqShelfGroup): void {
+    DialogManager.ShowConfirm('取消加锁',
+      `取消加锁「${group.name}」后，组内作品将恢复在书架、搜索和浏览历史中显示。`,
+      '取消加锁', (): void => {
+        FqGroupLock.verifyGroupAccess((): void => {
+          FqShelfGroupStore.setLocked(group.id, false);
+          this.showToast(`已取消「${group.name}」的加锁`);
+        }, (): void => {
+          this.showToast('验证未通过');
+        });
+      }, '暂不');
+  }
+
+  /** 进入分组：加锁分组每次进入都需重新验证。 */
+  private requestEnterGroup(group: FqShelfGroup): void {
+    if (!group.locked) {
+      this.setFilterGroupId(group.id);
+      return;
+    }
+    FqGroupLock.verifyGroupAccess((): void => {
+      this.setFilterGroupId(group.id);
+    }, (): void => {
+      this.showToast('验证未通过');
+    });
+  }
+
   private promptRenameGroup(id: string, name: string): void {
-    DialogManager.InputShelfGroupName('重命名分组', name, (next: string): void => {
+    DialogManager.InputShelfGroupName('重命名分组', name, (next: string, _locked: boolean): void => {
       if (!FqShelfGroupStore.renameGroup(id, next)) {
         this.showToast('重命名失败：名称重复或超出长度限制');
         return;
@@ -1009,11 +1120,18 @@ export struct ShelfPage {
               ListItem() {
                 Row() {
                   Column({ space: 2 }) {
-                    Text(group.name)
-                      .fontSize(15)
-                      .fontColor($r('sys.color.font_primary'))
-                      .maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    Row({ space: 4 }) {
+                      Text(group.name)
+                        .fontSize(15)
+                        .fontColor($r('sys.color.font_primary'))
+                        .maxLines(1)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
+                      if (group.locked) {
+                        SymbolGlyph($r('sys.symbol.lock'))
+                          .fontSize(11)
+                          .fontColor([$r('sys.color.icon_tertiary')])
+                      }
+                    }
                     Text(`${this.groupShelfCount(group.id)} 本`)
                       .fontSize(12)
                       .fontColor($r('sys.color.font_secondary'))
@@ -1737,14 +1855,23 @@ export struct ShelfPage {
           ForEach(this.sheetGroups, (group: FqShelfGroup) => {
             ListItem() {
               Column() {
-                Text(group.name)
-                  .fontSize(this.filterGroupId === group.id ? 17 : 15)
-                  .fontWeight(this.filterGroupId === group.id ? FontWeight.Bold : FontWeight.Normal)
-                  .fontColor(this.filterGroupId === group.id ? appState.accentColor : $r('sys.color.font_secondary'))
-                  .maxLines(1)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  .constraintSize({ maxWidth: 140 })
-                  .animation({ duration: 180, curve: Curve.EaseOut })
+                Row({ space: 3 }) {
+                  Text(group.name)
+                    .fontSize(this.filterGroupId === group.id ? 17 : 15)
+                    .fontWeight(this.filterGroupId === group.id ? FontWeight.Bold : FontWeight.Normal)
+                    .fontColor(this.filterGroupId === group.id ? appState.accentColor : $r('sys.color.font_secondary'))
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    .constraintSize({ maxWidth: 140 })
+                    .animation({ duration: 180, curve: Curve.EaseOut })
+                  // 加锁分组标签：锁图标（分组名保持可见）
+                  if (group.locked) {
+                    SymbolGlyph($r('sys.symbol.lock'))
+                      .fontSize(12)
+                      .fontColor([this.filterGroupId === group.id ? appState.accentColor
+                        : $r('sys.color.icon_tertiary')])
+                  }
+                }
                 // 选中项底部主题色小横条（常驻占位，未选中透明淡出，避免行高跳动）
                 Row()
                   .width(14)
@@ -1759,7 +1886,11 @@ export struct ShelfPage {
               .height(36)
               .id(SHELF_GROUP_TAG_ANCHOR_PREFIX + group.id)
               .onClick(() => {
-                this.setFilterGroupId(this.filterGroupId === group.id ? '' : group.id);
+                if (this.filterGroupId === group.id) {
+                  this.setFilterGroupId('');
+                  return;
+                }
+                this.requestEnterGroup(group);
               })
               .gesture(LongPressGesture()
                 .onAction((): void => {

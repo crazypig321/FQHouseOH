@@ -19,6 +19,7 @@ import { WebDavBackupListDialogContent } from '../view/dialog/WebDavBackupListDi
 import { WebDavBackupCountDialogContent } from '../view/dialog/WebDavBackupCountDialogContent';
 import { ChapterCacheLimitDialogContent } from '../view/dialog/ChapterCacheLimitDialogContent';
 import { GroupNameDialogContent } from '../view/dialog/GroupNameDialogContent';
+import { GroupPasswordDialogContent } from '../view/dialog/GroupPasswordDialogContent';
 import { SortJumpDialogContent } from '../view/dialog/SortJumpDialogContent';
 import { HomeCategoryDialogContent } from '../view/dialog/HomeCategoryDialogContent';
 import { HongguoQrDialogContent } from '../view/dialog/HongguoQrDialogContent';
@@ -559,6 +560,8 @@ struct Index {
       ChapterCacheLimitDialogContent()
     } else if (key === '分组命名') {
       GroupNameDialogContent()
+    } else if (key === '分组密码') {
+      GroupPasswordDialogContent()
     } else if (key === '跳转排序') {
       SortJumpDialogContent()
     } else if (key === '红果扫码登录') {

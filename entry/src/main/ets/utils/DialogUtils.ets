@@ -39,8 +39,12 @@ export class DialogManager {
   public static shelfGroupNameTitle: string = '新建分组';
   /** 分组名输入框当前值。 */
   public static shelfGroupNameValue: string = '';
-  /** 分组名确认回调（校验通过后触发，回传 trim 后的名称；取消/关闭不触发）。 */
-  private static shelfGroupNameConfirm: ((name: string) => void) | null = null;
+  /** 分组命名弹窗是否展示加锁开关（仅新建分组）。 */
+  public static shelfGroupNameShowLock: boolean = false;
+  /** 分组命名弹窗加锁开关当前值（仅新建分组）。 */
+  public static shelfGroupNameLock: boolean = false;
+  /** 分组名确认回调（校验通过后触发，回传 trim 后的名称与是否加锁；取消/关闭不触发）。 */
+  private static shelfGroupNameConfirm: ((name: string, locked: boolean) => void) | null = null;
 
   // ===== 跳转排序弹窗参数（打开前由调用方赋值，弹窗关闭后自动清空） =====
   /** 「跳转排序」目标序号（打开前赋初值，弹窗内编辑）。 */
@@ -49,6 +53,14 @@ export class DialogManager {
   public static sortJumpMax: number = 0;
   /** 「跳转排序」确认回调（target 为 0 基索引；取消/关闭不触发）。 */
   private static sortJumpConfirm: ((target: number) => void) | null = null;
+
+  // ===== 分组密码弹窗参数（打开前由调用方赋值，弹窗关闭后自动清空） =====
+  /** 分组密码弹窗标题（输入分组密码 / 设置分组密码）。 */
+  public static groupPasswordTitle: string = '输入分组密码';
+  /** 分组密码输入框当前值（4-8 位数字）。 */
+  public static groupPasswordValue: string = '';
+  /** 分组密码确认回调（回传输入密码；取消/关闭不触发）。 */
+  private static groupPasswordConfirm: ((pwd: string) => void) | null = null;
 
   // ===== 自定义颜色弹窗参数（打开前由调用方赋值，弹窗关闭后自动清空） =====
   /** 自定义颜色弹窗：取色器起始色。 */
@@ -201,10 +213,14 @@ export class DialogManager {
     DialogManager.OpenDialog('通用确认');
   }
 
-  /** 书架分组命名弹窗：title 标题（新建/重命名），initial 预填名称，onConfirm 确认后回传名称。 */
-  public static InputShelfGroupName(title: string, initial: string, onConfirm: (name: string) => void): void {
+  /** 书架分组命名弹窗：title 标题（新建/重命名），initial 预填名称，
+   *  showLock 是否展示加锁开关（仅新建），onConfirm 确认后回传名称与是否加锁。 */
+  public static InputShelfGroupName(title: string, initial: string,
+    onConfirm: (name: string, locked: boolean) => void, showLock: boolean = false): void {
     DialogManager.shelfGroupNameTitle = title;
     DialogManager.shelfGroupNameValue = initial;
+    DialogManager.shelfGroupNameShowLock = showLock;
+    DialogManager.shelfGroupNameLock = false;
     DialogManager.shelfGroupNameConfirm = onConfirm;
     DialogManager.OpenDialog('分组命名');
   }
@@ -215,6 +231,14 @@ export class DialogManager {
     DialogManager.sortJumpMax = max;
     DialogManager.sortJumpConfirm = onConfirm;
     DialogManager.OpenDialog('跳转排序');
+  }
+
+  /** 分组密码弹窗：title 标题（输入/设置分组密码），onConfirm 确认后回传密码（4-8 位数字）。 */
+  public static ShowGroupPassword(title: string, onConfirm: (pwd: string) => void): void {
+    DialogManager.groupPasswordTitle = title;
+    DialogManager.groupPasswordValue = '';
+    DialogManager.groupPasswordConfirm = onConfirm;
+    DialogManager.OpenDialog('分组密码');
   }
 
   /** 自定义颜色弹窗（HSB 取色器 + 确认/取消）：initial 取色器起始色，onConfirm 确认后回传所选色（取消/关闭不触发）。 */
@@ -479,6 +503,9 @@ export class DialogManager {
     if (key === '跳转排序') {
       return '跳转排序';
     }
+    if (key === '分组密码') {
+      return DialogManager.groupPasswordTitle;
+    }
     if (key === '红果扫码登录') {
       return '扫码登录红果';
     }
@@ -492,7 +519,7 @@ export class DialogManager {
   public static DialogButtons(key: string): Array<ButtonOptions> {
     if (key === '通用确认' || key === '自定义颜色' ||
       key === '选择WebDAV备份' || key === '备份保留数量' || key === '自定义主题编辑' ||
-      key === '章节缓存限制' || key === '分组命名' || key === '跳转排序') {
+      key === '章节缓存限制' || key === '分组命名' || key === '跳转排序' || key === '分组密码') {
       // 通用确认弹窗支持自定义取消文案与取消回调（分享进度「保持我的进度」等二选一场景）
       let cancelLabel: string = '取消';
       let cancelAction: (() => void) | null = null;
@@ -524,6 +551,8 @@ export class DialogManager {
       } else if (key === '分组命名') {
         confirmLabel = '保存';
       } else if (key === '跳转排序') {
+        confirmLabel = '确定';
+      } else if (key === '分组密码') {
         confirmLabel = '确定';
       }
       const confirm: ButtonOptions = {
@@ -604,9 +633,9 @@ export class DialogManager {
         DialogManager.Toast('分组名称需要 1~30 个字');
         return;
       }
-      const cb: ((name: string) => void) | null = DialogManager.shelfGroupNameConfirm;
+      const cb: ((name: string, locked: boolean) => void) | null = DialogManager.shelfGroupNameConfirm;
       if (cb !== null) {
-        cb(name);
+        cb(name, DialogManager.shelfGroupNameShowLock && DialogManager.shelfGroupNameLock);
       }
     }
     if (key === '跳转排序') {
@@ -618,6 +647,17 @@ export class DialogManager {
       const cb: ((target: number) => void) | null = DialogManager.sortJumpConfirm;
       if (cb !== null) {
         cb(target - 1);
+      }
+    }
+    if (key === '分组密码') {
+      const pwd: string = DialogManager.groupPasswordValue;
+      if (!/^\d{4,8}$/.test(pwd)) {
+        DialogManager.Toast('密码需为 4-8 位数字');
+        return;
+      }
+      const cb: ((pwd: string) => void) | null = DialogManager.groupPasswordConfirm;
+      if (cb !== null) {
+        cb(pwd);
       }
     }
   }
@@ -664,6 +704,8 @@ export class DialogManager {
     if (key === '分组命名') {
       DialogManager.shelfGroupNameTitle = '新建分组';
       DialogManager.shelfGroupNameValue = '';
+      DialogManager.shelfGroupNameShowLock = false;
+      DialogManager.shelfGroupNameLock = false;
       DialogManager.shelfGroupNameConfirm = null;
     }
     // 跳转排序弹窗参数一次性，关闭后清理
@@ -671,6 +713,12 @@ export class DialogManager {
       DialogManager.sortJumpValue = '';
       DialogManager.sortJumpMax = 0;
       DialogManager.sortJumpConfirm = null;
+    }
+    // 分组密码弹窗参数一次性，关闭后清理
+    if (key === '分组密码') {
+      DialogManager.groupPasswordTitle = '输入分组密码';
+      DialogManager.groupPasswordValue = '';
+      DialogManager.groupPasswordConfirm = null;
     }
     // 首页分类弹窗参数一次性，关闭后清理
     if (key === '首页分类') {

@@ -23,10 +23,13 @@ const FQ_SHELF_GROUP_MAX: number = 50;
 export class FqShelfGroup {
   readonly id: string;
   readonly name: string;
+  /** 是否加锁（进入分组需验证；锁定组内作品在书架/搜索/浏览历史中隐藏）。 */
+  readonly locked: boolean;
 
-  constructor(id: string, name: string) {
+  constructor(id: string, name: string, locked: boolean = false) {
     this.id = id;
     this.name = name;
+    this.locked = locked;
   }
 }
 
@@ -78,7 +81,7 @@ export class FqShelfGroupStore {
             continue;
           }
           ids.add(id);
-          FqShelfGroupStore.groups.push(new FqShelfGroup(id, name));
+          FqShelfGroupStore.groups.push(new FqShelfGroup(id, name, rec['locked'] === true));
         }
       }
       const assignmentsRaw: Record<string, Object> | null = fqAsRecord(doc['assignments']);
@@ -166,13 +169,37 @@ export class FqShelfGroupStore {
     }
     for (let index: number = 0; index < FqShelfGroupStore.groups.length; index++) {
       if (FqShelfGroupStore.groups[index].id === id) {
-        FqShelfGroupStore.groups[index] = new FqShelfGroup(id, trimmed);
+        FqShelfGroupStore.groups[index] =
+          new FqShelfGroup(id, trimmed, FqShelfGroupStore.groups[index].locked);
         FqShelfGroupStore.persist();
         fqStoreBus.shelfGroupVersion++;
         return true;
       }
     }
     return false;
+  }
+
+  /** 分组加锁/解锁（进入解锁后的分组仍需按调用方门控重新验证）。 */
+  public static setLocked(id: string, locked: boolean): boolean {
+    for (let index: number = 0; index < FqShelfGroupStore.groups.length; index++) {
+      if (FqShelfGroupStore.groups[index].id === id) {
+        if (FqShelfGroupStore.groups[index].locked === locked) {
+          return true;
+        }
+        FqShelfGroupStore.groups[index] =
+          new FqShelfGroup(id, FqShelfGroupStore.groups[index].name, locked);
+        FqShelfGroupStore.persist();
+        fqStoreBus.shelfGroupVersion++;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** 分组是否加锁（分组不存在 = 未加锁）。 */
+  public static isLocked(id: string): boolean {
+    const group: FqShelfGroup | null = FqShelfGroupStore.groupById(id);
+    return group !== null && group.locked;
   }
 
   /** 删除分组：其下归属一并清除（书保留在书架，回到未分组）。 */
@@ -326,6 +353,7 @@ export class FqShelfGroupStore {
       const rec: Record<string, Object> = {};
       rec['id'] = group.id;
       rec['name'] = group.name;
+      rec['locked'] = group.locked;
       groupsRec.push(rec);
     }
     const assignmentsRec: Record<string, Object> = {};

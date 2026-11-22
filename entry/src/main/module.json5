@@ -24,6 +24,9 @@
       },
       {
         "name": "ohos.permission.DETECT_GESTURE"
+      },
+      {
+        "name": "ohos.permission.ACCESS_BIOMETRIC"
       }
     ],
     "abilities": [

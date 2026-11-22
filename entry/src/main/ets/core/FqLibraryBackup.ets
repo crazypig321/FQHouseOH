@@ -395,14 +395,17 @@ export class FqBackupAppSettings {
   }
 }
 
-/** 备份内书架分组段：分组名 + 组内作品 id（采集时排除 local_ 与不在书架的书）。 */
+/** 备份内书架分组段：分组名 + 组内作品 id（采集时排除 local_ 与不在书架的书）+ 加锁标志。 */
 export class FqBackupShelfGroup {
   readonly name: string;
   readonly books: string[];
+  /** 分组是否加锁（旧备份无此字段 = false；应用内密码不进备份，仅恢复加锁标志）。 */
+  readonly locked: boolean;
 
-  constructor(name: string, books: string[]) {
+  constructor(name: string, books: string[], locked: boolean = false) {
     this.name = name;
     this.books = books;
+    this.locked = locked;
   }
 }
 
@@ -662,7 +665,7 @@ export class FqLibraryBackup {
           books.push(bookId);
         }
       }
-      groups.push(new FqBackupShelfGroup(group.name, books));
+      groups.push(new FqBackupShelfGroup(group.name, books, group.locked));
     }
     // 阅读书签段：local_ 排除（本地书依赖设备本地文件）
     const bookmarks: FqBackupBookmark[] = [];
@@ -806,6 +809,7 @@ export class FqLibraryBackup {
       for (const group of data.groups) {
         const rec: Record<string, Object> = {};
         rec['name'] = group.name;
+        rec['locked'] = group.locked;
         const books: Object[] = [];
         for (const bookId of group.books) {
           books.push(bookId);
@@ -1155,7 +1159,7 @@ export class FqLibraryBackup {
           bookIds.add(bookValue);
           books.push(bookValue);
         }
-        groups.push(new FqBackupShelfGroup(name, books));
+        groups.push(new FqBackupShelfGroup(name, books, groupRec['locked'] === true));
       }
     }
     // 应用设置段：v1 备份无此段（settings 为 null，恢复时跳过）；v2 起必有且全量校验。
@@ -1507,6 +1511,11 @@ export class FqLibraryBackup {
         if (local === null) {
           // 名称非法或分组数达上限：跳过该组，不阻断整份恢复
           continue;
+        }
+        // 加锁标志仅置位不清除（本机已加锁保持不变；应用内密码不进备份，
+        // 恢复后的加锁分组按设备凭据/本机密码验证）
+        if (group.locked) {
+          FqShelfGroupStore.setLocked(local.id, true);
         }
         const books: string[] = [];
         for (const bookId of group.books) {

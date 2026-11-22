@@ -43,6 +43,7 @@ const FQ_PREF_NAMES: string[] = [
   'fq_drama_cache',
   'fq_comic_cache',
   'fq_local_books',
+  'fq_group_lock',
 ];
 
 /** filesDir 下需删除的数据目录名（新增数据目录时需同步维护）。 */
