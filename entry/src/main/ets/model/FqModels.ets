@@ -384,6 +384,46 @@ export class FqChapter {
   }
 }
 
+/**
+ * LazyForEach 剧集目录数据源（选集面板/侧边栏选集/离线缓存格共用）：
+ * Repeat.virtualScroll 复用节点时只传 ri.item/ri.index 会渲染错位
+ * （千集长剧滚动后格子文案复用成开头集数），改 LazyForEach 按需构建
+ * 根治；episodes 均为整体替换，reload + onDataReloaded 通知即可。
+ */
+export class FqChapterDataSource implements IDataSource {
+  private items: FqChapter[] = [];
+  private listeners: DataChangeListener[] = [];
+
+  totalCount(): number {
+    return this.items.length;
+  }
+
+  getData(index: number): FqChapter {
+    return this.items[index];
+  }
+
+  registerDataChangeListener(listener: DataChangeListener): void {
+    if (this.listeners.indexOf(listener) === -1) {
+      this.listeners.push(listener);
+    }
+  }
+
+  unregisterDataChangeListener(listener: DataChangeListener): void {
+    const index: number = this.listeners.indexOf(listener);
+    if (index >= 0) {
+      this.listeners.splice(index, 1);
+    }
+  }
+
+  /** 整体替换目录并通知（onDataReloaded 触发可视区重建）。 */
+  reload(items: FqChapter[]): void {
+    this.items = items;
+    for (const listener of this.listeners) {
+      listener.onDataReloaded();
+    }
+  }
+}
+
 /** 剧集单个清晰度档（/api/content data.variants 行）。 */
 export class FqEpisodeVariant {
   readonly name: string;

@@ -100,7 +100,7 @@ import { FqPlayerSettingsSheet } from '../../view/player/FqPlayerSettingsSheet';
 import { FqPlayerSettingsPanel } from '../../view/player/FqPlayerSettingsPanel';
 import { FqDanmakuSettingsPanel } from '../../view/player/FqDanmakuSettingsPanel';
 import { fqPushBookOrDetail, PlayerNavParams, ListenVideoNavParams, ROUTE_LISTEN_VIDEO, ROUTE_CACHED_DRAMAS, DetailNavParams, ROUTE_DETAIL } from '../../model/FqNavModels';
-import { FqBookCommentPage, FqChapter, FqCommentReplyPage, FqDanmaku, FqDanmakuPage, FqEpisodeCommentPage, FqEpisodeSource, FqEpisodeVariant, FqHongguoChapters, FqHongguoMap, FqSeriesRelateBook, FqRelatedSeries, fqKindToTab, FqCacheTaskView } from '../../model/FqModels';
+import { FqBookCommentPage, FqChapter, FqChapterDataSource, FqCommentReplyPage, FqDanmaku, FqDanmakuPage, FqEpisodeCommentPage, FqEpisodeSource, FqEpisodeVariant, FqHongguoChapters, FqHongguoMap, FqSeriesRelateBook, FqRelatedSeries, fqKindToTab, FqCacheTaskView } from '../../model/FqModels';
 import { FqBackend, FqRequestError, fqErrorMessage } from '../../core/FqBackend';
 import { fqHongguoQualityHeight } from '../../core/FqParser';
 import { fqAudioSession } from '../../core/FqAudioSession';
@@ -267,6 +267,8 @@ export struct PlayerPage {
   private pendingOpenMedia: Media | null = null;
   /** 剧集目录（详情页预载；为空则本页拉目录）。 */
   @Local episodes: FqChapter[] = [];
+  /** LazyForEach 目录数据源（选集/PC 选集/离线缓存格共用；episodes 整体替换时 reload）。 */
+  private episodeSource: FqChapterDataSource = new FqChapterDataSource();
   /** 当前集下标。 */
   @Local index: number = 0;
   /** 集流加载中（/api/content 取流）。 */
@@ -570,11 +572,18 @@ export struct PlayerPage {
   /** 全屏顶栏充电中（chargingStatus=ENABLE）。 */
   @Local fsBatteryCharging: boolean = false;
 
+  /** episodes 整体替换时同步 LazyForEach 数据源（aboutToAppear/loadChapters 赋值均触发）。 */
+  @Monitor('episodes')
+  onEpisodesChange(): void {
+    this.episodeSource.reload(this.episodes);
+  }
+
   aboutToAppear(): void {
     this.title = PlayerNavParams.title;
     this.tab = fqKindToTab(PlayerNavParams.kind);
     this.creationStatus = PlayerNavParams.creationStatus;
     this.episodes = PlayerNavParams.chapters;
+    this.episodeSource.reload(this.episodes);
     // PC 布局隐藏左侧主导航栏（onHidden 被上层页面覆盖/离页复位）
     appState.hidePcSideNav = true;
     if (PlayerNavParams.startIndex >= 0) {
@@ -2905,30 +2914,28 @@ export struct PlayerPage {
           this.SideEpisodePagingStrip()
         }
         Grid(this.sideScroller) {
-          // Repeat 虚拟滚动：上千集仅构建可视区格子，避免全量 ForEach 冻结 UI
-          Repeat<FqChapter>(this.episodes)
-            .each((ri: RepeatItem<FqChapter>) => {
-              GridItem() {
-                Row() {
-                  Text(`${ri.index + 1}`)
-                    .fontSize(15)
-                    .fontWeight(ri.index === this.index ? FontWeight.Bold : FontWeight.Normal)
-                    .fontColor(this.sideEpisodeColor(ri.index))
-                }
-                .width('100%')
-                .aspectRatio(1)
-                .justifyContent(FlexAlign.Center)
-                .alignItems(VerticalAlign.Center)
-                .borderRadius(8)
-                .backgroundColor(ri.index === this.index ? '#1AFA6725' : '#26FFFFFF')
-                .onClick((): void => {
-                  this.closeSidePanel();
-                  this.loadEpisode(ri.index);
-                })
+          // LazyForEach 按需构建：上千集仅构建可视区格子；Repeat.virtualScroll
+          // 复用节点会渲染错位（滚动后集数文案错乱），弃用
+          LazyForEach(this.episodeSource, (episode: FqChapter, index: number) => {
+            GridItem() {
+              Row() {
+                Text(`${index + 1}`)
+                  .fontSize(15)
+                  .fontWeight(index === this.index ? FontWeight.Bold : FontWeight.Normal)
+                  .fontColor(this.sideEpisodeColor(index))
               }
-            })
-            .key((episode: FqChapter, index: number) => `${episode.itemId}-${index}`)
-            .virtualScroll()
+              .width('100%')
+              .aspectRatio(1)
+              .justifyContent(FlexAlign.Center)
+              .alignItems(VerticalAlign.Center)
+              .borderRadius(8)
+              .backgroundColor(index === this.index ? '#1AFA6725' : '#26FFFFFF')
+              .onClick((): void => {
+                this.closeSidePanel();
+                this.loadEpisode(index);
+              })
+            }
+          })
         }
         .columnsTemplate('1fr 1fr 1fr 1fr')
         .columnsGap(8)
@@ -3202,29 +3209,27 @@ export struct PlayerPage {
         // 集数网格独立滚动（占满余高）：分段按钮 scrollToIndex 直达当前段，
         // 滚动只动集数，不动上方固定区
         Grid(this.pcScroller) {
-          // Repeat 虚拟滚动：上千集仅构建可视区格子，避免全量 ForEach 冻结 UI
-          Repeat<FqChapter>(this.episodes)
-            .each((ri: RepeatItem<FqChapter>) => {
-              GridItem() {
-                Row() {
-                  Text(`${ri.index + 1}`)
-                    .fontSize(14)
-                    .fontWeight(ri.index === this.index ? FontWeight.Bold : FontWeight.Normal)
-                    .fontColor(this.sideEpisodeColor(ri.index))
-                }
-                .width('100%')
-                .aspectRatio(1)
-                .justifyContent(FlexAlign.Center)
-                .alignItems(VerticalAlign.Center)
-                .borderRadius(8)
-                .backgroundColor(ri.index === this.index ? '#1AFA6725' : '#26FFFFFF')
-                .onClick((): void => {
-                  this.loadEpisode(ri.index);
-                })
+          // LazyForEach 按需构建：上千集仅构建可视区格子；Repeat.virtualScroll
+          // 复用节点会渲染错位（滚动后集数文案错乱），弃用
+          LazyForEach(this.episodeSource, (episode: FqChapter, index: number) => {
+            GridItem() {
+              Row() {
+                Text(`${index + 1}`)
+                  .fontSize(14)
+                  .fontWeight(index === this.index ? FontWeight.Bold : FontWeight.Normal)
+                  .fontColor(this.sideEpisodeColor(index))
               }
-            })
-            .key((episode: FqChapter, index: number) => `${episode.itemId}-${index}`)
-            .virtualScroll()
+              .width('100%')
+              .aspectRatio(1)
+              .justifyContent(FlexAlign.Center)
+              .alignItems(VerticalAlign.Center)
+              .borderRadius(8)
+              .backgroundColor(index === this.index ? '#1AFA6725' : '#26FFFFFF')
+              .onClick((): void => {
+                this.loadEpisode(index);
+              })
+            }
+          })
         }
         .columnsTemplate('1fr 1fr 1fr 1fr 1fr')
         .columnsGap(8)
@@ -3436,15 +3441,13 @@ export struct PlayerPage {
       }
 
       Grid(this.sideCacheScroller) {
-        // Repeat 虚拟滚动：上千集仅构建可视区格子，避免全量 ForEach 冻结 UI
-        Repeat<FqChapter>(this.episodes)
-          .each((ri: RepeatItem<FqChapter>) => {
-            GridItem() {
-              this.CacheEpisodeCell(ri.item, ri.index, true)
-            }
-          })
-          .key((episode: FqChapter) => episode.itemId)
-          .virtualScroll()
+        // LazyForEach 按需构建：上千集仅构建可视区格子；Repeat.virtualScroll
+        // 复用节点会渲染错位（滚动后集数/状态文案错乱），弃用
+        LazyForEach(this.episodeSource, (episode: FqChapter, index: number) => {
+          GridItem() {
+            this.CacheEpisodeCell(episode, index, true)
+          }
+        })
       }
       .columnsTemplate('1fr 1fr 1fr')
       .columnsGap(8)

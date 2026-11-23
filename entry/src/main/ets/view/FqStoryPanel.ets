@@ -9,7 +9,7 @@
  * 打开时当前集滚动到视口竖直居中（官方 gj3/o.java:237-272）。
  */
 
-import { FqChapter } from '../model/FqModels';
+import { FqChapter, FqChapterDataSource } from '../model/FqModels';
 import { appState } from '../entryability/AppState';
 
 /** 官方长剧分页粒度（gj3/o.java:731 setGroupByCount(30)）。 */
@@ -41,16 +41,24 @@ export struct FqStoryPanel {
 
   /** 分页条选中页（可视区顶部所在段）。 */
   @Local page: number = 0;
+  /** LazyForEach 目录数据源（episodes 引用替换时 reload）。 */
+  private source: FqChapterDataSource = new FqChapterDataSource();
   private scroller: Scroller = new Scroller();
   private locateTimer: number = 0;
 
   aboutToAppear(): void {
+    this.source.reload(this.episodes);
     this.page = Math.floor(this.currentIndex / FQ_STORY_PAGE_SIZE);
     // 打开面板把当前集滚到视口竖直居中（官方 gj3/o.java:237-272）。
     this.locateTimer = setTimeout((): void => {
       this.locateTimer = 0;
       this.scroller.scrollToIndex(this.currentIndex, false, ScrollAlign.CENTER);
     }, 100);
+  }
+
+  @Monitor('episodes')
+  onEpisodesChange(): void {
+    this.source.reload(this.episodes);
   }
 
   aboutToDisappear(): void {
@@ -117,43 +125,41 @@ export struct FqStoryPanel {
         .justifyContent(FlexAlign.Center)
       } else {
         Grid(this.scroller) {
-          // Repeat 虚拟滚动：上千集仅构建可视区格子，避免全量 ForEach 冻结 UI
-          Repeat<FqChapter>(this.episodes)
-            .each((ri: RepeatItem<FqChapter>) => {
-              GridItem() {
-                Stack({ alignContent: Alignment.TopEnd }) {
-                  // 序号居中（badge 独立 TopEnd 叠放）
-                  Row({ space: 2 }) {
-                    Text(`${ri.index + 1}`)
-                      .fontSize(14)
-                      .fontWeight(ri.index === this.currentIndex ? FontWeight.Bold : FontWeight.Normal)
-                      .fontColor(this.tileTextColor(ri.index))
+          // LazyForEach 按需构建：上千集仅构建可视区格子；Repeat.virtualScroll
+          // 复用节点会渲染错位（滚动后格子文案复用成旧集数），弃用
+          LazyForEach(this.source, (episode: FqChapter, index: number) => {
+            GridItem() {
+              Stack({ alignContent: Alignment.TopEnd }) {
+                // 序号居中（badge 独立 TopEnd 叠放）
+                Row({ space: 2 }) {
+                  Text(`${index + 1}`)
+                    .fontSize(14)
+                    .fontWeight(index === this.currentIndex ? FontWeight.Bold : FontWeight.Normal)
+                    .fontColor(this.tileTextColor(index))
 
-                    if (ri.index === this.currentIndex) {
-                      // 当前集右上 12×12 播放角标（官方 video_playing_orange.json，
-                      // 本地以静态三角替代）
-                      SymbolGlyph($r('sys.symbol.play_fill'))
-                        .fontSize(11)
-                        .fontColor(['#FFFA6725'])
-                        .margin(4)
-                    }
+                  if (index === this.currentIndex) {
+                    // 当前集右上 12×12 播放角标（官方 video_playing_orange.json，
+                    // 本地以静态三角替代）
+                    SymbolGlyph($r('sys.symbol.play_fill'))
+                      .fontSize(11)
+                      .fontColor(['#FFFA6725'])
+                      .margin(4)
                   }
-                  .width('100%')
-                  .height('100%')
-                  .justifyContent(FlexAlign.Center)
-                  .alignItems(VerticalAlign.Center)
                 }
                 .width('100%')
-                .aspectRatio(53 / 52)
-                .borderRadius(8)
-                .backgroundColor(ri.index === this.currentIndex ? '#1AFA6725' : $r('sys.color.comp_background_list_card'))
-                .onClick((): void => {
-                  this.onSelectEpisode(ri.index);
-                })
+                .height('100%')
+                .justifyContent(FlexAlign.Center)
+                .alignItems(VerticalAlign.Center)
               }
-            })
-            .key((episode: FqChapter, index: number) => `${episode.itemId}-${index}`)
-            .virtualScroll()
+              .width('100%')
+              .aspectRatio(53 / 52)
+              .borderRadius(8)
+              .backgroundColor(index === this.currentIndex ? '#1AFA6725' : $r('sys.color.comp_background_list_card'))
+              .onClick((): void => {
+                this.onSelectEpisode(index);
+              })
+            }
+          })
         }
         .columnsTemplate('1fr 1fr 1fr 1fr 1fr 1fr')
         .columnsGap(8)
