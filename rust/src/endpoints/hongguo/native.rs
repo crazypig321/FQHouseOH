@@ -60,6 +60,10 @@ const V5_PLAYER_URL: &str =
 /// pin 同一设备身份兜底重查当前集的 `video_tab` GET 接口。
 const V5_VIDEO_TAB_URL: &str =
     "https://api5-normal-sinfonlineb.fqnovel.com/reading/bookapi/video_tab/multi_video_model/v1/";
+/// kotlin-tv 0.16.13（#94 修复）`PlayRetryPlan.host(0)`：`video_tab` 档位全被
+/// 滤掉（典型：只回 bytevc2）时换备用 host 重打的 V5 播放模型接口。
+const V5_PLAYER_BACKUP_URL: &str =
+    "https://api5-normal-sinfonlineb.fqnovel.com/novel/player/multi_video_model/player/v1";
 
 pub fn register(s: &mut Server) {
     s.add_route("hongguo_native_catalog", handle_catalog);
@@ -940,9 +944,15 @@ async fn fetch_video_info(up: &Arc<UpstreamClient>, vid: &str) -> ApiResult<Arc<
             Some(model) => {
                 let rows = rendition_rows(&model);
                 if rows.is_empty() {
-                    return Err(empty_err);
+                    // kotlin-tv 0.16.13（#94）：tab 模型可只含 bytevc2 被
+                    // 滤空，换备用 host 重打 player v1 协商兼容档。
+                    match fetch_backup_player_rows(up, vid).await {
+                        Some(rows) => rows,
+                        None => return Err(empty_err),
+                    }
+                } else {
+                    rows
                 }
-                rows
             }
             None => return Err(empty_err),
         }
@@ -1042,6 +1052,25 @@ fn tab_video_model(raw: &[u8], vid: &str) -> Option<Value> {
         Some(v) if v.is_object() => Some(v.clone()),
         _ => None,
     }
+}
+
+/// kotlin-tv 0.16.13（#94）`streamLadderWithCompatibility` 第三级回退：
+/// `video_tab` 档位全不可播（典型：只回 bytevc2）时，换备用 host 重打
+/// `multi_video_model/player/v1`（`device_level=1` 协商 HEVC 等兼容档）。
+/// 任何失败返回 None，调用方保留原错误。
+async fn fetch_backup_player_rows(
+    up: &Arc<UpstreamClient>,
+    vid: &str,
+) -> Option<Vec<QualityRow>> {
+    let body = v5_playback_body(vid).ok()?;
+    let (raw, _) = Upstream::new(up.clone())
+        .v5_playback_with_device(V5_PLAYER_BACKUP_URL, &body, None)
+        .await
+        .ok()?;
+    if raw.is_empty() {
+        return None;
+    }
+    video_model_rows(&raw, vid).ok()
 }
 
 /// cjs `resolveStream` 的档位选择：`quality > 0` 选对应高度档，否则最高档。
