@@ -226,18 +226,29 @@ impl UpstreamClient {
         }
 
         if let Some(trace) = super::playback_trace::current() {
+            let envelope = if crate::sign::v5::playback_envelope_is_full(query) {
+                "full"
+            } else {
+                "legacy"
+            };
+            trace
+                .exchange
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .envelope = envelope;
             let body = req.body.as_deref().unwrap_or_default();
             let stub = hex::encode_upper(Md5::digest(body));
             let stub_matches = headers.iter().any(|(name, value)| {
                 name.eq_ignore_ascii_case("x-ss-stub") && value.eq_ignore_ascii_case(&stub)
             });
             log::info!(
-                "v5 trace request={} purpose={} attempt={} device={} in_flight={} event=send body_bytes={} stub_matches={stub_matches}",
+                "v5 trace request={} purpose={} attempt={} device={} in_flight={} event=send route={} envelope={envelope} body_bytes={} stub_matches={stub_matches}",
                 trace.request_id,
                 trace.purpose,
                 trace.attempt,
                 trace.device_tag,
                 trace.in_flight,
+                trace.route,
                 body.len(),
             );
         }
@@ -535,6 +546,9 @@ impl UpstreamClient {
                 Err(err) => {
                     last_err = Some(err.clone());
                     if err.is_device_failed() {
+                        if Self::speculative_playback() {
+                            return Err(err);
+                        }
                         if super::budget::remaining().is_some_and(|left| left.is_zero()) {
                             return Err(err);
                         }
@@ -605,6 +619,9 @@ impl UpstreamClient {
                 Err(err) => {
                     last_err = Some(err.clone());
                     if err.is_device_failed() {
+                        if Self::speculative_playback() {
+                            return Err(err);
+                        }
                         if super::budget::remaining().is_some_and(|left| left.is_zero()) {
                             return Err(err);
                         }
@@ -634,10 +651,21 @@ impl UpstreamClient {
                 return Ok(device);
             }
         }
+        if Self::speculative_playback() {
+            return self
+                .pool
+                .get_excluding("")
+                .await
+                .map_err(|_| ClientError::Other("no playback device available".to_string()));
+        }
         self.pool
             .get()
             .await
             .map_err(|e| ClientError::Other(format!("get device: {e}")))
+    }
+
+    fn speculative_playback() -> bool {
+        super::playback_trace::current().is_some_and(|trace| trace.purpose == "prefetch")
     }
 
     /// Body-only wrapper kept for callers that do not need the identity that

@@ -503,6 +503,16 @@ fn log_http_trace(
     let Some(context) = trace.as_ref() else {
         return;
     };
+    let envelope = {
+        let mut exchange = context
+            .exchange
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        exchange.http_status = metrics.response.map(|response| response.status);
+        exchange.body_len = metrics.body_len.or(metrics.raw_bytes);
+        exchange.envelope
+    };
+    let route = context.route;
     let request = context.request_id;
     let purpose = context.purpose;
     let attempt = context.attempt;
@@ -528,7 +538,7 @@ fn log_http_trace(
     let body_ms = opt_ms(metrics.body);
     let inflate_ms = opt_ms(metrics.inflate);
     log::info!(
-        "v5 http request={request} purpose={purpose} attempt={attempt} device={device} in_flight={in_flight} result={result} status={status} http={http} redirected={redirected} hops={hops} final_method={final_method} content_len={content_len} encoding={encoding} raw_bytes={raw_bytes} raw_chunks={raw_chunks} gzip={gzip} gzip_outcome={gzip_outcome} body_len={body_len} req_body_len={req_body_len} head_ms={head_ms} body_ms={body_ms} inflate_ms={inflate_ms}"
+        "v5 http request={request} purpose={purpose} attempt={attempt} device={device} in_flight={in_flight} route={route} envelope={envelope} result={result} status={status} http_status={status} http={http} redirected={redirected} hops={hops} final_method={final_method} content_len={content_len} encoding={encoding} raw_bytes={raw_bytes} raw_chunks={raw_chunks} gzip={gzip} gzip_outcome={gzip_outcome} body_len={body_len} req_body_len={req_body_len} head_ms={head_ms} body_ms={body_ms} inflate_ms={inflate_ms}"
     );
 }
 

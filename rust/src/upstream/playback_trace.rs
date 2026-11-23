@@ -23,6 +23,25 @@ pub(crate) struct PlaybackTraceContext {
     pub in_flight: usize,
     pub redirect_hops: Arc<AtomicUsize>,
     pub redirect_method: Arc<Mutex<String>>,
+    pub route: &'static str,
+    pub exchange: Arc<Mutex<PlaybackExchange>>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct PlaybackExchange {
+    pub http_status: Option<u16>,
+    pub body_len: Option<usize>,
+    pub envelope: &'static str,
+}
+
+impl Default for PlaybackExchange {
+    fn default() -> Self {
+        Self {
+            http_status: None,
+            body_len: None,
+            envelope: "legacy",
+        }
+    }
 }
 
 impl PlaybackTraceContext {
@@ -84,8 +103,19 @@ pub(crate) async fn within<F: Future>(
         in_flight,
         redirect_hops: Arc::new(AtomicUsize::new(0)),
         redirect_method: Arc::new(Mutex::new(METHOD_UNKNOWN.to_string())),
+        route: "-",
+        exchange: Arc::new(Mutex::new(PlaybackExchange::default())),
     };
     log::info!("v5 trace request={request_id} purpose={purpose} event=start in_flight={in_flight}");
+    TRACE.scope(trace, work).await
+}
+
+pub(crate) async fn with_route<F: Future>(route: &'static str, work: F) -> F::Output {
+    let Some(mut trace) = current() else {
+        return work.await;
+    };
+    trace.route = route;
+    trace.exchange = Arc::new(Mutex::new(PlaybackExchange::default()));
     TRACE.scope(trace, work).await
 }
 

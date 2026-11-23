@@ -22,6 +22,10 @@ const VERSION_NAME: &str = "7.4.3.32";
 const CHANNEL: &str = "vivo_8662_64";
 const DEVICE_TYPE: &str = "PGT-AN10";
 const OS_VERSION: &str = "12";
+const DEVICE_BRAND: &str = "HONOR";
+const OS_API: &str = "31";
+const RESOLUTION: &str = "1312*2848";
+const DPI: &str = "480";
 const LICENSE: i64 = 646_637_794;
 const USER_AGENT: &str =
     "com.phoenix.read/73932 (Linux; U; Android 12; zh_CN_#Hans; PGT-AN10; Build/V417IR;tt-ok/3.12.13.20)";
@@ -628,13 +632,7 @@ fn encode_component(value: &str) -> String {
     output
 }
 
-/// The player-version query bag shared by the v5 door and the `video_tab`
-/// fallback.
-///
-/// Identity fields stay as placeholders: the request layer substitutes the
-/// pooled device that signs the call, so both doors are always asked under one
-/// identity.
-/// The player-version identity bag every playback door starts from.
+/// Shared playback query fields, with the signing device's own identity.
 fn playback_query(
     identity: &V5Identity<'_>,
     ticket: i64,
@@ -654,6 +652,22 @@ fn playback_query(
         ("iid", identity.install_id),
         ("cdid", identity.cdid),
         ("device_id", identity.device_id),
+        ("ac", "wifi"),
+        ("os", "android"),
+        ("ssmix", "a"),
+        ("device_brand", DEVICE_BRAND),
+        ("language", "zh"),
+        ("os_api", OS_API),
+        ("manifest_version_code", VERSION_CODE),
+        ("resolution", RESOLUTION),
+        ("dpi", DPI),
+        ("host_abi", "arm64-v8a"),
+        ("dragon_device_type", "phone"),
+        ("pv_player", VERSION_CODE),
+        ("compliance_status", "0"),
+        ("need_personal_recommend", "1"),
+        ("player_so_load", "1"),
+        ("is_android_pad_screen", "0"),
     ];
     let mut query = String::new();
     for (key, value) in pairs {
@@ -687,6 +701,34 @@ pub fn sign_playback_v5(
     identity: &V5Identity<'_>,
 ) -> Result<V5Request, String> {
     sign_v5_request(base, &[], Some(compressed_body), identity)
+}
+
+pub(crate) fn playback_envelope_is_full(query: &str) -> bool {
+    [
+        "ac",
+        "os",
+        "ssmix",
+        "device_brand",
+        "language",
+        "os_api",
+        "manifest_version_code",
+        "resolution",
+        "dpi",
+        "host_abi",
+        "dragon_device_type",
+        "pv_player",
+        "compliance_status",
+        "need_personal_recommend",
+        "player_so_load",
+        "is_android_pad_screen",
+    ]
+    .iter()
+    .all(|expected| {
+        query.split('&').any(|pair| {
+            pair.split_once('=')
+                .is_some_and(|(name, value)| name == *expected && !value.is_empty())
+        })
+    })
 }
 
 /// Signs a `GET` for a door of the same family, e.g. the `video_tab` model door.
@@ -764,3 +806,143 @@ fn sign_v5_request(
 #[cfg(test)]
 #[path = "v5_golden_tests.rs"]
 mod v5_golden_tests;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn identity<'a>(device_id: &'a str, install_id: &'a str, cdid: &'a str) -> V5Identity<'a> {
+        V5Identity {
+            device_id,
+            install_id,
+            cdid,
+        }
+    }
+
+    #[test]
+    fn the_playback_query_carries_the_full_official_device_bag_in_order() {
+        let query = playback_query(
+            &identity("dev-1", "iid-2", "cdid-3"),
+            1_700_000_000_000,
+            "8662",
+            &[],
+        );
+        assert!(playback_envelope_is_full(&query));
+        assert!(!playback_envelope_is_full(&query.replace("&dpi=480", "")));
+        assert!(!playback_envelope_is_full(
+            "aid=8662&_rticket=1700000000000"
+        ));
+        assert_eq!(
+            query,
+            "aid=8662\
+             &app_name=novelread\
+             &version_code=74332\
+             &version_name=7.4.3.32\
+             &channel=vivo_8662_64\
+             &device_platform=android\
+             &device_type=PGT-AN10\
+             &os_version=12\
+             &update_version_code=74332\
+             &iid=iid-2\
+             &cdid=cdid-3\
+             &device_id=dev-1\
+             &ac=wifi\
+             &os=android\
+             &ssmix=a\
+             &device_brand=HONOR\
+             &language=zh\
+             &os_api=31\
+             &manifest_version_code=74332\
+             &resolution=1312*2848\
+             &dpi=480\
+             &host_abi=arm64-v8a\
+             &dragon_device_type=phone\
+             &pv_player=74332\
+             &compliance_status=0\
+             &need_personal_recommend=1\
+             &player_so_load=1\
+             &is_android_pad_screen=0\
+             &_rticket=1700000000000"
+        );
+    }
+
+    #[test]
+    fn door_specific_fields_sit_between_the_bag_and_the_ticket() {
+        let query = playback_query(
+            &identity("dev-1", "iid-2", "cdid-3"),
+            1_700_000_000_000,
+            "8662",
+            &[("video_id", "vid-9")],
+        );
+        assert!(query.contains("&is_android_pad_screen=0&video_id=vid-9&_rticket="));
+    }
+
+    #[test]
+    fn a_signed_playback_request_pins_the_branch_twelve_ticket() {
+        let base = "https://example.invalid/novel/player/multi_video_model/player/v1";
+        let body = br#"{"fixture":true}"#;
+        let signed = sign_playback_v5(base, body, &identity("dev-1", "iid-2", "cdid-3"))
+            .expect("a complete identity must sign");
+
+        let (url_base, query) = signed.url.split_once('?').expect("query string");
+        assert_eq!(url_base, base);
+        let ticket = query
+            .rsplit('&')
+            .next()
+            .and_then(|pair| pair.strip_prefix("_rticket="))
+            .expect("the ticket is the last query field");
+        assert!(
+            ticket.chars().all(|digit| digit.is_ascii_digit()),
+            "{ticket}"
+        );
+
+        let ts: u32 = signed
+            .headers
+            .iter()
+            .find(|(name, _)| name == "x-khronos")
+            .and_then(|(_, value)| value.parse().ok())
+            .expect("x-khronos timestamp");
+        assert_eq!(
+            branch_iv(&sm3_hash(query.as_bytes()), &md5_bytes(body), ts) & 15,
+            12
+        );
+        let signed = sign_playback_v5_get(
+            base,
+            &[("video_id", "vid-9")],
+            &identity("dev-1", "iid-2", "cdid-3"),
+        )
+        .expect("GET playback signature");
+        let query = signed.url.split_once('?').expect("GET query").1;
+        let ts = signed
+            .headers
+            .iter()
+            .find(|(name, _)| name == "x-khronos")
+            .and_then(|(_, value)| value.parse().ok())
+            .expect("GET timestamp");
+        assert_eq!(
+            branch_iv(&sm3_hash(query.as_bytes()), &md5_bytes(&[]), ts) & 15,
+            12
+        );
+        assert!(signed.headers.iter().all(|(name, _)| !matches!(
+            name.as_str(),
+            "Content-Type" | "Content-Encoding" | "x-ss-stub"
+        )));
+    }
+
+    #[test]
+    fn an_incomplete_identity_is_refused_before_signing() {
+        for (device_id, install_id, cdid) in [
+            ("", "iid-2", "cdid-3"),
+            ("dev-1", "", "cdid-3"),
+            ("dev-1", "iid-2", ""),
+        ] {
+            let error = sign_playback_v5(
+                "https://example.invalid/player",
+                b"{}",
+                &identity(device_id, install_id, cdid),
+            )
+            .expect_err("an incomplete identity must not sign");
+            assert!(error.contains("incomplete"), "{error}");
+        }
+    }
+}
