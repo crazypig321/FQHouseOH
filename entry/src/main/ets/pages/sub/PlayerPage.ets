@@ -85,6 +85,7 @@ import { display, window, PiPWindow } from '@kit.ArkUI';
 import { connection } from '@kit.NetworkKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { common } from '@kit.AbilityKit';
+import { batteryInfo } from '@kit.BasicServicesKit';
 import { Player, PlayerSurface, Media, PlayerConfig } from '@mpv-ohos/mpv-arkts';
 import { CommonNav } from '../../view/CommonNav';
 import { CommonSheet, FqSheetOptions } from '../../view/sheet/CommonSheet';
@@ -558,6 +559,16 @@ export struct PlayerPage {
   private pipContentW: number = 0;
   /** 已同步给画中画控制器的视频内容高（px）。 */
   private pipContentH: number = 0;
+  /** 上一次有效画面宽（dw；切集 stop 重置 state 期间保持旧比例，防画面先缩后撑跳变）。 */
+  private lastVideoDw: number = 0;
+  /** 上一次有效画面高（dh）。 */
+  private lastVideoDh: number = 0;
+  /** 全屏顶栏时钟文案（HH:mm；1s tick 仅变化时赋值避免重渲染）。 */
+  @Local fsClockText: string = '';
+  /** 全屏顶栏电量百分比（0-100）。 */
+  @Local fsBatteryPercent: number = 0;
+  /** 全屏顶栏充电中（chargingStatus=ENABLE）。 */
+  @Local fsBatteryCharging: boolean = false;
 
   aboutToAppear(): void {
     this.title = PlayerNavParams.title;
@@ -610,11 +621,21 @@ export struct PlayerPage {
         this.hasDisplayed = true;
       }
     });
+    // 画面比例锁存：新集 video-params 到达前沿用上一集有效 dw/dh，
+    // 切集瞬间画面矩形不闪回 9:16 竖条（全屏横屏切集「先缩后撑」根因）
+    this.player.stream.videoParams.listen((params): void => {
+      if (params.dw > 0 && params.dh > 0) {
+        this.lastVideoDw = params.dw;
+        this.lastVideoDh = params.dh;
+      }
+    });
     // 弹幕进度心跳：接近已加载右界时按 cursor 续拉；同时周期保存续播进度
     // 幂等装配：aboutToAppear 异常重入时先清旧定时器，避免旧 interval 泄漏后无法 clearInterval
     if (this.danmakuTimer !== 0) {
       clearInterval(this.danmakuTimer);
     }
+    // 全屏顶栏时钟/电量先取一次（不等首个 1s tick）
+    this.statusTick();
     this.danmakuTimer = setInterval((): void => {
       if (this.pageGone) {
         return;
@@ -623,6 +644,7 @@ export struct PlayerPage {
       this.progressSaveTick();
       this.mediaTick();
       this.warmNextTick();
+      this.statusTick();
     }, 1000);
     // AVSession（通知栏播控中心/胶囊）播控命令 + 后台播放长时任务
     const mediaContext: common.UIAbilityContext | null = appState.abilityContext;
@@ -1621,6 +1643,20 @@ export struct PlayerPage {
         }
         .layoutWeight(1)
         .alignItems(VerticalAlign.Center)
+
+        // 系统状态（时钟 + 电量图标）：设置按钮前，全屏观看时对齐系统状态栏信息
+        Row({ space: 6 }) {
+          Text(this.fsClockText)
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(Color.White)
+            .maxLines(1)
+          SymbolGlyph(this.batteryIcon())
+            .fontSize(18)
+            .fontColor([Color.White])
+        }
+        .alignItems(VerticalAlign.Center)
+        .margin({ right: 8 })
 
         // PC 侧边栏在场时设置按钮移入侧边栏标题右侧，全屏顶栏不再显示
         if (!this.pcSidebarOn()) {
@@ -2736,6 +2772,76 @@ export struct PlayerPage {
     }
   }
 
+  /** 全屏顶栏状态刷新（1s tick）：时钟/电量仅值变化才赋值，避免整栏重渲染。 */
+  private statusTick(): void {
+    const now: Date = new Date();
+    const hours: number = now.getHours();
+    const minutes: number = now.getMinutes();
+    const hh: string = hours < 10 ? `0${hours}` : `${hours}`;
+    const mm: string = minutes < 10 ? `0${minutes}` : `${minutes}`;
+    const clock: string = `${hh}:${mm}`;
+    if (clock !== this.fsClockText) {
+      this.fsClockText = clock;
+    }
+    const percent: number = batteryInfo.batterySOC;
+    if (percent !== this.fsBatteryPercent) {
+      this.fsBatteryPercent = percent;
+    }
+    const charging: boolean =
+      batteryInfo.chargingStatus === batteryInfo.BatteryChargeState.ENABLE;
+    if (charging !== this.fsBatteryCharging) {
+      this.fsBatteryCharging = charging;
+    }
+  }
+
+  /** 全屏顶栏电量图标：充电 battery_bolt；否则按系统电量档位（对齐漫画页映射）。 */
+  private batteryIcon(): Resource {
+    if (this.fsBatteryCharging) {
+      return $r('sys.symbol.battery_bolt');
+    }
+    const level: number = this.fsBatteryPercent;
+    if (level >= 100) {
+      return $r('sys.symbol.battery_100percent');
+    }
+    if (level >= 95) {
+      return $r('sys.symbol.battery_95percent');
+    }
+    if (level >= 90) {
+      return $r('sys.symbol.battery_90percent');
+    }
+    if (level >= 80) {
+      return $r('sys.symbol.battery_80percent');
+    }
+    if (level >= 75) {
+      return $r('sys.symbol.battery_75percent');
+    }
+    if (level >= 70) {
+      return $r('sys.symbol.battery_70percent');
+    }
+    if (level >= 60) {
+      return $r('sys.symbol.battery_60percent');
+    }
+    if (level >= 50) {
+      return $r('sys.symbol.battery_50percent');
+    }
+    if (level >= 40) {
+      return $r('sys.symbol.battery_40percent');
+    }
+    if (level >= 30) {
+      return $r('sys.symbol.battery_30percent');
+    }
+    if (level >= 20) {
+      return $r('sys.symbol.battery_20percent');
+    }
+    if (level >= 15) {
+      return $r('sys.symbol.battery_15percent');
+    }
+    if (level >= 10) {
+      return $r('sys.symbol.battery_10percent');
+    }
+    return $r('sys.symbol.battery_5percent');
+  }
+
   /** 倍速显示文案（拖动中取预览值；最多两位小数去尾零，如 0.75× / 1× / 1.5×）。 */
   private speedLabel(): string {
     const value: number = this.speedPreview >= 0 ? this.speedPreview : this.player.state.speed;
@@ -3476,14 +3582,7 @@ export struct PlayerPage {
    */
   private videoBottom(): number {
     const regionH: number = this.videoRegionHeight();
-    const dw: number = this.player.state.videoParams.dw;
-    const dh: number = this.player.state.videoParams.dh;
-    let videoH: number = 0;
-    if (dw > 0 && dh > 0) {
-      videoH = Math.min(regionH, this.pageW() / dw * dh);
-    } else {
-      videoH = Math.min(regionH, this.pageW() * 16 / 9);
-    }
+    const videoH: number = Math.min(regionH, this.pageW() / this.videoDw() * this.videoDh());
     return this.videoTopAbs() + (regionH + videoH) / 2;
   }
 
@@ -3498,22 +3597,14 @@ export struct PlayerPage {
       !useSidebarLayout(appState.WidthBp, appState.windowWidthVp, appState.displayWidthVp)) {
       return false;
     }
-    const dw: number = this.player.state.videoParams.dw;
-    const dh: number = this.player.state.videoParams.dh;
-    const ratioW: number = dw > 0 && dh > 0 ? dw : 9;
-    const ratioH: number = dw > 0 && dh > 0 ? dh : 16;
-    return ratioW >= ratioH;
+    return this.videoDw() >= this.videoDh();
   }
 
   /** 非全屏画面矩形宽：surface 只取画面比例矩形（区域内居中，mpv 填满无黑边）；
    *  常规 contain；PC 清屏态 cover（撑满高度裁两侧）。 */
   private videoRectWidth(): number {
     const regionH: number = this.videoRegionHeight();
-    const dw: number = this.player.state.videoParams.dw;
-    const dh: number = this.player.state.videoParams.dh;
-    const ratioW: number = dw > 0 && dh > 0 ? dw : 9;
-    const ratioH: number = dw > 0 && dh > 0 ? dh : 16;
-    const byHeight: number = regionH / ratioH * ratioW;
+    const byHeight: number = regionH / this.videoDh() * this.videoDw();
     return this.cleanCoverRect()
       ? Math.max(1, Math.max(this.pageW(), byHeight))
       : Math.max(1, Math.min(this.pageW(), byHeight));
@@ -3522,11 +3613,7 @@ export struct PlayerPage {
   /** 非全屏画面矩形高：与 videoRectWidth 同一约束的另一边（contain 取 min；PC 清屏 cover 取 max）。 */
   private videoRectHeight(): number {
     const regionH: number = this.videoRegionHeight();
-    const dw: number = this.player.state.videoParams.dw;
-    const dh: number = this.player.state.videoParams.dh;
-    const ratioW: number = dw > 0 && dh > 0 ? dw : 9;
-    const ratioH: number = dw > 0 && dh > 0 ? dh : 16;
-    const byWidth: number = this.pageW() / ratioW * ratioH;
+    const byWidth: number = this.pageW() / this.videoDw() * this.videoDh();
     return this.cleanCoverRect()
       ? Math.max(1, Math.max(regionH, byWidth))
       : Math.max(1, Math.min(regionH, byWidth));
@@ -3586,11 +3673,29 @@ export struct PlayerPage {
     return duration > 0 ? duration : 1;
   }
 
-  /** 横屏片源判定（官方 videoParams.dw > dh；加载前按竖屏处理）。 */
-  private isLandscapeVideo(): boolean {
+  /** 有效画面宽：state 有值用 state，切集 stop 重置期间沿用锁存，均无回退 9（竖屏比例）。 */
+  private videoDw(): number {
     const dw: number = this.player.state.videoParams.dw;
     const dh: number = this.player.state.videoParams.dh;
-    return dw > 0 && dh > 0 && dw > dh;
+    if (dw > 0 && dh > 0) {
+      return dw;
+    }
+    return this.lastVideoDw > 0 && this.lastVideoDh > 0 ? this.lastVideoDw : 9;
+  }
+
+  /** 有效画面高：state 有值用 state，切集 stop 重置期间沿用锁存，均无回退 16。 */
+  private videoDh(): number {
+    const dw: number = this.player.state.videoParams.dw;
+    const dh: number = this.player.state.videoParams.dh;
+    if (dw > 0 && dh > 0) {
+      return dh;
+    }
+    return this.lastVideoDw > 0 && this.lastVideoDh > 0 ? this.lastVideoDh : 16;
+  }
+
+  /** 横屏片源判定（官方 videoParams.dw > dh；加载前沿用上一集比例，无历史按竖屏处理）。 */
+  private isLandscapeVideo(): boolean {
+    return this.videoDw() > this.videoDh();
   }
 
   /** 打开播放设置（横屏全屏走右侧边栏，其余右上角菜单半模态）。 */
