@@ -377,6 +377,87 @@ unsafe extern "C" fn js_set_device_pool_key(
     out
 }
 
+unsafe extern "C" fn js_set_sdk_paths(env: napi_env, info: napi_callback_info) -> napi_value {
+    let argv = argv_of(env, info, 2);
+    let mut out = ptr::null_mut();
+    let ok = match argv.len() {
+        2 => {
+            let image_path = arg_string(env, argv[0]);
+            let cache_dir = arg_string(env, argv[1]);
+            catch_unwind(AssertUnwindSafe(|| {
+                fqapi_core::api::set_sdk_paths(image_path, cache_dir)
+            }))
+            .unwrap_or(false)
+        }
+        _ => false,
+    };
+    napi_get_boolean(env, ok, &mut out);
+    out
+}
+
+// ---------------------------------------------------------------------------
+// sdkDigestSelfTest
+// ---------------------------------------------------------------------------
+
+struct SdkSelfTestCtx {
+    deferred: napi_deferred,
+    result: Option<Result<String, String>>,
+    panicked: bool,
+}
+
+unsafe extern "C" fn sdk_self_test_execute(_env: napi_env, data: *mut c_void) {
+    let ctx = &mut *(data as *mut SdkSelfTestCtx);
+    let r = catch_unwind(fqapi_core::api::sdk_digest_self_test);
+    match r {
+        Ok(res) => ctx.result = Some(res),
+        Err(_) => ctx.panicked = true,
+    }
+}
+
+unsafe extern "C" fn sdk_self_test_complete(
+    env: napi_env,
+    _status: napi_status,
+    data: *mut c_void,
+) {
+    let mut ctx = Box::from_raw(data as *mut SdkSelfTestCtx);
+    if ctx.panicked {
+        reject_string(env, ctx.deferred, "fqapi_core panicked during sdk digest self test");
+        return;
+    }
+    match ctx.result.take() {
+        Some(Ok(v)) => resolve_string(env, ctx.deferred, &v),
+        Some(Err(e)) => reject_string(env, ctx.deferred, &e),
+        None => reject_string(env, ctx.deferred, "sdk digest self test produced no result"),
+    }
+}
+
+unsafe extern "C" fn js_sdk_digest_self_test(
+    env: napi_env,
+    _info: napi_callback_info,
+) -> napi_value {
+    let mut deferred: napi_deferred = 0;
+    let mut promise = ptr::null_mut();
+    if napi_create_promise(env, &mut deferred, &mut promise) != NAPI_OK {
+        let mut u = ptr::null_mut();
+        napi_get_undefined(env, &mut u);
+        return u;
+    }
+    let ctx = SdkSelfTestCtx {
+        deferred,
+        result: None,
+        panicked: false,
+    };
+    queue_work(
+        env,
+        "fqcore.sdkSelfTest",
+        Box::new(ctx),
+        sdk_self_test_execute,
+        sdk_self_test_complete,
+        promise,
+        deferred,
+    )
+}
+
 // ---------------------------------------------------------------------------
 // init
 // ---------------------------------------------------------------------------
@@ -734,6 +815,8 @@ unsafe extern "C" fn module_init(env: napi_env, exports: napi_value) -> napi_val
     export(env, exports, b"version\0", Some(js_version));
     export(env, exports, b"cancel\0", Some(js_cancel));
     export(env, exports, b"setDevicePoolKey\0", Some(js_set_device_pool_key));
+    export(env, exports, b"setSdkPaths\0", Some(js_set_sdk_paths));
+    export(env, exports, b"sdkDigestSelfTest\0", Some(js_sdk_digest_self_test));
     export(env, exports, b"init\0", Some(js_init));
     export(env, exports, b"request\0", Some(js_request));
     export(env, exports, b"status\0", Some(js_status));

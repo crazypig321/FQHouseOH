@@ -170,6 +170,8 @@ export class FqBackend {
         fq.setDevicePoolKey(poolKey);
         FqLog.i('backend', '设备池加密密钥已注入');
       }
+      // SDK v5 链路（红果源取流兜底）运行路径：.so 镜像 + 持久化目录。
+      fq.setSdkPaths(`${context.bundleCodeDir}/libs/arm64/libmetasec_ml.so`, `${context.filesDir}/hg_sdk`);
       FqLog.i('backend', '初始化 Rust 核心...');
       const result: string = await fq.init(
         `${backendDir}/config/config.json`,
@@ -182,6 +184,16 @@ export class FqBackend {
       );
       if (result !== 'running') {
         throw new Error(`Rust core init failed: ${result}`);
+      }
+      // [临时] P1 锚点验证：SDK v5 digest 自检（期望 62b5cbd4...），P5 验证后移除。
+      try {
+        const digest: string = await fq.sdkDigestSelfTest();
+        FqLog.i('backend', `SDK digest 自检: ${digest}`);
+        hilog.info(0x0000, 'FqP1', 'sdk digest self-test: %{public}s', [digest]);
+      } catch (error) {
+        const msg: string = error instanceof Error ? error.message : String(error);
+        FqLog.e('backend', `SDK digest 自检失败: ${msg}`);
+        hilog.error(0x0000, 'FqP1', 'sdk digest self-test failed: %{public}s', [msg]);
       }
       this.baseUrlValue = await fq.baseUrl();
       this.capabilityValue = await fq.sessionCapability();

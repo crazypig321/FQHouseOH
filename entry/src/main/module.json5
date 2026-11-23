@@ -27,6 +27,9 @@
       },
       {
         "name": "ohos.permission.ACCESS_BIOMETRIC"
+      },
+      {
+        "name": "ohos.permission.kernel.ALLOW_WRITABLE_CODE_MEMORY"
       }
     ],
     "abilities": [

@@ -7,6 +7,7 @@
   "license": "",
   "dependencies": {
     "libfqapi_napi.so": "file:./src/main/cpp/types/libfqapi_napi",
+    "libunicorn_smoke.so": "file:./src/main/cpp/types/libunicorn_smoke",
     "@mpv-ohos/mpv-arkts": "@module:mpv",
     "@keke/color-picker": "1.0.4"
   }

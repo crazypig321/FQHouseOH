@@ -22,6 +22,7 @@ mod client;
 mod mapping;
 mod native;
 pub(crate) mod phone_login;
+pub(crate) mod sdk_digest;
 mod sign;
 pub(crate) mod vsign;
 mod web;

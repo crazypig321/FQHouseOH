@@ -78,6 +78,19 @@ pub fn version() -> String {
     format!("fqapi_core {}", env!("CARGO_PKG_VERSION"))
 }
 
+/// FQHouseOH patch: injects the SDK v5 runtime paths (libmetasec_ml.so image
+/// plus its persistent cache dir) before `init`. Consumed only by the
+/// OpenHarmony build; returns false on an empty path or duplicate injection.
+pub fn set_sdk_paths(image_path: String, cache_dir: String) -> bool {
+    crate::endpoints::hongguo::sdk_digest::configure(image_path, cache_dir)
+}
+
+/// FQHouseOH patch: runs the fixed-anchor SDK digest self test. Blocking
+/// (~300ms cold); callers run it off the hot path.
+pub fn sdk_digest_self_test() -> Result<String, String> {
+    crate::endpoints::hongguo::sdk_digest::self_test()
+}
+
 /// Resolves the runtime root (contains src/, web/, filters/).
 fn resolve_runtime_dir(config_path: &str, explicit: &str) -> PathBuf {
     if !explicit.is_empty() {
