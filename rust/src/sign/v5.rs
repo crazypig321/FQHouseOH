@@ -564,7 +564,10 @@ fn medusa(
         ),
         (17, Field::Sint(ts as i64)),
         string_field(20, "none"),
-        (21, Field::Sint(377)),
+        // hongguoTV 0.16.14（issue #102）：服务端开始对 377 回 200/0B；
+        // 同请求逐字段 A/B 定位到本字段，真实 App/SDK 的 zigzag 值是 312，
+        // 仅改此值即可恢复取流（fqapp 上游同步时保留此修复）。
+        (21, Field::Sint(312)),
         bytes_field(23, &environment),
         string_field(
             24,
