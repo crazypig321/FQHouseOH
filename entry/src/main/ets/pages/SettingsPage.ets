@@ -961,7 +961,7 @@ export struct SettingsPage {
           .fontSize(14.5)
           .fontWeight(FontWeight.Medium)
           .fontColor($r('sys.color.font_primary'))
-        Text('短剧/漫剧播放与缓存走哪种源播放形式')
+        Text('短剧/漫剧播放与缓存走哪种源播放形式，默认视频多次重试失效时，可选择自动切换+特殊取密来尝试播放视频')
           .fontSize(11.5)
           .fontColor($r('sys.color.font_secondary'))
       }
