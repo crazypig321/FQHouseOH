@@ -1004,7 +1004,8 @@ export struct SettingsPage {
   }
 
   /** 取密方式行（锚点 FqMenu：默认签名速度快、常规线路失败后 SDK 实时签名兜底；
-   *  特殊签名 = 模拟官方 SDK 实时签名优先，风控收紧时更稳；特殊签名与剧集下载
+   *  特殊签名 = 模拟官方 SDK 实时签名优先，风控收紧时更稳；仅「视频播放源 =
+   *  自动切换」时走红果链路生效（默认源固定番茄链路）；特殊签名与剧集下载
    *  的 SDK 链路均依赖系统 JIT 权限，缺失时自动回退常规线路）。 */
   @Builder
   private HgSignRow() {
@@ -1024,7 +1025,7 @@ export struct SettingsPage {
           .fontSize(14.5)
           .fontWeight(FontWeight.Medium)
           .fontColor($r('sys.color.font_primary'))
-        Text('特殊模式（需JIT，如手机没获取到JIT会回退默认模式），特殊更稳，但首次取流较慢，下次取流生效')
+        Text('仅视频播放源为「自动切换」时生效：特殊模式（需JIT，如手机没获取到JIT会回退默认模式），特殊更稳，但首次取流较慢，下次取流生效')
           .fontSize(11.5)
           .fontColor($r('sys.color.font_secondary'))
       }
