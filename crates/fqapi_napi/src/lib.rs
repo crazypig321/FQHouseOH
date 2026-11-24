@@ -378,14 +378,15 @@ unsafe extern "C" fn js_set_device_pool_key(
 }
 
 unsafe extern "C" fn js_set_sdk_paths(env: napi_env, info: napi_callback_info) -> napi_value {
-    let argv = argv_of(env, info, 2);
+    let argv = argv_of(env, info, 3);
     let mut out = ptr::null_mut();
     let ok = match argv.len() {
-        2 => {
+        3 => {
             let image_path = arg_string(env, argv[0]);
             let cache_dir = arg_string(env, argv[1]);
+            let config_path = arg_string(env, argv[2]);
             catch_unwind(AssertUnwindSafe(|| {
-                fqapi_core::api::set_sdk_paths(image_path, cache_dir)
+                fqapi_core::api::set_sdk_paths(image_path, cache_dir, config_path)
             }))
             .unwrap_or(false)
         }

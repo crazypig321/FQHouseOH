@@ -12,7 +12,7 @@ export interface FqBridgeResponse {
 export const version: () => string;
 export const cancel: (requestId: string) => boolean;
 export const setDevicePoolKey: (key: Uint8Array) => boolean;
-export const setSdkPaths: (imagePath: string, cacheDir: string) => boolean;
+export const setSdkPaths: (imagePath: string, cacheDir: string, configPath: string) => boolean;
 export const sdkDigestSelfTest: () => Promise<string>;
 export const init: (
   configPath: string,

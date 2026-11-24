@@ -11,6 +11,7 @@
 import { common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { fileIo } from '@kit.CoreFileKit';
 import fq, { FqBridgeResponse } from 'libfqapi_napi.so';
 import { FqDeployer } from './FqDeployer';
 import { FqKeyStore } from './FqKeyStore';
@@ -170,8 +171,27 @@ export class FqBackend {
         fq.setDevicePoolKey(poolKey);
         FqLog.i('backend', '设备池加密密钥已注入');
       }
-      // SDK v5 链路（红果源取流兜底）运行路径：.so 镜像 + 持久化目录。
-      fq.setSdkPaths(`${context.bundleCodeDir}/libs/arm64/libmetasec_ml.so`, `${context.filesDir}/hg_sdk`);
+      // SDK v5 链路（红果源取流兜底）运行路径：.so 镜像 + 持久化目录 + 运行配置。
+      const sdkDir: string = `${context.filesDir}/hg_sdk`;
+      const sdkConfigPath: string = `${sdkDir}/sdk-app-config.encoded`;
+      try {
+        if (!fileIo.accessSync(sdkDir)) {
+          fileIo.mkdirSync(sdkDir, true);
+        }
+        const sdkConfig: Uint8Array = await context.resourceManager.getRawFileContent('hg_sdk/sdk-app-config.encoded');
+        const sdkFd: fileIo.File = fileIo.openSync(
+          sdkConfigPath,
+          fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC,
+        );
+        try {
+          fileIo.writeSync(sdkFd.fd, sdkConfig.buffer);
+        } finally {
+          fileIo.closeSync(sdkFd);
+        }
+      } catch (error) {
+        FqLog.e('backend', `SDK v5 配置部署失败: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      fq.setSdkPaths(`${context.bundleCodeDir}/libs/arm64/libmetasec_ml.so`, sdkDir, sdkConfigPath);
       FqLog.i('backend', '初始化 Rust 核心...');
       const result: string = await fq.init(
         `${backendDir}/config/config.json`,
