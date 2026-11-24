@@ -58,9 +58,9 @@ const FQ_HOME_STYLE_LABELS: string[] = ['今日焦点', '排行榜', '今日焦�
 const FQ_MINE_STYLE_LABELS: string[] = ['我的含设置入口', '设置含我的入口', '我的和设置单独显示'];
 /** 视频播放源档位文案（false 自动切换 = 智能选源异常回退；true 默认源 = 固定单一链路）。 */
 const FQ_VIDEO_SOURCE_LABELS: string[] = ['自动切换', '默认源'];
-/** hg源签名方式档位文案（false 默认签名速度快 = 常规线路失败后 SDK 实时签名兜底；
+/** 取密方式档位文案（false 默认签名速度快 = 常规线路失败后 SDK 实时签名兜底；
  * true 特殊签名 = 模拟官方 SDK 实时签名优先，风控收紧时更稳）。 */
-const FQ_HG_SIGN_LABELS: string[] = ['默认签名', '特殊签名'];
+const FQ_HG_SIGN_LABELS: string[] = ['默认', '特殊'];
 
 @Builder
 function fqSettingsEmptyContent() {
@@ -1003,7 +1003,7 @@ export struct SettingsPage {
     FqMenu.open(this.getUIContext(), FQ_VIDEO_SOURCE_ANCHOR_ID, items);
   }
 
-  /** hg源签名方式行（锚点 FqMenu：默认签名速度快、常规线路失败后 SDK 实时签名兜底；
+  /** 取密方式行（锚点 FqMenu：默认签名速度快、常规线路失败后 SDK 实时签名兜底；
    *  特殊签名 = 模拟官方 SDK 实时签名优先，风控收紧时更稳）。 */
   @Builder
   private HgSignRow() {
@@ -1019,7 +1019,7 @@ export struct SettingsPage {
       .backgroundColor(FqColorUtils.withOpacity('#FF10B981', 0.12))
 
       Column({ space: 3 }) {
-        Text('hg源签名方式')
+        Text('取密方式')
           .fontSize(14.5)
           .fontWeight(FontWeight.Medium)
           .fontColor($r('sys.color.font_primary'))
@@ -1045,7 +1045,7 @@ export struct SettingsPage {
     })
   }
 
-  /** hg源签名方式菜单：默认签名/特殊签名 两选项（当前档尾勾，点击持久化，下次取流生效）。 */
+  /** 取密方式菜单：默认签名/特殊签名 两选项（当前档尾勾，点击持久化，下次取流生效）。 */
   private openHgSignMenu(): void {
     const items: FqMenuItem[] = [];
     const options: boolean[] = [false, true];
