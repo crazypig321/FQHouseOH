@@ -787,6 +787,7 @@ export class FqBackend {
       + `&chapter=${encodeURIComponent(chapterJson)}`
       + `&index=${index < 0 ? 0 : index}`
       + `&quality=${qualityHeight < 0 ? 0 : qualityHeight}`
+      + (FqAppSettingsStore.isVideoHgSignSdk() ? '&sign=sdk' : '')
       + (title.length > 0 ? `&title=${encodeURIComponent(title)}` : '');
     const payload: Record<string, Object> = await this.hongguoHealthRequest(
       '/api/v1/hongguo/native/media', query);
@@ -809,6 +810,7 @@ export class FqBackend {
       + `&index=${index < 0 ? 0 : index}`
       + `&quality=${qualityHeight < 0 ? 0 : qualityHeight}`
       + `&mode=download`
+      + (FqAppSettingsStore.isVideoHgSignSdk() ? '&sign=sdk' : '')
       + (title.length > 0 ? `&title=${encodeURIComponent(title)}` : '');
     const health: HgHealth = HgHealth.get();
     let lastError: Error | null = null;

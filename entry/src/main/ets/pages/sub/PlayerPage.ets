@@ -368,6 +368,8 @@ export struct PlayerPage {
   @Local qualityIndex: number = -1;
   /** 解码方式（true 硬解 ohcodec / false 软解 FFmpeg；偏好经 FqAppSettingsStore 持久化）。 */
   @Local hwDecode: boolean = FqAppSettingsStore.isVideoHwdec();
+  /** hg源签名方式（false 默认签名三门直连 SDK 兜底；true 特殊签名 SDK 优先；偏好持久化）。 */
+  @Local hgSignSdk: boolean = FqAppSettingsStore.isVideoHgSignSdk();
   /** 侧边栏缓存网格滚动器。 */
   private sideCacheScroller: Scroller = new Scroller();
   /** 侧边栏缓存面板打开后定位当前集的定时器（0 无任务）。 */
@@ -2320,6 +2322,7 @@ export struct PlayerPage {
       speedPreview: this.speedPreview,
       danmakuOn: this.danmakuOn,
       hwdecOn: this.hwDecode,
+      hgSignSdkOn: this.hgSignSdk,
       danmakuIsLandscape: this.isLandscapeDanmaku(),
       alphaPercent: this.danmakuAlphaPercent,
       speedTier: this.danmakuSpeedTier,
@@ -2338,6 +2341,9 @@ export struct PlayerPage {
       },
       hwdecToggle: (on: boolean): void => {
         this.setHwDecode(on);
+      },
+      hgSignSdkToggle: (on: boolean): void => {
+        this.setHgSignSdk(on);
       },
       rowClick: (key: string): void => {
         this.onSettingRowClick(key);
@@ -3342,6 +3348,7 @@ export struct PlayerPage {
         speedPreview: this.speedPreview,
         danmakuOn: this.danmakuOn,
         hwdecOn: this.hwDecode,
+        hgSignSdkOn: this.hgSignSdk,
         speedCommit: (value: number): void => {
           this.player.setSpeed(value);
         },
@@ -3353,6 +3360,9 @@ export struct PlayerPage {
         },
         hwdecToggle: (on: boolean): void => {
           this.setHwDecode(on);
+        },
+        hgSignSdkToggle: (on: boolean): void => {
+          this.setHgSignSdk(on);
         },
         rowClick: (key: string): void => {
           this.onSettingRowClick(key);
@@ -3933,7 +3943,7 @@ export struct PlayerPage {
   }
 
   /** 切换解码方式：mpv 运行时切 hwdec（当前视频即时生效，硬解失败自动回退软解），
-   *  偏好经 FqAppSettingsStore 持久化（下次进页随 PlayerConfig 初始化）。 */
+   * 偏好经 FqAppSettingsStore 持久化（下次进页随 PlayerConfig 初始化）。 */
   private setHwDecode(enabled: boolean): void {
     if (enabled === this.hwDecode) {
       return;
@@ -3941,6 +3951,17 @@ export struct PlayerPage {
     this.hwDecode = enabled;
     FqAppSettingsStore.setVideoHwdec(enabled);
     this.player.setHardwareDecode(enabled);
+  }
+
+  /** 切换 hg源签名方式（false 默认签名：内置固定签名三门直连、SDK 实时签名兜底；
+   * true 特殊签名：模拟官方 SDK 实时签名优先、失败回退三门），偏好持久化，
+   * 下次取流请求起生效（在播集不重取）。 */
+  private setHgSignSdk(enabled: boolean): void {
+    if (enabled === this.hgSignSdk) {
+      return;
+    }
+    this.hgSignSdk = enabled;
+    FqAppSettingsStore.setVideoHgSignSdk(enabled);
   }
 
   /**

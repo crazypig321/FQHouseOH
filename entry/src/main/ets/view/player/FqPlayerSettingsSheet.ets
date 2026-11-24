@@ -22,6 +22,8 @@ export struct FqPlayerSettingsSheet {
   @Param danmakuOn: boolean = true;
   /** 解码方式（true 硬解 ohcodec / false 软解 FFmpeg）。 */
   @Param hwdecOn: boolean = true;
+  /** hg源签名方式（false 默认签名三门直连 SDK 兜底；true 特殊签名 SDK 优先回退三门）。 */
+  @Param hgSignSdkOn: boolean = false;
   // ---- 弹幕设置参数 ----
   /** 「显示区域」行语义：true 横屏片源；false 竖屏片源。 */
   @Param danmakuIsLandscape: boolean = false;
@@ -42,6 +44,7 @@ export struct FqPlayerSettingsSheet {
   @Event speedPreviewChange: (value: number) => void = (_value: number): void => {};
   @Event danmakuToggle: (on: boolean) => void = (_on: boolean): void => {};
   @Event hwdecToggle: (on: boolean) => void = (_on: boolean): void => {};
+  @Event hgSignSdkToggle: (on: boolean) => void = (_on: boolean): void => {};
   @Event rowClick: (key: string) => void = (_key: string): void => {};
   // ---- 弹幕设置事件 ----
   @Event alphaChange: (value: number) => void = (_value: number): void => {};
@@ -132,6 +135,7 @@ export struct FqPlayerSettingsSheet {
         speedPreview: this.speedPreview,
         danmakuOn: this.danmakuOn,
         hwdecOn: this.hwdecOn,
+        hgSignSdkOn: this.hgSignSdkOn,
         speedCommit: (value: number): void => {
           this.speedCommit(value);
         },
@@ -143,6 +147,9 @@ export struct FqPlayerSettingsSheet {
         },
         hwdecToggle: (on: boolean): void => {
           this.hwdecToggle(on);
+        },
+        hgSignSdkToggle: (on: boolean): void => {
+          this.hgSignSdkToggle(on);
         },
         rowClick: (key: string): void => {
           this.rowClick(key);

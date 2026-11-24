@@ -1,6 +1,0 @@
-{
-  "name": "libunicorn_smoke.so",
-  "version": "1.0.0",
-  "description": "SDK v5 prestudy smoke (temporary)",
-  "main": "Index.d.ts"
-}

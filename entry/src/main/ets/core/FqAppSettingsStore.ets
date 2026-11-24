@@ -39,6 +39,9 @@
  *   播放页清晰度菜单切换即写入，下次进页沿用；白名单见 FQ_VIDEO_QUALITY_PREF_WHITELIST）；
  * - videoFanqieOnly：仅番茄源播放（默认关 = 智能：红果优先、异常自动回退番茄；
  *   开 = 播放页目录/取流/缓存全程番茄链路，不尝试红果）。
+ * - videoHgSignSdk：hg源签名方式（默认关 = 默认签名：内置固定签名参数三门直连，
+ *   SDK v5 全模拟链仅作三门全失败后的兜底；开 = 特殊签名：SDK v5 实时签名优先，
+ *   失败回退三门；播放设置菜单切换，取流请求 sign=sdk 透传后端）。
  */
 
 import preferences from '@ohos.data.preferences';
@@ -78,6 +81,7 @@ const FQ_SETTINGS_KEY_DANMAKU_BG_TRANSPARENT: string = 'danmakuBgTransparent';
 const FQ_SETTINGS_KEY_VIDEO_HWDEC: string = 'videoHwdec';
 const FQ_SETTINGS_KEY_VIDEO_QUALITY_PREF: string = 'videoQualityPref';
 const FQ_SETTINGS_KEY_VIDEO_FANQIE_ONLY: string = 'videoFanqieOnly';
+const FQ_SETTINGS_KEY_VIDEO_HG_SIGN_SDK: string = 'videoHgSignSdk';
 
 /** 章节自动缓存大小上限默认值（MB）。 */
 export const FQ_CHAPTER_CACHE_LIMIT_DEFAULT_MB: number = 80;
@@ -192,6 +196,8 @@ export class FqAppSettingsStore {
   private static videoQualityPref: string = '';
   /** 仅番茄源播放（false = 智能红果优先自动回退；true = 播放页全程番茄链路）。 */
   private static videoFanqieOnly: boolean = false;
+  /** hg源签名方式（false = 默认签名三门直连 SDK 兜底；true = 特殊签名 SDK 优先）。 */
+  private static videoHgSignSdk: boolean = false;
 
   public static init(context: common.Context): void {
     if (FqAppSettingsStore.pref !== null) {
@@ -349,6 +355,10 @@ export class FqAppSettingsStore {
       const rawFanqieOnly: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_VIDEO_FANQIE_ONLY, false);
       if (typeof rawFanqieOnly === 'boolean') {
         FqAppSettingsStore.videoFanqieOnly = rawFanqieOnly;
+      }
+      const rawHgSignSdk: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_VIDEO_HG_SIGN_SDK, false);
+      if (typeof rawHgSignSdk === 'boolean') {
+        FqAppSettingsStore.videoHgSignSdk = rawHgSignSdk;
       }
     } catch (error) {
       // 损坏数据按默认值处理
@@ -912,6 +922,27 @@ export class FqAppSettingsStore {
     }
     try {
       pref.putSync(FQ_SETTINGS_KEY_VIDEO_FANQIE_ONLY, enabled);
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
+  }
+
+  /** hg源签名方式（false = 默认签名：三门直连 SDK 兜底；true = 特殊签名：SDK 优先回退三门）。 */
+  public static isVideoHgSignSdk(): boolean {
+    return FqAppSettingsStore.videoHgSignSdk;
+  }
+
+  public static setVideoHgSignSdk(enabled: boolean): void {
+    FqAppSettingsStore.videoHgSignSdk = enabled;
+    const pref: preferences.Preferences | null = FqAppSettingsStore.pref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.putSync(FQ_SETTINGS_KEY_VIDEO_HG_SIGN_SDK, enabled);
       pref.flush().catch((_error: BusinessError): void => {
         // 落盘失败不阻断
       });

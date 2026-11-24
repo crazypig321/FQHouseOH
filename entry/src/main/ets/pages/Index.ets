@@ -35,9 +35,6 @@ import { PcMainLayout } from '../view/pcUI/PcMainLayout';
 import { FqContinueKit } from '../utils/continue/FqContinueKit';
 import { FqShareKit } from '../utils/share/FqShareKit';
 import { fqPhysicalIndexOf, fqVisibleTabIndexes, fqIsDramaTabActive } from '../model/FqTabsModels';
-// [临时] SDK v5 预研冒烟（JIT 复测；跑完整体回滚）
-import { hilog } from '@kit.PerformanceAnalysisKit';
-import { startSmoke, getSmokeResult } from 'libunicorn_smoke.so';
 
 @Entry
 @ComponentV2
@@ -177,30 +174,6 @@ struct Index {
     }
     // 碰一碰 / 隔空手势（握拳）分享：进程内一次注册（按导航栈顶页面构建分享内容）
     FqShareKit.setupHarmonyShare();
-    // [临时] SDK v5 预研冒烟：后台跑 Unicorn digest，结果打 hilog（跑完整体回滚）
-    this.tryUnicornSmokeOnce();
-  }
-
-  /** [临时] SDK v5 预研冒烟：从 HAP libs/arm64 加载 libmetasec_ml.so，后台 Unicorn 跑 digest。 */
-  private tryUnicornSmokeOnce(): void {
-    try {
-      const context: common.Context = getContext(this);
-      const path: string = `${context.bundleCodeDir}/libs/arm64/libmetasec_ml.so`;
-      if (!startSmoke(path)) {
-        hilog.info(0x0000, 'UnicornSmoke', 'start rejected (busy)');
-        return;
-      }
-      const started: number = Date.now();
-      const timer: number = setInterval((): void => {
-        const result: string = getSmokeResult();
-        if (result.length > 0) {
-          clearInterval(timer);
-          hilog.info(0x0000, 'UnicornSmoke', 'total=%{public}dms %{public}s', Date.now() - started, result);
-        }
-      }, 300);
-    } catch (error) {
-      hilog.info(0x0000, 'UnicornSmoke', 'smoke error: %{public}s', `${error}`);
-    }
   }
 
   /**

@@ -297,12 +297,14 @@ export class FqBackupPlaybackSettings {
   readonly ttsRate: number;
   /** 仅番茄源播放（null = 旧备份缺省，恢复时跳过不重置本机）。 */
   readonly videoFanqieOnly: boolean | null;
+  /** hg源签名方式（null = 旧备份缺省，恢复时跳过不重置本机）。 */
+  readonly videoHgSignSdk: boolean | null;
 
   constructor(danmakuAlphaPercent: number, danmakuSpeedTier: number, danmakuLineCount: number,
     danmakuLineSpaceTier: number, danmakuSizeTier: number, danmakuBgTransparent: boolean,
     videoHwdec: boolean, videoQualityPref: string | null, dramaAutoCacheAhead: number,
     dramaAutoCacheWifiOnly: boolean, pipVideo: boolean, ttsPerson: number, ttsRate: number,
-    videoFanqieOnly: boolean | null = null) {
+    videoFanqieOnly: boolean | null = null, videoHgSignSdk: boolean | null = null) {
     this.danmakuAlphaPercent = danmakuAlphaPercent;
     this.danmakuSpeedTier = danmakuSpeedTier;
     this.danmakuLineCount = danmakuLineCount;
@@ -317,6 +319,7 @@ export class FqBackupPlaybackSettings {
     this.ttsPerson = ttsPerson;
     this.ttsRate = ttsRate;
     this.videoFanqieOnly = videoFanqieOnly;
+    this.videoHgSignSdk = videoHgSignSdk;
   }
 }
 
@@ -616,7 +619,8 @@ export class FqLibraryBackup {
       FqAppSettingsStore.isPipVideoEnabled(),
       FqAppSettingsStore.getTtsPerson(),
       FqAppSettingsStore.getTtsRate(),
-      FqAppSettingsStore.getVideoFanqieOnly());
+      FqAppSettingsStore.getVideoFanqieOnly(),
+      FqAppSettingsStore.isVideoHgSignSdk());
     const settings: FqBackupAppSettings = new FqBackupAppSettings(
       FqAppSettingsStore.getThemeMode(),
       FqAppSettingsStore.getThemeColor(),
@@ -892,6 +896,7 @@ export class FqLibraryBackup {
         playback['ttsPerson'] = data.settings.playback.ttsPerson;
         playback['ttsRate'] = data.settings.playback.ttsRate;
         playback['videoFanqieOnly'] = data.settings.playback.videoFanqieOnly === true;
+        playback['videoHgSignSdk'] = data.settings.playback.videoHgSignSdk === true;
         settings['playback'] = playback;
       }
       root['settings'] = settings;
@@ -1403,6 +1408,9 @@ export class FqLibraryBackup {
         // 仅番茄源播放（旧备份无此字段为 null，恢复时跳过不重置本机已有设置）
         const pbFanqieOnly: boolean | null = pbRec['videoFanqieOnly'] === undefined ? null
           : fqBackupCheckBool(pbRec, 'videoFanqieOnly');
+        // hg源签名方式（旧备份无此字段为 null，恢复时跳过不重置本机已有设置）
+        const pbHgSignSdk: boolean | null = pbRec['videoHgSignSdk'] === undefined ? null
+          : fqBackupCheckBool(pbRec, 'videoHgSignSdk');
         playback = new FqBackupPlaybackSettings(pbAlpha, pbSpeed, pbLines, pbSpace, pbSize,
           fqBackupCheckBool(pbRec, 'danmakuBgTransparent'),
           fqBackupCheckBool(pbRec, 'videoHwdec'),
@@ -1412,7 +1420,8 @@ export class FqLibraryBackup {
           fqBackupCheckBool(pbRec, 'pipVideo'),
           fqBackupCheckInt(pbRec, 'ttsPerson', 2147483647),
           pbTtsRate,
-          pbFanqieOnly);
+          pbFanqieOnly,
+          pbHgSignSdk);
       }
       // 旧备份（v1/v2）主题档位迁移：2=夜间→3，3=自定义→4；v3 备份已是新档位。
       let readerThemeIndex: number =
@@ -1567,6 +1576,10 @@ export class FqLibraryBackup {
         // 仅番茄源播放（旧备份无此字段为 null，跳过不重置本机已有设置）
         if (playback.videoFanqieOnly !== null) {
           FqAppSettingsStore.setVideoFanqieOnly(playback.videoFanqieOnly);
+        }
+        // hg源签名方式（旧备份无此字段为 null，跳过不重置本机已有设置）
+        if (playback.videoHgSignSdk !== null) {
+          FqAppSettingsStore.setVideoHgSignSdk(playback.videoHgSignSdk);
         }
         playbackApplied = true;
       }
