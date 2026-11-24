@@ -47,6 +47,7 @@ const FQ_STARTUP_TAB_ANCHOR_ID: string = 'settings_startup_tab_anchor';
 const FQ_HOME_STYLE_ANCHOR_ID: string = 'settings_home_style_anchor';
 const FQ_MINE_STYLE_ANCHOR_ID: string = 'settings_mine_style_anchor';
 const FQ_VIDEO_SOURCE_ANCHOR_ID: string = 'settings_video_source_anchor';
+const FQ_HG_SIGN_ANCHOR_ID: string = 'settings_hg_sign_anchor';
 /** 行内分割线左右避让：左侧行 padding 14 + 图标块 34 + 间距 12，右侧对称一致。 */
 const FQ_ROW_DIVIDER_INSET: number = 60;
 /** 深色模式档位文案（下标即档位值）。 */
@@ -57,6 +58,9 @@ const FQ_HOME_STYLE_LABELS: string[] = ['今日焦点', '排行榜', '今日焦�
 const FQ_MINE_STYLE_LABELS: string[] = ['我的含设置入口', '设置含我的入口', '我的和设置单独显示'];
 /** 视频播放源档位文案（false 自动切换 = 智能选源异常回退；true 默认源 = 固定单一链路）。 */
 const FQ_VIDEO_SOURCE_LABELS: string[] = ['自动切换', '默认源'];
+/** hg源签名方式档位文案（false 默认签名速度快 = 常规线路失败后 SDK 实时签名兜底；
+ * true 特殊签名 = 模拟官方 SDK 实时签名优先，风控收紧时更稳）。 */
+const FQ_HG_SIGN_LABELS: string[] = ['默认签名', '特殊签名'];
 
 @Builder
 function fqSettingsEmptyContent() {
@@ -87,6 +91,8 @@ export struct SettingsPage {
   @Local backgroundAudio: boolean = true;
   @Local pipVideo: boolean = false;
   @Local fanqieOnly: boolean = false;
+  /** hg源签名方式（false 默认签名 / true 特殊签名；偏好经 FqAppSettingsStore 持久化）。 */
+  @Local hgSignSdk: boolean = false;
   @Local startupTab: number = 0;
   @Local homeStyle: number = FQ_HOME_STYLE_SPOTLIGHT;
   @Local mineSettingsStyle: number = FQ_MINE_STYLE_SEPARATE;
@@ -96,6 +102,7 @@ export struct SettingsPage {
     this.backgroundAudio = FqAppSettingsStore.isBackgroundAudio();
     this.pipVideo = FqAppSettingsStore.isPipVideoEnabled();
     this.fanqieOnly = FqAppSettingsStore.getVideoFanqieOnly();
+    this.hgSignSdk = FqAppSettingsStore.isVideoHgSignSdk();
     this.startupTab = FqAppSettingsStore.getStartupTabIndex();
     this.homeStyle = FqAppSettingsStore.getHomeStyle();
     this.mineSettingsStyle = FqAppSettingsStore.getMineSettingsStyle();
@@ -154,6 +161,8 @@ export struct SettingsPage {
             this.PipVideoRow()
             this.RowDivider()
             this.VideoSourceRow()
+            this.RowDivider()
+            this.HgSignRow()
             this.RowDivider()
             this.SettingRow($r('sys.symbol.waveform_headphones'), '#FF8B5CF6', '离线朗读',
               '朗读音色下载与语速设置', '', true,
@@ -992,6 +1001,68 @@ export struct SettingsPage {
       items.push(item);
     }
     FqMenu.open(this.getUIContext(), FQ_VIDEO_SOURCE_ANCHOR_ID, items);
+  }
+
+  /** hg源签名方式行（锚点 FqMenu：默认签名速度快、常规线路失败后 SDK 实时签名兜底；
+   *  特殊签名 = 模拟官方 SDK 实时签名优先，风控收紧时更稳）。 */
+  @Builder
+  private HgSignRow() {
+    Row({ space: 12 }) {
+      Stack() {
+        SymbolGlyph($r('sys.symbol.lock_fill'))
+          .fontSize(17)
+          .fontColor(['#FF10B981'])
+      }
+      .width(34)
+      .height(34)
+      .borderRadius(10)
+      .backgroundColor(FqColorUtils.withOpacity('#FF10B981', 0.12))
+
+      Column({ space: 3 }) {
+        Text('hg源签名方式')
+          .fontSize(14.5)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('sys.color.font_primary'))
+        Text('特殊签名更稳但首次取流较慢，下次取流生效')
+          .fontSize(11.5)
+          .fontColor($r('sys.color.font_secondary'))
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+
+      Text(FQ_HG_SIGN_LABELS[this.hgSignSdk ? 1 : 0])
+        .fontSize(12.5)
+        .fontColor($r('sys.color.font_secondary'))
+      SymbolGlyph($r('sys.symbol.chevron_right'))
+        .fontSize(13)
+        .fontColor([$r('sys.color.font_tertiary')])
+    }
+    .id(FQ_HG_SIGN_ANCHOR_ID)
+    .padding({ left: 14, right: 14, top: 11, bottom: 11 })
+    .width('100%')
+    .onClick((): void => {
+      this.openHgSignMenu();
+    })
+  }
+
+  /** hg源签名方式菜单：默认签名/特殊签名 两选项（当前档尾勾，点击持久化，下次取流生效）。 */
+  private openHgSignMenu(): void {
+    const items: FqMenuItem[] = [];
+    const options: boolean[] = [false, true];
+    for (const option of options) {
+      const item: FqMenuItem = new FqMenuItem();
+      item.label = FQ_HG_SIGN_LABELS[option ? 1 : 0];
+      if (option === this.hgSignSdk) {
+        item.endIcon = $r('sys.symbol.checkmark');
+      }
+      const picked: boolean = option;
+      item.onAction = (): void => {
+        this.hgSignSdk = picked;
+        FqAppSettingsStore.setVideoHgSignSdk(picked);
+      };
+      items.push(item);
+    }
+    FqMenu.open(this.getUIContext(), FQ_HG_SIGN_ANCHOR_ID, items);
   }
 
   /** 页面内统一 toast。 */

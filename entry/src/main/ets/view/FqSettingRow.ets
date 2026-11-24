@@ -1,7 +1,7 @@
 /**
  * 公共设置列表行（配合 List/ListItem 使用，divider 建议由 List 统一绘制）：
- * 左侧图标（SymbolGlyph）+ 标题文本（可选副标题说明），右侧内容经尾随闭包
- * 插槽传入（跳转箭头 / 开关 / 滑杆 / 值文本等）；整行点击经 click 回调。
+ * 左侧图标（SymbolGlyph）+ 标题文本，右侧内容经尾随闭包插槽传入
+ * （跳转箭头 / 开关 / 滑杆 / 值文本等）；整行点击经 click 回调。
  */
 @ComponentV2
 export struct FqSettingRow {
@@ -9,8 +9,6 @@ export struct FqSettingRow {
   @Param icon: Resource = $r('sys.symbol.chevron_right')
   /** 标题文本。 */
   @Param title: string = ''
-  /** 可选副标题（设置项说明；空串不占位）。 */
-  @Param subtitle: string = ''
   /** 图标与标题颜色。 */
   @Param tintColor: ResourceColor = $r('sys.color.font')
   /** 整行点击（未传时行点击为空操作）。 */
@@ -25,17 +23,9 @@ export struct FqSettingRow {
         SymbolGlyph(this.icon)
           .fontSize(22)
           .fontColor([this.tintColor])
-        Column({ space: 2 }) {
-          Text(this.title)
-            .fontSize(15)
-            .fontColor(this.tintColor)
-          if (this.subtitle.length > 0) {
-            Text(this.subtitle)
-              .fontSize(11)
-              .fontColor($r('sys.color.font_tertiary'))
-          }
-        }
-        .alignItems(HorizontalAlign.Start)
+        Text(this.title)
+          .fontSize(15)
+          .fontColor(this.tintColor)
       }
       .alignItems(VerticalAlign.Center)
 
