@@ -205,16 +205,6 @@ export class FqBackend {
       if (result !== 'running') {
         throw new Error(`Rust core init failed: ${result}`);
       }
-      // [临时] P1 锚点验证：SDK v5 digest 自检（期望 62b5cbd4...），P5 验证后移除。
-      try {
-        const digest: string = await fq.sdkDigestSelfTest();
-        FqLog.i('backend', `SDK digest 自检: ${digest}`);
-        hilog.info(0x0000, 'FqP1', 'sdk digest self-test: %{public}s', [digest]);
-      } catch (error) {
-        const msg: string = error instanceof Error ? error.message : String(error);
-        FqLog.e('backend', `SDK digest 自检失败: ${msg}`);
-        hilog.error(0x0000, 'FqP1', 'sdk digest self-test failed: %{public}s', [msg]);
-      }
       this.baseUrlValue = await fq.baseUrl();
       this.capabilityValue = await fq.sessionCapability();
       FqLog.i('backend', `本地后端启动完成 (端口 ${PORT})`);
