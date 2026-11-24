@@ -24,7 +24,6 @@ export class FqChangelogEntry {
 /** 全部版本更新日志（新版本在前）。 */
 const FQ_CHANGELOGS: FqChangelogEntry[] = [
   new FqChangelogEntry('1.2.4', '2026-11-24', [
-    'hg源取流新增实时签名链路：常规线路失败时自动模拟官方客户端实时签名重取，播放与下载更稳',
     '设置新增「取密方式」：默认模式速度快；特殊模式（需系统 JIT 权限）更稳，随备份同步 ',
   ]),
   new FqChangelogEntry('1.2.3', '2026-11-22', [
