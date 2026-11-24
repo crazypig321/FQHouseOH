@@ -1009,7 +1009,7 @@ export struct SettingsPage {
   private HgSignRow() {
     Row({ space: 12 }) {
       Stack() {
-        SymbolGlyph($r('sys.symbol.lock_fill'))
+        SymbolGlyph($r('sys.symbol.ohos_lock'))
           .fontSize(17)
           .fontColor(['#FF10B981'])
       }
