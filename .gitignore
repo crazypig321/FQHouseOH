@@ -15,6 +15,7 @@
 /.deveco
 
 # Rust
+/rust/
 /target
 rust/target
 **/*.so
