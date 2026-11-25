@@ -5415,8 +5415,13 @@ export struct PlayerPage {
 
   /** 合并一页弹幕入池：按 id 去重、保持 offsetMs 升序，推进 cursor/已加载右界。 */
   private applyDanmakuPage(page: FqDanmakuPage, startMs: number): void {
-    this.danmakuCursor = page.cursor;
-    this.danmakuHasMore = page.hasMore;
+    // hongguoTV 2026-11-25 atEnd 修复：服务端下一窗口越过本集时长时停止翻页，
+    // 否则会以 start >= duration 续拉——红果端点窗口校验直接 400，连续失败累计
+    // 会整场弃用红果弹幕源（hg源会话回退番茄端点也拿不到弹幕），片尾弹幕丢失。
+    const durationMs: number = Math.floor(this.player.state.duration * 1000);
+    const atEnd: boolean = durationMs > 0 && page.nextQueryMs >= durationMs;
+    this.danmakuCursor = atEnd ? '' : page.cursor;
+    this.danmakuHasMore = atEnd ? false : page.hasMore;
     this.danmakuLoadedToMs = page.nextQueryMs > startMs ? page.nextQueryMs : startMs + 5000;
     const seen: Set<string> = new Set<string>();
     const merged: FqDanmaku[] = [];
