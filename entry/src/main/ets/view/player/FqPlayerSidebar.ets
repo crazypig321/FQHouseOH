@@ -29,8 +29,8 @@ export struct FqPlayerSidebar {
   @Param showClose: boolean = false;
   /** 右上定位按钮（scope，选集面板滚动到当前集居中）。 */
   @Param showLocate: boolean = false;
-  /** 右上下载按钮（circle_and_arrow_down，离线缓存页下载所选集）。 */
-  @Param showDownload: boolean = false;
+  /** 右上管理按钮（circle_and_arrow_down，离线缓存页进剧集缓存管理页）。 */
+  @Param showManage: boolean = false;
   /** 面板背景色（与宿主容器底色一致，避免 CommonNav 默认页面底色透出）。 */
   @Param panelBgColor: ResourceColor = '#F0141414';
   /** 绑定内容滚动器（驱动标题栏滚动模糊与双击标题栏回顶）。 */
@@ -45,7 +45,7 @@ export struct FqPlayerSidebar {
   @Event settingsClick: () => void = (): void => {};
   @Event closeClick: () => void = (): void => {};
   @Event locateClick: () => void = (): void => {};
-  @Event downloadClick: () => void = (): void => {};
+  @Event manageClick: () => void = (): void => {};
   @BuilderParam content: () => void;
 
   build() {
@@ -144,13 +144,13 @@ export struct FqPlayerSidebar {
         },
       });
     }
-    if (this.showDownload) {
+    if (this.showManage) {
       menus.push({
         content: {
           icon: $r('sys.symbol.circle_and_arrow_down'),
-          label: '下载',
+          label: '管理',
           action: (): void => {
-            this.downloadClick();
+            this.manageClick();
           },
         },
       });

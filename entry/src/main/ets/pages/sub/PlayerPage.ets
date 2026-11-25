@@ -622,6 +622,12 @@ export struct PlayerPage {
     this.danmakuSizeTier = FqAppSettingsStore.getDanmakuSizeTier();
     this.danmakuBgTransparent = FqAppSettingsStore.isDanmakuBgTransparent();
     this.applyDanmakuCfg();
+    // 弹幕开关 + 倍速：载入持久化设置（fqapp key_enable_danmaku_by_user / player_playback_rate）
+    this.danmakuOn = FqAppSettingsStore.isVideoDanmakuOn();
+    const persistedRate: number = FqAppSettingsStore.getVideoPlaybackRate();
+    if (persistedRate > 0 && Math.abs(persistedRate - 1.0) > 0.0001) {
+      this.player.setSpeed(persistedRate);
+    }
     // 清晰度偏好：跨进页持久化记忆（fqapp download_preference；空 = 跟默认最高档）
     this.qualityPreference = FqAppSettingsStore.getVideoQualityPref();
     // 实际播放 guard：position 走表（非加载期）才视为看过（对齐 fqapp 首帧不标）
@@ -2329,6 +2335,7 @@ export struct PlayerPage {
       bgTransparent: this.danmakuBgTransparent,
       speedCommit: (value: number): void => {
         this.player.setSpeed(value);
+        FqAppSettingsStore.setVideoPlaybackRate(value);
       },
       speedPreviewChange: (value: number): void => {
         this.speedPreview = value;
@@ -3403,8 +3410,8 @@ export struct PlayerPage {
   }
 
   /** 侧边栏·离线缓存（横屏全屏形态，公共 FqPlayerSidebar 壳）：标题栏返回（回播放设置侧边栏）+
-   *  右上下载（下载所选集）/关闭；>30 集分页条横向滚动直达；集数网格 3 列复选（4 列勾选态
-   *  文字超出单格宽度）/全选/下载行与底部半模态同款逻辑。 */
+   *  右上管理（进剧集缓存页面，与底部半模态「管理」一致）/关闭；>30 集分页条横向滚动直达；
+   *  集数网格 3 列复选（4 列勾选态文字超出单格宽度）/全选/下载行与底部半模态同款逻辑。 */
   @Builder
   private SideCache() {
     FqPlayerSidebar({
@@ -3413,13 +3420,10 @@ export struct PlayerPage {
       backClick: (): void => {
         this.openSidePanel('settings');
       },
-      showDownload: true,
-      downloadClick: (): void => {
-        if (this.cacheSelectedIds.size === 0) {
-          this.getUIContext().getPromptAction().showToast({ message: '请选择要缓存的剧集', duration: 1500 });
-          return;
-        }
-        this.confirmCacheDownload(this.cacheSelectedIdList());
+      showManage: true,
+      manageClick: (): void => {
+        this.closeSidePanel();
+        NavPathUtils.push(ROUTE_CACHED_DRAMAS);
       },
       showClose: true,
       closeClick: (): void => {
@@ -3848,6 +3852,7 @@ export struct PlayerPage {
       }
       item.onAction = (): void => {
         this.player.setSpeed(step);
+        FqAppSettingsStore.setVideoPlaybackRate(step);
       };
       items.push(item);
     }
@@ -5431,9 +5436,10 @@ export struct PlayerPage {
     this.danmakuItems = merged;
   }
 
-  /** 弹幕开关（官方 Toast 文案：弹幕已开启/已关闭）。 */
+  /** 弹幕开关（官方 Toast 文案：弹幕已开启/已关闭；开关状态持久化）。 */
   private toggleDanmaku(): void {
     this.danmakuOn = !this.danmakuOn;
+    FqAppSettingsStore.setVideoDanmakuOn(this.danmakuOn);
     this.getUIContext().getPromptAction().showToast({
       message: this.danmakuOn ? '弹幕已开启' : '弹幕已关闭',
       duration: 1200,

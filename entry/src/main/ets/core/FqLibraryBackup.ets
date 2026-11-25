@@ -18,7 +18,8 @@ import { FqReaderProgress, FqReaderSettings, FqReaderStore,
 fqDecodeReadRanges, fqEncodeReadRanges, fqNormalizeThemeFontColor, fqNormalizeDialogueColor } from './FqReaderStore';
 import { FqAppSettingsStore, FQ_DRAMA_AUTO_CACHE_AHEAD_MAX,
   FQ_DANMAKU_ALPHA_MIN_PERCENT, FQ_DANMAKU_ALPHA_MAX_PERCENT,
-  FQ_VIDEO_QUALITY_PREF_WHITELIST } from './FqAppSettingsStore';
+  FQ_VIDEO_QUALITY_PREF_WHITELIST,
+  FQ_VIDEO_PLAYBACK_RATE_MIN, FQ_VIDEO_PLAYBACK_RATE_MAX } from './FqAppSettingsStore';
 import { fqAsArray, fqAsRecord, fqNum, fqStr } from './FqJson';
 import { FqReaderBookmark, FqReaderBookmarkStore, FQ_BOOKMARK_EXCERPT_MAX, FQ_BOOKMARK_MAX_ENTRIES } from './FqReaderBookmarkStore';
 
@@ -299,12 +300,17 @@ export class FqBackupPlaybackSettings {
   readonly videoFanqieOnly: boolean | null;
   /** hg源签名方式（null = 旧备份缺省，恢复时跳过不重置本机）。 */
   readonly videoHgSignSdk: boolean | null;
+  /** 弹幕开关（null = 旧备份缺省，恢复时跳过不重置本机）。 */
+  readonly videoDanmakuOn: boolean | null;
+  /** 视频倍速（null = 旧备份缺省，恢复时跳过不重置本机）。 */
+  readonly videoPlaybackRate: number | null;
 
   constructor(danmakuAlphaPercent: number, danmakuSpeedTier: number, danmakuLineCount: number,
     danmakuLineSpaceTier: number, danmakuSizeTier: number, danmakuBgTransparent: boolean,
     videoHwdec: boolean, videoQualityPref: string | null, dramaAutoCacheAhead: number,
     dramaAutoCacheWifiOnly: boolean, pipVideo: boolean, ttsPerson: number, ttsRate: number,
-    videoFanqieOnly: boolean | null = null, videoHgSignSdk: boolean | null = null) {
+    videoFanqieOnly: boolean | null = null, videoHgSignSdk: boolean | null = null,
+    videoDanmakuOn: boolean | null = null, videoPlaybackRate: number | null = null) {
     this.danmakuAlphaPercent = danmakuAlphaPercent;
     this.danmakuSpeedTier = danmakuSpeedTier;
     this.danmakuLineCount = danmakuLineCount;
@@ -320,6 +326,8 @@ export class FqBackupPlaybackSettings {
     this.ttsRate = ttsRate;
     this.videoFanqieOnly = videoFanqieOnly;
     this.videoHgSignSdk = videoHgSignSdk;
+    this.videoDanmakuOn = videoDanmakuOn;
+    this.videoPlaybackRate = videoPlaybackRate;
   }
 }
 
@@ -620,7 +628,9 @@ export class FqLibraryBackup {
       FqAppSettingsStore.getTtsPerson(),
       FqAppSettingsStore.getTtsRate(),
       FqAppSettingsStore.getVideoFanqieOnly(),
-      FqAppSettingsStore.isVideoHgSignSdk());
+      FqAppSettingsStore.isVideoHgSignSdk(),
+      FqAppSettingsStore.isVideoDanmakuOn(),
+      FqAppSettingsStore.getVideoPlaybackRate());
     const settings: FqBackupAppSettings = new FqBackupAppSettings(
       FqAppSettingsStore.getThemeMode(),
       FqAppSettingsStore.getThemeColor(),
@@ -897,6 +907,8 @@ export class FqLibraryBackup {
         playback['ttsRate'] = data.settings.playback.ttsRate;
         playback['videoFanqieOnly'] = data.settings.playback.videoFanqieOnly === true;
         playback['videoHgSignSdk'] = data.settings.playback.videoHgSignSdk === true;
+        playback['videoDanmakuOn'] = data.settings.playback.videoDanmakuOn === true;
+        playback['videoPlaybackRate'] = data.settings.playback.videoPlaybackRate ?? 1;
         settings['playback'] = playback;
       }
       root['settings'] = settings;
@@ -1411,6 +1423,16 @@ export class FqLibraryBackup {
         // hg源签名方式（旧备份无此字段为 null，恢复时跳过不重置本机已有设置）
         const pbHgSignSdk: boolean | null = pbRec['videoHgSignSdk'] === undefined ? null
           : fqBackupCheckBool(pbRec, 'videoHgSignSdk');
+        // 弹幕开关（旧备份无此字段为 null，恢复时跳过不重置本机已有设置）
+        const pbDanmakuOn: boolean | null = pbRec['videoDanmakuOn'] === undefined ? null
+          : fqBackupCheckBool(pbRec, 'videoDanmakuOn');
+        // 视频倍速（旧备份无此字段为 null，恢复时跳过不重置本机已有设置）
+        let pbPlaybackRate: number | null = null;
+        if (pbRec['videoPlaybackRate'] !== undefined) {
+          const pbRate: number =
+            fqBackupCheckRange(pbRec, 'videoPlaybackRate', FQ_VIDEO_PLAYBACK_RATE_MIN, FQ_VIDEO_PLAYBACK_RATE_MAX);
+          pbPlaybackRate = pbRate;
+        }
         playback = new FqBackupPlaybackSettings(pbAlpha, pbSpeed, pbLines, pbSpace, pbSize,
           fqBackupCheckBool(pbRec, 'danmakuBgTransparent'),
           fqBackupCheckBool(pbRec, 'videoHwdec'),
@@ -1421,7 +1443,9 @@ export class FqLibraryBackup {
           fqBackupCheckInt(pbRec, 'ttsPerson', 2147483647),
           pbTtsRate,
           pbFanqieOnly,
-          pbHgSignSdk);
+          pbHgSignSdk,
+          pbDanmakuOn,
+          pbPlaybackRate);
       }
       // 旧备份（v1/v2）主题档位迁移：2=夜间→3，3=自定义→4；v3 备份已是新档位。
       let readerThemeIndex: number =
@@ -1580,6 +1604,14 @@ export class FqLibraryBackup {
         // hg源签名方式（旧备份无此字段为 null，跳过不重置本机已有设置）
         if (playback.videoHgSignSdk !== null) {
           FqAppSettingsStore.setVideoHgSignSdk(playback.videoHgSignSdk);
+        }
+        // 弹幕开关（旧备份无此字段为 null，跳过不重置本机已有设置）
+        if (playback.videoDanmakuOn !== null) {
+          FqAppSettingsStore.setVideoDanmakuOn(playback.videoDanmakuOn);
+        }
+        // 视频倍速（旧备份无此字段为 null，跳过不重置本机已有设置）
+        if (playback.videoPlaybackRate !== null) {
+          FqAppSettingsStore.setVideoPlaybackRate(playback.videoPlaybackRate);
         }
         playbackApplied = true;
       }

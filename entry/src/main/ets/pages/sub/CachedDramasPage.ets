@@ -106,7 +106,8 @@ export struct CachedDramasPage {
       for (const episode of FqDramaCacheStore.episodesOf(drama.seriesId)) {
         this.episodeById.set(episode.itemId, episode);
         details.push(new FqCacheDetailItem(episode.itemId, `第 ${episode.index} 集`,
-          episode.title, fqFormatCacheBytes(episode.bytes)));
+          this.ordinalOnlyTitle(episode.title, episode.index) ? '' : episode.title,
+          fqFormatCacheBytes(episode.bytes)));
       }
       groups.push(new FqCacheGroupItem(drama.seriesId, drama.title,
         `${drama.episodeCount} 集 · ${fqFormatCacheBytes(drama.byteCount)}`,
@@ -158,6 +159,16 @@ export struct CachedDramasPage {
       }
     }
     return null;
+  }
+
+  /** 集标题是否仅为「第N集/N」式序号（源目录常这么命名）：与行首「第 N 集」重复，不再展示。 */
+  private ordinalOnlyTitle(title: string, index: number): boolean {
+    const compact: string = title.replace(/\s+/g, '');
+    if (compact.length === 0) {
+      return false;
+    }
+    const pattern: RegExp = new RegExp(`^第?0*${index}集?$`);
+    return pattern.test(compact);
   }
 
   /** 该剧未入库任务（含暂停/失败；完成即入 store 不在此列）。 */
@@ -501,12 +512,15 @@ export struct CachedDramasPage {
           .fontSize(13)
           .fontWeight(FontWeight.Medium)
           .fontColor($r('sys.color.font_primary'))
-        if (task.title.length > 0) {
+        if (task.title.length > 0 && !this.ordinalOnlyTitle(task.title, task.index)) {
           Text(task.title)
             .fontSize(12.5)
             .fontColor($r('sys.color.font_secondary'))
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+        } else {
+          Blank()
             .layoutWeight(1)
         }
         this.TaskActionIcon(task)

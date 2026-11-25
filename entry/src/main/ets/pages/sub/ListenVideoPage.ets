@@ -26,6 +26,7 @@ import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { FqVideoMedia } from '../../core/FqVideoMedia';
 import { FqWatchedStore, FqWatchedProgress, FqWatchHistoryRecord } from '../../core/FqWatchedStore';
 import { FqReadStatsStore } from '../../core/FqReadStatsStore';
+import { FqAppSettingsStore } from '../../core/FqAppSettingsStore';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { appState } from '../../entryability/AppState';
 import { Player, Media, PlayerConfig } from '@mpv-ohos/mpv-arkts';
@@ -155,6 +156,11 @@ export struct ListenVideoPage {
     this.previewNoSave = ListenVideoNavParams.previewNoSave;
     ListenVideoNavParams.previewNoSave = false;
     FqWatchedStore.init(getContext(this));
+    // 倍速：载入持久化设置（fqapp listen_mode_page 与视频页共用 player_playback_rate）
+    const persistedRate: number = FqAppSettingsStore.getVideoPlaybackRate();
+    if (persistedRate > 0 && Math.abs(persistedRate - 1.0) > 0.0001) {
+      this.player.setSpeed(persistedRate);
+    }
     this.player.stream.eof.listen((eof: boolean): void => {
       if (eof) {
         this.onEpisodeEnd();
@@ -632,6 +638,7 @@ export struct ListenVideoPage {
                     .onChange((value: number, mode: SliderChangeMode): void => {
                       if (mode === SliderChangeMode.End || mode === SliderChangeMode.Click) {
                         this.player.setSpeed(value);
+                        FqAppSettingsStore.setVideoPlaybackRate(value);
                         this.speedPreview = -1;
                         this.syncMediaState(this.player.state.playing);
                       } else {

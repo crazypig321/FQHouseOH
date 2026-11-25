@@ -42,6 +42,10 @@
  * - videoHgSignSdk：hg源签名方式（默认关 = 默认签名：内置固定签名参数三门直连，
  *   SDK v5 全模拟链仅作三门全失败后的兜底；开 = 特殊签名：SDK v5 实时签名优先，
  *   失败回退三门；播放设置菜单切换，取流请求 sign=sdk 透传后端）。
+ * - videoDanmakuOn：弹幕开关（默认开 = fqapp DanmakuPreference key_enable_danmaku_by_user；
+ *   播放设置弹幕开关切换即写入，下次进页沿用）；
+ * - videoPlaybackRate：视频倍速（默认 1.0；fqapp PlayerPreferences player_playback_rate，
+ *   0.5-2.0 与倍速滑杆范围一致，播放页/听剧页共用一份）。
  */
 
 import preferences from '@ohos.data.preferences';
@@ -82,6 +86,8 @@ const FQ_SETTINGS_KEY_VIDEO_HWDEC: string = 'videoHwdec';
 const FQ_SETTINGS_KEY_VIDEO_QUALITY_PREF: string = 'videoQualityPref';
 const FQ_SETTINGS_KEY_VIDEO_FANQIE_ONLY: string = 'videoFanqieOnly';
 const FQ_SETTINGS_KEY_VIDEO_HG_SIGN_SDK: string = 'videoHgSignSdk';
+const FQ_SETTINGS_KEY_VIDEO_DANMAKU_ON: string = 'videoDanmakuOn';
+const FQ_SETTINGS_KEY_VIDEO_PLAYBACK_RATE: string = 'videoPlaybackRate';
 
 /** 章节自动缓存大小上限默认值（MB）。 */
 export const FQ_CHAPTER_CACHE_LIMIT_DEFAULT_MB: number = 80;
@@ -111,6 +117,10 @@ export const FQ_DANMAKU_LINE_SPACE_LABELS: string[] = ['单行', '1/4屏', '1/2�
 export const FQ_DANMAKU_ALPHA_MIN_PERCENT: number = 20;
 /** 弹幕不透明度上限（%）。 */
 export const FQ_DANMAKU_ALPHA_MAX_PERCENT: number = 100;
+/** 视频倍速下限（与播放设置倍速滑杆最小档一致）。 */
+export const FQ_VIDEO_PLAYBACK_RATE_MIN: number = 0.5;
+/** 视频倍速上限（与播放设置倍速滑杆最大档一致）。 */
+export const FQ_VIDEO_PLAYBACK_RATE_MAX: number = 2.0;
 /**
  * 视频清晰度偏好档名白名单（'' = 跟随默认最高可用档）。
  * 与后端档名映射一致（短边像素映射 360P~4K）；decode 校验与 store 钳制共用。
@@ -198,6 +208,10 @@ export class FqAppSettingsStore {
   private static videoFanqieOnly: boolean = false;
   /** hg源签名方式（false = 默认签名三门直连 SDK 兜底；true = 特殊签名 SDK 优先）。 */
   private static videoHgSignSdk: boolean = false;
+  /** 弹幕开关（fqapp key_enable_danmaku_by_user 默认开）。 */
+  private static videoDanmakuOn: boolean = true;
+  /** 视频倍速（fqapp player_playback_rate 默认 1.0；播放页/听剧页共用）。 */
+  private static videoPlaybackRate: number = 1.0;
 
   public static init(context: common.Context): void {
     if (FqAppSettingsStore.pref !== null) {
@@ -359,6 +373,16 @@ export class FqAppSettingsStore {
       const rawHgSignSdk: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_VIDEO_HG_SIGN_SDK, false);
       if (typeof rawHgSignSdk === 'boolean') {
         FqAppSettingsStore.videoHgSignSdk = rawHgSignSdk;
+      }
+      const rawDanmakuOn: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_VIDEO_DANMAKU_ON, true);
+      if (typeof rawDanmakuOn === 'boolean') {
+        FqAppSettingsStore.videoDanmakuOn = rawDanmakuOn;
+      }
+      const rawPlaybackRate: preferences.ValueType =
+        pref.getSync(FQ_SETTINGS_KEY_VIDEO_PLAYBACK_RATE, 1.0);
+      if (typeof rawPlaybackRate === 'number' && rawPlaybackRate >= FQ_VIDEO_PLAYBACK_RATE_MIN
+        && rawPlaybackRate <= FQ_VIDEO_PLAYBACK_RATE_MAX) {
+        FqAppSettingsStore.videoPlaybackRate = rawPlaybackRate;
       }
     } catch (error) {
       // 损坏数据按默认值处理
@@ -943,6 +967,52 @@ export class FqAppSettingsStore {
     }
     try {
       pref.putSync(FQ_SETTINGS_KEY_VIDEO_HG_SIGN_SDK, enabled);
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
+  }
+
+  /** 弹幕开关（fqapp key_enable_danmaku_by_user；播放设置切换即写入，跨进页沿用）。 */
+  public static isVideoDanmakuOn(): boolean {
+    return FqAppSettingsStore.videoDanmakuOn;
+  }
+
+  public static setVideoDanmakuOn(on: boolean): void {
+    FqAppSettingsStore.videoDanmakuOn = on;
+    const pref: preferences.Preferences | null = FqAppSettingsStore.pref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.putSync(FQ_SETTINGS_KEY_VIDEO_DANMAKU_ON, on);
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
+  }
+
+  /** 视频倍速（fqapp player_playback_rate；范围外静默忽略）。 */
+  public static getVideoPlaybackRate(): number {
+    return FqAppSettingsStore.videoPlaybackRate;
+  }
+
+  public static setVideoPlaybackRate(rate: number): void {
+    if (!Number.isFinite(rate) || rate < FQ_VIDEO_PLAYBACK_RATE_MIN
+      || rate > FQ_VIDEO_PLAYBACK_RATE_MAX) {
+      return;
+    }
+    FqAppSettingsStore.videoPlaybackRate = rate;
+    const pref: preferences.Preferences | null = FqAppSettingsStore.pref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.putSync(FQ_SETTINGS_KEY_VIDEO_PLAYBACK_RATE, rate);
       pref.flush().catch((_error: BusinessError): void => {
         // 落盘失败不阻断
       });
