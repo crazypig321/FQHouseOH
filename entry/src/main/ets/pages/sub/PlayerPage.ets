@@ -5385,8 +5385,17 @@ export struct PlayerPage {
           return;
         }
         this.hongguoFailCount = 0;
-        this.applyDanmakuPage(page, startMs);
-        return;
+        // 红果「成功但空」且整池仍空（items 空 + 无更多）：map 大概率对位到红果
+        // 无弹幕的剧/集，整场弃用红果、落入番茄回退——否则空页也按成功 return，
+        // 番茄弹幕（fq 源剧 id 有效、本可拿到）永远拉不到，整集没弹幕；
+        // 红果部分窗口稀疏（池非空）不触发，保持红果链路
+        if (page.items.length === 0 && !page.hasMore && this.danmakuItems.length === 0) {
+          this.hongguoFailCount = FQ_HONGGUO_MAX_FAILS;
+          this.danmakuCursor = '';
+        } else {
+          this.applyDanmakuPage(page, startMs);
+          return;
+        }
       } catch (error) {
         if (token !== this.danmakuLoadToken) {
           return;
