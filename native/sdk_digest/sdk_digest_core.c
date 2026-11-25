@@ -6,11 +6,13 @@
  * no napi/hilog/probe/one-shot scaffolding. Hook behavior is intentionally
  * byte-identical so the digest stays stable.
  */
+#include <errno.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 
 #include <unicorn/unicorn.h>
 #include <unicorn/arm64.h>
@@ -710,6 +712,22 @@ int sdk_digest_open(sdk_digest_ctx **out, const uint8_t *image, size_t image_siz
     memcpy(&magic, image, 8);
     if (magic != 0x00010102464c457fULL) {
         return report(err, err_len, "not an ELF64 LSB shared object");
+    }
+
+    /* TCG needs an RWX mapping for its translation buffer. Without the JIT
+     * entitlement (ohos.permission.kernel.ALLOW_WRITABLE_CODE_MEMORY) mmap
+     * denies it and QEMU's legacy alloc path exit(1)s the process instead of
+     * returning an error (appspawn turns that into a CppCrash). Probe first
+     * so the caller gets a clean error and the ladder fallback can engage. */
+    {
+        void *probe = mmap(NULL, 4096, PROT_READ | PROT_WRITE | PROT_EXEC,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (probe == MAP_FAILED) {
+            return report(err, err_len,
+                          "RWX mapping unavailable (JIT permission missing), errno=%d",
+                          errno);
+        }
+        munmap(probe, 4096);
     }
 
     sdk_digest_ctx *ctx = calloc(1, sizeof(*ctx));
