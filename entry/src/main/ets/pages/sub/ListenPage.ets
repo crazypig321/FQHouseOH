@@ -139,7 +139,7 @@ export struct ListenPage {
           // 离线朗读：目录定位按朗读模式续读，原文 cue 字符定位（装载中自动延后）
           if (startChapter >= 0 && startChapter < fqAudioSession.chapters.length) {
             fqAudioSession.openChapter(startChapter,
-              new FqChapterOpenOptions(fqAudioSession.toneId, 0, true, false));
+              new FqChapterOpenOptions(fqAudioSession.requestedToneId, 0, true, false));
           }
           if (startCueText.trim().length > 0) {
             fqAudioSession.seekTtsByText(startCueText);
@@ -152,7 +152,7 @@ export struct ListenPage {
           if (startCueText.trim().length > 0) {
             try {
               const track: FqSubtitleTrack = await FqBackend.get().chapterTimeline(
-                fqAudioSession.chapters[startChapter].itemId, fqAudioSession.toneId);
+                fqAudioSession.chapters[startChapter].itemId, fqAudioSession.requestedToneId);
               const matched: number = fqSubtitleStartSec(track, startCueText);
               if (matched > 0) {
                 positionSec = matched;
@@ -162,7 +162,7 @@ export struct ListenPage {
             }
           }
           fqAudioSession.openChapter(startChapter,
-            new FqChapterOpenOptions(fqAudioSession.toneId, positionSec, true, false));
+            new FqChapterOpenOptions(fqAudioSession.requestedToneId, positionSec, true, false));
         }
       });
   }
@@ -380,7 +380,7 @@ export struct ListenPage {
           .padding({ left: 16, right: 16, top: 5, bottom: 5 })
           .onClick((): void => {
             fqAudioSession.openChapter(fqAudioSession.index,
-              new FqChapterOpenOptions(fqAudioSession.toneId, fqAudioSession.positionSec, true, false));
+              new FqChapterOpenOptions(fqAudioSession.requestedToneId, fqAudioSession.positionSec, true, false));
           })
       } else if (fqAudioSession.loading) {
         Row({ space: 8 }) {
@@ -1057,7 +1057,7 @@ export struct ListenPage {
       chapterClick: (index: number): void => {
         this.closeSheet();
         fqAudioSession.openChapter(index,
-          new FqChapterOpenOptions(fqAudioSession.toneId, 0, true, false));
+          new FqChapterOpenOptions(fqAudioSession.requestedToneId, 0, true, false));
       },
     })
   }

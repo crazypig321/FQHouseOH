@@ -137,6 +137,8 @@ export class FqAudioSession {
   @Trace durationSec: number = 0;
   @Trace rate: number = 1;
   @Trace toneId: string = '0';
+  /** 用户所选音色（与实际播放 toneId 分离：某章音源回退只改实际播放，不丢用户选择；切章仍按本值取源）。 */
+  requestedToneId: string = '0';
 
   // ---- 睡眠定时 ----
   private sleepDeadline: number = 0;
@@ -325,6 +327,7 @@ export class FqAudioSession {
     this.index = 0;
     this.itemId = '';
     this.toneId = '0';
+    this.requestedToneId = '0';
     this.positionSec = 0;
     this.durationSec = 0;
     this.completed = false;
@@ -522,7 +525,8 @@ export class FqAudioSession {
       if (this.ttsMode) {
         this.openTtsChapter(this.index, true, 0, '');
       } else {
-        this.openChapter(this.index, new FqChapterOpenOptions(this.toneId, this.positionSec, true, false));
+        this.openChapter(this.index,
+          new FqChapterOpenOptions(this.requestedToneId, this.positionSec, true, false));
       }
       return;
     }
@@ -570,14 +574,14 @@ export class FqAudioSession {
   public next(): void {
     if (this.index + 1 < this.chapters.length) {
       this.openChapter(this.index + 1,
-        new FqChapterOpenOptions(this.toneId, 0, this.wantPlay && !this.completed, false));
+        new FqChapterOpenOptions(this.requestedToneId, 0, this.wantPlay && !this.completed, false));
     }
   }
 
   public previous(): void {
     if (this.index > 0) {
       this.openChapter(this.index - 1,
-        new FqChapterOpenOptions(this.toneId, 0, this.wantPlay && !this.completed, false));
+        new FqChapterOpenOptions(this.requestedToneId, 0, this.wantPlay && !this.completed, false));
     } else if (this.ttsMode) {
       this.seekTts(0);
     } else {
@@ -661,6 +665,7 @@ export class FqAudioSession {
       this.positionSec = 0;
       this.durationSec = 0;
       this.toneId = toneId;
+      this.requestedToneId = toneId;
       this.excerpt = '';
       this.subtitleTrack = fqEmptySubtitleTrack();
       this.toneSet = fqEmptyToneSet();
@@ -700,6 +705,7 @@ export class FqAudioSession {
     this.itemId = chapter.itemId;
     if (options.toneId.length > 0) {
       this.toneId = options.toneId;
+      this.requestedToneId = options.toneId;
     }
     this.completed = options.completed;
     this.loading = true;
@@ -711,7 +717,7 @@ export class FqAudioSession {
     this.subtitleTrack = fqEmptySubtitleTrack();
     this.lastHistorySaveAt = Date.now();
     try {
-      const source: FqAudioSource = await this.fetchSource(chapter.itemId, this.toneId, gen);
+      const source: FqAudioSource = await this.fetchSource(chapter.itemId, this.requestedToneId, gen);
       if (gen !== this.generation) {
         return;
       }
@@ -860,7 +866,8 @@ export class FqAudioSession {
     this.ttsCueText = '';
     this.ttsEstimatedDurationSec = 0;
     const wasPlaying: boolean = this.wantPlay && !this.completed;
-    this.openChapter(this.index, new FqChapterOpenOptions(this.toneId, 0, wasPlaying, false));
+    this.openChapter(this.index,
+      new FqChapterOpenOptions(this.requestedToneId, 0, wasPlaying, false));
   }
 
   /** 设置离线朗读语速（全局持久化；朗读中即时重起当前片段）。 */
@@ -1576,7 +1583,8 @@ export class FqAudioSession {
       return;
     }
     if (this.autoAdvance && this.index + 1 < this.chapters.length) {
-      this.openChapter(this.index + 1, new FqChapterOpenOptions(this.toneId, 0, true, false));
+      this.openChapter(this.index + 1,
+        new FqChapterOpenOptions(this.requestedToneId, 0, true, false));
     }
   }
 
@@ -1914,12 +1922,19 @@ export class FqAudioSession {
       if (!message.includes('NO_THIS_TONE')) {
         throw new Error(message);
       }
-      // 纯 TTS 书无默认音色：等待音色表就绪后取首个可用音色重试一次
+      // 纯 TTS 书无默认音色：等待音色表就绪后取首个可用音色重试一次。
+      // 回退只改实际播放音色（toneId 驱动界面展示/字幕/下载），
+      // requestedToneId（用户所选）保持不变：下一章仍按用户选择取源。
       const fallback: string | null = await this.awaitSelectableTone(gen);
       if (fallback === null || gen !== this.generation) {
         throw new Error(message);
       }
       this.toneId = fallback;
+      const fallbackCached: string | null =
+        FqAudioCacheStore.cachedFilePath(this.bookId, itemId, fallback);
+      if (fallbackCached !== null) {
+        return new FqAudioSource(itemId, `file://${fallbackCached}`, fallback, 0);
+      }
       return await backend.audioChapterSource(this.bookId, itemId, fallback);
     }
   }
@@ -2190,7 +2205,8 @@ export class FqAudioSession {
       return;
     }
     if (this.autoAdvance && this.index + 1 < this.chapters.length) {
-      this.openChapter(this.index + 1, new FqChapterOpenOptions(this.toneId, 0, true, false));
+      this.openChapter(this.index + 1,
+        new FqChapterOpenOptions(this.requestedToneId, 0, true, false));
     } else {
       this.wantPlay = false;
     }
@@ -2208,7 +2224,7 @@ export class FqAudioSession {
     const durationSec: number = this.ttsMode ? 0 : this.durationSec;
     const chapter: FqChapter | undefined = this.chapters[this.index];
     FqAudioHistory.put(new FqListenRecord(this.bookId, this.index, positionSec,
-      durationSec, this.toneId, this.rate, this.completed, this.title, this.cover,
+      durationSec, this.requestedToneId, this.rate, this.completed, this.title, this.cover,
       this.ttsMode ? 'tts' : 'online', Date.now(), this.currentListenCueText(),
       chapter !== undefined ? chapter.itemId : ''));
   }

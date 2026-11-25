@@ -295,7 +295,7 @@ export class FqContinueKit {
     payload.chapterIndex = fqAudioSession.index;
     payload.positionSec = fqAudioSession.ttsMode ? 0 : fqAudioSession.positionSec;
     payload.durationSec = fqAudioSession.ttsMode ? 0 : fqAudioSession.durationSec;
-    payload.toneId = fqAudioSession.toneId;
+    payload.toneId = fqAudioSession.requestedToneId;
     payload.rate = fqAudioSession.rate;
     payload.completed = fqAudioSession.completed;
     payload.mode = fqAudioSession.ttsMode ? 'tts' : 'online';
