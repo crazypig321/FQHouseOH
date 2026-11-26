@@ -151,9 +151,17 @@ export struct ListenPage {
           let positionSec: number = startPositionSec;
           if (startCueText.trim().length > 0) {
             try {
-              const track: FqSubtitleTrack = await FqBackend.get().chapterTimeline(
+              let track: FqSubtitleTrack = await FqBackend.get().chapterTimeline(
                 fqAudioSession.chapters[startChapter].itemId, fqAudioSession.requestedToneId);
-              const matched: number = fqSubtitleStartSec(track, startCueText);
+              let matched: number = fqSubtitleStartSec(track, startCueText);
+              if (matched <= 0 && track.isEmpty
+                && fqAudioSession.toneId !== fqAudioSession.requestedToneId) {
+                // 所选音色本章无字幕（音色回退书）：按实际播放音色重取字幕定位，
+                // 否则段落到秒的映射恒为 0，起播退回章首
+                track = await FqBackend.get().chapterTimeline(
+                  fqAudioSession.chapters[startChapter].itemId, fqAudioSession.toneId);
+                matched = fqSubtitleStartSec(track, startCueText);
+              }
               if (matched > 0) {
                 positionSec = matched;
               }
