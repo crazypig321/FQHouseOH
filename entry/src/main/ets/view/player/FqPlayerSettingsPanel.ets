@@ -1,6 +1,6 @@
 /**
- * 播放设置面板（公共 FqSettingRow 设置行 List：倍速滑杆/解码方式菜单/离线缓存/听视频/
- * 弹幕开关/弹幕设置 + 底部独立分组的分享/流转）：设置 sheet（浅色）与横屏全屏侧边栏
+ * 播放设置面板（公共 FqSettingRow 设置行 List：倍速滑杆/解码方式菜单/铺满屏幕菜单/离线缓存/
+ * 听视频/弹幕开关/弹幕设置 + 底部独立分组的分享/流转）：设置 sheet（浅色）与横屏全屏侧边栏
  * （深色）共用，dark 控配色。
  * 行点击/滑杆/开关经 @Event 回调宿主（PlayerPage 持有播放器与业务状态）。
  */
@@ -12,6 +12,8 @@ import { appState } from '../../entryability/AppState';
 const FQ_STORY_ORANGE: string = '#FFFA6725';
 /** 解码方式菜单锚点（右侧当前值 + 箭头触发）。 */
 const FQ_SETTINGS_HWDEC_ANCHOR_ID: string = 'player_settings_hwdec_anchor';
+/** 铺满屏幕菜单锚点（右侧当前值 + 箭头）。 */
+const FQ_SETTINGS_FILL_ANCHOR_ID: string = 'player_settings_fill_anchor';
 /** 播放设置倍速滑杆范围与步进（0.5-2.0、步进 0.25）。 */
 const FQ_SPEED_MIN: number = 0.5;
 const FQ_SPEED_MAX: number = 2.0;
@@ -64,6 +66,8 @@ export struct FqPlayerSettingsPanel {
   @Param danmakuOn: boolean = true;
   /** 解码方式（true 硬解 ohcodec / false 软解 FFmpeg）。 */
   @Param hwdecOn: boolean = true;
+  /** 画面铺满（true 铺满屏幕 cover 撑满裁溢出 / false 原始尺寸留黑边）。 */
+  @Param fillScreen: boolean = false;
   /** 倍速松手/点按提交（宿主调 mpv setSpeed）。 */
   @Event speedCommit: (value: number) => void = (_value: number): void => {};
   /** 倍速拖动预览（宿主更新 speedPreview 驱动文案高亮）。 */
@@ -72,6 +76,8 @@ export struct FqPlayerSettingsPanel {
   @Event danmakuToggle: (on: boolean) => void = (_on: boolean): void => {};
   /** 解码方式切换（宿主 setHwDecode：mpv 运行时切 hwdec + 持久化）。 */
   @Event hwdecToggle: (on: boolean) => void = (_on: boolean): void => {};
+  /** 画面铺满切换（宿主 setFillScreen：全屏画面矩形 cover/contain + 持久化）。 */
+  @Event fillToggle: (fill: boolean) => void = (_fill: boolean): void => {};
   /** 设置行点击（cache/listen/share/danmakuSettings；倍速/弹幕行右侧控件自理）。 */
   @Event rowClick: (key: string) => void = (_key: string): void => {};
 
@@ -124,6 +130,10 @@ export struct FqPlayerSettingsPanel {
         title: item.title,
         tintColor: this.dark ? Color.White : $r('sys.color.font'),
         click: (): void => {
+          if (item.key === 'fill') {
+            this.openFillMenu();
+            return;
+          }
           this.rowClick(item.key);
         }
       }) {
@@ -181,6 +191,18 @@ export struct FqPlayerSettingsPanel {
           .onClick((): void => {
             this.openHwdecMenu();
           })
+        } else if (item.key === 'fill') {
+          // 铺满屏幕：当前值 + 箭头（FqMenu 锚点）；整行点击弹菜单直选
+          // （铺满屏幕/原始尺寸，当前项尾勾），选中经宿主 setFillScreen 切画面矩形 + 持久化
+          Row({ space: 3 }) {
+            Text(this.fillScreen ? '铺满屏幕' : '原始尺寸')
+              .fontSize(12.5)
+              .fontColor(this.dark ? FQ_DARK_TERTIARY_TEXT : $r('sys.color.font_secondary'))
+            SymbolGlyph($r('sys.symbol.chevron_right'))
+              .fontSize(13)
+              .fontColor([this.dark ? FQ_DARK_TERTIARY_TEXT : $r('sys.color.font_tertiary')])
+          }
+          .id(FQ_SETTINGS_FILL_ANCHOR_ID)
         } else if (item.key === 'danmaku') {
           // 弹幕开关：Switch（宿主 toggleDanmaku，含官方 Toast 文案）
           Toggle({ type: ToggleType.Switch, isOn: this.danmakuOn })
@@ -205,6 +227,7 @@ export struct FqPlayerSettingsPanel {
     const items: FqSettingItem[] = [
       new FqSettingItem('speed', '倍速', $r('sys.symbol.speed_multiple')),
       new FqSettingItem('hwdec', '解码方式', $r('sys.symbol.video')),
+      new FqSettingItem('fill', '铺满屏幕', $r('sys.symbol.arrow_up_left_and_arrow_down_right')),
       new FqSettingItem('cache', '离线缓存', $r('sys.symbol.download')),
       new FqSettingItem('listen', '听视频', $r('sys.symbol.waveform_tv')),
       new FqSettingItem('danmaku', '弹幕开关', $r('sys.symbol.ellipsis_bubble')),
@@ -245,6 +268,31 @@ export struct FqPlayerSettingsPanel {
     };
     items.push(swItem);
     FqMenu.open(this.getUIContext(), FQ_SETTINGS_HWDEC_ANCHOR_ID, items);
+  }
+
+  /** 铺满屏幕菜单：公共 FqMenu 档位直选（铺满屏幕/原始尺寸，当前项尾勾）。
+   *  选中即经宿主 setFillScreen 切全屏画面矩形 cover/contain + 偏好持久化。 */
+  private openFillMenu(): void {
+    const items: Array<FqMenuItem> = [];
+    const fillItem: FqMenuItem = new FqMenuItem();
+    fillItem.label = '铺满屏幕';
+    if (this.fillScreen) {
+      fillItem.endIcon = $r('sys.symbol.checkmark');
+    }
+    fillItem.onAction = (): void => {
+      this.fillToggle(true);
+    };
+    items.push(fillItem);
+    const originItem: FqMenuItem = new FqMenuItem();
+    originItem.label = '原始尺寸';
+    if (!this.fillScreen) {
+      originItem.endIcon = $r('sys.symbol.checkmark');
+    }
+    originItem.onAction = (): void => {
+      this.fillToggle(false);
+    };
+    items.push(originItem);
+    FqMenu.open(this.getUIContext(), FQ_SETTINGS_FILL_ANCHOR_ID, items);
   }
 
   /** 断点倍速高亮判定（当前值取拖动预览优先；半步容差内视为命中该断点）。 */

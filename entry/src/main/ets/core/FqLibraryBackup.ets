@@ -304,13 +304,16 @@ export class FqBackupPlaybackSettings {
   readonly videoDanmakuOn: boolean | null;
   /** 视频倍速（null = 旧备份缺省，恢复时跳过不重置本机）。 */
   readonly videoPlaybackRate: number | null;
+  /** 画面铺满（null = 旧备份缺省，恢复时跳过不重置本机）。 */
+  readonly videoFillScreen: boolean | null;
 
   constructor(danmakuAlphaPercent: number, danmakuSpeedTier: number, danmakuLineCount: number,
     danmakuLineSpaceTier: number, danmakuSizeTier: number, danmakuBgTransparent: boolean,
     videoHwdec: boolean, videoQualityPref: string | null, dramaAutoCacheAhead: number,
     dramaAutoCacheWifiOnly: boolean, pipVideo: boolean, ttsPerson: number, ttsRate: number,
     videoFanqieOnly: boolean | null = null, videoHgSignSdk: boolean | null = null,
-    videoDanmakuOn: boolean | null = null, videoPlaybackRate: number | null = null) {
+    videoDanmakuOn: boolean | null = null, videoPlaybackRate: number | null = null,
+    videoFillScreen: boolean | null = null) {
     this.danmakuAlphaPercent = danmakuAlphaPercent;
     this.danmakuSpeedTier = danmakuSpeedTier;
     this.danmakuLineCount = danmakuLineCount;
@@ -328,6 +331,7 @@ export class FqBackupPlaybackSettings {
     this.videoHgSignSdk = videoHgSignSdk;
     this.videoDanmakuOn = videoDanmakuOn;
     this.videoPlaybackRate = videoPlaybackRate;
+    this.videoFillScreen = videoFillScreen;
   }
 }
 
@@ -630,7 +634,8 @@ export class FqLibraryBackup {
       FqAppSettingsStore.getVideoFanqieOnly(),
       FqAppSettingsStore.isVideoHgSignSdk(),
       FqAppSettingsStore.isVideoDanmakuOn(),
-      FqAppSettingsStore.getVideoPlaybackRate());
+      FqAppSettingsStore.getVideoPlaybackRate(),
+      FqAppSettingsStore.isVideoFillScreen());
     const settings: FqBackupAppSettings = new FqBackupAppSettings(
       FqAppSettingsStore.getThemeMode(),
       FqAppSettingsStore.getThemeColor(),
@@ -909,6 +914,7 @@ export class FqLibraryBackup {
         playback['videoHgSignSdk'] = data.settings.playback.videoHgSignSdk === true;
         playback['videoDanmakuOn'] = data.settings.playback.videoDanmakuOn === true;
         playback['videoPlaybackRate'] = data.settings.playback.videoPlaybackRate ?? 1;
+        playback['videoFillScreen'] = data.settings.playback.videoFillScreen === true;
         settings['playback'] = playback;
       }
       root['settings'] = settings;
@@ -1433,6 +1439,9 @@ export class FqLibraryBackup {
             fqBackupCheckRange(pbRec, 'videoPlaybackRate', FQ_VIDEO_PLAYBACK_RATE_MIN, FQ_VIDEO_PLAYBACK_RATE_MAX);
           pbPlaybackRate = pbRate;
         }
+        // 画面铺满（旧备份无此字段为 null，恢复时跳过不重置本机已有设置）
+        const pbFillScreen: boolean | null = pbRec['videoFillScreen'] === undefined ? null
+          : fqBackupCheckBool(pbRec, 'videoFillScreen');
         playback = new FqBackupPlaybackSettings(pbAlpha, pbSpeed, pbLines, pbSpace, pbSize,
           fqBackupCheckBool(pbRec, 'danmakuBgTransparent'),
           fqBackupCheckBool(pbRec, 'videoHwdec'),
@@ -1445,7 +1454,8 @@ export class FqLibraryBackup {
           pbFanqieOnly,
           pbHgSignSdk,
           pbDanmakuOn,
-          pbPlaybackRate);
+          pbPlaybackRate,
+          pbFillScreen);
       }
       // 旧备份（v1/v2）主题档位迁移：2=夜间→3，3=自定义→4；v3 备份已是新档位。
       let readerThemeIndex: number =
@@ -1612,6 +1622,10 @@ export class FqLibraryBackup {
         // 视频倍速（旧备份无此字段为 null，跳过不重置本机已有设置）
         if (playback.videoPlaybackRate !== null) {
           FqAppSettingsStore.setVideoPlaybackRate(playback.videoPlaybackRate);
+        }
+        // 画面铺满（旧备份无此字段为 null，跳过不重置本机已有设置）
+        if (playback.videoFillScreen !== null) {
+          FqAppSettingsStore.setVideoFillScreen(playback.videoFillScreen);
         }
         playbackApplied = true;
       }

@@ -195,6 +195,8 @@ const PLAYER_FS_SPEED_ANCHOR_ID: string = 'player_fs_speed_anchor';
 const PLAYER_FS_QUALITY_ANCHOR_ID: string = 'player_fs_quality_anchor';
 /** 全屏底部解码按钮锚点 id（FqMenu 档位菜单挂靠）。 */
 const PLAYER_FS_HWDEC_ANCHOR_ID: string = 'player_fs_hwdec_anchor';
+/** 全屏底部铺满按钮锚点 id（FqMenu 档位菜单挂靠）。 */
+const PLAYER_FS_FILL_ANCHOR_ID: string = 'player_fs_fill_anchor';
 /** 播放设置深色（横屏侧边栏）配色：半透明白卡片/分隔线/滑轨/次级文字。 */
 const FQ_DARK_CARD_BG: string = '#26FFFFFF';
 const FQ_DARK_DIVIDER: string = '#1FFFFFFF';
@@ -368,6 +370,8 @@ export struct PlayerPage {
   @Local qualityIndex: number = -1;
   /** 解码方式（true 硬解 ohcodec / false 软解 FFmpeg；偏好经 FqAppSettingsStore 持久化）。 */
   @Local hwDecode: boolean = FqAppSettingsStore.isVideoHwdec();
+  /** 画面铺满（开 = 全屏画面矩形 cover 撑满裁溢出不变形；关 = 原始比例留黑边；全屏底部「铺满」菜单切换）。 */
+  @Local fillScreen: boolean = FqAppSettingsStore.isVideoFillScreen();
   /** 侧边栏缓存网格滚动器。 */
   private sideCacheScroller: Scroller = new Scroller();
   /** 侧边栏缓存面板打开后定位当前集的定时器（0 无任务）。 */
@@ -1747,6 +1751,15 @@ export struct PlayerPage {
       .alignItems(VerticalAlign.Center)
 
       Row({ space: 24 }) {
+        Text(this.fillScreen ? '铺满' : '原始')
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(Color.White)
+          .id(PLAYER_FS_FILL_ANCHOR_ID)
+          .onClick((): void => {
+            this.openFillMenu();
+          })
+
         Text('弹幕')
           .fontSize(14)
           .fontWeight(FontWeight.Medium)
@@ -2326,6 +2339,7 @@ export struct PlayerPage {
       speedPreview: this.speedPreview,
       danmakuOn: this.danmakuOn,
       hwdecOn: this.hwDecode,
+      fillScreen: this.fillScreen,
       danmakuIsLandscape: this.isLandscapeDanmaku(),
       alphaPercent: this.danmakuAlphaPercent,
       speedTier: this.danmakuSpeedTier,
@@ -2345,6 +2359,9 @@ export struct PlayerPage {
       },
       hwdecToggle: (on: boolean): void => {
         this.setHwDecode(on);
+      },
+      fillToggle: (fill: boolean): void => {
+        this.setFillScreen(fill);
       },
       rowClick: (key: string): void => {
         this.onSettingRowClick(key);
@@ -3349,6 +3366,7 @@ export struct PlayerPage {
         speedPreview: this.speedPreview,
         danmakuOn: this.danmakuOn,
         hwdecOn: this.hwDecode,
+        fillScreen: this.fillScreen,
         speedCommit: (value: number): void => {
           this.player.setSpeed(value);
         },
@@ -3360,6 +3378,9 @@ export struct PlayerPage {
         },
         hwdecToggle: (on: boolean): void => {
           this.setHwDecode(on);
+        },
+        fillToggle: (fill: boolean): void => {
+          this.setFillScreen(fill);
         },
         rowClick: (key: string): void => {
           this.onSettingRowClick(key);
@@ -3607,21 +3628,30 @@ export struct PlayerPage {
     return this.videoDw() >= this.videoDh();
   }
 
+  /** 全屏铺满矩形（全屏底部「铺满」菜单开启 + 全屏态）：画面矩形按视频比例
+   *  cover 撑满区域、溢出居中由屏幕边缘裁掉（无黑边不变形）；非全屏保持 contain
+   *  （inline 区域 cover 溢出会遮挡底部信息带）。 */
+  private fillCoverRect(): boolean {
+    return this.fullScreen && this.fillScreen;
+  }
+
   /** 非全屏画面矩形宽：surface 只取画面比例矩形（区域内居中，mpv 填满无黑边）；
-   *  常规 contain；PC 清屏态 cover（撑满高度裁两侧）。 */
+   *  常规 contain；PC 清屏态 / 全屏「铺满」态 cover（撑满裁溢出）。 */
   private videoRectWidth(): number {
     const regionH: number = this.videoRegionHeight();
     const byHeight: number = regionH / this.videoDh() * this.videoDw();
-    return this.cleanCoverRect()
+    const cover: boolean = this.cleanCoverRect() || this.fillCoverRect();
+    return cover
       ? Math.max(1, Math.max(this.pageW(), byHeight))
       : Math.max(1, Math.min(this.pageW(), byHeight));
   }
 
-  /** 非全屏画面矩形高：与 videoRectWidth 同一约束的另一边（contain 取 min；PC 清屏 cover 取 max）。 */
+  /** 非全屏画面矩形高：与 videoRectWidth 同一约束的另一边（contain 取 min；cover 取 max）。 */
   private videoRectHeight(): number {
     const regionH: number = this.videoRegionHeight();
     const byWidth: number = this.pageW() / this.videoDw() * this.videoDh();
-    return this.cleanCoverRect()
+    const cover: boolean = this.cleanCoverRect() || this.fillCoverRect();
+    return cover
       ? Math.max(1, Math.max(regionH, byWidth))
       : Math.max(1, Math.min(regionH, byWidth));
   }
@@ -3946,6 +3976,47 @@ export struct PlayerPage {
     this.hwDecode = enabled;
     FqAppSettingsStore.setVideoHwdec(enabled);
     this.player.setHardwareDecode(enabled);
+  }
+
+  /** 全屏底部铺满按钮：公共 FqMenu 直选（铺满屏幕 = 画面矩形 cover 撑满裁溢出，无黑边不变形 /
+   *  原始尺寸 = 保持比例留黑边），当前项尾勾；切换即时生效 + 偏好持久化。
+   *  菜单打开期间暂停控件自动隐藏（关闭后恢复空闲计时）。 */
+  private openFillMenu(): void {
+    const items: Array<FqMenuItem> = [];
+    const fillItem: FqMenuItem = new FqMenuItem();
+    fillItem.label = '铺满屏幕';
+    if (this.fillScreen) {
+      fillItem.endIcon = $r('sys.symbol.checkmark');
+    }
+    fillItem.onAction = (): void => {
+      this.setFillScreen(true);
+    };
+    items.push(fillItem);
+    const originItem: FqMenuItem = new FqMenuItem();
+    originItem.label = '原始尺寸';
+    if (!this.fillScreen) {
+      originItem.endIcon = $r('sys.symbol.checkmark');
+    }
+    originItem.onAction = (): void => {
+      this.setFillScreen(false);
+    };
+    items.push(originItem);
+    this.fsMenuOpen = true;
+    this.cancelFsHide();
+    FqMenu.open(this.getUIContext(), PLAYER_FS_FILL_ANCHOR_ID, items, (): void => {
+      this.fsMenuOpen = false;
+      this.resumeFsAutoHide();
+    });
+  }
+
+  /** 切换画面铺满（全屏态生效：画面矩形 cover 撑满裁溢出，无黑边不变形，@Local 驱动即时重排），
+   * 偏好经 FqAppSettingsStore 持久化（下次进页沿用）。 */
+  private setFillScreen(fill: boolean): void {
+    if (fill === this.fillScreen) {
+      return;
+    }
+    this.fillScreen = fill;
+    FqAppSettingsStore.setVideoFillScreen(fill);
   }
 
   /**

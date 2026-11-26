@@ -46,6 +46,8 @@
  *   播放设置弹幕开关切换即写入，下次进页沿用）；
  * - videoPlaybackRate：视频倍速（默认 1.0；fqapp PlayerPreferences player_playback_rate，
  *   0.5-2.0 与倍速滑杆范围一致，播放页/听剧页共用一份）。
+ * - videoFillScreen：画面铺满（默认关 = 原始比例留黑边；开 = 全屏画面矩形 cover 撑满裁溢出，
+ *   无黑边不变形；全屏底部「铺满」菜单切换）。
  */
 
 import preferences from '@ohos.data.preferences';
@@ -88,6 +90,7 @@ const FQ_SETTINGS_KEY_VIDEO_FANQIE_ONLY: string = 'videoFanqieOnly';
 const FQ_SETTINGS_KEY_VIDEO_HG_SIGN_SDK: string = 'videoHgSignSdk';
 const FQ_SETTINGS_KEY_VIDEO_DANMAKU_ON: string = 'videoDanmakuOn';
 const FQ_SETTINGS_KEY_VIDEO_PLAYBACK_RATE: string = 'videoPlaybackRate';
+const FQ_SETTINGS_KEY_VIDEO_FILL_SCREEN: string = 'videoFillScreen';
 
 /** 章节自动缓存大小上限默认值（MB）。 */
 export const FQ_CHAPTER_CACHE_LIMIT_DEFAULT_MB: number = 80;
@@ -212,6 +215,8 @@ export class FqAppSettingsStore {
   private static videoDanmakuOn: boolean = true;
   /** 视频倍速（fqapp player_playback_rate 默认 1.0；播放页/听剧页共用）。 */
   private static videoPlaybackRate: number = 1.0;
+  /** 画面铺满（panscan 裁剪填满；关 = 原始比例留黑边）。 */
+  private static videoFillScreen: boolean = false;
 
   public static init(context: common.Context): void {
     if (FqAppSettingsStore.pref !== null) {
@@ -383,6 +388,10 @@ export class FqAppSettingsStore {
       if (typeof rawPlaybackRate === 'number' && rawPlaybackRate >= FQ_VIDEO_PLAYBACK_RATE_MIN
         && rawPlaybackRate <= FQ_VIDEO_PLAYBACK_RATE_MAX) {
         FqAppSettingsStore.videoPlaybackRate = rawPlaybackRate;
+      }
+      const rawFillScreen: preferences.ValueType = pref.getSync(FQ_SETTINGS_KEY_VIDEO_FILL_SCREEN, false);
+      if (typeof rawFillScreen === 'boolean') {
+        FqAppSettingsStore.videoFillScreen = rawFillScreen;
       }
     } catch (error) {
       // 损坏数据按默认值处理
@@ -1013,6 +1022,27 @@ export class FqAppSettingsStore {
     }
     try {
       pref.putSync(FQ_SETTINGS_KEY_VIDEO_PLAYBACK_RATE, rate);
+      pref.flush().catch((_error: BusinessError): void => {
+        // 落盘失败不阻断
+      });
+    } catch (error) {
+      // 忽略写入失败
+    }
+  }
+
+  /** 画面铺满（全屏底部「铺满」菜单切换：开 = cover 撑满裁溢出不变形，关 = 原始比例留黑边）。 */
+  public static isVideoFillScreen(): boolean {
+    return FqAppSettingsStore.videoFillScreen;
+  }
+
+  public static setVideoFillScreen(fill: boolean): void {
+    FqAppSettingsStore.videoFillScreen = fill;
+    const pref: preferences.Preferences | null = FqAppSettingsStore.pref;
+    if (pref === null) {
+      return;
+    }
+    try {
+      pref.putSync(FQ_SETTINGS_KEY_VIDEO_FILL_SCREEN, fill);
       pref.flush().catch((_error: BusinessError): void => {
         // 落盘失败不阻断
       });
