@@ -14,6 +14,7 @@ import { common } from '@kit.AbilityKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { FqBackend, FqRequestError } from './FqBackend';
+import { fqParseObject, fqStr } from './FqJson';
 import { fqHongguoQualityHeight } from './FqParser';
 import { FqCachedEpisode, FqDramaCacheStore } from './FqDramaCacheStore';
 import { fqKindToTab, FqCacheTaskView } from '../model/FqModels';
@@ -33,6 +34,30 @@ export enum DramaDownloadStatus {
  *  runTask 等待网络期间 pause() 可能改写 status，编译器无法感知）。 */
 function fqIsPaused(status: DramaDownloadStatus): boolean {
   return status === DramaDownloadStatus.Paused;
+}
+
+/** 从 detail 原始章节串提取 vid（后端 chapter_vid 同语义：videoUrl 的
+ *  hongguo-cenc:// 标记优先，回退 id 末段「:」之后的部分）。 */
+function fqHongguoChapterVid(chapterJson: string): string {
+  const rec: Record<string, Object> | null = fqParseObject(chapterJson);
+  if (rec === null) {
+    return '';
+  }
+  const videoUrl: string = fqStr(rec, 'videoUrl');
+  const marker: string = 'hongguo-cenc://';
+  const at: number = videoUrl.indexOf(marker);
+  if (at >= 0) {
+    const vid: string = videoUrl.substring(at + marker.length).trim();
+    if (vid.length > 0) {
+      return vid;
+    }
+  }
+  const id: string = fqStr(rec, 'id');
+  if (id.length === 0) {
+    return '';
+  }
+  const tail: number = id.lastIndexOf(':');
+  return (tail >= 0 ? id.substring(tail + 1) : id).trim();
 }
 
 @ObservedV2
@@ -85,6 +110,9 @@ export class FqDramaDownloader {
   private context: common.Context | null = null;
   /** itemId → 进行中的 HTTP 请求（暂停时 destroy 中断流）。 */
   private clients: Map<string, http.HttpRequest> = new Map<string, http.HttpRequest>();
+  /** itemId → 最近一次预取时间（ms）：与后端 video_info 5 分钟缓存 TTL
+   *  对齐，窗口内不重复预取。 */
+  private prefetchWindow: Map<string, number> = new Map<string, number>();
 
   public init(context: common.Context): void {
     this.context = context;
@@ -254,9 +282,63 @@ export class FqDramaDownloader {
       }
       if (task.status === DramaDownloadStatus.Waiting) {
         active++;
+        if (task.hongguoChapterJson.length > 0) {
+          this.prefetchHongguoBatch(task);
+        }
         this.runTask(task);
       }
     }
+  }
+
+  /** hg源批量预取（fire-and-forget，不阻塞任务启动）：pump 启动 hg 任务
+   *  时，把同剧排队的 hg 集凑一批（≤8，后端批量 resolve 上限）提前暖
+   *  后端 5 分钟 video_info 缓存，后续各集取流命中缓存免逐集解析。预取
+   *  与任务自身请求赛跑，未命中任务照常自行解析（有会话复用兜底）。 */
+  private prefetchHongguoBatch(start: FqDramaDownloadTask): void {
+    const now: number = Date.now();
+    const windowMs: number = 5 * 60 * 1000;
+    if (this.prefetchWindow.size > 64) {
+      this.prefetchWindow.forEach((ts: number, key: string): void => {
+        if (now - ts >= windowMs) {
+          this.prefetchWindow.delete(key);
+        }
+      });
+    }
+    const candidates: FqDramaDownloadTask[] = [start];
+    for (const task of this.taskList) {
+      if (candidates.length >= 8) {
+        break;
+      }
+      if (task === start || task.hongguoChapterJson.length === 0
+        || task.seriesId !== start.seriesId
+        || task.status !== DramaDownloadStatus.Waiting) {
+        continue;
+      }
+      candidates.push(task);
+    }
+    const vids: string[] = [];
+    for (const task of candidates) {
+      if (vids.length >= 8) {
+        break;
+      }
+      const last: number | undefined = this.prefetchWindow.get(task.itemId);
+      if (last !== undefined && now - last < windowMs) {
+        continue;
+      }
+      const vid: string = fqHongguoChapterVid(task.hongguoChapterJson);
+      if (vid.length === 0) {
+        continue;
+      }
+      this.prefetchWindow.set(task.itemId, now);
+      vids.push(vid);
+    }
+    if (vids.length === 0) {
+      return;
+    }
+    hilog.info(0x0001, TAG, `prefetch hg vids=${vids.length}`);
+    FqBackend.get().hongguoPrefetch(vids).then((count: number): void => {
+      hilog.info(0x0001, TAG, `prefetch hg done prefetched=${count}`);
+    });
   }
 
   private async runTask(task: FqDramaDownloadTask): Promise<void> {

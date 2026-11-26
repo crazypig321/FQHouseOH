@@ -840,6 +840,24 @@ export class FqBackend {
     return new FqEpisodeSource(url, source.keyHex, source.variants, source.quality);
   }
 
+  /** hg源批量预取（mode=prefetch，下载队列暖缓存用）：一次批量 resolve 暖
+   * 后端 5 分钟 video_info 缓存，后续各集取流/代下载命中缓存免逐集解析。
+   * 后台 fire-and-forget 调用：不走熔断读门、不抛错，失败吞掉记 0。 */
+  public async hongguoPrefetch(vids: string[]): Promise<number> {
+    if (vids.length === 0) {
+      return 0;
+    }
+    const query: string = `mode=prefetch&vids=${encodeURIComponent(vids.join(','))}`;
+    try {
+      const payload: Record<string, Object> = await this.getJson(
+        '/api/v1/hongguo/native/media', query, FQ_HONGGUO_DOWNLOAD_TIMEOUT_MS);
+      const prefetched: Object | undefined = payload['prefetched'];
+      return typeof prefetched === 'number' ? prefetched : 0;
+    } catch (error) {
+      return 0;
+    }
+  }
+
   /**
    * 短剧剧评一页（/api/v1/series/{id}/comments，官方 gx1/m.java:168-181：
    * 播放页评论区即整部剧的评论列表）：sort 1=热门（官方「全部」SmartHot）、

@@ -37,6 +37,11 @@ int sdk_digest_open(sdk_digest_ctx **out, const uint8_t *image, size_t image_siz
 int sdk_digest_run(sdk_digest_ctx *ctx, const uint8_t *payload, uint32_t selector,
                    uint64_t seconds, uint8_t out[20], char *err, size_t err_len);
 
+/* Bytes consumed on the emulated heap since sdk_digest_open(). Used by the
+ * caller to proactively rebuild the VM before the run-time guard band
+ * (mirrors the Python reference's SdkDigestCore.heap attribute). 0 for NULL. */
+size_t sdk_digest_heap_used(const sdk_digest_ctx *ctx);
+
 /* Releases the VM and all ctx memory. NULL is a no-op. */
 void sdk_digest_close(sdk_digest_ctx *ctx);
 

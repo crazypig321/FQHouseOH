@@ -872,6 +872,14 @@ int sdk_digest_run(sdk_digest_ctx *ctx, const uint8_t *payload, uint32_t selecto
     return 0;
 }
 
+size_t sdk_digest_heap_used(const sdk_digest_ctx *ctx)
+{
+    if (ctx == NULL || ctx->heap_ptr < HEAP) {
+        return 0;
+    }
+    return (size_t)(ctx->heap_ptr - HEAP);
+}
+
 void sdk_digest_close(sdk_digest_ctx *ctx)
 {
     if (ctx == NULL) {
