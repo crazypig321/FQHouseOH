@@ -15,7 +15,8 @@ import { BlurStrategy,
   HdsTabs,
   HdsTabsController,
   HdsNavDestinationTitleMode,
-  HdsAnimationMode} from '@kit.UIDesignKit';
+  HdsAnimationMode,
+  HdsBarWidthRangeOptions} from '@kit.UIDesignKit';
 import { appState } from '../entryability/AppState';
 import { useSidebarLayout } from '../utils/BreakpointUtils';
 import { LengthMetrics } from '@kit.ArkUI';
@@ -169,7 +170,7 @@ export struct CommonNav {
         .animationDuration(300)
         .barFloatingStyle({ barOpacity: this.isShowBarController ? 1 : 0 })
         .barFloatingStyle({
-          barWidth: { smallWidth: 330, mediumWidth: 480, largeWidth: 560 },
+          barWidth: this.cappedBarWidth(),
           barBottomMargin: 28,
           systemMaterialEffect: {
             materialType: appState.materialType,
@@ -268,6 +269,18 @@ export struct CommonNav {
       mode: HideMode.SCROLL_UP_TO
     })
     .linearGradient(this.brandGradient())
+  }
+
+  /** 底部悬浮栏宽度档位：按窗口宽钳制。
+   *  HDS 档位边界为 440vp——Pura X 等窗口恰为 440vp 的设备会踩中 medium(480) 档，
+   *  栏体比屏幕还宽导致左右溢出；预留左右各 15vp 边距（对齐 360vp 手机 330 档的留白）。 */
+  private cappedBarWidth(): HdsBarWidthRangeOptions {
+    const avail: number = appState.windowWidthVp > 0 ? appState.windowWidthVp - 30 : Number.MAX_VALUE;
+    return {
+      smallWidth: Math.min(330, avail),
+      mediumWidth: Math.min(480, avail),
+      largeWidth: Math.min(560, avail),
+    };
   }
 
   /** 品牌橙渐变背景；showBrandGradient 为 false（阅读页）时返回 undefined。 */
