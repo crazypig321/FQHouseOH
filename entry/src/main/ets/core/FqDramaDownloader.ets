@@ -77,7 +77,7 @@ export class FqDramaDownloadTask implements FqCacheTaskView {
   public readonly auto: boolean;
   /** 入队时快照的清晰度偏好（空 = 后端默认最高档；下载跟播放同档，fqapp 同语义）。 */
   public readonly quality: string;
-  /** 红果会话：detail 原始章节串（hongguoRawChapters 快照；空 = 番茄链路）。 */
+  /** 红果会话：会话章节串（hongguoRawChapters 快照；空 = 番茄链路）。 */
   public readonly hongguoChapterJson: string;
   /** 取流返回的实际下载档名（完成时写入缓存记录；上游不带档位时为空）。 */
   public servedQuality: string = '';

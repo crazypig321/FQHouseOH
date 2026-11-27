@@ -4363,13 +4363,15 @@ export struct PlayerPage {
     fqPushBookOrDetail(book.id, 'book', book.title, book.cover);
   }
 
-  /** 目录为空或需红果优先时拉剧集目录（红果原生优先：失败/熔断回退番茄目录；
-   * 进页预载的番茄目录作为回退，不重复拉取）。 */
+  /** 拉剧集目录并建立播放会话：红果官网详情改版后 vid_list 仅回少量
+   * v1_ 令牌集（取流梯子查不到），剧集全集与红果会话章节统一改由番茄
+   * 目录数字 itemId 构建（itemId 即红果 vid，与番茄目录集 id 完全一致，
+   * 已看/续播/弹幕/离线缓存记录跨源通用）；红果不可用回退番茄会话。 */
   private async loadEpisodes(): Promise<void> {
     const token: number = ++this.loadToken;
     this.loading = true;
     this.errorMsg = '';
-    // 进页预载目录（详情页/搜索页/分享/观看全集传入的番茄目录）：红果失败时的回退
+    // 进页预载目录（详情页/搜索页/分享/观看全集传入的番茄目录）：全集基准
     const preloaded: FqChapter[] = this.episodes;
     try {
       await FqBackend.get().start(getContext(this));
@@ -4378,18 +4380,16 @@ export struct PlayerPage {
       this.hongguoSession = false;
       this.hongguoRawChapters = new Map();
       this.hongguoStreamFailCount = 0;
-      // 红果原生目录优先（「仅番茄源播放」开启时跳过；同源贯穿：目录与取流同源；
-      // itemId 即红果 vid，与番茄目录集 id 完全一致，已看/续播/弹幕/离线缓存记录跨源通用）
+      // 红果可用性探测（「仅番茄源播放」开启时跳过；失败/熔断/剧不在红果
+      // → 纯番茄会话）。只探可用性，章节不直接采用
+      let hongguoChapters: FqHongguoChapters | null = null;
       if (!FqAppSettingsStore.getVideoFanqieOnly()) {
         try {
-          const hongguo: FqHongguoChapters =
-            await FqBackend.get().hongguoDramaChapters(PlayerNavParams.contentId, this.title);
+          hongguoChapters = await FqBackend.get().hongguoDramaChapters(
+            PlayerNavParams.contentId, this.title);
           if (token !== this.loadToken) {
             return;
           }
-          this.hongguoSession = true;
-          this.hongguoRawChapters = hongguo.rawByIndex;
-          episodes = hongguo.chapters;
         } catch (error) {
           // 红果失败/熔断/剧不在红果：回退番茄目录（会话切番茄源）
           if (token !== this.loadToken) {
@@ -4397,12 +4397,27 @@ export struct PlayerPage {
           }
         }
       }
-      if (episodes.length === 0) {
-        // 预载的番茄目录直接用（详情页等入口已拉好），无预载再拉
-        if (preloaded.length > 0) {
-          episodes = preloaded;
-        } else {
+      // 番茄目录全集（数字 itemId）：预载的目录直接用（详情页等入口已拉好），无预载再拉
+      if (preloaded.length > 0) {
+        episodes = preloaded;
+      } else {
+        try {
           episodes = await FqBackend.get().directoryChapters(PlayerNavParams.contentId, this.tab);
+        } catch (error) {
+          if (token !== this.loadToken) {
+            return;
+          }
+        }
+      }
+      // 红果会话：番茄目录可用且 itemId 全数字 → 会话章节串按目录构建（全集
+      // 可播）；目录不可用退回红果 detail 章节（尽力而为，旧剧仍可能回全量）
+      if (hongguoChapters !== null) {
+        this.hongguoSession = true;
+        if (episodes.length > 0 && this.numericItemIds(episodes)) {
+          this.hongguoRawChapters = this.buildHongguoRawChapters(episodes);
+        } else {
+          this.hongguoRawChapters = hongguoChapters.rawByIndex;
+          episodes = hongguoChapters.chapters;
         }
       }
       if (token !== this.loadToken) {
@@ -4434,8 +4449,33 @@ export struct PlayerPage {
     }
   }
 
+  /** 红果会话章节串构建：番茄目录数字 itemId → detail 同构 chapter JSON
+   * （videoUrl 为后端 chapter_vid 识别的 hongguo-cenc:// 形态）。 */
+  private buildHongguoRawChapters(chapters: FqChapter[]): Map<number, string> {
+    const rawByIndex: Map<number, string> = new Map<number, string>();
+    const sid: string = PlayerNavParams.contentId;
+    for (let i: number = 0; i < chapters.length; i++) {
+      const vid: string = chapters[i].itemId;
+      const title: string = chapters[i].title.length > 0 ? chapters[i].title : `第${i + 1}集`;
+      rawByIndex.set(i, `{"id":"hongguo:${sid}:${vid}"`
+        + `,"title":${JSON.stringify(title)},"videoUrl":"hongguo-cenc://${vid}"}`);
+    }
+    return rawByIndex;
+  }
+
+  /** 目录 itemId 是否全为纯数字（红果取流梯子只认数字 vid，v1_ 令牌查不到）。 */
+  private numericItemIds(chapters: FqChapter[]): boolean {
+    for (let i: number = 0; i < chapters.length; i++) {
+      if (!/^[0-9]+$/.test(chapters[i].itemId)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   /** 在线取流一集（同源贯穿 + 单集降级）：红果会话走 hongguoEpisodeSource
-   * （detail 原始章节串 + 清晰度偏好换算短边像素），瞬时失败静默重试一次，
+   * （会话章节串由番茄目录数字 itemId 构建 + 清晰度偏好换算短边像素），
+   * 瞬时失败静默重试一次，
    * 再失败本集降级番茄取流（集 id 跨源一致，进度/已看/缓存记录不受影响），
    * 连续降级达上限本场不再尝试红果；番茄会话 / 仅番茄开关走流式直连
    * （对齐 fqapp player 恒 mode=stream：后端只解析 CDN 直链与 CENC key，

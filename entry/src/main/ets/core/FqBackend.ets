@@ -768,9 +768,9 @@ export class FqBackend {
   }
 
   /** 红果取流（同源贯穿：仅红果目录会话调用；失败不跨源回退，调用方重试）。
-   * chapterJson 为 detail 原始章节串（rawByIndex），qualityHeight 为短边
-   * 像素（fqHongguoQualityHeight 换算；0 = 默认最高档）；url 为 Go 本地
-   * 流代理绝对地址，mpv 直连。 */
+   * chapterJson 为会话章节串（番茄目录数字 itemId 构建；rawByIndex 快照），
+   * qualityHeight 为短边像素（fqHongguoQualityHeight 换算；0 = 默认最高档）；
+   * url 为 Go 本地流代理绝对地址，mpv 直连。 */
   public async hongguoEpisodeSource(dramaId: string, chapterJson: string, index: number,
     qualityHeight: number, title: string = ''): Promise<FqEpisodeSource> {
     const query: string = `drama_id=${encodeURIComponent(`hongguo:${dramaId}`)}`
