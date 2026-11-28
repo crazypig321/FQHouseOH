@@ -21,7 +21,7 @@
  */
 
 import { common, ConfigurationConstant } from '@kit.AbilityKit';
-import { curves, display, LengthMetrics, promptAction, window } from '@kit.ArkUI';
+import { curves, display, LengthMetrics, promptAction, SymbolGlyphModifier, window } from '@kit.ArkUI';
 import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
 import { batteryInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -33,6 +33,7 @@ import { fqEnsureDownloadSubdir } from '../../core/FqCacheExport';
 import { FqAppSettingsStore, FQ_THEME_DARK, FQ_THEME_LIGHT } from '../../core/FqAppSettingsStore';
 import { FqReadStatsStore } from '../../core/FqReadStatsStore';
 import { FqLocalBookStore } from '../../core/FqLocalBookStore';
+import { FqShelfItem, FqShelfStore } from '../../core/FqShelfStore';
 import { FqChapterCacheStore, FqCachedCatalog } from '../../core/FqChapterCacheStore';
 import { FqAudioHistory, FqListenRecord } from '../../core/FqAudioHistory';
 import { ReaderNavParams, ListenNavParams, ROUTE_LISTEN } from '../../model/FqNavModels';
@@ -295,6 +296,14 @@ export struct ReaderPage {
   get volumeKeyPaging(): boolean {
     return appState.volumeKeyPaging;
   }
+  /** 书架状态刷新令牌（toggle 后 +1 驱动 inShelf 重算）。 */
+  @Local shelfRefresh: number = 0;
+  /** 当前书是否在书架（标题栏收藏菜单状态）。 */
+  @Computed
+  get inShelf(): boolean {
+    const tick: number = this.shelfRefresh;
+    return tick >= 0 && FqShelfStore.contains(this.bookId);
+  }
   /** 自定义阅读主题列表（themeIndex=3 时经 customThemeId 选定生效条目）。 */
   @Local customThemes: FqCustomReaderTheme[] = [];
   @Local customThemeId: string = '';
@@ -388,6 +397,8 @@ export struct ReaderPage {
     this.reloadBookmarkItems();
     // PC 布局：进入阅读页隐藏左侧主导航，内容区铺满（PlayerPage 同款）
     appState.hidePcSideNav = true;
+    // 书架状态先就绪（同步 init），标题栏收藏图标按在架状态初建
+    FqShelfStore.init(getContext(this));
     this.rebuildTitleBar();
     this.startChapterIndex = ReaderNavParams.chapterIndex;
     ReaderNavParams.chapterIndex = -1;
@@ -460,7 +471,7 @@ export struct ReaderPage {
       roMenus.push({
         content: {
           icon: $r('sys.symbol.waveform_headphones'),
-          label: 'listen',
+          label: '听书',
           action: (): void => {
             this.openListenFromReader();
           },
@@ -502,7 +513,7 @@ export struct ReaderPage {
         menus.push({
           content: {
             icon: $r('sys.symbol.message'),
-            label: 'comments',
+            label: '段评',
             action: (): void => {
               this.openCommentSheet();
             },
@@ -512,12 +523,31 @@ export struct ReaderPage {
       menus.push({
         content: {
           icon: $r('sys.symbol.waveform_headphones'),
-          label: 'listen',
+          label: '听书',
           action: (): void => {
             this.openListenFromReader();
           },
         },
       });
+      // 收藏（一键加入/移出书架；本地导入书导入即入架，不显示）：听书后、书签前
+      if (!isLocalBook) {
+        menus.push({
+          content: {
+            // 已在书架时 checkmark 实心 + 主题色高亮（fontSize 显式 24 与 HDS 菜单图标一致，避免首帧 16fp 偏小）
+            icon: this.inShelf
+              ? new SymbolGlyphModifier($r('sys.symbol.bookshelf_badge_checkmark_fill'))
+                .fontColor([appState.accentColor]).fontSize(24)
+              : $r('sys.symbol.bookshelf_badge_plus'),
+            // label 恒为「收藏」：HDS 菜单项挂载后冻结（「更多」面板里 icon/label 均为挂载期快照，
+            // 换 content 对象不重建），动态文案会停在挂载期值误导操作；
+            // 在架状态由挂载期图标初态 + toggle toast 反馈
+            label: '收藏',
+            action: (): void => {
+              this.toggleShelf();
+            },
+          },
+        });
+      }
       // 书签：当前位置收藏/列表跳转（半模态）
       menus.push({
         content: {
@@ -3856,6 +3886,15 @@ export struct ReaderPage {
   // ---------------------------------------------------------------------------
   // 半模态 / 弹窗装配
   // ---------------------------------------------------------------------------
+
+  /** 标题栏收藏菜单：一键加入/移出书架（toggle 后重建标题栏刷新图标）。 */
+  private toggleShelf(): void {
+    const added: boolean = FqShelfStore.toggle(
+      new FqShelfItem(this.bookId, this.kind, this.bookTitle, this.readerCover));
+    this.shelfRefresh += 1;
+    this.rebuildTitleBar();
+    promptAction.showToast({ message: added ? '已加入书架' : '已移出书架', duration: 1500 });
+  }
 
   /** 目录半模态：公共 FqCatalogSheet（搜索/排序/定位/进度自理）。 */
   @Builder

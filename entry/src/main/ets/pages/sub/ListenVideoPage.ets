@@ -14,7 +14,7 @@
  * core/FqVideoMedia 承载（离页 release，通知栏让回播放页会话）。
  */
 
-import { promptAction } from '@kit.ArkUI';
+import { promptAction, SymbolGlyphModifier } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { CommonNav, titleBarOf } from '../../view/CommonNav';
 import { CommonSheet, FqSheetOptions } from '../../view/sheet/CommonSheet';
@@ -25,6 +25,7 @@ import { FqChapter, FqEpisodeSource } from '../../model/FqModels';
 import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { FqVideoMedia } from '../../core/FqVideoMedia';
 import { FqWatchedStore, FqWatchedProgress, FqWatchHistoryRecord } from '../../core/FqWatchedStore';
+import { FqShelfItem, FqShelfStore } from '../../core/FqShelfStore';
 import { FqReadStatsStore } from '../../core/FqReadStatsStore';
 import { FqAppSettingsStore } from '../../core/FqAppSettingsStore';
 import { NavPathUtils } from '../../utils/NavPathUtils';
@@ -140,6 +141,14 @@ export struct ListenVideoPage {
   private media: FqVideoMedia = new FqVideoMedia('FqListenVideo');
   /** AVSession 元数据已同步时长（切集重置 -1；时长事件到达后补发元数据）。 */
   private mediaDurationSynced: number = -1;
+  /** 书架状态刷新令牌（toggle 后 +1 驱动 inShelf 重算）。 */
+  @Local shelfRefresh: number = 0;
+  /** 当前剧是否在书架（标题栏右上角收藏按钮状态）。 */
+  @Computed
+  get inShelf(): boolean {
+    const tick: number = this.shelfRefresh;
+    return tick >= 0 && FqShelfStore.contains(ListenVideoNavParams.contentId);
+  }
   /** 切后台主动暂停回调（关闭后台播放时 EntryAbility onBackground 调用）。 */
   private backgroundPause: () => void = (): void => {};
   /** 视听统计累计秒（播放中每满 15s 落一次按书统计）。 */
@@ -156,6 +165,7 @@ export struct ListenVideoPage {
     this.previewNoSave = ListenVideoNavParams.previewNoSave;
     ListenVideoNavParams.previewNoSave = false;
     FqWatchedStore.init(getContext(this));
+    FqShelfStore.init(getContext(this));
     // 倍速：载入持久化设置（fqapp listen_mode_page 与视频页共用 player_playback_rate）
     const persistedRate: number = FqAppSettingsStore.getVideoPlaybackRate();
     if (persistedRate > 0 && Math.abs(persistedRate - 1.0) > 0.0001) {
@@ -279,9 +289,32 @@ export struct ListenVideoPage {
     return this.sleepDeadline > 0 || this.sleepAtEpisodeEnd;
   }
 
-  /** 标题栏：倍速 + 分享（直达链接）+ 流转接续。 */
+  /** 标题栏右上角收藏：一键加入/移出书架。 */
+  private toggleShelf(): void {
+    const added: boolean = FqShelfStore.toggle(
+      new FqShelfItem(ListenVideoNavParams.contentId, ListenVideoNavParams.kind,
+        ListenVideoNavParams.title, ListenVideoNavParams.cover));
+    this.shelfRefresh += 1;
+    promptAction.showToast({ message: added ? '已加入书架' : '已移出书架', duration: 1500 });
+  }
+
+  /** 标题栏：收藏（一键加入/移出书架）+ 倍速 + 分享（直达链接）+ 流转接续。 */
   private buildTitleBar(): TitleBarContentOptions {
     const menus: Array<HdsNavigationMenuItemOptions> = [{
+      // 已在书架时 checkmark 实心 + 主题色高亮（fontSize 显式 24 与 HDS 菜单图标一致，避免首帧 16fp 偏小）
+      content: {
+        icon: this.inShelf
+          ? new SymbolGlyphModifier($r('sys.symbol.bookshelf_badge_checkmark_fill'))
+            .fontColor([appState.accentColor]).fontSize(24)
+          : $r('sys.symbol.bookshelf_badge_plus'),
+        // label 恒为「收藏」：HDS 菜单项挂载后冻结，动态文案会停在挂载期值误导操作；
+        // 在架状态由挂载期图标初态 + toggle toast 反馈
+        label: '收藏',
+        action: (): void => {
+          this.toggleShelf();
+        },
+      },
+    }, {
       content: {
         icon: $r('sys.symbol.speed_multiple'),
         label: 'speed',

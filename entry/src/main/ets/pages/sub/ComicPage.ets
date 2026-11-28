@@ -12,7 +12,7 @@
  */
 
 import { common } from '@kit.AbilityKit';
-import { display, promptAction, window } from '@kit.ArkUI';
+import { display, promptAction, SymbolGlyphModifier, window } from '@kit.ArkUI';
 import { image } from '@kit.ImageKit';
 import { http } from '@kit.NetworkKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
@@ -23,6 +23,7 @@ import { FqBackend, fqErrorMessage } from '../../core/FqBackend';
 import { FqChapter, FqCacheTaskView, fqKindToTab } from '../../model/FqModels';
 import { FqReaderProgress, FqReaderStore } from '../../core/FqReaderStore';
 import { FqReadStatsStore } from '../../core/FqReadStatsStore';
+import { FqShelfItem, FqShelfStore } from '../../core/FqShelfStore';
 import { ComicNavParams, ROUTE_CACHED_COMICS } from '../../model/FqNavModels';
 import { NavPathUtils } from '../../utils/NavPathUtils';
 import { CommonNav, titleBarOf } from '../../view/CommonNav';
@@ -136,6 +137,14 @@ export struct ComicPage {
   get volumeKeyPaging(): boolean {
     return appState.volumeKeyPaging;
   }
+  /** 书架状态刷新令牌（toggle 后 +1 驱动 inShelf 重算）。 */
+  @Local shelfRefresh: number = 0;
+  /** 当前漫画是否在书架（标题栏收藏菜单状态）。 */
+  @Computed
+  get inShelf(): boolean {
+    const tick: number = this.shelfRefresh;
+    return tick >= 0 && FqShelfStore.contains(this.bookId);
+  }
   /** 当前章图片 / 邻章预载缓存（引用替换驱动翻页容器刷新）。 */
   @Local curImages: string[] = [];
   @Local prevImages: string[] = [];
@@ -237,6 +246,8 @@ export struct ComicPage {
     this.reloadBookmarkItems();
     // PC 布局：进入漫画页隐藏左侧主导航，内容区铺满（PlayerPage 同款）
     appState.hidePcSideNav = true;
+    // 书架状态先就绪（同步 init），标题栏收藏图标按在架状态初建
+    FqShelfStore.init(getContext(this));
     this.rebuildTitleBar();
     FqReaderStore.init(getContext(this));
     FqReadStatsStore.init(getContext(this));
@@ -278,7 +289,7 @@ export struct ComicPage {
     menus.push({
       content: {
         icon: $r('sys.symbol.message'),
-        label: 'comments',
+        label: '段评',
         action: (): void => {
           this.openCommentSheet();
         },
@@ -287,9 +298,25 @@ export struct ComicPage {
     menus.push({
       content: {
         icon: $r('sys.symbol.download'),
-        label: 'cache',
+        label: '缓存',
         action: (): void => {
           this.openCacheSheet();
+        },
+      },
+    });
+    // 收藏（一键加入/移出书架）：书签前
+    menus.push({
+      content: {
+        // 已在书架时 checkmark 实心 + 主题色高亮（fontSize 显式 24 与 HDS 菜单图标一致，避免首帧 16fp 偏小）
+        icon: this.inShelf
+          ? new SymbolGlyphModifier($r('sys.symbol.bookshelf_badge_checkmark_fill'))
+            .fontColor([appState.accentColor]).fontSize(24)
+          : $r('sys.symbol.bookshelf_badge_plus'),
+          // label 恒为「收藏」：HDS 菜单项挂载后冻结，动态文案会停在挂载期值误导操作；
+          // 在架状态由挂载期图标初态 + toggle toast 反馈
+          label: '收藏',
+        action: (): void => {
+          this.toggleShelf();
         },
       },
     });
@@ -1921,6 +1948,15 @@ export struct ComicPage {
         this.jumpToChapter(index);
       },
     })
+  }
+
+  /** 标题栏收藏菜单：一键加入/移出书架（toggle 后重建标题栏刷新图标）。 */
+  private toggleShelf(): void {
+    const added: boolean = FqShelfStore.toggle(
+      new FqShelfItem(this.bookId, 'manga', this.bookTitle, this.bookCover));
+    this.shelfRefresh += 1;
+    this.rebuildTitleBar();
+    promptAction.showToast({ message: added ? '已加入书架' : '已移出书架', duration: 1500 });
   }
 
   /** 漫评半模态：公共 FqCommentSheet（首拉 Loading / 错误重试 / 空态 / 分页列表）。 */

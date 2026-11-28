@@ -8,15 +8,12 @@
  * 倍速/定时/播放设置/试读全文/同步字幕/章评。
  */
 
-import { promptAction, display } from '@kit.ArkUI';
-import { CommonNav } from '../../view/CommonNav';
+import { promptAction, display, SymbolGlyphModifier } from '@kit.ArkUI';
+import { CommonNav, titleBarOf } from '../../view/CommonNav';
 import { CommonSheet, FqSheetOptions } from '../../view/sheet/CommonSheet';
 import { FqCatalogSheet } from '../../view/sheet/FqCatalogSheet';
 import { FqCommentSheet, fqCommentSheetHeightVp } from '../../view/sheet/FqCommentSheet';
 import {
-  FqTitleBarOptions,
-  FqTitleBarMenuOptions,
-  FqTitleBarTwoMenusOptions,
   fqPushBookOrDetail,
   ListenNavParams,
   ReaderNavParams,
@@ -43,7 +40,7 @@ import { appState } from '../../entryability/AppState';
 import { FqColorUtils } from '../../utils/FqColorUtils';
 import { FqContinueKit } from '../../utils/continue/FqContinueKit';
 import { FqShareKit } from '../../utils/share/FqShareKit';
-import { TitleBarContentOptions } from '@kit.UIDesignKit';
+import { TitleBarContentOptions, HdsNavigationMenuItemOptions } from '@kit.UIDesignKit';
 
 /** 播放倍速档（avPlayer 0.75 ~ 2）。 */
 const FQ_RATES: number[] = [0.75, 1, 1.25, 1.5, 1.75, 2];
@@ -201,20 +198,44 @@ export struct ListenPage {
     return this.seekPreview >= 0 ? this.seekPreview : fqAudioSession.positionSec;
   }
 
-  /** 标题栏：分享菜单（链接直达；本地导入书改分享正文文件）+ 流转接续。 */
+  /** 标题栏：收藏（一键加入/移出书架）+ 分享菜单（链接直达；本地导入书改分享正文文件）+ 流转接续。 */
   private buildTitleBar(): TitleBarContentOptions {
-    if (FqShareKit.isShareableId(fqAudioSession.bookId)) {
-      return FqTitleBarTwoMenusOptions('听书',
-        $r('sys.symbol.share'), '分享', (): void => {
-          FqShareKit.shareListen();
+    const menus: Array<HdsNavigationMenuItemOptions> = [{
+      content: {
+        // 已在书架时 checkmark 实心 + 主题色高亮（fontSize 显式 24 与 HDS 菜单图标一致，避免首帧 16fp 偏小）
+        icon: this.inShelf
+          ? new SymbolGlyphModifier($r('sys.symbol.bookshelf_badge_checkmark_fill'))
+            .fontColor([appState.accentColor]).fontSize(24)
+          : $r('sys.symbol.bookshelf_badge_plus'),
+        // label 恒为「收藏」：HDS 菜单项挂载后冻结，动态文案会停在挂载期值误导操作；
+        // 在架状态由挂载期图标初态 + toggle toast 反馈
+        label: '收藏',
+        action: (): void => {
+          this.toggleShelf();
         },
-        $r('sys.symbol.superdevice'), '流转', (): void => {
-          FqContinueKit.startInAppContinuation();
-        });
+      },
+    }];
+    if (FqShareKit.isShareableId(fqAudioSession.bookId)) {
+      menus.push({
+        content: {
+          icon: $r('sys.symbol.share'),
+          label: '分享',
+          action: (): void => {
+            FqShareKit.shareListen();
+          },
+        },
+      });
     }
-    return FqTitleBarMenuOptions('听书', $r('sys.symbol.superdevice'), '流转', (): void => {
-      FqContinueKit.startInAppContinuation();
+    menus.push({
+      content: {
+        icon: $r('sys.symbol.superdevice'),
+        label: '流转',
+        action: (): void => {
+          FqContinueKit.startInAppContinuation();
+        },
+      },
     });
+    return titleBarOf('听书', undefined, menus);
   }
 
   build() {

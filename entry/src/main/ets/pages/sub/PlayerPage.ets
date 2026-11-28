@@ -81,7 +81,7 @@
  *   pageW()/pageH()（根 Stack 实测），不出侧边栏的设备回退屏宽屏高。
  */
 
-import { display, window, PiPWindow } from '@kit.ArkUI';
+import { display, promptAction, window, PiPWindow } from '@kit.ArkUI';
 import { connection } from '@kit.NetworkKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { common } from '@kit.AbilityKit';
@@ -112,6 +112,7 @@ import {
   FQ_DANMAKU_LINE_SPACE_FACTORS,
 } from '../../core/FqAppSettingsStore';
 import { FqWatchedStore, FqWatchedProgress, FqWatchHistoryRecord } from '../../core/FqWatchedStore';
+import { FqShelfItem, FqShelfStore } from '../../core/FqShelfStore';
 import { FqDramaCacheStore, FqCachedEpisode } from '../../core/FqDramaCacheStore';
 import { fqDramaDownloader, FqDramaDownloader, FqDramaDownloadTask, DramaDownloadStatus } from '../../core/FqDramaDownloader';
 import { FqReadStatsStore } from '../../core/FqReadStatsStore';
@@ -379,6 +380,8 @@ export struct PlayerPage {
 
   private title: string = '';
   private tab: string = '短剧';
+  /** 书架状态刷新令牌（toggle 后 +1 驱动 inShelf 重算）。 */
+  @Local shelfRefresh: number = 0;
   /** 剧集状态（0 完结 / 1 连载中 / -1 未知）。 */
   private creationStatus: number = -1;
   /** 异步加载令牌（页面销毁/切集后旧请求作废）。 */
@@ -616,6 +619,7 @@ export struct PlayerPage {
     });
     // 已看集：按集 itemId 持久化（FqWatchedStore），加载本剧已看集合与续播进度
     FqWatchedStore.init(getContext(this));
+    FqShelfStore.init(getContext(this));
     this.progress = FqWatchedStore.progress(PlayerNavParams.contentId);
     this.watchedIds = this.copyWatchedIds();
     // 弹幕样式：载入持久化设置（fqapp danmaku_config 五项 + 背景透明）
@@ -1951,6 +1955,11 @@ export struct PlayerPage {
       seriesCover: this.coverUrl,
       seriesIntro: PlayerNavParams.intro,
       episodeLabel: this.episodeLabel(),
+      showFavorite: true,
+      favoriteActive: this.inShelf,
+      onToggleFavorite: (): void => {
+        this.toggleShelf();
+      },
       onOpenRelatedSeries: (): void => {
         this.openRelatedSeries();
       },
@@ -2907,6 +2916,12 @@ export struct PlayerPage {
         this.sideEpisodePage = Math.floor(this.index / FQ_CACHE_PAGE_SIZE);
         this.sideScroller.scrollToIndex(this.index, false, ScrollAlign.CENTER);
       },
+      showFavorite: true,
+      favoriteAtLeading: true,
+      favoriteActive: this.inShelf,
+      favoriteClick: (): void => {
+        this.toggleShelf();
+      },
       showClose: true,
       closeClick: (): void => {
         this.closeSidePanel();
@@ -3389,11 +3404,16 @@ export struct PlayerPage {
     }
   }
 
-  /** 侧边栏·同系列（横屏全屏形态，公共 FqPlayerSidebar 壳）：深色双列卡片网格，选中新剧进详情页。 */
+  /** 侧边栏·同系列（横屏全屏形态，公共 FqPlayerSidebar 壳）：深色双列卡片网格，选中新剧进详情页。
+    *  标题栏左侧返回按钮回选集侧边栏（此前仅关闭，看完同系列回选集得多点一步）。 */
   @Builder
   private SideRelated() {
     FqPlayerSidebar({
       title: '同系列剧',
+      showBack: true,
+      backClick: (): void => {
+        this.openSidePanel('episodes');
+      },
       showClose: true,
       closeClick: (): void => {
         this.closeSidePanel();
@@ -3693,6 +3713,21 @@ export struct PlayerPage {
       return `已完结 共${count}集`;
     }
     return `共${count}集`;
+  }
+
+  /** 当前剧是否在书架（选集面板/全屏选集侧边栏收藏按钮状态）。 */
+  @Computed
+  get inShelf(): boolean {
+    const tick: number = this.shelfRefresh;
+    return tick >= 0 && FqShelfStore.contains(PlayerNavParams.contentId);
+  }
+
+  /** 选集面板/全屏侧边栏收藏：一键加入/移出书架。 */
+  private toggleShelf(): void {
+    const added: boolean = FqShelfStore.toggle(
+      new FqShelfItem(PlayerNavParams.contentId, PlayerNavParams.kind, this.title, this.coverUrl));
+    this.shelfRefresh += 1;
+    promptAction.showToast({ message: added ? '已加入书架' : '已移出书架', duration: 1500 });
   }
 
   // ---------------------------------------------------------------------------

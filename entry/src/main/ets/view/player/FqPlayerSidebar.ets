@@ -9,7 +9,9 @@ import {
   TextStyleMode,
   TitleBarContentOptions,
 } from '@kit.UIDesignKit';
+import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { CommonNav } from '../CommonNav';
+import { appState } from '../../entryability/AppState';
 
 @ComponentV2
 export struct FqPlayerSidebar {
@@ -31,6 +33,12 @@ export struct FqPlayerSidebar {
   @Param showLocate: boolean = false;
   /** 右上管理按钮（circle_and_arrow_down，离线缓存页进剧集缓存管理页）。 */
   @Param showManage: boolean = false;
+  /** 右上收藏按钮（bookshelf_badge，选集面板一键加入/移出书架）。 */
+  @Param showFavorite: boolean = false;
+  /** 收藏按钮放标题左侧（HDS 标题栏无标题前图标位，借 backIcon 槽实现；全屏选集面板用）。 */
+  @Param favoriteAtLeading: boolean = false;
+  /** 收藏状态（已在书架时 checkmark 实心 + 主题色高亮）。 */
+  @Param favoriteActive: boolean = false;
   /** 面板背景色（与宿主容器底色一致，避免 CommonNav 默认页面底色透出）。 */
   @Param panelBgColor: ResourceColor = '#F0141414';
   /** 绑定内容滚动器（驱动标题栏滚动模糊与双击标题栏回顶）。 */
@@ -46,6 +54,7 @@ export struct FqPlayerSidebar {
   @Event closeClick: () => void = (): void => {};
   @Event locateClick: () => void = (): void => {};
   @Event manageClick: () => void = (): void => {};
+  @Event favoriteClick: () => void = (): void => {};
   @BuilderParam content: () => void;
 
   build() {
@@ -64,7 +73,7 @@ export struct FqPlayerSidebar {
   private SidebarHost() {
     CommonNav({
       titleBarOp: this.sidebarTitleBar(),
-      isHideBackButton: !this.showBack,
+      isHideBackButton: !this.showBack && !this.favoriteAtLeading,
       embedded: true,
       barForegroundColor: this.dark ? Color.White : undefined,
       pageBackgroundColor: this.panelBgColor,
@@ -92,7 +101,22 @@ export struct FqPlayerSidebar {
     const options: TitleBarContentOptions = {
       title: { mainTitle: this.title },
     };
-    if (this.showBack) {
+    if (this.favoriteAtLeading) {
+      // 收藏放标题左侧：HDS 标题栏唯一的标题前图标槽是 backIcon，借槽渲染收藏
+      // （icon 自定义 + action 覆盖默认返回；返回语义不受影响——系统返回走 backPressed）
+      options.backIcon = {
+        icon: this.favoriteActive
+          ? new SymbolGlyphModifier($r('sys.symbol.bookshelf_badge_checkmark_fill'))
+            .fontColor([appState.accentColor]).fontSize(24)
+          : $r('sys.symbol.bookshelf_badge_plus'),
+        // label 恒为「收藏」：HDS 菜单项挂载后冻结，动态文案会停在挂载期值误导操作
+        label: '收藏',
+        action: (): void => {
+          this.favoriteClick();
+        },
+      };
+    }
+    if (this.showBack && !this.favoriteAtLeading) {
       options.backIcon = {
         action: (): void => {
           this.backClick();
@@ -151,6 +175,22 @@ export struct FqPlayerSidebar {
           label: '管理',
           action: (): void => {
             this.manageClick();
+          },
+        },
+      });
+    }
+    if (this.showFavorite && !this.favoriteAtLeading) {
+      menus.push({
+        content: {
+          // 已在书架时 checkmark 实心 + 主题色高亮（fontSize 显式 24 与 HDS 菜单图标一致，避免首帧 16fp 偏小）
+          icon: this.favoriteActive
+            ? new SymbolGlyphModifier($r('sys.symbol.bookshelf_badge_checkmark_fill'))
+              .fontColor([appState.accentColor]).fontSize(24)
+            : $r('sys.symbol.bookshelf_badge_plus'),
+          // label 恒为「收藏」：HDS 菜单项挂载后冻结，动态文案会停在挂载期值误导操作
+          label: '收藏',
+          action: (): void => {
+            this.favoriteClick();
           },
         },
       });

@@ -194,6 +194,8 @@ export class FqAudioSession {
   private ttsQueue: ArrayBuffer[] = [];
   /** 写泵占用标记（按渲染器实例防并发泵）。 */
   private ttsPumpingFor: audio.AudioRenderer | null = null;
+  /** 渲染器是否已 start：惰性启动，首块 PCM 写入前不启动，避免空转循环脏缓冲出电流音。 */
+  private ttsRendererStarted: boolean = false;
   /** 合成中片段已收 PCM 字节。 */
   private ttsPieceBytes: number = 0;
   /** 已完成片段累计 PCM 字节。 */
@@ -1274,30 +1276,64 @@ export class FqAudioSession {
     this.pumpTtsWrites();
   }
 
-  /** PCM 写泵：队列 → renderer.write（背压由 write 的 Promise 天然承担）。 */
+  /** PCM 写泵：队列 → renderer.write（背压由 write 的 Promise 天然承担）。
+   * 渲染器惰性启动：首块 PCM 就绪才 start，播放失败/合成卡住时渲染器
+   * 从未空转，不再循环底层脏缓冲出电流音。 */
   private async pumpTtsWrites(): Promise<void> {
     const renderer: audio.AudioRenderer | null = this.ttsRenderer;
     if (renderer === null || this.ttsPumpingFor === renderer) {
       return;
     }
     this.ttsPumpingFor = renderer;
+    let startFailed: boolean = false;
     try {
-      while (this.ttsRenderer === renderer && this.ttsQueue.length > 0) {
-        const buffer: ArrayBuffer = this.ttsQueue[0];
-        const written: number = await renderer.write(buffer);
-        if (this.ttsQueue.length === 0 || this.ttsQueue[0] !== buffer) {
-          continue;
+      if (this.ttsQueue.length > 0 && !this.ttsRendererStarted) {
+        try {
+          await renderer.start();
+        } catch (error) {
+          // start 失败：与 ensureTtsRenderer 创建失败同口径报错并让位
+          const err: BusinessError = error as BusinessError;
+          hilog.warn(0x0001, TAG, `start tts renderer failed: ${err.code} ${err.message}`);
+          startFailed = true;
         }
-        if (written >= buffer.byteLength) {
-          this.ttsQueue.shift();
-        } else if (written > 0) {
-          this.ttsQueue[0] = buffer.slice(written);
-        } else {
-          this.ttsQueue.shift();
+        if (this.ttsRenderer !== renderer) {
+          // 启动期间管线被 flush：释放让位
+          renderer.release().catch((): void => {
+          });
+          startFailed = true;
+        } else if (!startFailed) {
+          this.ttsRendererStarted = true;
+        }
+      }
+      if (!startFailed) {
+        while (this.ttsRenderer === renderer && this.ttsQueue.length > 0) {
+          const buffer: ArrayBuffer = this.ttsQueue[0];
+          const written: number = await renderer.write(buffer);
+          if (this.ttsQueue.length === 0 || this.ttsQueue[0] !== buffer) {
+            continue;
+          }
+          if (written >= buffer.byteLength) {
+            this.ttsQueue.shift();
+          } else if (written > 0) {
+            this.ttsQueue[0] = buffer.slice(written);
+          } else {
+            this.ttsQueue.shift();
+          }
         }
       }
     } catch (error) {
       // 渲染器已释放/状态异常：静默退出，等下一次 pump
+    }
+    if (startFailed && this.ttsRenderer === renderer) {
+      this.ttsRenderer = null;
+      renderer.release().catch((): void => {
+      });
+      if (this.ttsMode && this.wantPlay) {
+        this.wantPlay = false;
+        this.errorMessage = '离线朗读音频设备初始化失败，请稍后重试';
+        this.persistHistory();
+        this.syncAvPlaybackState(true);
+      }
     }
     if (this.ttsPumpingFor === renderer) {
       this.ttsPumpingFor = null;
@@ -1440,6 +1476,7 @@ export class FqAudioSession {
     this.ttsExpectedSeq = 0;
     this.ttsPlayedAtLastTick = 0;
     this.ttsEndStallTicks = 0;
+    this.ttsRendererStarted = false;
     const renderer: audio.AudioRenderer | null = this.ttsRenderer;
     this.ttsRenderer = null;
     if (renderer !== null) {
@@ -1448,7 +1485,9 @@ export class FqAudioSession {
     }
   }
 
-  /** 创建自渲染 AudioRenderer（16kHz/16bit/单声道 PCM，媒体流）。 */
+  /** 创建自渲染 AudioRenderer（16kHz/16bit/单声道 PCM，媒体流）。
+   * 仅创建不启动：首块 PCM 写入时才惰性 start（pumpTtsWrites），
+   * 播放失败/合成卡住时渲染器从未空转，不会循环脏缓冲出电流音。 */
   private async ensureTtsRenderer(): Promise<boolean> {
     if (this.ttsRenderer !== null) {
       return true;
@@ -1479,24 +1518,7 @@ export class FqAudioSession {
       this.onTtsRendererInterrupt(event);
     });
     this.ttsRenderer = renderer;
-    try {
-      await renderer.start();
-    } catch (error) {
-      const err: BusinessError = error as BusinessError;
-      hilog.warn(0x0001, TAG, `start tts renderer failed: ${err.code} ${err.message}`);
-      if (this.ttsRenderer === renderer) {
-        this.ttsRenderer = null;
-      }
-      renderer.release().catch((): void => {
-      });
-      return false;
-    }
-    if (this.ttsRenderer !== renderer) {
-      // 启动期间管线被 flush：释放让位
-      renderer.release().catch((): void => {
-      });
-      return false;
-    }
+    this.ttsRendererStarted = false;
     return true;
   }
 

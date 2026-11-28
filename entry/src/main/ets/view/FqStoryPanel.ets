@@ -38,6 +38,12 @@ export struct FqStoryPanel {
   @Param onOpenRelatedSeries: (() => void) | null = null;
   /** 剧名行点击进剧集详情（官方 onOpenSeries；null 不响应）。 */
   @Param onOpenSeries: (() => void) | null = null;
+  /** 「选集」行收藏按钮（一键加入/移出书架；定位图标之前；false 不显示）。 */
+  @Param showFavorite: boolean = false;
+  /** 收藏状态（已在书架时 checkmark 实心 + 官方橙高亮）。 */
+  @Param favoriteActive: boolean = false;
+  /** 收藏按钮点击（宿主负责 toggle 与 toast）。 */
+  @Param onToggleFavorite: (() => void) | null = null;
 
   /** 分页条选中页（可视区顶部所在段）。 */
   @Local page: number = 0;
@@ -81,6 +87,23 @@ export struct FqStoryPanel {
           .fontWeight(FontWeight.Bold)
           .padding({ left: 20 })
           .layoutWeight(1)
+
+        // 收藏（一键加入/移出书架；定位图标之前）
+        if (this.showFavorite) {
+          SymbolGlyph(this.favoriteActive
+            ? $r('sys.symbol.bookshelf_badge_checkmark_fill')
+            : $r('sys.symbol.bookshelf_badge_plus'))
+            .fontSize(20)
+            // 未在架颜色跟随系统字色（深色模式写死 #FF1B1B1B 会看不见）；在架保持官方橙
+            .fontColor([this.favoriteActive ? '#FFFA6725' : $r('sys.color.font_tertiary')])
+            .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+            .onClick((): void => {
+              const toggle: (() => void) | null = this.onToggleFavorite;
+              if (toggle !== null) {
+                toggle();
+              }
+            })
+        }
 
         // 定位当前集（scope 图标，滚动当前集竖直居中；同系列入口之前）
         SymbolGlyph($r('sys.symbol.scope'))
